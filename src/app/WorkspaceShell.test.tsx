@@ -101,14 +101,19 @@ describe("WorkspaceShell", () => {
     expect(screen.getByRole("combobox", { name: "Active session" })).toHaveTextContent(
       "dev-session · ready",
     );
-    expect(screen.getByText("Session: dev-session · ready")).toBeInTheDocument();
+    expect(screen.getByText("Operational")).toBeInTheDocument();
+    expect(screen.getByText("1 Gateway session")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Groups" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sessions" })).toHaveAttribute(
       "aria-current",
       "page",
     );
+    expect(screen.getByRole("button", { name: "Sessions" })).toHaveAttribute(
+      "data-variant",
+      "secondary",
+    );
 
-    await user.click(screen.getByRole("button", { name: "Sync selected session" }));
+    await user.click(screen.getByRole("button", { name: "Sync session" }));
 
     await waitFor(() => expect(requestSessionSync).toHaveBeenCalledWith(session.id));
     expect(screen.getByRole("progressbar", { name: "Session sync: completed" })).toHaveAttribute(
@@ -192,6 +197,7 @@ describe("WorkspaceShell", () => {
     expect(screen.getByRole("combobox", { name: "Active session" })).toHaveTextContent(
       "standby-session · disconnected",
     );
-    expect(screen.getByText("Session: standby-session · disconnected")).toBeInTheDocument();
+    expect(screen.getByText("Attention required")).toBeInTheDocument();
+    expect(screen.getByText("2 Gateway sessions")).toBeInTheDocument();
   });
 });

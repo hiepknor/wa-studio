@@ -174,7 +174,7 @@ export function SessionsScreen() {
     <Stack gap="lg">
       <Inline align="center" justify="between" wrap>
         <div>
-          <h2 id="sessions-title">Sessions</h2>
+          <h2 className="workspace-page-title" id="sessions-title">Sessions</h2>
           <p className="muted-copy">Select the Gateway session used by groups and campaigns.</p>
         </div>
         <Button
@@ -184,7 +184,7 @@ export function SessionsScreen() {
           onClick={handleSync}
           variant="primary"
         >
-          Sync selected session
+          Sync session
         </Button>
       </Inline>
 

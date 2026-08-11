@@ -8,6 +8,7 @@ WA Studio uses `@hiepknor/ink-react` as its UI primitive layer. Feature modules 
 - Import the aggregate Ink stylesheet once at the application entrypoint, before product layout CSS.
 - Use Ink components directly inside features. Add a WA Studio wrapper only when it encodes recurring product behavior, not merely to rename or restyle a primitive.
 - Use Ink tokens for product layout CSS. Avoid copying component CSS or introducing a second token system.
+- Shell CSS targets only WA Studio-owned classes. Size controls through product wrappers and do not select internal `.ink-ui-*` classes.
 - Keep Runtime-generated DTOs and API logic out of UI components.
 - Keep `DataTable` controlled: Runtime query parameters and response metadata own filtering, sorting, and pagination.
 - Match failures to their scope: field errors for invalid input, `ErrorState` for a failed panel, `Banner` for persistent application-wide failures, and toasts only for non-blocking background results.

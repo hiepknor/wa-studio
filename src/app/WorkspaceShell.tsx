@@ -20,7 +20,6 @@ import { useState } from "react";
 import { useRuntimeConnection } from "./RuntimeConnectionContext";
 import {
   DEFAULT_WORKSPACE_PAGE,
-  findWorkspacePage,
   WORKSPACE_SECTIONS,
   type WorkspacePageId,
 } from "./workspace-pages";
@@ -62,81 +61,88 @@ export function WorkspaceShell() {
 
   const selectedSession =
     connected.sessions.find((session) => session.id === selectedSessionId) ?? null;
-  const activePageDefinition = findWorkspacePage(activePage);
+  const sessionCountLabel = `${connected.sessions.length} Gateway ${
+    connected.sessions.length === 1 ? "session" : "sessions"
+  }`;
 
   return (
     <main className="workspace">
-      <Toolbar className="workspace-toolbar" aria-label="Workspace toolbar">
-        <strong>WA Studio</strong>
-        <div className="workspace-session-context">
-          <span className="workspace-context-label" aria-hidden="true">Session</span>
-          <Select
-            className="workspace-session-select"
-            disabled={connected.sessions.length === 0}
-            label={<VisuallyHidden>Active session</VisuallyHidden>}
-            onValueChange={selectSession}
-            options={connected.sessions.map((session) => ({
-              label: `${session.name} · ${session.status}`,
-              value: session.id,
-            }))}
-            placeholder="No session"
-            value={selectedSessionId ?? undefined}
-          />
-        </div>
-        <Inline className="toolbar-end" align="center" gap="sm" wrap={false}>
-          <StatusMark label="Runtime connected" tone="ok" />
-          <StatusMark
-            label={selectedSession ? `Session ${selectedSession.status}` : "No active session"}
-            tone={sessionTone(selectedSession?.status)}
-          />
-          <Menu>
-            <MenuTrigger asChild>
-              <Button variant="quiet">Runtime</Button>
-            </MenuTrigger>
-            <MenuContent align="end">
-              <MenuItem disabled>{connected.profile.baseUrl}</MenuItem>
-              <MenuSeparator />
-              <MenuItem onSelect={disconnect}>Disconnect Runtime</MenuItem>
-            </MenuContent>
-          </Menu>
+      <Toolbar aria-label="Workspace toolbar">
+        <Inline className="workspace-toolbar-row" align="center" justify="between" wrap={false}>
+          <Inline className="workspace-toolbar-context" align="center" gap="md" wrap={false}>
+            <strong className="workspace-brand">WA Studio</strong>
+            <div className="workspace-session-switcher">
+              <Select
+                disabled={connected.sessions.length === 0}
+                label={<VisuallyHidden>Active session</VisuallyHidden>}
+                onValueChange={selectSession}
+                options={connected.sessions.map((session) => ({
+                  label: `${session.name} · ${session.status}`,
+                  value: session.id,
+                }))}
+                placeholder="No session"
+                value={selectedSessionId ?? undefined}
+              />
+            </div>
+          </Inline>
+
+          <Inline align="center" gap="sm" wrap={false}>
+            <span className="workspace-health">
+              <StatusMark
+                label={selectedSession?.status === "ready" ? "Operational" : "Attention required"}
+                tone={sessionTone(selectedSession?.status)}
+              />
+            </span>
+            <Menu>
+              <MenuTrigger asChild>
+                <Button variant="quiet">Runtime</Button>
+              </MenuTrigger>
+              <MenuContent align="end">
+                <MenuItem disabled>{connected.profile.baseUrl}</MenuItem>
+                <MenuSeparator />
+                <MenuItem onSelect={disconnect}>Disconnect Runtime</MenuItem>
+              </MenuContent>
+            </Menu>
+          </Inline>
         </Inline>
       </Toolbar>
 
       <div className="workspace-body">
         <Sidebar>
           <nav aria-label="Workspace navigation">
-            {WORKSPACE_SECTIONS.map((section) => (
-              <section className="workspace-nav-section" key={section.id}>
-                <span className="workspace-nav-label">{section.label}</span>
-                <Stack gap="xs">
-                  {section.pages.map((page) => (
-                    <Button
-                      aria-current={page.id === activePage ? "page" : undefined}
-                      disabled={!page.available}
-                      key={page.id}
-                      onClick={() => setActivePage(page.id)}
-                      title={page.available ? undefined : `${page.label} is planned for a later slice`}
-                      variant={page.id === activePage ? "primary" : "quiet"}
-                    >
-                      {page.label}
-                    </Button>
-                  ))}
-                </Stack>
-              </section>
-            ))}
+            <Stack gap="lg">
+              {WORKSPACE_SECTIONS.map((section) => (
+                <section key={section.id}>
+                  <Stack gap="xs">
+                    <strong className="muted-copy">{section.label}</strong>
+                    {section.pages.map((page) => (
+                      <Button
+                        aria-current={page.id === activePage ? "page" : undefined}
+                        className="workspace-nav-button"
+                        disabled={!page.available}
+                        key={page.id}
+                        onClick={() => setActivePage(page.id)}
+                        title={page.available ? undefined : `${page.label} is planned for a later slice`}
+                        variant={page.id === activePage ? "secondary" : "quiet"}
+                      >
+                        {page.label}
+                      </Button>
+                    ))}
+                  </Stack>
+                </section>
+              ))}
+            </Stack>
           </nav>
         </Sidebar>
 
-        <Panel aria-labelledby={`${activePage}-title`} className="workspace-panel">
+        <Panel aria-labelledby={`${activePage}-title`} className="workspace-content">
           {renderPage(activePage)}
         </Panel>
       </div>
 
       <StatusBar>
-        <span>Runtime: connected</span>
-        <span>Page: {activePageDefinition.label}</span>
-        <span>Session: {selectedSession?.name ?? "none"} · {selectedSession?.status ?? "unavailable"}</span>
-        <span>Synced: {formatSyncTime(selectedSession?.syncedAt)}</span>
+        <span>{sessionCountLabel}</span>
+        <span>Last sync: {formatSyncTime(selectedSession?.syncedAt)}</span>
       </StatusBar>
     </main>
   );
