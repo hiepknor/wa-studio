@@ -16,6 +16,10 @@
   --focus-border: rgb(166 154 255 / 78%);
   --focus-halo: rgb(118 103 232 / 22%);
   --focus-surface: rgb(118 103 232 / 11%);
+  --scrollbar-thumb: rgb(146 152 168 / 28%);
+  --scrollbar-thumb-hover: rgb(166 171 187 / 44%);
+  --scrollbar-thumb-active: rgb(137 123 240 / 62%);
+  --scrollbar-track: #101116;
   --ok: #56d364;
   --ok-soft: rgb(86 211 100 / 12%);
   --warning: #e3b341;

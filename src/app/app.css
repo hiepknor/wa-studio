@@ -1,6 +1,7 @@
 :root {
   color: #f2f3f5;
   background: #090a0d;
+  color-scheme: dark;
   font-family: var(--font-ui);
   font-optical-sizing: auto;
   font-synthesis: none;
