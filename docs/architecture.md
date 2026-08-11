@@ -36,6 +36,10 @@ src/shared/api          generated contract and Runtime transport
 
 Keep state near its feature. Runtime data is server state; only UI preferences and connection profiles belong locally. Introduce a shared state library only when multiple completed slices prove the need.
 
+## User interface
+
+`@hiepknor/ink-react` supplies accessible React primitives and design tokens. It does not own routing, requests, validation rules, or domain state. See [ui-implementation-plan.md](ui-implementation-plan.md) for component mapping and incremental rollout.
+
 ## Security
 
 The first slice holds `X-Runtime-Key` only in process memory. It is never placed in source control, local storage, logs, or a Vite environment variable. Before persistent connection profiles are added, store secrets in the OS-backed Tauri Stronghold integration. Production Runtime URLs must use HTTPS; plain HTTP is reserved for local development.
