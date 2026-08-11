@@ -18,6 +18,8 @@ WA Studio uses `@hiepknor/ink-react` as its UI primitive layer. Feature modules 
 
 Replace native controls and bespoke card/status styles with `Card`, `Stack`, `TextField`, `Button`, and `Alert`. Preserve the existing connection state machine and API tests. Add keyboard, loading, rejected-key, and readiness-failure component tests.
 
+Status: completed in the initial Ink migration slice.
+
 ### 2. Desktop shell
 
 Compose `Toolbar`, `Sidebar`, `Panel`, and `StatusBar`. Navigation destinations are Sessions, Groups, Campaigns, and Runs. Keep routing and selected-session state in the application; Ink owns only presentation and accessible interaction.
