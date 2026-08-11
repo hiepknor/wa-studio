@@ -22,9 +22,9 @@ Status: completed in the initial Ink migration slice.
 
 ### 2. Desktop shell
 
-Compose `Toolbar`, `Sidebar`, `Panel`, and `StatusBar`. Navigation destinations are Sessions, Groups, Campaigns, and Runs. Keep routing and selected-session state in the application; Ink owns only presentation and accessible interaction.
+Compose `Toolbar`, `Sidebar`, `Panel`, and `StatusBar`. Navigation is registry-driven and grouped into Operate (Groups, Campaigns, Runs, Activity) and System (Sessions, Settings). Keep page routing and the shared selected-session context in the application; Ink owns only presentation and accessible interaction. Runtime connection actions belong to the toolbar menu, while concise operational context belongs to the status bar.
 
-Status: foundation completed with the Sessions destination active.
+Status: completed with the Sessions destination active and future destinations explicitly disabled until their slices exist.
 
 ### 3. Sessions and groups
 

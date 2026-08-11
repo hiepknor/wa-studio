@@ -36,8 +36,28 @@ h1 { margin: var(--ink-dimension-spacing-md) 0 var(--ink-dimension-spacing-lg); 
 .muted-copy { margin: 0; color: var(--ink-color-semantic-foreground-muted); font-size: var(--ink-typography-font-size-sm); }
 
 .workspace { display: grid; width: 100%; height: 100%; min-height: 0; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; isolation: isolate; padding: var(--ink-dimension-spacing-sm); background: var(--ink-color-semantic-background); }
-.workspace-toolbar { border-color: var(--ink-color-semantic-border-strong); }
-.toolbar-end { margin-left: auto; }
+.workspace-toolbar {
+  min-width: 0;
+  border-color: var(--ink-color-semantic-border-strong);
+  overflow: visible;
+}
+.workspace-session-context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--ink-dimension-spacing-xs);
+}
+.workspace-context-label,
+.workspace-nav-label {
+  color: var(--ink-color-semantic-foreground-muted);
+  font-size: var(--ink-typography-font-size-xs);
+  font-weight: var(--ink-typography-font-weight-bold);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.workspace-session-context .ink-ui-field { width: 220px; min-width: 0; }
+.workspace-session-select { width: 100%; min-width: 0; }
+.toolbar-end { margin-left: auto; flex-shrink: 0; }
 .workspace-body {
   display: grid;
   min-height: 0;
@@ -50,13 +70,19 @@ h1 { margin: var(--ink-dimension-spacing-md) 0 var(--ink-dimension-spacing-lg); 
 .workspace > .ink-ui-status-bar { contain: layout paint; }
 .workspace-body .ink-ui-sidebar { min-width: 0; min-height: 0; overflow-y: auto; }
 .workspace-body .ink-ui-sidebar .ink-ui-button { width: 100%; justify-content: flex-start; box-shadow: none; }
+.workspace-nav-section + .workspace-nav-section { margin-top: var(--ink-dimension-spacing-lg); }
+.workspace-nav-label { display: block; margin: 0 var(--ink-dimension-spacing-sm) var(--ink-dimension-spacing-xs); }
 .workspace-panel { min-width: 0; min-height: 0; overflow: auto; border-top: 0; border-bottom: 0; }
 .workspace-panel h2 { margin: 0 0 var(--ink-dimension-spacing-xs); }
+.workspace > .ink-ui-status-bar { min-width: 0; overflow: hidden; }
+.workspace > .ink-ui-status-bar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 820px) {
   .shell { grid-template-columns: 1fr; gap: 32px; align-content: center; padding: 32px; }
   h1 { font-size: 3rem; }
   .workspace-body { grid-template-columns: 160px minmax(0, 1fr); }
+  .workspace-context-label { display: none; }
+  .workspace-session-context .ink-ui-field { width: 180px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

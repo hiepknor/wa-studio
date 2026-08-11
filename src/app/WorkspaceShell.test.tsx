@@ -31,6 +31,14 @@ const session: RuntimeSession = {
   syncedAt: "2026-08-11T09:00:00.000Z",
 };
 
+const standbySession: RuntimeSession = {
+  ...session,
+  id: "standby-session-id",
+  name: "standby-session",
+  status: "disconnected",
+  engineLoaded: false,
+};
+
 const completedSync: RuntimeSyncRun = {
   id: "sync-id",
   sessionId: session.id,
@@ -90,7 +98,15 @@ describe("WorkspaceShell", () => {
 
     expect(await screen.findByRole("heading", { name: "Sessions" })).toBeInTheDocument();
     expect(screen.getByText("Selected")).toBeInTheDocument();
-    expect(screen.getByText("Session: dev-session")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Active session" })).toHaveTextContent(
+      "dev-session · ready",
+    );
+    expect(screen.getByText("Session: dev-session · ready")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Groups" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sessions" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
 
     await user.click(screen.getByRole("button", { name: "Sync selected session" }));
 
@@ -100,7 +116,8 @@ describe("WorkspaceShell", () => {
       "100",
     );
 
-    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    await user.click(screen.getByRole("button", { name: "Runtime" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Disconnect Runtime" }));
     expect(screen.getByRole("button", { name: "Connect test Runtime" })).toBeInTheDocument();
     expect(screen.getByText("Selected: none")).toBeInTheDocument();
   });
@@ -134,11 +151,47 @@ describe("WorkspaceShell", () => {
 
     await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
     await user.click(await screen.findByRole("button", { name: "Refresh" }));
-    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    await user.click(screen.getByRole("button", { name: "Runtime" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Disconnect Runtime" }));
 
     await act(async () => resolveRefresh?.([session]));
 
     expect(screen.getByText("Selected: none")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect test Runtime" })).toBeInTheDocument();
+  });
+
+  it("uses the toolbar selector as the shared active-session context", async () => {
+    const user = userEvent.setup();
+    const fakeApi = {
+      getSessionSyncRun: vi.fn(),
+      listSessions: vi.fn(),
+      requestSessionSync: vi.fn(),
+    } as unknown as RuntimeApi;
+
+    render(
+      <InkProvider density="compact">
+        <RuntimeConnectionProvider
+          createApi={() => fakeApi}
+          probeConnection={vi.fn().mockResolvedValue({
+            sessionCount: 2,
+            readySessions: 1,
+            sessions: [session, standbySession],
+          })}
+        >
+          <WorkspaceHarness />
+        </RuntimeConnectionProvider>
+      </InkProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(await screen.findByRole("combobox", { name: "Active session" }));
+    await user.click(
+      await screen.findByRole("option", { name: "standby-session · disconnected" }),
+    );
+
+    expect(screen.getByRole("combobox", { name: "Active session" })).toHaveTextContent(
+      "standby-session · disconnected",
+    );
+    expect(screen.getByText("Session: standby-session · disconnected")).toBeInTheDocument();
   });
 });

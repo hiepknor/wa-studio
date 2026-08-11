@@ -27,7 +27,7 @@ When Runtime changes, update the snapshot from a released Runtime revision, run 
 ```text
 src/app                  composition and application shell
 src/features/connection first-run connection and credential validation
-src/features/sessions   session selection and status (next)
+src/features/sessions   session selection, status, and full sync
 src/features/groups     browse, filter, inspect capability (next)
 src/features/campaigns  draft, targets, preflight, launch (later)
 src/features/runs       progress, delivery failures, controls (later)
@@ -68,5 +68,7 @@ Tauri HTTP permissions and its custom-header feature are intentionally explicit.
 ## Desktop workspace state
 
 After authentication, `RuntimeConnectionProvider` holds the normalized Runtime origin, API key, typed API client, initial sessions, and selected session in process memory. The session list returned during credential verification is reused when the workspace opens, so entering the shell does not duplicate `GET /sessions`.
+
+The shell treats the selected session as shared workspace context. Its toolbar selector is therefore the single context switch used by current and future Groups, Campaigns, Runs, and Activity pages. Destinations and availability live in `src/app/workspace-pages.ts`; adding a feature page means registering it there and adding its renderer, without duplicating sidebar or status-bar logic. Unimplemented destinations remain visibly disabled rather than presenting mock workflows.
 
 Disconnect clears the connection profile, API client, sessions, and selection. A monotonically increasing connection revision prevents late connect or refresh responses from restoring state after disconnect. Session full sync follows the durable Runtime workflow: create a sync run, poll its status, then refresh session read models after completion.
