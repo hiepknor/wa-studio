@@ -32,9 +32,21 @@ src/features/groups     browse, filter, inspect capability (next)
 src/features/campaigns  draft, targets, preflight, launch (later)
 src/features/runs       progress, delivery failures, controls (later)
 src/shared/api          generated contract and Runtime transport
+src/shared/platform     typed adapters for optional desktop capabilities
+src-tauri/src/windowing native window policy and platform implementations
 ```
 
 Keep state near its feature. Runtime data is server state; only UI preferences and connection profiles belong locally. Introduce a shared state library only when multiple completed slices prove the need.
+
+## Native window experience
+
+The frontend expresses window intent as `normal`, `maximized`, or `immersive`; it never selects an operating-system fullscreen API. `src-tauri/src/windowing` owns the state machine, native menu, shortcut, capability discovery, rollback, and platform policy. `src/shared/platform/windowing.ts` is the only frontend adapter for that contract.
+
+On macOS, immersive mode uses Simple Fullscreen on the current Space. Native Space fullscreen is disabled for the main `NSWindow`, so the green title-bar control remains Zoom/Maximize and `Control-Command-F` enters or exits immersive mode without the cross-Space snapshot animation. On Windows, the same intent falls back to Tauri fullscreen and uses `F11`; Windows-specific DWM, Snap Layout, and per-monitor DPI work stays isolated behind the same Rust facade.
+
+Native title-bar actions can change maximize state without going through a Tauri command. The facade reconciles observed native state immediately before an immersive transition or state query, which avoids reading transient AppKit state during resize while preserving the correct restore target for sequences such as Maximize → Immersive → Exit. Platform state is emitted as `window://state-changed`; application features must not infer it from viewport dimensions.
+
+Responsive CSS still owns content layout, but it must not simulate native window transitions. Desktop typography and spacing change at explicit breakpoints rather than continuously with viewport units, preventing WebView reflow from competing with native window animation.
 
 ## User interface
 
