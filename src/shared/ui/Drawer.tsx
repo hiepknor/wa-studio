@@ -33,7 +33,6 @@ interface DrawerProviderProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 export function DrawerProvider({ children, className = "", ...props }: DrawerProviderProps) {
-  const frameRef = useRef<HTMLDivElement>(null);
   const [host, registerHost] = useState<HTMLElement | null>(null);
   const [mode, setMode] = useState<DrawerMode>(() =>
     typeof window !== "undefined" && window.innerWidth >= DRAWER_DOCK_MIN_WIDTH
@@ -42,24 +41,25 @@ export function DrawerProvider({ children, className = "", ...props }: DrawerPro
   );
 
   useLayoutEffect(() => {
-    const frame = frameRef.current;
-    if (!frame) return;
+    const mediaQuery = typeof window.matchMedia === "function"
+      ? window.matchMedia(`(min-width: ${DRAWER_DOCK_MIN_WIDTH}px)`)
+      : null;
 
-    function updateMode(width: number) {
-      const resolvedWidth = width || window.innerWidth;
-      setMode(resolvedWidth >= DRAWER_DOCK_MIN_WIDTH ? "docked" : "overlay");
+    function updateFromViewport() {
+      setMode(window.innerWidth >= DRAWER_DOCK_MIN_WIDTH ? "docked" : "overlay");
     }
 
-    updateMode(frame.getBoundingClientRect().width);
-    if (typeof ResizeObserver === "undefined") {
-      const handleResize = () => updateMode(frame.getBoundingClientRect().width);
-      window.addEventListener("resize", handleResize);
-      return () => window.removeEventListener("resize", handleResize);
+    function updateFromMedia(event: MediaQueryListEvent) {
+      setMode(event.matches ? "docked" : "overlay");
     }
 
-    const observer = new ResizeObserver(([entry]) => updateMode(entry.contentRect.width));
-    observer.observe(frame);
-    return () => observer.disconnect();
+    updateFromViewport();
+    window.addEventListener("resize", updateFromViewport);
+    mediaQuery?.addEventListener("change", updateFromMedia);
+    return () => {
+      window.removeEventListener("resize", updateFromViewport);
+      mediaQuery?.removeEventListener("change", updateFromMedia);
+    };
   }, []);
 
   return (
@@ -68,7 +68,6 @@ export function DrawerProvider({ children, className = "", ...props }: DrawerPro
         {...props}
         className={`drawer-frame ${className}`.trim()}
         data-drawer-mode={mode}
-        ref={frameRef}
       >
         {children}
       </div>

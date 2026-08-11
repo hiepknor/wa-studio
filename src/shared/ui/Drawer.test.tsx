@@ -109,23 +109,6 @@ describe("Drawer", () => {
   });
 
   it("becomes a non-modal complementary panel when the workspace is wide", async () => {
-    let emitResize: (width: number) => void = () => {};
-    class MockResizeObserver {
-      private readonly callback: ResizeObserverCallback;
-
-      constructor(callback: ResizeObserverCallback) {
-        this.callback = callback;
-        emitResize = (width) => this.callback(
-          [{ contentRect: { width } } as ResizeObserverEntry],
-          this as unknown as ResizeObserver,
-        );
-      }
-
-      disconnect() {}
-      observe() {}
-      unobserve() {}
-    }
-    vi.stubGlobal("ResizeObserver", MockResizeObserver);
     setViewportWidth(1100);
     const user = userEvent.setup();
     render(<DrawerHarness />);
@@ -133,15 +116,42 @@ describe("Drawer", () => {
     await user.click(screen.getByRole("button", { name: "Inspect group" }));
     expect(await screen.findByRole("dialog", { name: "Release room" })).toBeInTheDocument();
 
-    act(() => emitResize(DRAWER_DOCK_MIN_WIDTH - 1));
+    act(() => {
+      setViewportWidth(DRAWER_DOCK_MIN_WIDTH - 1);
+      window.dispatchEvent(new Event("resize"));
+    });
     expect(screen.getByRole("dialog", { name: "Release room" })).toBeInTheDocument();
 
-    act(() => emitResize(DRAWER_DOCK_MIN_WIDTH));
+    act(() => {
+      setViewportWidth(DRAWER_DOCK_MIN_WIDTH);
+      window.dispatchEvent(new Event("resize"));
+    });
 
     const panel = await screen.findByRole("complementary", { name: "Release room" });
     expect(panel).not.toHaveAttribute("aria-modal");
     expect(screen.getByTestId("drawer-frame")).toHaveAttribute("data-drawer-mode", "docked");
     expect(screen.getByTestId("drawer-host").querySelector(".drawer-backdrop")).toBeNull();
+  });
+
+  it("returns an open docked drawer to overlay mode when the viewport narrows", async () => {
+    setViewportWidth(DRAWER_DOCK_MIN_WIDTH);
+    const user = userEvent.setup();
+    render(<DrawerHarness />);
+
+    await user.click(screen.getByRole("button", { name: "Inspect group" }));
+    expect(await screen.findByRole("complementary", { name: "Release room" }))
+      .toBeInTheDocument();
+
+    act(() => {
+      setViewportWidth(820);
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    const dialog = await screen.findByRole("dialog", { name: "Release room" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByTestId("drawer-frame")).toHaveAttribute("data-drawer-mode", "overlay");
+    expect(screen.getByTestId("drawer-host").querySelector(".drawer-backdrop"))
+      .toBeInTheDocument();
   });
 
   it("keeps a long Vietnamese and unbroken entity name available in full", async () => {
