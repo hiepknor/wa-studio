@@ -1,6 +1,5 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { InkProvider } from "@hiepknor/ink-react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConnectionScreen } from "./ConnectionScreen";
@@ -8,11 +7,7 @@ import { ConnectionScreen } from "./ConnectionScreen";
 function renderScreen(
   probeConnection: NonNullable<Parameters<typeof ConnectionScreen>[0]>["probeConnection"],
 ) {
-  return render(
-    <InkProvider density="compact">
-      <ConnectionScreen probeConnection={probeConnection} />
-    </InkProvider>,
-  );
+  return render(<ConnectionScreen probeConnection={probeConnection} />);
 }
 
 async function submitConnection() {

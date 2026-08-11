@@ -1,5 +1,3 @@
-import { InkProvider } from "@hiepknor/ink-react";
-
 import { ConnectionScreen } from "@/features/connection/ConnectionScreen";
 import { RuntimeConnectionProvider, useRuntimeConnection } from "./RuntimeConnectionContext";
 import { WorkspaceShell } from "./WorkspaceShell";
@@ -12,10 +10,8 @@ function AppContent() {
 
 export function App() {
   return (
-    <InkProvider density="compact">
-      <RuntimeConnectionProvider>
-        <AppContent />
-      </RuntimeConnectionProvider>
-    </InkProvider>
+    <RuntimeConnectionProvider>
+      <AppContent />
+    </RuntimeConnectionProvider>
   );
 }

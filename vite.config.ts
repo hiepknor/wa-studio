@@ -17,11 +17,6 @@ export default defineConfig(async () => ({
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
-    server: {
-      deps: {
-        inline: [/@hiepknor\/ink-/],
-      },
-    },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

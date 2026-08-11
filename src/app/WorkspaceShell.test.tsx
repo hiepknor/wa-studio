@@ -1,4 +1,3 @@
-import { Button, InkProvider } from "@hiepknor/ink-react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -39,6 +38,25 @@ const standbySession: RuntimeSession = {
   engineLoaded: false,
 };
 
+const secondReadySession: RuntimeSession = {
+  ...session,
+  id: "second-session-id",
+  name: "second-session",
+};
+
+const pendingSync: RuntimeSyncRun = {
+  id: "pending-sync-id",
+  sessionId: session.id,
+  syncType: "FULL",
+  status: "PENDING",
+  groupsSynced: 0,
+  membersSynced: 0,
+  error: null,
+  requestedAt: "2026-08-11T09:00:00.000Z",
+  startedAt: null,
+  completedAt: null,
+};
+
 const completedSync: RuntimeSyncRun = {
   id: "sync-id",
   sessionId: session.id,
@@ -58,11 +76,12 @@ function WorkspaceHarness() {
   return (
     <>
       <span>Selected: {selectedSessionId ?? "none"}</span>
-      <Button
+      <button
         onClick={() => connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" })}
+        type="button"
       >
         Connect test Runtime
-      </Button>
+      </button>
     </>
   );
 }
@@ -84,14 +103,12 @@ describe("WorkspaceShell", () => {
     } as unknown as RuntimeApi;
 
     render(
-      <InkProvider density="compact">
-        <RuntimeConnectionProvider
-          createApi={() => fakeApi}
-          probeConnection={probeConnection}
-        >
-          <WorkspaceHarness />
-        </RuntimeConnectionProvider>
-      </InkProvider>,
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={probeConnection}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
     );
 
     await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
@@ -99,7 +116,7 @@ describe("WorkspaceShell", () => {
     expect(await screen.findByRole("heading", { name: "Sessions" })).toBeInTheDocument();
     expect(screen.getByText("Selected")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Active session" })).toHaveTextContent(
-      "dev-session · ready",
+      /dev-session.*ready/,
     );
     expect(screen.getByText("Operational")).toBeInTheDocument();
     expect(screen.getByText("1 Gateway session")).toBeInTheDocument();
@@ -140,18 +157,16 @@ describe("WorkspaceShell", () => {
     } as unknown as RuntimeApi;
 
     render(
-      <InkProvider density="compact">
-        <RuntimeConnectionProvider
-          createApi={() => fakeApi}
-          probeConnection={vi.fn().mockResolvedValue({
-            sessionCount: 1,
-            readySessions: 1,
-            sessions: [session],
-          })}
-        >
-          <WorkspaceHarness />
-        </RuntimeConnectionProvider>
-      </InkProvider>,
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 1,
+          readySessions: 1,
+          sessions: [session],
+        })}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
     );
 
     await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
@@ -174,30 +189,113 @@ describe("WorkspaceShell", () => {
     } as unknown as RuntimeApi;
 
     render(
-      <InkProvider density="compact">
-        <RuntimeConnectionProvider
-          createApi={() => fakeApi}
-          probeConnection={vi.fn().mockResolvedValue({
-            sessionCount: 2,
-            readySessions: 1,
-            sessions: [session, standbySession],
-          })}
-        >
-          <WorkspaceHarness />
-        </RuntimeConnectionProvider>
-      </InkProvider>,
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 2,
+          readySessions: 1,
+          sessions: [session, standbySession],
+        })}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
     );
 
     await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
-    await user.click(await screen.findByRole("combobox", { name: "Active session" }));
-    await user.click(
-      await screen.findByRole("option", { name: "standby-session · disconnected" }),
-    );
+    const sessionCombobox = await screen.findByRole("combobox", { name: "Active session" });
+    sessionCombobox.focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
 
-    expect(screen.getByRole("combobox", { name: "Active session" })).toHaveTextContent(
-      "standby-session · disconnected",
-    );
+    expect(sessionCombobox).toHaveTextContent(/standby-session.*disconnected/);
     expect(screen.getByText("Attention required")).toBeInTheDocument();
     expect(screen.getByText("2 Gateway sessions")).toBeInTheDocument();
+
+    await user.click(sessionCombobox);
+    expect(screen.getByRole("listbox", { name: "Gateway sessions" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(sessionCombobox).toHaveFocus();
+  });
+
+  it("prevents duplicate sync runs and clears progress when the active session changes", async () => {
+    const user = userEvent.setup();
+    let resolveSync: ((run: RuntimeSyncRun) => void) | undefined;
+    const syncPromise = new Promise<RuntimeSyncRun>((resolve) => {
+      resolveSync = resolve;
+    });
+    const requestSessionSync = vi.fn().mockReturnValue(syncPromise);
+    const fakeApi = {
+      getSessionSyncRun: vi.fn(() => new Promise(() => undefined)),
+      listSessions: vi.fn(),
+      requestSessionSync,
+    } as unknown as RuntimeApi;
+
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 2,
+          readySessions: 2,
+          sessions: [session, secondReadySession],
+        })}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(await screen.findByRole("button", { name: "Sync session" }));
+
+    const startingButton = screen.getByRole("button", { name: "Starting full sync" });
+    expect(startingButton).toBeDisabled();
+    await user.click(startingButton);
+    expect(requestSessionSync).toHaveBeenCalledTimes(1);
+
+    await act(async () => resolveSync?.(pendingSync));
+    expect(await screen.findByRole("button", { name: "Sync in progress" })).toBeDisabled();
+    expect(screen.getByRole("progressbar", { name: "Session sync: pending" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "Active session" }));
+    await user.click(screen.getByRole("option", { name: /second-session/ }));
+
+    await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Sync session" })).toBeEnabled();
+  });
+
+  it("supports keyboard focus, Escape, and outside dismissal for the Runtime menu", async () => {
+    const user = userEvent.setup();
+    const fakeApi = {
+      getSessionSyncRun: vi.fn(),
+      listSessions: vi.fn(),
+      requestSessionSync: vi.fn(),
+    } as unknown as RuntimeApi;
+
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 1,
+          readySessions: 1,
+          sessions: [session],
+        })}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    const runtimeButton = await screen.findByRole("button", { name: "Runtime" });
+    runtimeButton.focus();
+    await user.keyboard("{ArrowDown}");
+
+    expect(screen.getByRole("menuitem", { name: "Disconnect Runtime" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(runtimeButton).toHaveFocus();
+
+    await user.click(runtimeButton);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await user.click(screen.getByRole("heading", { name: "Sessions" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 });

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { App } from "./App";
 
 describe("App", () => {
-  it("renders inside the Ink application provider", () => {
+  it("renders the connection screen", () => {
     render(<App />);
 
     expect(
