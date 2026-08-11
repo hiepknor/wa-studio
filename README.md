@@ -30,4 +30,4 @@ npm run tauri build -- --debug
 `npm run check` regenerates the pinned API types, runs frontend tests/build, then runs Rust formatting and Clippy with warnings treated as errors.
 
 See [docs/architecture.md](docs/architecture.md) for system boundaries, contract ownership, security, and the planned feature slices.
-The incremental Ink UI rollout is documented in [docs/ui-implementation-plan.md](docs/ui-implementation-plan.md).
+The incremental UI rollout is documented in [docs/ui-implementation-plan.md](docs/ui-implementation-plan.md).

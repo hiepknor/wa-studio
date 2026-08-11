@@ -1,54 +1,56 @@
-# Ink UI implementation plan
+# UI implementation plan
 
-WA Studio uses `@hiepknor/ink-react` as its UI primitive layer. Feature modules continue to own domain language, validation, Runtime requests, server state, and workflows.
+WA Studio uses product-owned semantic React controls and CSS with a Warp Terminal-inspired visual language. Graphite surfaces, compact spacing, restrained violet accents, and monospace technical data support the operations-console context without importing Warp branding or assets. Feature modules own domain language, accessibility, validation, Runtime requests, server state, and workflows.
 
 ## Composition rules
 
-- Put one `InkProvider` at the application root with `compact` density for desktop operations.
-- Import the aggregate Ink stylesheet once at the application entrypoint, before product layout CSS.
-- Use Ink components directly inside features. Add a WA Studio wrapper only when it encodes recurring product behavior, not merely to rename or restyle a primitive.
-- Use Ink tokens for product layout CSS. Avoid copying component CSS or introducing a second token system.
-- Shell CSS targets only WA Studio-owned classes. Size controls through product wrappers and do not select internal `.ink-ui-*` classes.
+- Prefer semantic HTML for buttons, fields, selects, alerts, cards, and data tables.
+- Use the WA Studio tokens in `src/app/app.css` for color, typography, focus treatment, and component states.
+- Keep the design language compact and desktop-native; reserve monospace for identifiers, URLs, timestamps, commands, and other machine-oriented data.
+- Add a WA Studio component abstraction only when it encodes recurring product behavior.
+- Shell CSS targets only WA Studio-owned classes.
 - Keep Runtime-generated DTOs and API logic out of UI components.
 - Keep `DataTable` controlled: Runtime query parameters and response metadata own filtering, sorting, and pagination.
-- Match failures to their scope: field errors for invalid input, `ErrorState` for a failed panel, `Banner` for persistent application-wide failures, and toasts only for non-blocking background results.
+- Match failures to their scope: field errors for invalid input, panel alerts for scoped failures, persistent banners for application-wide failures, and transient notices only for non-blocking background results.
 
 ## Delivery slices
 
 ### 1. Connection screen
 
-Replace native controls and bespoke card/status styles with `Card`, `Stack`, `TextField`, `Button`, and `Alert`. Preserve the existing connection state machine and API tests. Add keyboard, loading, rejected-key, and readiness-failure component tests.
+Use semantic form, input, button, and status elements styled by the product UI layer. Preserve the connection state machine and API tests. Cover keyboard submission, loading, rejected-key, and readiness failures.
 
-Status: completed in the initial Ink migration slice.
+Status: completed.
 
 ### 2. Desktop shell
 
-Compose `Toolbar`, `Sidebar`, `Panel`, and `StatusBar`. Navigation is registry-driven and grouped into Operate (Groups, Campaigns, Runs, Activity) and System (Sessions, Settings). Keep page routing and the shared selected-session context in the application; Ink owns only presentation and accessible interaction. Runtime connection actions belong to the toolbar menu, while concise operational context belongs to the status bar.
+Compose the shell from semantic header, navigation, content, and footer regions. Navigation is registry-driven and grouped into Operate (Groups, Campaigns, Runs, Activity) and System (Sessions, Settings). Keep page routing and the shared selected-session context in the application. Runtime connection actions belong to the toolbar menu, while concise operational context belongs to the status bar.
 
 Status: completed with the Sessions destination active and future destinations explicitly disabled until their slices exist.
 
 ### 3. Sessions and groups
 
-Use `DataTable`, `DataTableToolbar`, `Badge`, `StatusMark`, `Skeleton`, and `ErrorState`. Groups must use Runtime-backed pagination/filtering rather than loading a large session into a client-only table. A group detail panel shows send capability and exposes refresh as an explicit action.
+Use semantic tables, fields, buttons, badges, and alerts. Groups must use Runtime-backed pagination/filtering rather than loading a large session into a client-only table. A group detail panel shows send capability and exposes refresh as an explicit action.
 
 Status: Sessions selection, refresh, and durable full-sync monitoring completed; Groups remains next.
 
 ### 4. Campaign editor and preflight
 
-Use form primitives for campaign content and scheduling, controlled group selection for targets, and `Alert`/`ErrorState` for preflight findings. A live run action remains visually and behaviorally distinct from dry-run or draft actions.
+Use labelled form controls for campaign content and scheduling, controlled group selection for targets, and scoped alerts for preflight findings. A live run action remains visually and behaviorally distinct from dry-run or draft actions.
 
 ### 5. Run monitoring
 
-Use `Progress`, status feedback, controlled delivery tables, and `Dialog` confirmation for destructive controls. Pause, resume, and cancel remain Runtime commands; UI state is reconciled from durable Runtime responses.
+Use native progress elements, status feedback, controlled delivery tables, and accessible confirmation dialogs for destructive controls. Pause, resume, and cancel remain Runtime commands; UI state is reconciled from durable Runtime responses.
 
 ## Quality gates per slice
 
 1. Component tests cover keyboard interaction, loading, empty, error, and success states.
 2. `npm run check` passes.
-3. Tauri development build is inspected on macOS for focus, overlays, reduced motion, compact density, and window resizing.
-4. Bundle-size changes are recorded because Ink currently ships an aggregate stylesheet.
+3. Tauri development build is inspected on macOS for focus, overlays, reduced motion, compact spacing, and window resizing.
+4. Bundle-size changes are recorded when new UI dependencies or substantial styles are introduced.
 5. No feature may call OpenWA or redefine Runtime DTOs.
+
+Current post-migration frontend baseline: 228.64 kB JavaScript (72.10 kB gzip) and 26.49 kB CSS (6.04 kB gzip), plus 106.41 kB of locally bundled variable-font subsets. The production brand mark is an inlined SVG; native bundle icons are generated from the dedicated SVG app-icon master.
 
 ## Dependency policy
 
-The application declares the stable `1.x` package range and commits `package-lock.json` for reproducible builds. Ink upgrades are reviewed as dedicated dependency changes, including its changelog, visual behavior, accessibility checks, frontend build size, and Tauri WebView behavior.
+The application commits `package-lock.json` for reproducible builds. Shared controls use native semantics; UI dependencies require review for accessibility, frontend bundle size, and Tauri WebView behavior. Inter Variable and JetBrains Mono Variable are self-hosted with Latin and Vietnamese subsets so the desktop shell remains consistent across platforms without a remote asset host.

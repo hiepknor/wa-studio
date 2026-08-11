@@ -50,7 +50,7 @@ Responsive CSS still owns content layout, but it must not simulate native window
 
 ## User interface
 
-`@hiepknor/ink-react` supplies accessible React primitives and design tokens. It does not own routing, requests, validation rules, or domain state. See [ui-implementation-plan.md](ui-implementation-plan.md) for component mapping and incremental rollout.
+WA Studio owns its semantic React controls and CSS. The interface follows a Warp Terminal-inspired operations language—graphite surfaces, restrained violet accents, compact system typography, and monospace for technical data—without copying Warp branding or assets. Feature modules continue to own accessibility, domain language, validation, Runtime requests, server state, and workflows. See [ui-implementation-plan.md](ui-implementation-plan.md) for the incremental rollout.
 
 ## Security
 
