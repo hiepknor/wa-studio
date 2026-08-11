@@ -107,4 +107,72 @@ describe("RuntimeApi", () => {
     );
     expect(request.headers.get("X-Runtime-Key")).toBe("test-key");
   });
+
+  it("reads paginated groups and group details for a session", async () => {
+    const group = {
+      sessionId: "session id",
+      id: "120363@g.us",
+      name: "Release room",
+      description: null,
+      ownerId: null,
+      linkedParentId: null,
+      participantsCount: 3,
+      isAdmin: true,
+      isReadOnly: false,
+      isAnnounce: false,
+      settingsLocked: false,
+      isActive: true,
+      detailsSyncedAt: null,
+      syncedAt: "2026-08-11T09:00:00.000Z",
+      sendCapability: {
+        status: "ALLOWED",
+        reason: "session_is_admin",
+        checkedAt: "2026-08-11T09:00:00.000Z",
+        invalidatedAt: null,
+        revision: 1,
+      },
+    } as const;
+    const runtimeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ data: [group], meta: { total: 1, limit: 20, offset: 20 } }))
+      .mockResolvedValueOnce(Response.json({ ...group, members: [] }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await expect(api.listGroups({ sessionId: "session id", limit: 20, offset: 20 }))
+      .resolves.toMatchObject({ meta: { total: 1, limit: 20, offset: 20 } });
+    await expect(api.getGroup("session id", "120363@g.us"))
+      .resolves.toMatchObject({ name: "Release room", members: [] });
+
+    const listRequest = runtimeFetch.mock.calls[0][0] as Request;
+    expect(listRequest.url).toBe(
+      "http://127.0.0.1:3100/api/v1/groups?sessionId=session%20id&limit=20&offset=20",
+    );
+    expect(listRequest.headers.get("X-Runtime-Key")).toBe("test-key");
+    const detailRequest = runtimeFetch.mock.calls[1][0] as Request;
+    expect(detailRequest.url).toBe(
+      "http://127.0.0.1:3100/api/v1/groups/120363%40g.us?sessionId=session%20id",
+    );
+  });
+
+  it("queues a group capability refresh", async () => {
+    const runtimeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(null, { status: 202 }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await expect(api.requestGroupCapabilityRefresh("session id", "120363@g.us"))
+      .resolves.toBeUndefined();
+
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.method).toBe("POST");
+    expect(request.url).toBe(
+      "http://127.0.0.1:3100/api/v1/groups/120363%40g.us/refresh-capability?sessionId=session%20id",
+    );
+  });
 });

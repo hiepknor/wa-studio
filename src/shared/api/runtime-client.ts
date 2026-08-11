@@ -5,6 +5,16 @@ import type { components, paths } from "./generated/runtime";
 
 export type RuntimeSession = components["schemas"]["SessionDto"];
 export type RuntimeSyncRun = components["schemas"]["SyncRunDto"];
+export type RuntimeGroup = components["schemas"]["GroupDto"];
+export type RuntimeGroupDetail = components["schemas"]["GroupDetailDto"];
+export type RuntimeGroupPage = components["schemas"]["GroupListDto"];
+export type RuntimeGroupMember = components["schemas"]["GroupMemberDto"];
+
+export interface RuntimeGroupListInput {
+  sessionId: string;
+  limit?: number;
+  offset?: number;
+}
 
 export interface RuntimeConnectionInput {
   baseUrl: string;
@@ -118,6 +128,48 @@ export class RuntimeApi {
       );
     }
     return result.data;
+  }
+
+  async listGroups({
+    sessionId,
+    limit = 25,
+    offset = 0,
+  }: RuntimeGroupListInput): Promise<RuntimeGroupPage> {
+    const result = await this.client.GET("/api/v1/groups", {
+      params: { query: { sessionId, limit, offset } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw new RuntimeRequestError(
+        `Could not load groups (HTTP ${result.response.status}).`,
+      );
+    }
+    return result.data;
+  }
+
+  async getGroup(sessionId: string, groupId: string): Promise<RuntimeGroupDetail> {
+    const result = await this.client.GET("/api/v1/groups/{id}", {
+      params: { path: { id: groupId }, query: { sessionId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw new RuntimeRequestError(
+        `Could not load group details (HTTP ${result.response.status}).`,
+      );
+    }
+    return result.data;
+  }
+
+  async requestGroupCapabilityRefresh(
+    sessionId: string,
+    groupId: string,
+  ): Promise<void> {
+    const result = await this.client.POST("/api/v1/groups/{id}/refresh-capability", {
+      params: { path: { id: groupId }, query: { sessionId } },
+    });
+    if (!result.response.ok) {
+      throw new RuntimeRequestError(
+        `Could not refresh send capability (HTTP ${result.response.status}).`,
+      );
+    }
   }
 }
 

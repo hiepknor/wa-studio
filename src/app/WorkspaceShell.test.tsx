@@ -10,6 +10,8 @@ import { WorkspaceShell } from "./WorkspaceShell";
 import type {
   RuntimeApi,
   RuntimeConnectionResult,
+  RuntimeGroup,
+  RuntimeGroupDetail,
   RuntimeSession,
   RuntimeSyncRun,
 } from "@/shared/api/runtime-client";
@@ -70,6 +72,43 @@ const completedSync: RuntimeSyncRun = {
   completedAt: "2026-08-11T09:00:10.000Z",
 };
 
+const group: RuntimeGroup = {
+  sessionId: session.id,
+  id: "120363000000000000@g.us",
+  name: "Release room",
+  description: "Coordinates the weekly release.",
+  ownerId: null,
+  linkedParentId: null,
+  participantsCount: 2,
+  isAdmin: true,
+  isReadOnly: false,
+  isAnnounce: false,
+  settingsLocked: false,
+  isActive: true,
+  detailsSyncedAt: "2026-08-11T09:00:00.000Z",
+  syncedAt: "2026-08-11T09:00:00.000Z",
+  sendCapability: {
+    status: "ALLOWED",
+    reason: "session_is_admin",
+    checkedAt: "2026-08-11T09:00:00.000Z",
+    invalidatedAt: null,
+    revision: 1,
+  },
+};
+
+const groupDetail: RuntimeGroupDetail = {
+  ...group,
+  members: [
+    {
+      participantId: "84900000000@c.us",
+      phoneNumber: "84900000000",
+      displayName: "Hiep Mai",
+      isAdmin: true,
+      isSuperAdmin: false,
+    },
+  ],
+};
+
 function WorkspaceHarness() {
   const { connect, connected, selectedSessionId } = useRuntimeConnection();
   if (connected) return <WorkspaceShell />;
@@ -120,7 +159,7 @@ describe("WorkspaceShell", () => {
     );
     expect(screen.getByText("Operational")).toBeInTheDocument();
     expect(screen.getByText("1 Gateway session")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Groups" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Groups" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sessions" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -297,5 +336,67 @@ describe("WorkspaceShell", () => {
     expect(screen.getByRole("menu")).toBeInTheDocument();
     await user.click(screen.getByRole("heading", { name: "Sessions" }));
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("browses paginated groups, inspects members, and queues capability refresh", async () => {
+    const user = userEvent.setup();
+    const secondGroup = { ...group, id: "second@g.us", name: "Product room" };
+    const listGroups = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [group], meta: { total: 21, limit: 20, offset: 0 } })
+      .mockResolvedValueOnce({ data: [secondGroup], meta: { total: 21, limit: 20, offset: 20 } });
+    const getGroup = vi.fn().mockResolvedValue(groupDetail);
+    const requestGroupCapabilityRefresh = vi.fn().mockResolvedValue(undefined);
+    const fakeApi = {
+      getGroup,
+      getSessionSyncRun: vi.fn(),
+      listGroups,
+      listSessions: vi.fn(),
+      requestGroupCapabilityRefresh,
+      requestSessionSync: vi.fn(),
+    } as unknown as RuntimeApi;
+
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 1,
+          readySessions: 1,
+          sessions: [session],
+        })}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(await screen.findByRole("button", { name: "Groups" }));
+
+    expect(await screen.findByRole("heading", { name: "Groups" })).toBeInTheDocument();
+    await waitFor(() => expect(listGroups).toHaveBeenCalledWith({
+      sessionId: session.id,
+      limit: 20,
+      offset: 0,
+    }));
+    expect(screen.getByText("1–1 of 21")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "View Release room" }));
+    await waitFor(() => expect(getGroup).toHaveBeenCalledWith(session.id, group.id));
+    expect(await screen.findByText("Hiep Mai")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Refresh capability" }));
+    await waitFor(() => expect(requestGroupCapabilityRefresh).toHaveBeenCalledWith(
+      session.id,
+      group.id,
+    ));
+    expect(screen.getByText(/Refresh queued/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 20,
+      offset: 20,
+    }));
+    expect(await screen.findByText("Product room")).toBeInTheDocument();
   });
 });

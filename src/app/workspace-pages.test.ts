@@ -12,6 +12,7 @@ describe("workspace page registry", () => {
 
     expect(new Set(pages.map((page) => page.id)).size).toBe(pages.length);
     expect(findWorkspacePage(DEFAULT_WORKSPACE_PAGE).available).toBe(true);
+    expect(findWorkspacePage("groups").available).toBe(true);
   });
 
   it("separates operational pages from system configuration", () => {
