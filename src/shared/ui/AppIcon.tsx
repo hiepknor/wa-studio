@@ -11,6 +11,7 @@ import {
   Server,
   Settings2,
   UsersRound,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -21,6 +22,7 @@ export type AppIconName =
   | "campaigns"
   | "check"
   | "chevron-down"
+  | "close"
   | "groups"
   | "key"
   | "refresh"
@@ -43,6 +45,7 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   campaigns: Send,
   check: Check,
   "chevron-down": ChevronDown,
+  close: X,
   groups: UsersRound,
   key: KeyRound,
   refresh: RefreshCw,

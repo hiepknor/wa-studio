@@ -12,6 +12,7 @@ import { GroupsScreen } from "@/features/groups/GroupsScreen";
 import { AppIcon, type AppIconName } from "@/shared/ui/AppIcon";
 import { BrandMark } from "@/shared/ui/BrandMark";
 import { Button } from "@/shared/ui/Button";
+import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { StatusDot, StatusIndicator, type StatusTone } from "@/shared/ui/StatusIndicator";
 
 const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
@@ -115,7 +116,8 @@ export function WorkspaceShell() {
   )?.label;
 
   return (
-    <main className="workspace">
+    <DrawerProvider className="workspace-frame">
+      <main className="workspace">
       <aside className="workspace-sidebar">
         <div className="workspace-brand-lockup">
           <BrandMark />
@@ -162,7 +164,7 @@ export function WorkspaceShell() {
         </div>
       </aside>
 
-      <div className="workspace-main">
+        <div className="workspace-main">
         <header aria-label="Workspace toolbar" className="workspace-toolbar">
           <div className="workspace-toolbar-context">
             <span className="workspace-toolbar-copy">
@@ -235,7 +237,10 @@ export function WorkspaceShell() {
           <span className="status-bar-session">session: {selectedSession?.name ?? "none"}</span>
           <span>Last sync: {formatSyncTime(selectedSession?.syncedAt)}</span>
         </footer>
-      </div>
-    </main>
+        </div>
+
+        <DrawerHost className="workspace-drawer-host" />
+      </main>
+    </DrawerProvider>
   );
 }

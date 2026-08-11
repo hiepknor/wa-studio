@@ -8,6 +8,7 @@ import type {
 } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
+import { Drawer } from "@/shared/ui/Drawer";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import type { StatusTone } from "@/shared/ui/StatusIndicator";
@@ -196,7 +197,7 @@ export function GroupsScreen() {
         </InlineAlert>
       )}
 
-      <div className="groups-workspace" data-detail-open={selectedGroupId ? "true" : undefined}>
+      <>
         <div className="data-table-container groups-list-panel">
           <div className="data-table-toolbar groups-toolbar">
             <TextField
@@ -293,16 +294,13 @@ export function GroupsScreen() {
           </div>
         </div>
 
-        {selectedGroupId && (
-          <aside aria-label="Group details" className="groups-detail-panel">
-            <div className="groups-detail-header">
-              <div className="stack stack-xs">
-                <span className="groups-detail-eyebrow">Group inspector</span>
-                <strong>{detail?.name ?? "Loading group…"}</strong>
-              </div>
-              <Button onClick={closeDetail} size="sm" variant="ghost">Close</Button>
-            </div>
-
+        <Drawer
+          description={detail ? `${detail.participantsCount ?? detail.members.length} members` : undefined}
+          eyebrow="Group inspector"
+          onClose={closeDetail}
+          open={Boolean(selectedGroupId)}
+          title={detail?.name ?? "Loading group…"}
+        >
             {detailLoading && <div className="groups-detail-state">Loading details…</div>}
             {detailError && (
               <InlineAlert title="Group action failed">{detailError}</InlineAlert>
@@ -312,7 +310,7 @@ export function GroupsScreen() {
             )}
 
             {detail && (
-              <div className="groups-detail-content stack stack-md">
+              <div className="stack stack-md">
                 <p className="groups-description">{detail.description || "No group description."}</p>
 
                 <dl className="groups-facts">
@@ -367,9 +365,8 @@ export function GroupsScreen() {
                 </section>
               </div>
             )}
-          </aside>
-        )}
-      </div>
+        </Drawer>
+      </>
     </div>
   );
 }

@@ -1,0 +1,113 @@
+.drawer-frame {
+  width: 100%;
+  min-width: 0;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  container-name: workspace-shell;
+  container-type: inline-size;
+}
+
+.drawer-host { pointer-events: none; }
+.drawer-layer {
+  position: absolute;
+  z-index: 40;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+.drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(4 5 8 / 48%);
+  opacity: 0;
+  pointer-events: auto;
+  backdrop-filter: blur(2px);
+  transition: opacity 140ms ease;
+}
+.drawer-surface {
+  position: relative;
+  z-index: 1;
+  width: min(380px, calc(100% - 48px));
+  min-width: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 0;
+  border-left: 1px solid var(--border-strong);
+  background: rgb(17 18 24 / 98%);
+  box-shadow: -24px 0 64px rgb(0 0 0 / 36%);
+  pointer-events: auto;
+  transform: translateX(100%);
+  transition: transform 140ms ease;
+}
+.drawer-layer[data-state="open"] .drawer-backdrop { opacity: 1; }
+.drawer-layer[data-state="open"] .drawer-surface { transform: translateX(0); }
+.drawer-header {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgb(22 23 30 / 94%);
+}
+.drawer-heading { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.drawer-eyebrow {
+  color: #9389e8;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.drawer-title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer-description {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer-close { position: relative; width: 28px; flex: 0 0 28px; padding: 0; }
+.drawer-close .button-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+.drawer-body { min-height: 0; padding: 14px; overflow: auto; }
+.drawer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: rgb(22 23 30 / 82%);
+}
+
+@container workspace-shell (min-width: 1320px) {
+  .drawer-layer {
+    position: relative;
+    height: 100%;
+  }
+  .drawer-surface {
+    width: 100%;
+    box-shadow: none;
+    transform: none;
+    transition: none;
+  }
+}

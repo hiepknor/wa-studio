@@ -141,12 +141,18 @@ select:focus-visible {
 .connection-alert-copy { color: inherit; opacity: .78; }
 
 .workspace {
+  position: relative;
   min-width: 760px;
   height: 100vh;
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);
   overflow: hidden;
   background: #101116;
+}
+.workspace-drawer-host {
+  position: absolute;
+  z-index: 40;
+  inset: 0;
 }
 .workspace-sidebar {
   min-height: 0;
@@ -458,4 +464,18 @@ progress::-webkit-progress-value { background: var(--accent); }
     animation-iteration-count: 1 !important;
   }
 
+}
+
+@container workspace-shell (min-width: 1320px) {
+  .workspace:has(> .workspace-drawer-host:not(:empty)) {
+    grid-template-columns: 224px minmax(0, 1fr) 320px;
+  }
+
+  .workspace-drawer-host {
+    position: relative;
+    z-index: auto;
+    grid-column: 3;
+    min-width: 0;
+    height: 100%;
+  }
 }

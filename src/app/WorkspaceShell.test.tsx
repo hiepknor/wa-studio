@@ -382,6 +382,10 @@ describe("WorkspaceShell", () => {
 
     await user.click(screen.getByRole("button", { name: "View Release room" }));
     await waitFor(() => expect(getGroup).toHaveBeenCalledWith(session.id, group.id));
+    expect(await screen.findByRole("dialog", { name: "Release room" })).toHaveAttribute(
+      "aria-modal",
+      "true",
+    );
     expect(await screen.findByText("Hiep Mai")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Refresh capability" }));
