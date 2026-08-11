@@ -17,7 +17,7 @@ import { createPortal } from "react-dom";
 import { Button } from "./Button";
 import "./drawer.css";
 
-export const DRAWER_DOCK_MIN_WIDTH = 1320;
+export const DRAWER_DOCK_MIN_WIDTH = 1400;
 
 type DrawerMode = "docked" | "overlay";
 
@@ -234,7 +234,13 @@ export function Drawer({
         <header className="drawer-header">
           <div className="drawer-heading">
             {eyebrow && <span className="drawer-eyebrow">{eyebrow}</span>}
-            <h2 className="drawer-title" id={titleId}>{title}</h2>
+            <h2
+              className="drawer-title"
+              id={titleId}
+              title={typeof title === "string" ? title : undefined}
+            >
+              {title}
+            </h2>
             {description && <span className="drawer-description" id={descriptionId}>{description}</span>}
           </div>
           <Button

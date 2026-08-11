@@ -254,7 +254,7 @@ export function GroupsScreen() {
                   <tr data-selected={group.id === selectedGroupId || undefined} key={group.id}>
                     <td>
                       <div className="stack stack-xs groups-name-cell">
-                        <strong>{group.name}</strong>
+                        <strong title={group.name}>{group.name}</strong>
                         <span className="muted-copy">{group.id}</span>
                       </div>
                     </td>

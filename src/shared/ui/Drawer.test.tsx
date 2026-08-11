@@ -53,6 +53,10 @@ describe("Drawer", () => {
     const dialog = await screen.findByRole("dialog", { name: "Release room" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveAccessibleDescription("2 members");
+    expect(screen.getByRole("heading", { name: "Release room" })).toHaveAttribute(
+      "title",
+      "Release room",
+    );
     expect(trigger).toHaveProperty("inert", true);
     await waitFor(() => expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus());
 
@@ -74,7 +78,7 @@ describe("Drawer", () => {
     await user.click(screen.getByRole("button", { name: "Inspect group" }));
     expect(await screen.findByRole("dialog", { name: "Release room" })).toBeInTheDocument();
 
-    setViewportWidth(1440);
+    setViewportWidth(1400);
     fireEvent(window, new Event("resize"));
 
     const panel = await screen.findByRole("complementary", { name: "Release room" });

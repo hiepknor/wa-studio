@@ -29,7 +29,7 @@
 .drawer-surface {
   position: relative;
   z-index: 1;
-  width: min(380px, calc(100% - 48px));
+  width: min(440px, calc(100% - 48px));
   min-width: 0;
   height: 100%;
   display: grid;
@@ -65,13 +65,17 @@
 }
 .drawer-title {
   margin: 0;
+  display: -webkit-box;
   overflow: hidden;
+  overflow-wrap: anywhere;
   color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-family: var(--font-ui);
+  font-size: 13px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .drawer-description {
   overflow: hidden;
@@ -99,7 +103,7 @@
   background: rgb(22 23 30 / 82%);
 }
 
-@container workspace-shell (min-width: 1320px) {
+@container workspace-shell (min-width: 1400px) {
   .drawer-layer {
     position: relative;
     height: 100%;
