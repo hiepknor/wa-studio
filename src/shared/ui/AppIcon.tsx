@@ -14,6 +14,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import "./app-icon.css";
+
 export type AppIconName =
   | "activity"
   | "campaigns"

@@ -1,0 +1,27 @@
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-weight: 500;
+  line-height: 1;
+}
+
+.status-indicator-sm { font-size: 10px; }
+.status-indicator-md { font-size: 11px; }
+
+.status-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-dot-sm { width: 5px; height: 5px; }
+.status-dot-md { width: 6px; height: 6px; }
+.status-dot-glow { box-shadow: 0 0 7px color-mix(in srgb, currentColor 46%, transparent); }
+
+.status-tone-neutral { color: var(--muted); }
+.status-tone-success { color: var(--ok); }
+.status-tone-warning { color: var(--warning); }
+.status-tone-danger { color: var(--danger); }

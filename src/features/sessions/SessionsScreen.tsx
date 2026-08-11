@@ -2,11 +2,15 @@ import { useEffect, useRef, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import type { RuntimeSyncRun } from "@/shared/api/runtime-client";
-import { AppIcon } from "@/shared/ui/AppIcon";
+import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
+import { InlineAlert } from "@/shared/ui/InlineAlert";
+import { PageHeader } from "@/shared/ui/PageHeader";
+import { StatusIndicator, type StatusTone } from "@/shared/ui/StatusIndicator";
+import { TextField } from "@/shared/ui/TextField";
 
-function statusTone(status: string): "ok" | "warning" | "danger" | "neutral" {
-  if (status === "ready") return "ok";
+function statusTone(status: string): StatusTone {
+  if (status === "ready") return "success";
   if (status === "failed" || status === "disconnected") return "danger";
   if (status === "initializing" || status === "authenticating") return "warning";
   return "neutral";
@@ -132,29 +136,27 @@ export function SessionsScreen() {
 
   return (
     <div className="stack stack-lg">
-      <div className="inline inline-between sessions-heading">
-        <div>
-          <h2 className="workspace-page-title" id="sessions-title">Sessions</h2>
-          <p className="muted-copy">Select the Gateway session used by groups and campaigns.</p>
-        </div>
-        <Button
-          aria-label={syncButtonLabel}
-          className="sessions-sync-button"
-          disabled={!selectedSession || selectedSession.status !== "ready" || syncInProgress}
-          icon="refresh"
-          loading={syncInProgress}
-          onClick={handleSync}
-          variant="primary"
-        >
-          Sync session
-        </Button>
-      </div>
+      <PageHeader
+        actions={(
+          <Button
+            aria-label={syncButtonLabel}
+            className="sessions-sync-button"
+            disabled={!selectedSession || selectedSession.status !== "ready" || syncInProgress}
+            icon="refresh"
+            loading={syncInProgress}
+            onClick={handleSync}
+            variant="primary"
+          >
+            Sync session
+          </Button>
+        )}
+        description="Select the Gateway session used by groups and campaigns."
+        title="Sessions"
+        titleId="sessions-title"
+      />
 
       {syncError && (
-        <div className="alert alert-danger" role="alert">
-          <strong>Session sync failed</strong>
-          <span className="connection-alert-copy">{syncError}</span>
-        </div>
+        <InlineAlert title="Session sync failed">{syncError}</InlineAlert>
       )}
       {syncRun && !syncError && (
         <div className="stack stack-xs">
@@ -171,17 +173,18 @@ export function SessionsScreen() {
 
       <div className="data-table-container">
         <div className="data-table-toolbar">
-          <div className="session-search">
-            <AppIcon className="session-search-icon" name="search" size="sm" />
-            <label className="visually-hidden" htmlFor="session-search">Search sessions</label>
-            <input
-              id="session-search"
-              onChange={(event) => setSearch(event.currentTarget.value)}
-              placeholder="Search sessions"
-              type="search"
-              value={search}
-            />
-          </div>
+          <TextField
+            containerClassName="session-search"
+            icon="search"
+            id="session-search"
+            label="Search sessions"
+            labelHidden
+            onChange={(event) => setSearch(event.currentTarget.value)}
+            placeholder="Search sessions"
+            size="sm"
+            type="search"
+            value={search}
+          />
           <Button
             aria-label={refreshing ? "Refreshing sessions" : "Refresh"}
             className="sessions-refresh-button"
@@ -194,10 +197,13 @@ export function SessionsScreen() {
         </div>
 
         {sessionsError && (
-          <div className="alert alert-danger data-table-error" role="alert">
-            <span><strong>Could not refresh sessions</strong> {sessionsError}</span>
-            <Button onClick={handleRefresh} size="sm">Retry</Button>
-          </div>
+          <InlineAlert
+            action={<Button onClick={handleRefresh} size="sm">Retry</Button>}
+            className="data-table-error"
+            title="Could not refresh sessions"
+          >
+            {sessionsError}
+          </InlineAlert>
         )}
 
         <div className="data-table-scroll">
@@ -224,19 +230,19 @@ export function SessionsScreen() {
                     </div>
                   </td>
                   <td>
-                    <span className={`status-mark status-${statusTone(session.status)}`}>
+                    <StatusIndicator glow tone={statusTone(session.status)}>
                       {session.status}
-                    </span>
+                    </StatusIndicator>
                   </td>
                   <td>
-                    <span className={`badge badge-${session.engineLoaded ? "ok" : "warning"}`}>
+                    <Badge tone={session.engineLoaded ? "success" : "warning"}>
                       {session.engineLoaded ? "Loaded" : "Not loaded"}
-                    </span>
+                    </Badge>
                   </td>
                   <td>{formatDate(session.syncedAt)}</td>
                   <td className="align-end">
                     {session.id === selectedSessionId ? (
-                      <span className="badge badge-ok">Selected</span>
+                      <Badge tone="success">Selected</Badge>
                     ) : (
                       <Button
                         onClick={() => selectSession(session.id)}

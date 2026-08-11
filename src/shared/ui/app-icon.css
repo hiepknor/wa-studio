@@ -1,0 +1,19 @@
+.ui-icon {
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+  color: currentColor;
+  shape-rendering: geometricPrecision;
+}
+.ui-icon-xs { width: 12px; height: 12px; }
+.ui-icon-sm { width: 14px; height: 14px; }
+.ui-icon-md { width: 16px; height: 16px; }
+.ui-icon-lg { width: 18px; height: 18px; }
+.ui-icon-xl { width: 20px; height: 20px; }
+.ui-icon-spin { animation: icon-spin 800ms linear infinite; }
+
+@keyframes icon-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-icon-spin { animation: none; }
+}

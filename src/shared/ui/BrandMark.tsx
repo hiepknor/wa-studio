@@ -1,12 +1,14 @@
 import brandMarkUrl from "@/assets/branding/wa-studio-logo.svg";
+import "./brand-mark.css";
 
 interface BrandMarkProps {
   className?: string;
+  size?: "sm" | "md" | "lg";
 }
 
-export function BrandMark({ className = "" }: BrandMarkProps) {
+export function BrandMark({ className = "", size = "md" }: BrandMarkProps) {
   return (
-    <span aria-hidden="true" className={`workspace-brand-mark ${className}`.trim()}>
+    <span aria-hidden="true" className={`brand-mark brand-mark-${size} ${className}`.trim()}>
       <img alt="" src={brandMarkUrl} />
     </span>
   );

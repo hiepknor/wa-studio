@@ -5,8 +5,9 @@ import {
   type RuntimeConnectionResult,
 } from "@/shared/api/runtime-client";
 import { BrandMark } from "@/shared/ui/BrandMark";
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
+import { StatusDot } from "@/shared/ui/StatusIndicator";
+import { TextField } from "@/shared/ui/TextField";
 
 type ConnectionState =
   | { status: "idle" }
@@ -80,69 +81,60 @@ export function ConnectionScreen({
                 <span>~</span> wa runtime attach
               </div>
 
-              <div className="field connection-field">
-                <label htmlFor="runtime-url">Runtime URL</label>
-                <div className="connection-input-wrap">
-                  <AppIcon className="connection-input-icon" name="server" size="sm" />
-                  <input
-                    disabled={isChecking}
-                    id="runtime-url"
-                    inputMode="url"
-                    onChange={(event) => setBaseUrl(event.currentTarget.value)}
-                    placeholder="https://runtime.example.com"
-                    required
-                    spellCheck={false}
-                    type="url"
-                    value={baseUrl}
-                  />
-                </div>
-              </div>
+              <TextField
+                disabled={isChecking}
+                icon="server"
+                id="runtime-url"
+                inputMode="url"
+                label="Runtime URL"
+                monospace
+                onChange={(event) => setBaseUrl(event.currentTarget.value)}
+                placeholder="https://runtime.example.com"
+                required
+                spellCheck={false}
+                type="url"
+                value={baseUrl}
+              />
 
-              <div className="field connection-field">
-                <label htmlFor="runtime-key">Runtime API key</label>
-                <div className="connection-input-wrap">
-                  <AppIcon className="connection-input-icon" name="key" size="sm" />
-                  <input
-                    aria-describedby="runtime-key-description"
-                    autoComplete="new-password"
-                    disabled={isChecking}
-                    id="runtime-key"
-                    onChange={(event) => setApiKey(event.currentTarget.value)}
-                    placeholder="Enter the development key"
-                    required
-                    type="password"
-                    value={apiKey}
-                  />
-                </div>
-                <span className="field-description" id="runtime-key-description">
-                  Stored for this process only. Never written to disk.
-                </span>
-              </div>
+              <TextField
+                autoComplete="new-password"
+                description="Stored for this process only. Never written to disk."
+                disabled={isChecking}
+                icon="key"
+                id="runtime-key"
+                label="Runtime API key"
+                monospace
+                onChange={(event) => setApiKey(event.currentTarget.value)}
+                placeholder="Enter the development key"
+                required
+                type="password"
+                value={apiKey}
+              />
 
               {state.status === "idle" && (
                 <div className="connection-status" role="status">
-                  <span className="connection-status-dot" />
+                  <StatusDot />
                   <strong>Waiting for credentials</strong>
                   <span className="connection-alert-copy">No active Runtime session</span>
                 </div>
               )}
               {state.status === "checking" && (
                 <div className="connection-status connection-status-checking" role="status">
-                  <span className="connection-status-dot" />
+                  <StatusDot glow tone="warning" />
                   <strong>Checking connection</strong>
                   <span className="connection-alert-copy">Verifying Runtime readiness…</span>
                 </div>
               )}
               {state.status === "failed" && (
                 <div className="connection-status connection-status-danger" role="alert">
-                  <span className="connection-status-dot" />
+                  <StatusDot glow tone="danger" />
                   <strong>Connection failed</strong>
                   <span className="connection-alert-copy">{state.message}</span>
                 </div>
               )}
               {state.status === "connected" && (
                 <div className="connection-status connection-status-ok" role="status">
-                  <span className="connection-status-dot" />
+                  <StatusDot glow tone="success" />
                   <strong>Runtime connected</strong>
                   <span className="connection-alert-copy">
                     {state.result.readySessions} of {state.result.sessionCount} sessions ready.

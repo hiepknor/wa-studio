@@ -11,6 +11,7 @@ import { SessionsScreen } from "@/features/sessions/SessionsScreen";
 import { AppIcon, type AppIconName } from "@/shared/ui/AppIcon";
 import { BrandMark } from "@/shared/ui/BrandMark";
 import { Button } from "@/shared/ui/Button";
+import { StatusDot, StatusIndicator, type StatusTone } from "@/shared/ui/StatusIndicator";
 
 const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
   activity: "activity",
@@ -21,8 +22,8 @@ const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
   settings: "settings",
 };
 
-function sessionTone(status: string | undefined): "ok" | "warning" | "danger" | "neutral" {
-  if (status === "ready") return "ok";
+function sessionTone(status: string | undefined): StatusTone {
+  if (status === "ready") return "success";
   if (status === "failed" || status === "disconnected") return "danger";
   if (status === "initializing" || status === "authenticating") return "warning";
   return "neutral";
@@ -151,9 +152,9 @@ export function WorkspaceShell() {
 
         <div className="workspace-runtime-summary">
           <span className="workspace-runtime-label">Runtime status</span>
-          <span className={`status-mark status-${sessionTone(selectedSession?.status)}`}>
+          <StatusIndicator glow tone={sessionTone(selectedSession?.status)}>
             {selectedSession?.status === "ready" ? "Operational" : "Attention required"}
-          </span>
+          </StatusIndicator>
           <span className="workspace-runtime-meta">{sessionCountLabel}</span>
         </div>
       </aside>
@@ -179,13 +180,12 @@ export function WorkspaceShell() {
                 aria-expanded={runtimeMenuOpen}
                 aria-haspopup="menu"
                 className="workspace-runtime-button"
-                data-tone={sessionTone(selectedSession?.status)}
                 onClick={() => setRuntimeMenuOpen((open) => !open)}
                 onKeyDown={handleRuntimeTriggerKeyDown}
                 ref={runtimeMenuButtonRef}
                 type="button"
               >
-                <span aria-hidden="true" className="workspace-runtime-indicator" />
+                <StatusDot glow tone={sessionTone(selectedSession?.status)} />
                 <span className="workspace-runtime-text">Runtime</span>
                 <AppIcon className="workspace-runtime-chevron" name="chevron-down" size="xs" />
               </button>
@@ -228,7 +228,7 @@ export function WorkspaceShell() {
         </div>
 
         <footer className="status-bar">
-          <span><span className="status-bar-dot" />Connected to {connected.profile.baseUrl}</span>
+          <span><StatusDot glow tone="success" />Connected to {connected.profile.baseUrl}</span>
           <span className="status-bar-session">session: {selectedSession?.name ?? "none"}</span>
           <span>Last sync: {formatSyncTime(selectedSession?.syncedAt)}</span>
         </footer>

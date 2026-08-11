@@ -1,0 +1,52 @@
+.button {
+  --button-height: 32px;
+  min-height: var(--button-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 4%);
+  color: #d7d9e0;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1;
+  letter-spacing: -.005em;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, color 120ms ease;
+}
+.button-sm { --button-height: 28px; gap: 5px; padding-inline: 9px; font-size: 11px; }
+.button-md { --button-height: 32px; }
+.button-lg { --button-height: 36px; gap: 7px; padding-inline: 14px; font-size: 12px; }
+.button-secondary:hover:not(:disabled) { border-color: rgb(255 255 255 / 15%); background: rgb(255 255 255 / 6.5%); color: #f0f1f4; }
+.button-secondary:active:not(:disabled) { background: rgb(255 255 255 / 3%); box-shadow: inset 0 1px 3px rgb(0 0 0 / 28%); }
+.button-primary {
+  border-color: rgb(194 187 255 / 22%);
+  background: linear-gradient(180deg, #7b6ee9 0%, #6b5ed7 100%);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 16%), 0 1px 2px rgb(0 0 0 / 24%);
+}
+.button-primary:hover:not(:disabled) { border-color: rgb(211 206 255 / 32%); background: linear-gradient(180deg, #8478ed 0%, #7467df 100%); }
+.button-primary:active:not(:disabled) { background: linear-gradient(180deg, #685bd1 0%, #7164da 100%); box-shadow: inset 0 1px 3px rgb(38 29 104 / 42%); }
+.button-ghost { border-color: transparent; background: transparent; color: #b8b1f7; box-shadow: none; }
+.button-ghost:hover:not(:disabled) { background: var(--accent-soft); color: #d3ceff; }
+.button-ghost:active:not(:disabled) { background: rgb(118 103 232 / 10%); box-shadow: inset 0 1px 2px rgb(0 0 0 / 18%); }
+.button-danger { border-color: transparent; background: transparent; color: #f1847c; box-shadow: none; }
+.button-danger:hover:not(:disabled) { background: var(--danger-soft); color: #ffa19a; }
+.button-danger:active:not(:disabled) { background: rgb(244 112 103 / 9%); box-shadow: inset 0 1px 2px rgb(0 0 0 / 18%); }
+.button:focus-visible {
+  border-color: var(--focus-border);
+  box-shadow: 0 0 0 1px var(--focus-border), 0 0 0 3px var(--focus-halo);
+}
+.button-primary:focus-visible {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 16%),
+    0 0 0 1px var(--focus-border),
+    0 0 0 3px var(--focus-halo);
+}
+.button:disabled { filter: saturate(.65); opacity: .44; box-shadow: none; }
+.button-icon { color: currentColor; }
+.button-label { display: block; }

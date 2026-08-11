@@ -1,6 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 
 import { AppIcon, type AppIconName } from "./AppIcon";
+import "./button.css";
 
 type ButtonSize = "sm" | "md" | "lg";
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";

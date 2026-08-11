@@ -1,0 +1,25 @@
+:root {
+  --font-ui: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  --background: #090a0d;
+  --surface: #0f1116;
+  --surface-raised: #15171d;
+  --surface-hover: #1a1c23;
+  --border: rgb(255 255 255 / 8%);
+  --border-strong: rgb(255 255 255 / 14%);
+  --foreground: #f2f3f5;
+  --muted: #9298a8;
+  --dim: #7a8191;
+  --accent: #7667e8;
+  --accent-hover: #897bf0;
+  --accent-soft: rgb(118 103 232 / 15%);
+  --focus-border: rgb(166 154 255 / 78%);
+  --focus-halo: rgb(118 103 232 / 22%);
+  --focus-surface: rgb(118 103 232 / 11%);
+  --ok: #56d364;
+  --ok-soft: rgb(86 211 100 / 12%);
+  --warning: #e3b341;
+  --warning-soft: rgb(227 179 65 / 12%);
+  --danger: #f47067;
+  --danger-soft: rgb(244 112 103 / 12%);
+}
