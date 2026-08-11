@@ -24,7 +24,10 @@ async function submitConnection() {
 describe("ConnectionScreen", () => {
   it("shows a loading state while the Runtime probe is pending", async () => {
     const probeConnection = vi.fn(
-      () => new Promise<{ sessionCount: number; readySessions: number }>(() => undefined),
+      () =>
+        new Promise<{ sessionCount: number; readySessions: number; sessions: [] }>(
+          () => undefined,
+        ),
     );
     renderScreen(probeConnection);
 
@@ -61,7 +64,9 @@ describe("ConnectionScreen", () => {
   });
 
   it("reports session readiness after a successful probe", async () => {
-    const probeConnection = vi.fn().mockResolvedValue({ sessionCount: 3, readySessions: 2 });
+    const probeConnection = vi
+      .fn()
+      .mockResolvedValue({ sessionCount: 3, readySessions: 2, sessions: [] });
     renderScreen(probeConnection);
 
     await submitConnection();

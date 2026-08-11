@@ -24,9 +24,13 @@ Status: completed in the initial Ink migration slice.
 
 Compose `Toolbar`, `Sidebar`, `Panel`, and `StatusBar`. Navigation destinations are Sessions, Groups, Campaigns, and Runs. Keep routing and selected-session state in the application; Ink owns only presentation and accessible interaction.
 
+Status: foundation completed with the Sessions destination active.
+
 ### 3. Sessions and groups
 
 Use `DataTable`, `DataTableToolbar`, `Badge`, `StatusMark`, `Skeleton`, and `ErrorState`. Groups must use Runtime-backed pagination/filtering rather than loading a large session into a client-only table. A group detail panel shows send capability and exposes refresh as an explicit action.
+
+Status: Sessions selection, refresh, and durable full-sync monitoring completed; Groups remains next.
 
 ### 4. Campaign editor and preflight
 

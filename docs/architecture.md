@@ -52,3 +52,9 @@ Tauri HTTP permissions and its custom-header feature are intentionally explicit.
 2. Call `GET /api/v1/health/ready` to verify service dependencies.
 3. Call authenticated `GET /api/v1/sessions` to validate credentials and display readiness.
 4. Continue to session/group management only after both checks pass.
+
+## Desktop workspace state
+
+After authentication, `RuntimeConnectionProvider` holds the normalized Runtime origin, API key, typed API client, initial sessions, and selected session in process memory. The session list returned during credential verification is reused when the workspace opens, so entering the shell does not duplicate `GET /sessions`.
+
+Disconnect clears the connection profile, API client, sessions, and selection. A monotonically increasing connection revision prevents late connect or refresh responses from restoring state after disconnect. Session full sync follows the durable Runtime workflow: create a sync run, poll its status, then refresh session read models after completion.
