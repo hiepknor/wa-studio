@@ -466,7 +466,7 @@ progress::-webkit-progress-value { background: var(--accent); }
 
 }
 
-.drawer-frame[data-drawer-mode="docked"] .workspace:has(> .workspace-drawer-host:not(:empty)) {
+.drawer-frame[data-drawer-mode="docked"] .workspace:has(> .workspace-drawer-host > .drawer-layer) {
   grid-template-columns: 224px minmax(0, 1fr) 384px;
 }
 .drawer-frame[data-drawer-mode="docked"] .workspace-drawer-host {
