@@ -1,0 +1,46 @@
+:root {
+  color: #17352d;
+  background: #e7eee9;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input { font: inherit; }
+
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 470px);
+  gap: 64px;
+  align-items: center;
+  min-height: 100vh;
+  padding: clamp(32px, 7vw, 96px);
+  background:
+    radial-gradient(circle at 15% 20%, rgba(55, 170, 126, .2), transparent 32%),
+    linear-gradient(135deg, #edf3ef, #dce8e1);
+}
+
+.intro { max-width: 620px; }
+.eyebrow { color: #16815f; font-size: .78rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+h1 { margin: 14px 0 18px; color: #102d25; font-size: clamp(2.5rem, 5vw, 5rem); line-height: .98; letter-spacing: -.055em; }
+.intro p { max-width: 54ch; color: #48655c; font-size: 1.05rem; line-height: 1.7; }
+
+.card { padding: 32px; border: 1px solid rgba(24, 72, 58, .13); border-radius: 22px; background: rgba(255, 255, 255, .82); box-shadow: 0 24px 70px rgba(31, 73, 59, .13); backdrop-filter: blur(18px); }
+form { display: grid; gap: 10px; }
+label { margin-top: 8px; font-size: .85rem; font-weight: 750; }
+input { width: 100%; padding: 13px 14px; border: 1px solid #b9cbc4; border-radius: 10px; outline: none; color: #17352d; background: #fff; }
+input:focus { border-color: #16815f; box-shadow: 0 0 0 3px rgba(22, 129, 95, .12); }
+small { color: #6d817a; line-height: 1.45; }
+button { margin-top: 16px; padding: 13px 18px; border: 0; border-radius: 10px; color: white; background: #167b5c; cursor: pointer; font-weight: 750; }
+button:hover { background: #10684d; }
+button:disabled { cursor: wait; opacity: .65; }
+.status { margin-top: 22px; padding: 13px 14px; border-radius: 10px; color: #587169; background: #edf2ef; font-size: .9rem; }
+.status--connected { color: #0e664b; background: #e0f5eb; }
+.status--failed { color: #9a342d; background: #fce9e7; }
+
+@media (max-width: 820px) {
+  .shell { grid-template-columns: 1fr; gap: 32px; align-content: center; }
+  h1 { font-size: clamp(2.5rem, 11vw, 4rem); }
+}

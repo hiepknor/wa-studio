@@ -1,0 +1,2270 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/sessions": {
+      "get": {
+        "operationId": "SessionController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "List allowlisted Gateway sessions",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/v1/sessions/{id}": {
+      "get": {
+        "operationId": "SessionController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read a Gateway session from the durable read model",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/v1/sessions/{id}/sync": {
+      "post": {
+        "operationId": "SessionController_requestSync",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncRunDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Queue a full session, group and group-member sync",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/v1/sessions/{id}/sync-runs/{runId}": {
+      "get": {
+        "operationId": "SessionController_getSyncRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncRunDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read sync progress",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/v1/groups": {
+      "get": {
+        "operationId": "GroupController_list",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 0,
+              "default": 0,
+              "type": "number"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "query",
+            "description": "Gateway session owning the read model",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "List active groups from the Runtime read model",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
+    "/api/v1/groups/{id}": {
+      "get": {
+        "operationId": "GroupController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "query",
+            "description": "Gateway session owning the group",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupDetailDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read a group and its synchronized members",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
+    "/api/v1/groups/{id}/members": {
+      "get": {
+        "operationId": "GroupController_members",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 0,
+              "default": 0,
+              "type": "number"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "query",
+            "description": "Gateway session owning the read model",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupMemberListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "List synchronized group members without a contacts dependency",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
+    "/api/v1/groups/{id}/refresh-capability": {
+      "post": {
+        "operationId": "GroupController_refreshCapability",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "query",
+            "description": "Gateway session owning the group",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "example": {
+                    "accepted": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Request an asynchronous capability refresh for one group",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
+    "/api/v1/campaigns": {
+      "post": {
+        "operationId": "CampaignController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCampaignDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Create a text campaign draft",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "get": {
+        "operationId": "CampaignController_list",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 0,
+              "default": 0,
+              "type": "number"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "List campaigns for allowlisted sessions",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{id}": {
+      "get": {
+        "operationId": "CampaignController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read a campaign",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "patch": {
+        "operationId": "CampaignController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCampaignDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Update an editable campaign draft",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{id}/targets": {
+      "get": {
+        "operationId": "CampaignController_listTargets",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignTargetListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "List selected group targets with current capability",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "put": {
+        "operationId": "CampaignController_replaceTargets",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceCampaignTargetsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignTargetListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Atomically replace all group targets of a campaign draft",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{id}/preflight": {
+      "post": {
+        "operationId": "CampaignController_preflight",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CampaignPreflightRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignPreflightDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Evaluate a campaign without creating a run",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{id}/runs": {
+      "post": {
+        "operationId": "CampaignController_createRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCampaignRunDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRunDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Create an idempotent durable campaign run",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "get": {
+        "operationId": "CampaignController_listRuns",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 0,
+              "default": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRunListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "List runs of a campaign",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaign-runs/{id}": {
+      "get": {
+        "operationId": "CampaignRunController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRunDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read a durable campaign run",
+        "tags": [
+          "campaign-runs"
+        ]
+      }
+    },
+    "/api/v1/campaign-runs/{id}/deliveries": {
+      "get": {
+        "operationId": "CampaignRunController_deliveries",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 0,
+              "default": 0,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDeliveryListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "List per-group deliveries for a campaign run",
+        "tags": [
+          "campaign-runs"
+        ]
+      }
+    },
+    "/api/v1/campaign-runs/{id}/pause": {
+      "post": {
+        "operationId": "CampaignRunController_pause",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRunDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Pause new delivery materialization for a campaign run",
+        "tags": [
+          "campaign-runs"
+        ]
+      }
+    },
+    "/api/v1/campaign-runs/{id}/resume": {
+      "post": {
+        "operationId": "CampaignRunController_resume",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRunDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Re-run preflight and resume a paused or blocked campaign run",
+        "tags": [
+          "campaign-runs"
+        ]
+      }
+    },
+    "/api/v1/campaign-runs/{id}/cancel": {
+      "post": {
+        "operationId": "CampaignRunController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRunDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Cancel pending work for a campaign run",
+        "tags": [
+          "campaign-runs"
+        ]
+      }
+    },
+    "/api/v1/message-jobs": {
+      "post": {
+        "operationId": "MessageJobController_create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMessageJobDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Create an idempotent scheduled text-message job",
+        "tags": [
+          "message-jobs"
+        ]
+      }
+    },
+    "/api/v1/message-jobs/{id}": {
+      "get": {
+        "operationId": "MessageJobController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read current durable message-job state",
+        "tags": [
+          "message-jobs"
+        ]
+      }
+    },
+    "/api/v1/health/live": {
+      "get": {
+        "operationId": "HealthController_live",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/health/ready": {
+      "get": {
+        "operationId": "HealthController_ready",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/messages": {
+      "get": {
+        "operationId": "InboxController_list",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 0,
+              "default": 0,
+              "type": "number"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "groupId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": "120363000000000000@g.us",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundMessageListDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "List normalized inbound group messages",
+        "tags": [
+          "messages"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Automation Runtime API",
+    "description": "Stable, versioned API contract consumed by WA Studio",
+    "version": "1.0.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "runtime-key": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Runtime-Key"
+      }
+    },
+    "schemas": {
+      "SessionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "example": "ready"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "pushName": {
+            "type": "string",
+            "nullable": true
+          },
+          "connectedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastActiveAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "engineLoaded": {
+            "type": "boolean"
+          },
+          "lastError": {
+            "type": "string",
+            "nullable": true
+          },
+          "restriction": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true
+          },
+          "gatewayCreatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "gatewayUpdatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "syncedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "status",
+          "phone",
+          "pushName",
+          "connectedAt",
+          "lastActiveAt",
+          "engineLoaded",
+          "lastError",
+          "restriction",
+          "gatewayCreatedAt",
+          "gatewayUpdatedAt",
+          "syncedAt"
+        ]
+      },
+      "SessionListDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionDto"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "SyncRunDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "syncType": {
+            "type": "string",
+            "example": "FULL"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "RUNNING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "groupsSynced": {
+            "type": "number"
+          },
+          "membersSynced": {
+            "type": "number"
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "syncType",
+          "status",
+          "groupsSynced",
+          "membersSynced",
+          "error",
+          "requestedAt",
+          "startedAt",
+          "completedAt"
+        ]
+      },
+      "GroupSendCapabilityDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ALLOWED",
+              "DENIED",
+              "UNKNOWN"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "invalidatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "revision": {
+            "type": "number",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "checkedAt",
+          "invalidatedAt",
+          "revision"
+        ]
+      },
+      "GroupDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "example": "120363000000000000@g.us"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "ownerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "linkedParentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "participantsCount": {
+            "type": "number",
+            "nullable": true
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "isReadOnly": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "isAnnounce": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "settingsLocked": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "detailsSyncedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "syncedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sendCapability": {
+            "$ref": "#/components/schemas/GroupSendCapabilityDto"
+          }
+        },
+        "required": [
+          "sessionId",
+          "id",
+          "name",
+          "description",
+          "ownerId",
+          "linkedParentId",
+          "participantsCount",
+          "isAdmin",
+          "isReadOnly",
+          "isAnnounce",
+          "settingsLocked",
+          "isActive",
+          "detailsSyncedAt",
+          "syncedAt",
+          "sendCapability"
+        ]
+      },
+      "PageMetaDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "GroupListDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMetaDto"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "GroupMemberDto": {
+        "type": "object",
+        "properties": {
+          "participantId": {
+            "type": "string"
+          },
+          "phoneNumber": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "isAdmin": {
+            "type": "boolean"
+          },
+          "isSuperAdmin": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "participantId",
+          "phoneNumber",
+          "displayName",
+          "isAdmin",
+          "isSuperAdmin"
+        ]
+      },
+      "GroupDetailDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "example": "120363000000000000@g.us"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "ownerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "linkedParentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "participantsCount": {
+            "type": "number",
+            "nullable": true
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "isReadOnly": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "isAnnounce": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "settingsLocked": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "detailsSyncedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "syncedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "sendCapability": {
+            "$ref": "#/components/schemas/GroupSendCapabilityDto"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberDto"
+            }
+          }
+        },
+        "required": [
+          "sessionId",
+          "id",
+          "name",
+          "description",
+          "ownerId",
+          "linkedParentId",
+          "participantsCount",
+          "isAdmin",
+          "isReadOnly",
+          "isAnnounce",
+          "settingsLocked",
+          "isActive",
+          "detailsSyncedAt",
+          "syncedAt",
+          "sendCapability",
+          "members"
+        ]
+      },
+      "GroupMemberListDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupMemberDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMetaDto"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "CreateCampaignDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "scheduleType": {
+            "type": "string",
+            "enum": [
+              "IMMEDIATE",
+              "ONCE"
+            ],
+            "default": "IMMEDIATE"
+          },
+          "scheduledAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Required only for ONCE scheduling"
+          }
+        },
+        "required": [
+          "sessionId",
+          "name",
+          "text"
+        ]
+      },
+      "CampaignDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "scheduleType": {
+            "type": "string",
+            "enum": [
+              "IMMEDIATE",
+              "ONCE"
+            ]
+          },
+          "scheduledAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "ACTIVE",
+              "PAUSED",
+              "ARCHIVED"
+            ]
+          },
+          "targetCount": {
+            "type": "number"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "name",
+          "text",
+          "scheduleType",
+          "scheduledAt",
+          "status",
+          "targetCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "CampaignListDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMetaDto"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "UpdateCampaignDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "scheduleType": {
+            "type": "string",
+            "enum": [
+              "IMMEDIATE",
+              "ONCE"
+            ]
+          },
+          "scheduledAt": {
+            "type": "object",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "CampaignTargetDto": {
+        "type": "object",
+        "properties": {
+          "groupId": {
+            "type": "string"
+          },
+          "groupName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "sendCapability": {
+            "$ref": "#/components/schemas/GroupSendCapabilityDto"
+          }
+        },
+        "required": [
+          "groupId",
+          "groupName",
+          "enabled",
+          "sendCapability"
+        ]
+      },
+      "CampaignTargetListDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignTargetDto"
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "ReplaceCampaignTargetsDto": {
+        "type": "object",
+        "properties": {
+          "groupIds": {
+            "maxItems": 1000,
+            "example": [
+              "120363000000000000@g.us"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "groupIds"
+        ]
+      },
+      "CampaignPreflightRequestDto": {
+        "type": "object",
+        "properties": {
+          "executionMode": {
+            "type": "string",
+            "enum": [
+              "DRY_RUN",
+              "LIVE"
+            ],
+            "default": "DRY_RUN"
+          }
+        },
+        "required": [
+          "executionMode"
+        ]
+      },
+      "CampaignPreflightCheckDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PASS",
+              "WARN",
+              "BLOCK"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "status",
+          "message"
+        ]
+      },
+      "CampaignTargetIssueDto": {
+        "type": "object",
+        "properties": {
+          "groupId": {
+            "type": "string"
+          },
+          "groupName": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "ALLOWED",
+              "DENIED",
+              "UNKNOWN"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "groupId",
+          "groupName",
+          "capability",
+          "reason"
+        ]
+      },
+      "CampaignPreflightDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "PASS",
+              "WARN",
+              "BLOCK"
+            ]
+          },
+          "policyVersion": {
+            "type": "number"
+          },
+          "executionMode": {
+            "type": "string",
+            "enum": [
+              "DRY_RUN",
+              "LIVE"
+            ]
+          },
+          "checkedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "totalTargets": {
+            "type": "number"
+          },
+          "allowedTargets": {
+            "type": "number"
+          },
+          "deniedTargets": {
+            "type": "number"
+          },
+          "unknownTargets": {
+            "type": "number"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignPreflightCheckDto"
+            }
+          },
+          "targetIssues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignTargetIssueDto"
+            }
+          }
+        },
+        "required": [
+          "status",
+          "policyVersion",
+          "executionMode",
+          "checkedAt",
+          "totalTargets",
+          "allowedTargets",
+          "deniedTargets",
+          "unknownTargets",
+          "checks",
+          "targetIssues"
+        ]
+      },
+      "CreateCampaignRunDto": {
+        "type": "object",
+        "properties": {
+          "executionMode": {
+            "type": "string",
+            "enum": [
+              "DRY_RUN",
+              "LIVE"
+            ],
+            "default": "DRY_RUN"
+          }
+        },
+        "required": [
+          "executionMode"
+        ]
+      },
+      "CampaignRunProgressDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "pending": {
+            "type": "number"
+          },
+          "materialized": {
+            "type": "number"
+          },
+          "processing": {
+            "type": "number"
+          },
+          "dryRunCompleted": {
+            "type": "number"
+          },
+          "accepted": {
+            "type": "number"
+          },
+          "sent": {
+            "type": "number"
+          },
+          "delivered": {
+            "type": "number"
+          },
+          "read": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "unknown": {
+            "type": "number"
+          },
+          "blocked": {
+            "type": "number"
+          },
+          "cancelled": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "pending",
+          "materialized",
+          "processing",
+          "dryRunCompleted",
+          "accepted",
+          "sent",
+          "delivered",
+          "read",
+          "failed",
+          "unknown",
+          "blocked",
+          "cancelled"
+        ]
+      },
+      "CampaignRunDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "executionMode": {
+            "type": "string",
+            "enum": [
+              "DRY_RUN",
+              "LIVE"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PREPARING",
+              "BLOCKED",
+              "SCHEDULED",
+              "RUNNING",
+              "PAUSED",
+              "COMPLETED",
+              "PARTIAL_FAILED",
+              "CANCELLED",
+              "FAILED"
+            ]
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "text": {
+            "type": "string"
+          },
+          "preflight": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CampaignPreflightDto"
+              }
+            ]
+          },
+          "totalTargets": {
+            "type": "number"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/CampaignRunProgressDto"
+          },
+          "scheduledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "campaignId",
+          "sessionId",
+          "executionMode",
+          "status",
+          "statusReason",
+          "text",
+          "preflight",
+          "totalTargets",
+          "progress",
+          "scheduledAt",
+          "startedAt",
+          "completedAt",
+          "createdAt"
+        ]
+      },
+      "CampaignRunListDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignRunDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMetaDto"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "CampaignDeliveryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "groupId": {
+            "type": "string"
+          },
+          "groupName": {
+            "type": "string"
+          },
+          "messageJobId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "failureReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "runId",
+          "groupId",
+          "groupName",
+          "messageJobId",
+          "status",
+          "failureReason",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "CampaignDeliveryListDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignDeliveryDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMetaDto"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "CreateMessageJobDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "example": "c4984920-cc62-4720-97ca-c46b4f3f9d80",
+            "description": "Must be in the Runtime session allowlist"
+          },
+          "recipientId": {
+            "type": "string",
+            "example": "120363000000000000@g.us"
+          },
+          "text": {
+            "type": "string",
+            "example": "Hello from Automation Runtime",
+            "maxLength": 4096
+          },
+          "scheduledAt": {
+            "type": "string",
+            "example": "2026-08-11T12:00:00.000Z",
+            "description": "Defaults to now"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "default": true,
+            "description": "Live sends also require ALLOW_LIVE_SENDS=true"
+          }
+        },
+        "required": [
+          "sessionId",
+          "recipientId",
+          "text"
+        ]
+      },
+      "InboundMessageDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "groupId": {
+            "type": "string"
+          },
+          "senderId": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "messageType": {
+            "type": "string"
+          },
+          "fromMe": {
+            "type": "boolean"
+          },
+          "receivedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "messageId",
+          "groupId",
+          "senderId",
+          "body",
+          "messageType",
+          "fromMe",
+          "receivedAt"
+        ]
+      },
+      "InboundMessageListDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboundMessageDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMetaDto"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      }
+    }
+  }
+}
