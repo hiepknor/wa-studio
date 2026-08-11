@@ -4,8 +4,6 @@
   height: 100vh;
   min-height: 0;
   overflow: hidden;
-  container-name: workspace-shell;
-  container-type: inline-size;
 }
 
 .drawer-host { pointer-events: none; }
@@ -20,7 +18,7 @@
 .drawer-backdrop {
   position: absolute;
   inset: 0;
-  background: rgb(4 5 8 / 48%);
+  background: rgb(4 5 8 / 24%);
   opacity: 0;
   pointer-events: auto;
   backdrop-filter: blur(2px);
@@ -29,7 +27,7 @@
 .drawer-surface {
   position: relative;
   z-index: 1;
-  width: min(440px, calc(100% - 48px));
+  width: min(400px, calc(100% - 48px));
   min-width: 0;
   height: 100%;
   display: grid;
@@ -93,6 +91,8 @@
   clip: rect(0, 0, 0, 0);
 }
 .drawer-body { min-height: 0; padding: 14px; overflow: auto; }
+.drawer-body .inline-alert-copy { flex-wrap: wrap; }
+.drawer-body .inline-alert-copy span { white-space: normal; overflow-wrap: anywhere; }
 .drawer-footer {
   display: flex;
   align-items: center;
@@ -103,15 +103,13 @@
   background: rgb(22 23 30 / 82%);
 }
 
-@container workspace-shell (min-width: 1400px) {
-  .drawer-layer {
-    position: relative;
-    height: 100%;
-  }
-  .drawer-surface {
-    width: 100%;
-    box-shadow: none;
-    transform: none;
-    transition: none;
-  }
+.drawer-frame[data-drawer-mode="docked"] .drawer-layer {
+  position: relative;
+  height: 100%;
+}
+.drawer-frame[data-drawer-mode="docked"] .drawer-surface {
+  width: 100%;
+  box-shadow: none;
+  transform: none;
+  transition: none;
 }

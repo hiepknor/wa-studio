@@ -53,7 +53,7 @@ export function GroupsScreen() {
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<RuntimeGroup | null>(null);
   const [detail, setDetail] = useState<RuntimeGroupDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -62,6 +62,7 @@ export function GroupsScreen() {
   const listRevision = useRef(0);
   const detailRevision = useRef(0);
   const capabilityRevision = useRef(0);
+  const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const loadGroups = useCallback(async (nextOffset: number) => {
     if (!selectedSessionId) return;
@@ -94,7 +95,7 @@ export function GroupsScreen() {
     setOffset(0);
     setFilter("");
     setLoading(false);
-    setSelectedGroupId(null);
+    setSelectedGroup(null);
     setDetail(null);
     setDetailLoading(false);
     setDetailError(null);
@@ -113,11 +114,12 @@ export function GroupsScreen() {
     );
   }, [filter, page]);
 
-  async function openGroup(group: RuntimeGroup) {
+  async function openGroup(group: RuntimeGroup, trigger: HTMLButtonElement) {
     if (!selectedSessionId) return;
     const revision = ++detailRevision.current;
     capabilityRevision.current += 1;
-    setSelectedGroupId(group.id);
+    detailTriggerRef.current = trigger;
+    setSelectedGroup(group);
     setDetail(null);
     setDetailLoading(true);
     setDetailError(null);
@@ -138,7 +140,7 @@ export function GroupsScreen() {
   function closeDetail() {
     detailRevision.current += 1;
     capabilityRevision.current += 1;
-    setSelectedGroupId(null);
+    setSelectedGroup(null);
     setDetail(null);
     setDetailLoading(false);
     setDetailError(null);
@@ -147,13 +149,13 @@ export function GroupsScreen() {
   }
 
   async function refreshCapability() {
-    if (!selectedSessionId || !selectedGroupId || refreshingCapability) return;
+    if (!selectedSessionId || !selectedGroup || refreshingCapability) return;
     const revision = ++capabilityRevision.current;
     setRefreshingCapability(true);
     setDetailError(null);
     setCapabilityNotice(null);
     try {
-      await runtimeApi.requestGroupCapabilityRefresh(selectedSessionId, selectedGroupId);
+      await runtimeApi.requestGroupCapabilityRefresh(selectedSessionId, selectedGroup.id);
       if (revision === capabilityRevision.current) {
         setCapabilityNotice("Refresh queued. Reopen the group shortly to read the latest result.");
       }
@@ -251,7 +253,7 @@ export function GroupsScreen() {
                     </td>
                   </tr>
                 ) : filteredGroups.map((group) => (
-                  <tr data-selected={group.id === selectedGroupId || undefined} key={group.id}>
+                  <tr data-selected={group.id === selectedGroup?.id || undefined} key={group.id}>
                     <td>
                       <div className="stack stack-xs groups-name-cell">
                         <strong title={group.name}>{group.name}</strong>
@@ -268,7 +270,7 @@ export function GroupsScreen() {
                     <td className="align-end">
                       <Button
                         aria-label={`View ${group.name}`}
-                        onClick={() => void openGroup(group)}
+                        onClick={(event) => void openGroup(group, event.currentTarget)}
                         size="sm"
                         variant="ghost"
                       >
@@ -298,8 +300,9 @@ export function GroupsScreen() {
           description={detail ? `${detail.participantsCount ?? detail.members.length} members` : undefined}
           eyebrow="Group inspector"
           onClose={closeDetail}
-          open={Boolean(selectedGroupId)}
-          title={detail?.name ?? "Loading group…"}
+          open={Boolean(selectedGroup)}
+          returnFocusRef={detailTriggerRef}
+          title={detail?.name ?? selectedGroup?.name ?? "Group inspector"}
         >
             {detailLoading && <div className="groups-detail-state">Loading details…</div>}
             {detailError && (

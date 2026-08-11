@@ -403,4 +403,43 @@ describe("WorkspaceShell", () => {
     }));
     expect(await screen.findByText("Product room")).toBeInTheDocument();
   });
+
+  it("keeps the selected group name visible when detail loading fails", async () => {
+    const user = userEvent.setup();
+    const longName = "Nhóm điều phối ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 không được mất tên";
+    const longNameGroup = { ...group, name: longName };
+    const getGroup = vi.fn().mockRejectedValue(new Error("Runtime detail unavailable."));
+    const fakeApi = {
+      getGroup,
+      getSessionSyncRun: vi.fn(),
+      listGroups: vi.fn().mockResolvedValue({
+        data: [longNameGroup],
+        meta: { total: 1, limit: 20, offset: 0 },
+      }),
+      listSessions: vi.fn(),
+      requestGroupCapabilityRefresh: vi.fn(),
+      requestSessionSync: vi.fn(),
+    } as unknown as RuntimeApi;
+
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 1,
+          readySessions: 1,
+          sessions: [session],
+        })}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(await screen.findByRole("button", { name: "Groups" }));
+    await user.click(await screen.findByRole("button", { name: `View ${longName}` }));
+
+    expect(await screen.findByRole("dialog", { name: longName })).toBeInTheDocument();
+    expect(await screen.findByText("Runtime detail unavailable.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: longName })).toHaveAttribute("title", longName);
+  });
 });

@@ -15,9 +15,8 @@ import {
 import { createPortal } from "react-dom";
 
 import { Button } from "./Button";
+import { DRAWER_DOCK_MIN_WIDTH } from "./drawer-config";
 import "./drawer.css";
-
-export const DRAWER_DOCK_MIN_WIDTH = 1400;
 
 type DrawerMode = "docked" | "overlay";
 
@@ -134,8 +133,15 @@ export function Drawer({
   const descriptionId = useId();
   const surfaceRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const originRef = useRef<HTMLElement | null>(null);
+  const returnTargetRef = useRef<HTMLElement | null>(null);
+  const restoreFocusPendingRef = useRef(false);
   const [present, setPresent] = useState(open);
+
+  const restoreFocus = useCallback(() => {
+    if (!restoreFocusPendingRef.current) return;
+    restoreFocusPendingRef.current = false;
+    if (returnTargetRef.current?.isConnected) returnTargetRef.current.focus();
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -152,7 +158,7 @@ export function Drawer({
   }, [mode, open, present]);
 
   useEffect(() => {
-    if (!open || !host || mode !== "overlay") return;
+    if (!present || !host || mode !== "overlay") return;
     const siblings = Array.from(host.parentElement?.children ?? [])
       .filter((element): element is HTMLElement =>
         element instanceof HTMLElement && element !== host,
@@ -166,16 +172,23 @@ export function Drawer({
         element.inert = inert;
       });
     };
-  }, [host, mode, open]);
+  }, [host, mode, present]);
 
   useEffect(() => {
     if (!open) return;
-    originRef.current = returnFocusRef?.current ?? (document.activeElement as HTMLElement | null);
-    return () => {
-      const returnTarget = returnFocusRef?.current ?? originRef.current;
-      if (returnTarget?.isConnected) returnTarget.focus();
-    };
-  }, [open, returnFocusRef]);
+    const explicitTarget = returnFocusRef?.current;
+    if (explicitTarget) returnTargetRef.current = explicitTarget;
+    else if (!restoreFocusPendingRef.current) {
+      returnTargetRef.current = document.activeElement as HTMLElement | null;
+    }
+    restoreFocusPendingRef.current = true;
+  });
+
+  useEffect(() => {
+    if (!present) restoreFocus();
+  }, [present, restoreFocus]);
+
+  useEffect(() => () => restoreFocus(), [restoreFocus]);
 
   useEffect(() => {
     if (!open || !host || mode !== "overlay") return;
