@@ -96,7 +96,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Read a group and its synchronized members */
+        /** Read synchronized group metadata */
         get: operations["GroupController_get"];
         put?: never;
         post?: never;
@@ -113,7 +113,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List synchronized group members without a contacts dependency */
+        /**
+         * List synchronized group members without a contacts dependency
+         * @description Results use deterministic super-admin, admin, normalized display name, and participant ID ordering.
+         */
         get: operations["GroupController_members"];
         put?: never;
         post?: never;
@@ -487,13 +490,6 @@ export interface components {
             data: components["schemas"]["GroupDto"][];
             meta: components["schemas"]["PageMetaDto"];
         };
-        GroupMemberDto: {
-            participantId: string;
-            phoneNumber: string;
-            displayName: string | null;
-            isAdmin: boolean;
-            isSuperAdmin: boolean;
-        };
         GroupDetailDto: {
             /** Format: uuid */
             sessionId: string;
@@ -514,11 +510,24 @@ export interface components {
             /** Format: date-time */
             syncedAt: string;
             sendCapability: components["schemas"]["GroupSendCapabilityDto"];
-            members: components["schemas"]["GroupMemberDto"][];
+        };
+        GroupMemberDto: {
+            participantId: string;
+            phoneNumber: string;
+            displayName: string | null;
+            isAdmin: boolean;
+            isSuperAdmin: boolean;
+        };
+        GroupMemberPageMetaDto: {
+            /** @description Total synchronized member records matching the current search filter */
+            total: number;
+            limit: number;
+            offset: number;
         };
         GroupMemberListDto: {
             data: components["schemas"]["GroupMemberDto"][];
-            meta: components["schemas"]["PageMetaDto"];
+            /** @description Pagination metadata for the filtered synchronized member dataset */
+            meta: components["schemas"]["GroupMemberPageMetaDto"];
         };
         CreateCampaignDto: {
             /** Format: uuid */
@@ -874,6 +883,8 @@ export interface operations {
                 offset?: number;
                 /** @description Gateway session owning the read model */
                 sessionId: string;
+                /** @description Case-insensitive literal substring search across display name, phone number, and participant ID */
+                query?: string;
             };
             header?: never;
             path: {

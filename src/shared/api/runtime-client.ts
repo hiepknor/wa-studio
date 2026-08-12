@@ -9,11 +9,20 @@ export type RuntimeGroup = components["schemas"]["GroupDto"];
 export type RuntimeGroupDetail = components["schemas"]["GroupDetailDto"];
 export type RuntimeGroupPage = components["schemas"]["GroupListDto"];
 export type RuntimeGroupMember = components["schemas"]["GroupMemberDto"];
+export type RuntimeGroupMemberPage = components["schemas"]["GroupMemberListDto"];
 
 export interface RuntimeGroupListInput {
   sessionId: string;
   limit?: number;
   offset?: number;
+}
+
+export interface RuntimeGroupMemberListInput {
+  sessionId: string;
+  groupId: string;
+  limit?: number;
+  offset?: number;
+  query?: string;
 }
 
 export interface RuntimeConnectionInput {
@@ -153,6 +162,33 @@ export class RuntimeApi {
     if (!result.response.ok || !result.data) {
       throw new RuntimeRequestError(
         `Could not load group details (HTTP ${result.response.status}).`,
+      );
+    }
+    return result.data;
+  }
+
+  async listGroupMembers({
+    sessionId,
+    groupId,
+    limit = 50,
+    offset = 0,
+    query,
+  }: RuntimeGroupMemberListInput): Promise<RuntimeGroupMemberPage> {
+    const normalizedQuery = query?.trim();
+    const result = await this.client.GET("/api/v1/groups/{id}/members", {
+      params: {
+        path: { id: groupId },
+        query: {
+          sessionId,
+          limit,
+          offset,
+          ...(normalizedQuery ? { query: normalizedQuery } : {}),
+        },
+      },
+    });
+    if (!result.response.ok || !result.data) {
+      throw new RuntimeRequestError(
+        `Could not load group members (HTTP ${result.response.status}).`,
       );
     }
     return result.data;

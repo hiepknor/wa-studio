@@ -2,6 +2,7 @@ import {
   Activity,
   Check,
   ChevronDown,
+  Copy,
   KeyRound,
   PanelsTopLeft,
   Play,
@@ -23,6 +24,7 @@ export type AppIconName =
   | "check"
   | "chevron-down"
   | "close"
+  | "copy"
   | "groups"
   | "key"
   | "refresh"
@@ -46,6 +48,7 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   check: Check,
   "chevron-down": ChevronDown,
   close: X,
+  copy: Copy,
   groups: UsersRound,
   key: KeyRound,
   refresh: RefreshCw,

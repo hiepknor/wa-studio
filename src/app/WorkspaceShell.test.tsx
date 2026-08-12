@@ -98,7 +98,10 @@ const group: RuntimeGroup = {
 
 const groupDetail: RuntimeGroupDetail = {
   ...group,
-  members: [
+};
+
+const groupMemberPage = {
+  data: [
     {
       participantId: "84900000000@c.us",
       phoneNumber: "84900000000",
@@ -107,6 +110,7 @@ const groupDetail: RuntimeGroupDetail = {
       isSuperAdmin: false,
     },
   ],
+  meta: { total: 1, limit: 25, offset: 0 },
 };
 
 function WorkspaceHarness() {
@@ -346,10 +350,12 @@ describe("WorkspaceShell", () => {
       .mockResolvedValueOnce({ data: [group], meta: { total: 21, limit: 20, offset: 0 } })
       .mockResolvedValueOnce({ data: [secondGroup], meta: { total: 21, limit: 20, offset: 20 } });
     const getGroup = vi.fn().mockResolvedValue(groupDetail);
+    const listGroupMembers = vi.fn().mockResolvedValue(groupMemberPage);
     const requestGroupCapabilityRefresh = vi.fn().mockResolvedValue(undefined);
     const fakeApi = {
       getGroup,
       getSessionSyncRun: vi.fn(),
+      listGroupMembers,
       listGroups,
       listSessions: vi.fn(),
       requestGroupCapabilityRefresh,
@@ -382,18 +388,38 @@ describe("WorkspaceShell", () => {
 
     await user.click(screen.getByRole("button", { name: "View Release room" }));
     await waitFor(() => expect(getGroup).toHaveBeenCalledWith(session.id, group.id));
+    await waitFor(() => expect(listGroupMembers).toHaveBeenCalledWith({
+      sessionId: session.id,
+      groupId: group.id,
+      limit: 25,
+      offset: 0,
+    }));
     expect(await screen.findByRole("dialog", { name: "Release room" })).toHaveAttribute(
       "aria-modal",
       "true",
     );
     expect(await screen.findByText("Hiep Mai")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Send readiness" })).toBeInTheDocument();
+    expect(screen.getByText("The active session is a group administrator.")).toBeInTheDocument();
+    expect(screen.getByText("session_is_admin")).toBeInTheDocument();
+    expect(screen.getByText("1 synced of 2")).toBeInTheDocument();
+    expect(screen.getByText(/1 synchronized member records are available for 2 participants/))
+      .toBeInTheDocument();
+    expect(screen.getByText("All members")).toBeInTheDocument();
+    expect(screen.getByText("Unlocked")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Copy group ID" }));
+    expect(screen.getByRole("button", { name: "Copied group ID" })).toBeInTheDocument();
+    await expect(navigator.clipboard.readText()).resolves.toBe(group.id);
 
     await user.click(screen.getByRole("button", { name: "Refresh capability" }));
     await waitFor(() => expect(requestGroupCapabilityRefresh).toHaveBeenCalledWith(
       session.id,
       group.id,
     ));
-    expect(screen.getByText(/Refresh queued/)).toBeInTheDocument();
+    await waitFor(() => expect(getGroup).toHaveBeenCalledTimes(2));
+    expect(listGroupMembers).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Runtime is still processing/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
@@ -404,6 +430,202 @@ describe("WorkspaceShell", () => {
     expect(await screen.findByText("Product room")).toBeInTheDocument();
   });
 
+  it("pages and searches the synchronized member dataset on the server", async () => {
+    const user = userEvent.setup();
+    let resolveStaleSearch: ((value: typeof groupMemberPage) => void) | undefined;
+    const staleSearch = new Promise<typeof groupMemberPage>((resolve) => {
+      resolveStaleSearch = resolve;
+    });
+    const nowOutOfRangePage = {
+      data: [],
+      meta: { total: 1, limit: 25, offset: 25 },
+    };
+    const freshSearchPage = {
+      data: [{
+        participantId: "server-result@c.us",
+        phoneNumber: "84888888888",
+        displayName: "Backend-selected result",
+        isAdmin: false,
+        isSuperAdmin: false,
+      }],
+      meta: { total: 1, limit: 25, offset: 0 },
+    };
+    const listGroupMembers = vi.fn((input: {
+      offset?: number;
+      query?: string;
+    }) => {
+      if (input.query === "needle") return staleSearch;
+      if (input.query === "fresh") return Promise.resolve(freshSearchPage);
+      if (input.query === "no matches") return Promise.resolve({
+        data: [],
+        meta: { total: 0, limit: 25, offset: 0 },
+      });
+      if (input.offset === 25) return Promise.resolve(nowOutOfRangePage);
+      return Promise.resolve({
+        ...groupMemberPage,
+        meta: { total: 30, limit: 25, offset: 0 },
+      });
+    });
+    const fakeApi = {
+      getGroup: vi.fn().mockResolvedValue(groupDetail),
+      getSessionSyncRun: vi.fn(),
+      listGroupMembers,
+      listGroups: vi.fn().mockResolvedValue({
+        data: [group],
+        meta: { total: 1, limit: 20, offset: 0 },
+      }),
+      listSessions: vi.fn(),
+      requestGroupCapabilityRefresh: vi.fn(),
+      requestSessionSync: vi.fn(),
+    } as unknown as RuntimeApi;
+
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 1,
+          readySessions: 1,
+          sessions: [session],
+        })}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(await screen.findByRole("button", { name: "Groups" }));
+    await user.click(await screen.findByRole("button", { name: "View Release room" }));
+
+    expect(await screen.findByText("1–1 of 30")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next member page" }));
+    await waitFor(() => expect(listGroupMembers).toHaveBeenCalledWith({
+      sessionId: session.id,
+      groupId: group.id,
+      limit: 25,
+      offset: 25,
+    }));
+    await waitFor(() => expect(listGroupMembers).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      groupId: group.id,
+      limit: 25,
+      offset: 0,
+    }));
+    expect(screen.getByText("Hiep Mai")).toBeInTheDocument();
+
+    const search = screen.getByRole("searchbox", { name: "Search synchronized members" });
+    await user.clear(search);
+    await user.type(search, "needle");
+    await waitFor(() => expect(listGroupMembers).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      groupId: group.id,
+      limit: 25,
+      offset: 0,
+      query: "needle",
+    }));
+
+    await user.clear(search);
+    await user.type(search, "fresh");
+    expect(await screen.findByText("Backend-selected result")).toBeInTheDocument();
+    expect(screen.getByText("1 matches")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveStaleSearch?.({
+        data: [{
+          participantId: "stale@c.us",
+          phoneNumber: "84777777777",
+          displayName: "Stale response",
+          isAdmin: false,
+          isSuperAdmin: false,
+        }],
+        meta: { total: 1, limit: 25, offset: 0 },
+      });
+    });
+    expect(screen.queryByText("Stale response")).not.toBeInTheDocument();
+    expect(screen.getByText("Backend-selected result")).toBeInTheDocument();
+
+    await user.clear(search);
+    await user.type(search, "   ");
+    await waitFor(() => expect(listGroupMembers).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      groupId: group.id,
+      limit: 25,
+      offset: 0,
+    }));
+
+    await user.clear(search);
+    await user.type(search, "no matches");
+    await waitFor(() => expect(listGroupMembers).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      groupId: group.id,
+      limit: 25,
+      offset: 0,
+      query: "no matches",
+    }));
+    expect(await screen.findByText("No synchronized members match this search."))
+      .toBeInTheDocument();
+  });
+
+  it("does not show a late member response from a previously selected group", async () => {
+    const user = userEvent.setup();
+    const secondGroup = { ...group, id: "second@g.us", name: "Product room" };
+    let resolveFirstGroup: ((value: typeof groupMemberPage) => void) | undefined;
+    const firstGroupMembers = new Promise<typeof groupMemberPage>((resolve) => {
+      resolveFirstGroup = resolve;
+    });
+    const secondGroupMembers = {
+      data: [{
+        participantId: "product@c.us",
+        phoneNumber: "84666666666",
+        displayName: "Product member",
+        isAdmin: false,
+        isSuperAdmin: false,
+      }],
+      meta: { total: 1, limit: 25, offset: 0 },
+    };
+    const fakeApi = {
+      getGroup: vi.fn((_sessionId: string, groupId: string) => Promise.resolve(
+        groupId === secondGroup.id ? { ...groupDetail, ...secondGroup } : groupDetail,
+      )),
+      getSessionSyncRun: vi.fn(),
+      listGroupMembers: vi.fn(({ groupId }: { groupId: string }) =>
+        groupId === secondGroup.id ? Promise.resolve(secondGroupMembers) : firstGroupMembers),
+      listGroups: vi.fn().mockResolvedValue({
+        data: [group, secondGroup],
+        meta: { total: 2, limit: 20, offset: 0 },
+      }),
+      listSessions: vi.fn(),
+      requestGroupCapabilityRefresh: vi.fn(),
+      requestSessionSync: vi.fn(),
+    } as unknown as RuntimeApi;
+
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 1,
+          readySessions: 1,
+          sessions: [session],
+        })}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(await screen.findByRole("button", { name: "Groups" }));
+    await user.click(await screen.findByRole("button", { name: "View Release room" }));
+    await waitFor(() => expect(fakeApi.listGroupMembers).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "View Product room" }));
+    expect(await screen.findByText("Product member")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveFirstGroup?.(groupMemberPage);
+    });
+    expect(screen.queryByText("Hiep Mai")).not.toBeInTheDocument();
+    expect(screen.getByText("Product member")).toBeInTheDocument();
+  });
+
   it("keeps the selected group name visible when detail loading fails", async () => {
     const user = userEvent.setup();
     const longName = "Nhóm điều phối ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 không được mất tên";
@@ -412,6 +634,10 @@ describe("WorkspaceShell", () => {
     const fakeApi = {
       getGroup,
       getSessionSyncRun: vi.fn(),
+      listGroupMembers: vi.fn().mockResolvedValue({
+        data: [],
+        meta: { total: 0, limit: 25, offset: 0 },
+      }),
       listGroups: vi.fn().mockResolvedValue({
         data: [longNameGroup],
         meta: { total: 1, limit: 20, offset: 0 },

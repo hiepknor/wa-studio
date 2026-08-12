@@ -135,7 +135,11 @@ describe("RuntimeApi", () => {
     const runtimeFetch = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ data: [group], meta: { total: 1, limit: 20, offset: 20 } }))
-      .mockResolvedValueOnce(Response.json({ ...group, members: [] }));
+      .mockResolvedValueOnce(Response.json(group))
+      .mockResolvedValueOnce(Response.json({
+        data: [],
+        meta: { total: 0, limit: 25, offset: 50 },
+      }));
     const api = new RuntimeApi(
       { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
       runtimeFetch,
@@ -144,7 +148,14 @@ describe("RuntimeApi", () => {
     await expect(api.listGroups({ sessionId: "session id", limit: 20, offset: 20 }))
       .resolves.toMatchObject({ meta: { total: 1, limit: 20, offset: 20 } });
     await expect(api.getGroup("session id", "120363@g.us"))
-      .resolves.toMatchObject({ name: "Release room", members: [] });
+      .resolves.toMatchObject({ name: "Release room" });
+    await expect(api.listGroupMembers({
+      sessionId: "session id",
+      groupId: "120363@g.us",
+      limit: 25,
+      offset: 50,
+      query: "  Hiep Mai  ",
+    })).resolves.toMatchObject({ meta: { total: 0, limit: 25, offset: 50 } });
 
     const listRequest = runtimeFetch.mock.calls[0][0] as Request;
     expect(listRequest.url).toBe(
@@ -155,6 +166,47 @@ describe("RuntimeApi", () => {
     expect(detailRequest.url).toBe(
       "http://127.0.0.1:3100/api/v1/groups/120363%40g.us?sessionId=session%20id",
     );
+    const membersRequest = runtimeFetch.mock.calls[2][0] as Request;
+    expect(membersRequest.url).toBe(
+      "http://127.0.0.1:3100/api/v1/groups/120363%40g.us/members?sessionId=session%20id&limit=25&offset=50&query=Hiep%20Mai",
+    );
+  });
+
+  it("omits an empty member search query", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      data: [],
+      meta: { total: 0, limit: 50, offset: 0 },
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await api.listGroupMembers({
+      sessionId: "session id",
+      groupId: "120363@g.us",
+      query: "   ",
+    });
+
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.url).toBe(
+      "http://127.0.0.1:3100/api/v1/groups/120363%40g.us/members?sessionId=session%20id&limit=50&offset=0",
+    );
+  });
+
+  it("preserves the member endpoint HTTP status in request errors", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, { status: 404 }),
+    );
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await expect(api.listGroupMembers({
+      sessionId: "out-of-scope-session",
+      groupId: "missing@g.us",
+    })).rejects.toThrow("Could not load group members (HTTP 404).");
   });
 
   it("queues a group capability refresh", async () => {

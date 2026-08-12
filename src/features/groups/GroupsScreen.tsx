@@ -4,6 +4,7 @@ import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import type {
   RuntimeGroup,
   RuntimeGroupDetail,
+  RuntimeGroupMemberPage,
   RuntimeGroupPage,
 } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
@@ -17,6 +18,7 @@ import { TextField } from "@/shared/ui/TextField";
 import "./groups.css";
 
 const PAGE_SIZE = 20;
+const MEMBER_PAGE_SIZE = 25;
 
 function capabilityTone(status: RuntimeGroup["sendCapability"]["status"]): StatusTone {
   if (status === "ALLOWED") return "success";
@@ -28,6 +30,36 @@ function capabilityLabel(status: RuntimeGroup["sendCapability"]["status"]): stri
   if (status === "ALLOWED") return "Allowed";
   if (status === "DENIED") return "Denied";
   return "Unknown";
+}
+
+const CAPABILITY_REASON_COPY: Record<string, string> = {
+  SEND_ALLOWED: "Runtime confirmed that this group can receive messages.",
+  SEND_DENIED: "Runtime determined that this group cannot receive messages.",
+  SEND_UNKNOWN: "Runtime could not confirm whether this group can receive messages.",
+  group_is_read_only: "The group currently does not accept new messages.",
+  session_is_admin: "The active session is a group administrator.",
+  session_is_member: "The active session is a group member.",
+  session_not_in_group: "The active session is not a member of this group.",
+};
+
+function capabilityReasonCopy(reason: string): string {
+  return CAPABILITY_REASON_COPY[reason] ?? "Runtime returned a capability policy result.";
+}
+
+function accessLabel(isAdmin: boolean | null): string {
+  if (isAdmin === null) return "Unknown";
+  return isAdmin ? "Administrator" : "Member";
+}
+
+function booleanLabel(value: boolean | null, positive: string, negative: string): string {
+  if (value === null) return "Unknown";
+  return value ? positive : negative;
+}
+
+function capabilityIsStale(capability: RuntimeGroup["sendCapability"]): boolean {
+  if (!capability.invalidatedAt) return false;
+  if (!capability.checkedAt) return true;
+  return new Date(capability.invalidatedAt) >= new Date(capability.checkedAt);
 }
 
 function formatDate(value: string | null): string {
@@ -58,9 +90,19 @@ export function GroupsScreen() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [refreshingCapability, setRefreshingCapability] = useState(false);
+  const [capabilityError, setCapabilityError] = useState<string | null>(null);
   const [capabilityNotice, setCapabilityNotice] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [memberPage, setMemberPage] = useState<RuntimeGroupMemberPage | null>(null);
+  const [memberFilter, setMemberFilter] = useState("");
+  const [memberQuery, setMemberQuery] = useState("");
+  const [memberOffset, setMemberOffset] = useState(0);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [syncedMemberTotal, setSyncedMemberTotal] = useState<number | null>(null);
   const listRevision = useRef(0);
   const detailRevision = useRef(0);
+  const membersRevision = useRef(0);
   const capabilityRevision = useRef(0);
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -87,9 +129,49 @@ export function GroupsScreen() {
     }
   }, [runtimeApi, selectedSessionId]);
 
+  const loadMembers = useCallback(async (
+    sessionId: string,
+    groupId: string,
+    nextOffset: number,
+    query: string,
+  ) => {
+    const revision = ++membersRevision.current;
+    setMembersLoading(true);
+    setMembersError(null);
+    try {
+      const nextPage = await runtimeApi.listGroupMembers({
+        sessionId,
+        groupId,
+        limit: MEMBER_PAGE_SIZE,
+        offset: nextOffset,
+        ...(query ? { query } : {}),
+      });
+      if (revision !== membersRevision.current) return;
+
+      if (nextOffset > 0 && nextPage.data.length === 0 && nextPage.meta.total <= nextOffset) {
+        const lastOffset = nextPage.meta.total === 0
+          ? 0
+          : Math.floor((nextPage.meta.total - 1) / MEMBER_PAGE_SIZE) * MEMBER_PAGE_SIZE;
+        setMemberOffset(lastOffset);
+        if (nextPage.meta.total === 0) setMemberPage(nextPage);
+        return;
+      }
+
+      setMemberPage(nextPage);
+      if (!query) setSyncedMemberTotal(nextPage.meta.total);
+    } catch (error) {
+      if (revision === membersRevision.current) {
+        setMembersError(errorMessage(error, "Could not load group members."));
+      }
+    } finally {
+      if (revision === membersRevision.current) setMembersLoading(false);
+    }
+  }, [runtimeApi]);
+
   useEffect(() => {
     listRevision.current += 1;
     detailRevision.current += 1;
+    membersRevision.current += 1;
     capabilityRevision.current += 1;
     setPage(null);
     setOffset(0);
@@ -100,9 +182,32 @@ export function GroupsScreen() {
     setDetailLoading(false);
     setDetailError(null);
     setRefreshingCapability(false);
+    setCapabilityError(null);
     setCapabilityNotice(null);
+    setCopyState("idle");
+    setMemberPage(null);
+    setMemberFilter("");
+    setMemberQuery("");
+    setMemberOffset(0);
+    setMembersLoading(false);
+    setMembersError(null);
+    setSyncedMemberTotal(null);
     void loadGroups(0);
   }, [loadGroups]);
+
+  useEffect(() => {
+    const normalizedQuery = memberFilter.trim();
+    const timeout = window.setTimeout(() => {
+      setMemberOffset(0);
+      setMemberQuery(normalizedQuery);
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [memberFilter]);
+
+  useEffect(() => {
+    if (!selectedSessionId || !selectedGroup || selectedGroup.sessionId !== selectedSessionId) return;
+    void loadMembers(selectedSessionId, selectedGroup.id, memberOffset, memberQuery);
+  }, [loadMembers, memberOffset, memberQuery, selectedGroup, selectedSessionId]);
 
   const filteredGroups = useMemo(() => {
     const query = filter.trim().toLocaleLowerCase();
@@ -118,13 +223,23 @@ export function GroupsScreen() {
     if (!selectedSessionId) return;
     const revision = ++detailRevision.current;
     capabilityRevision.current += 1;
+    membersRevision.current += 1;
     detailTriggerRef.current = trigger;
     setSelectedGroup(group);
     setDetail(null);
     setDetailLoading(true);
     setDetailError(null);
     setRefreshingCapability(false);
+    setCapabilityError(null);
     setCapabilityNotice(null);
+    setCopyState("idle");
+    setMemberPage(null);
+    setMemberFilter("");
+    setMemberQuery("");
+    setMemberOffset(0);
+    setMembersLoading(false);
+    setMembersError(null);
+    setSyncedMemberTotal(null);
     try {
       const nextDetail = await runtimeApi.getGroup(selectedSessionId, group.id);
       if (revision === detailRevision.current) setDetail(nextDetail);
@@ -139,29 +254,60 @@ export function GroupsScreen() {
 
   function closeDetail() {
     detailRevision.current += 1;
+    membersRevision.current += 1;
     capabilityRevision.current += 1;
     setSelectedGroup(null);
     setDetail(null);
     setDetailLoading(false);
     setDetailError(null);
     setRefreshingCapability(false);
+    setCapabilityError(null);
     setCapabilityNotice(null);
+    setCopyState("idle");
+    setMemberPage(null);
+    setMemberFilter("");
+    setMemberQuery("");
+    setMemberOffset(0);
+    setMembersLoading(false);
+    setMembersError(null);
+    setSyncedMemberTotal(null);
   }
 
   async function refreshCapability() {
-    if (!selectedSessionId || !selectedGroup || refreshingCapability) return;
+    if (
+      !selectedSessionId
+      || !selectedGroup
+      || selectedGroup.sessionId !== selectedSessionId
+      || refreshingCapability
+    ) return;
     const revision = ++capabilityRevision.current;
     setRefreshingCapability(true);
-    setDetailError(null);
+    setCapabilityError(null);
     setCapabilityNotice(null);
     try {
       await runtimeApi.requestGroupCapabilityRefresh(selectedSessionId, selectedGroup.id);
-      if (revision === capabilityRevision.current) {
-        setCapabilityNotice("Refresh queued. Reopen the group shortly to read the latest result.");
+      if (revision !== capabilityRevision.current) return;
+      setCapabilityNotice("Refresh queued. Checking for an updated result…");
+
+      try {
+        const previousRevision = detail?.sendCapability.revision;
+        const nextDetail = await runtimeApi.getGroup(selectedSessionId, selectedGroup.id);
+        if (revision !== capabilityRevision.current) return;
+        setDetail(nextDetail);
+        setCapabilityNotice(
+          previousRevision !== undefined && nextDetail.sendCapability.revision > previousRevision
+            ? "Capability result updated."
+            : "Refresh queued. Runtime is still processing the request.",
+        );
+      } catch (error) {
+        if (revision === capabilityRevision.current) {
+          setCapabilityNotice("Refresh queued. The latest result is not available yet.");
+          setCapabilityError(errorMessage(error, "Could not read the latest capability result."));
+        }
       }
     } catch (error) {
       if (revision === capabilityRevision.current) {
-        setDetailError(errorMessage(error, "Could not refresh send capability."));
+        setCapabilityError(errorMessage(error, "Could not refresh send capability."));
       }
     } finally {
       if (revision === capabilityRevision.current) setRefreshingCapability(false);
@@ -173,6 +319,24 @@ export function GroupsScreen() {
   const lastItem = Math.min(offset + (page?.data.length ?? 0), total);
   const canGoBack = offset > 0 && !loading;
   const canGoForward = offset + (page?.meta.limit ?? PAGE_SIZE) < total && !loading;
+  const memberTotal = memberPage?.meta.total ?? 0;
+  const memberPageOffset = memberPage?.meta.offset ?? memberOffset;
+  const memberFirstItem = memberTotal === 0 ? 0 : memberPageOffset + 1;
+  const memberLastItem = Math.min(
+    memberPageOffset + (memberPage?.data.length ?? 0),
+    memberTotal,
+  );
+  const canGoToPreviousMembers = memberOffset > 0 && !membersLoading;
+  const canGoToNextMembers = memberOffset + MEMBER_PAGE_SIZE < memberTotal && !membersLoading;
+
+  async function copyGroupId(groupId: string) {
+    try {
+      await navigator.clipboard.writeText(groupId);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  }
 
   return (
     <div className="groups-screen stack stack-lg">
@@ -297,42 +461,73 @@ export function GroupsScreen() {
         </div>
 
         <Drawer
-          description={detail ? `${detail.participantsCount ?? detail.members.length} members` : undefined}
+          description={detail
+            ? `${detail.isActive ? "Active" : "Inactive"} · ${detail.participantsCount ?? syncedMemberTotal ?? "Unknown"} participants`
+            : undefined}
           eyebrow="Group inspector"
           onClose={closeDetail}
-          open={Boolean(selectedGroup)}
+          open={Boolean(selectedGroup && selectedGroup.sessionId === selectedSessionId)}
           returnFocusRef={detailTriggerRef}
           title={detail?.name ?? selectedGroup?.name ?? "Group inspector"}
         >
             {detailLoading && <div className="groups-detail-state">Loading details…</div>}
             {detailError && (
-              <InlineAlert title="Group action failed">{detailError}</InlineAlert>
+              <InlineAlert title="Could not load group details">{detailError}</InlineAlert>
+            )}
+            {capabilityError && (
+              <InlineAlert title="Capability refresh issue">{capabilityError}</InlineAlert>
             )}
             {capabilityNotice && (
               <InlineAlert title="Capability refresh" tone="success">{capabilityNotice}</InlineAlert>
             )}
 
             {detail && (
-              <div className="stack stack-md">
-                <p className="groups-description">{detail.description || "No group description."}</p>
-
-                <dl className="groups-facts">
-                  <div><dt>Status</dt><dd><Badge tone={detail.isActive ? "success" : "neutral"}>{detail.isActive ? "Active" : "Inactive"}</Badge></dd></div>
-                  <div><dt>Access</dt><dd>{detail.isAdmin ? "Administrator" : "Member"}</dd></div>
-                  <div><dt>Members</dt><dd>{detail.participantsCount ?? detail.members.length}</dd></div>
-                  <div><dt>Details synced</dt><dd>{formatDate(detail.detailsSyncedAt)}</dd></div>
-                </dl>
+              <div className="groups-inspector stack stack-lg">
+                <section aria-labelledby="group-identity-title" className="groups-inspector-section groups-identity">
+                  <h3 id="group-identity-title">Group identity</h3>
+                  <p className="groups-description">{detail.description || "No group description."}</p>
+                  <div className="groups-identity-id">
+                    <div>
+                      <span>Group ID</span>
+                      <code>{detail.id}</code>
+                    </div>
+                    <Button
+                      aria-label={copyState === "copied" ? "Copied group ID" : "Copy group ID"}
+                      icon={copyState === "copied" ? "check" : "copy"}
+                      onClick={() => void copyGroupId(detail.id)}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      {copyState === "copied" ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                  {copyState === "failed" && (
+                    <span className="groups-copy-error" role="alert">Could not copy the group ID.</span>
+                  )}
+                </section>
 
                 <section aria-labelledby="group-capability-title" className="groups-capability">
                   <div className="groups-section-heading">
                     <div className="stack stack-xs">
-                      <strong id="group-capability-title">Send capability</strong>
-                      <span>{detail.sendCapability.reason}</span>
+                      <h3 id="group-capability-title">Send readiness</h3>
+                      <p>{capabilityReasonCopy(detail.sendCapability.reason)}</p>
+                      <code>{detail.sendCapability.reason}</code>
                     </div>
                     <Badge tone={capabilityTone(detail.sendCapability.status)}>
                       {capabilityLabel(detail.sendCapability.status)}
                     </Badge>
                   </div>
+                  <dl className="groups-capability-meta">
+                    <div><dt>Checked</dt><dd>{formatDate(detail.sendCapability.checkedAt)}</dd></div>
+                    <div>
+                      <dt>Freshness</dt>
+                      <dd>
+                        <Badge tone={capabilityIsStale(detail.sendCapability) ? "warning" : "success"}>
+                          {capabilityIsStale(detail.sendCapability) ? "Stale" : "Current"}
+                        </Badge>
+                      </dd>
+                    </div>
+                  </dl>
                   <Button
                     icon="refresh"
                     loading={refreshingCapability}
@@ -343,29 +538,133 @@ export function GroupsScreen() {
                   </Button>
                 </section>
 
+                <section aria-labelledby="group-configuration-title" className="groups-inspector-section">
+                  <h3 id="group-configuration-title">Group configuration</h3>
+                  <dl className="groups-facts">
+                    <div><dt>Session access</dt><dd>{accessLabel(detail.isAdmin)}</dd></div>
+                    <div><dt>Posting</dt><dd>{booleanLabel(detail.isAnnounce, "Admins only", "All members")}</dd></div>
+                    <div><dt>Read only</dt><dd>{booleanLabel(detail.isReadOnly, "Yes", "No")}</dd></div>
+                    <div><dt>Settings</dt><dd>{booleanLabel(detail.settingsLocked, "Locked", "Unlocked")}</dd></div>
+                  </dl>
+                </section>
+
                 <section aria-labelledby="group-members-title" className="groups-members">
                   <div className="groups-section-heading">
-                    <strong id="group-members-title">Members</strong>
-                    <span>{detail.members.length}</span>
+                    <h3 id="group-members-title">Members</h3>
+                    <span>
+                      {memberQuery
+                        ? `${memberTotal} matches`
+                        : syncedMemberTotal !== null
+                          && detail.participantsCount !== null
+                          && detail.participantsCount !== syncedMemberTotal
+                          ? `${syncedMemberTotal} synced of ${detail.participantsCount}`
+                          : syncedMemberTotal ?? "—"}
+                    </span>
                   </div>
-                  {detail.members.length === 0 ? (
+                  {syncedMemberTotal !== null
+                    && detail.participantsCount !== null
+                    && detail.participantsCount !== syncedMemberTotal && (
+                    <InlineAlert title="Member sync incomplete" tone="warning">
+                      {syncedMemberTotal} synchronized member records are available for {detail.participantsCount} participants.
+                    </InlineAlert>
+                  )}
+                  <TextField
+                    icon="search"
+                    id="member-filter"
+                    label="Search synchronized members"
+                    labelHidden
+                    onChange={(event) => setMemberFilter(event.currentTarget.value)}
+                    placeholder="Search all synced members"
+                    size="sm"
+                    type="search"
+                    value={memberFilter}
+                  />
+                  {membersError && (
+                    <InlineAlert
+                      action={(
+                        <Button
+                          onClick={() => selectedSessionId && selectedGroup
+                            && void loadMembers(
+                              selectedSessionId,
+                              selectedGroup.id,
+                              memberOffset,
+                              memberQuery,
+                            )}
+                          size="sm"
+                        >
+                          Retry
+                        </Button>
+                      )}
+                      title="Could not load members"
+                    >
+                      {membersError}
+                    </InlineAlert>
+                  )}
+                  {!memberPage && membersLoading ? (
+                    <p className="groups-detail-state">Loading members…</p>
+                  ) : !memberPage && membersError ? null : memberPage?.data.length === 0 && memberQuery ? (
+                    <p className="groups-detail-state">No synchronized members match this search.</p>
+                  ) : memberPage?.data.length === 0 ? (
                     <p className="groups-detail-state">No member details available.</p>
                   ) : (
-                    <ul>
-                      {detail.members.map((member) => (
+                    <ul aria-busy={membersLoading || undefined}>
+                      {(memberPage?.data ?? []).map((member) => (
                         <li key={member.participantId}>
                           <span className="stack stack-xs">
                             <strong>{member.displayName || member.phoneNumber}</strong>
                             <code>{member.phoneNumber}</code>
+                            {member.participantId !== member.phoneNumber && (
+                              <code className="groups-member-id">{member.participantId}</code>
+                            )}
                           </span>
-                          {(member.isAdmin || member.isSuperAdmin) && (
-                            <Badge tone="success">{member.isSuperAdmin ? "Owner" : "Admin"}</Badge>
-                          )}
+                          <Badge tone={member.isAdmin || member.isSuperAdmin ? "success" : "neutral"}>
+                            {member.isSuperAdmin ? "Owner" : member.isAdmin ? "Admin" : "Member"}
+                          </Badge>
                         </li>
                       ))}
                     </ul>
                   )}
+                  {memberPage && memberTotal > 0 && (
+                    <div className="groups-member-pagination">
+                      <span>
+                        {memberFirstItem}–{memberLastItem} of {memberTotal}
+                      </span>
+                      <div>
+                        <Button
+                          aria-label="Previous member page"
+                          disabled={!canGoToPreviousMembers}
+                          onClick={() => setMemberOffset(Math.max(0, memberOffset - MEMBER_PAGE_SIZE))}
+                          size="sm"
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          aria-label="Next member page"
+                          disabled={!canGoToNextMembers}
+                          onClick={() => setMemberOffset(memberOffset + MEMBER_PAGE_SIZE)}
+                          size="sm"
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </section>
+
+                <details className="groups-technical" key={detail.id}>
+                  <summary>Sync &amp; technical metadata</summary>
+                  <dl className="groups-facts">
+                    <div><dt>Record synced</dt><dd>{formatDate(detail.syncedAt)}</dd></div>
+                    <div><dt>Details synced</dt><dd>{formatDate(detail.detailsSyncedAt)}</dd></div>
+                    <div><dt>Capability revision</dt><dd>{detail.sendCapability.revision}</dd></div>
+                    {detail.sendCapability.invalidatedAt && (
+                      <div><dt>Invalidated</dt><dd>{formatDate(detail.sendCapability.invalidatedAt)}</dd></div>
+                    )}
+                    {detail.ownerId && <div><dt>Owner ID</dt><dd>{detail.ownerId}</dd></div>}
+                    {detail.linkedParentId && <div><dt>Linked parent</dt><dd>{detail.linkedParentId}</dd></div>}
+                    <div><dt>Session ID</dt><dd>{detail.sessionId}</dd></div>
+                  </dl>
+                </details>
               </div>
             )}
         </Drawer>
