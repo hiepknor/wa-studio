@@ -8,7 +8,7 @@ describe("App", () => {
     render(<App />);
 
     expect(
-      screen.getByRole("heading", { name: "Connect to Automation Runtime" }),
+      screen.getByRole("heading", { name: "Connect to WA Runtime" }),
     ).toBeInTheDocument();
   });
 });

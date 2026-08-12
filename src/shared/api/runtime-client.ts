@@ -52,17 +52,17 @@ export class RuntimeRequestError extends Error {
 
 export function normalizeRuntimeBaseUrl(value: string): string {
   const candidate = value.trim();
-  if (!candidate) throw new RuntimeConnectionError("Runtime URL is required.");
+  if (!candidate) throw new RuntimeConnectionError("WA Runtime URL is required.");
 
   let url: URL;
   try {
     url = new URL(candidate);
   } catch {
-    throw new RuntimeConnectionError("Runtime URL must be a valid http(s) URL.");
+    throw new RuntimeConnectionError("WA Runtime URL must be a valid http(s) URL.");
   }
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new RuntimeConnectionError("Runtime URL must use http or https.");
+    throw new RuntimeConnectionError("WA Runtime URL must use http or https.");
   }
 
   url.search = "";
@@ -75,7 +75,7 @@ export function normalizeRuntimeConnection(
   input: RuntimeConnectionInput,
 ): RuntimeConnectionInput {
   const apiKey = input.apiKey.trim();
-  if (!apiKey) throw new RuntimeConnectionError("Runtime API key is required.");
+  if (!apiKey) throw new RuntimeConnectionError("WA Runtime API key is required.");
   return { baseUrl: normalizeRuntimeBaseUrl(input.baseUrl), apiKey };
 }
 
@@ -98,7 +98,7 @@ export class RuntimeApi {
     const result = await this.client.GET("/api/v1/health/ready");
     if (!result.response.ok) {
       throw new RuntimeConnectionError(
-        `Runtime is not ready (HTTP ${result.response.status}).`,
+        `WA Runtime is not ready (HTTP ${result.response.status}).`,
       );
     }
   }
@@ -108,7 +108,7 @@ export class RuntimeApi {
     if (!result.response.ok || !result.data) {
       const message =
         result.response.status === 401
-          ? "Runtime API key was rejected."
+          ? "WA Runtime API key was rejected."
           : `Could not load sessions (HTTP ${result.response.status}).`;
       throw new RuntimeRequestError(message);
     }

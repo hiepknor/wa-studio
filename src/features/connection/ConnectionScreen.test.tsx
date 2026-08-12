@@ -12,7 +12,7 @@ function renderScreen(
 
 async function submitConnection() {
   const user = userEvent.setup();
-  await user.type(screen.getByLabelText("Runtime API key"), "development-key");
+  await user.type(screen.getByLabelText("WA Runtime API key"), "development-key");
   await user.click(screen.getByRole("button", { name: "Test connection" }));
 }
 
@@ -28,34 +28,34 @@ describe("ConnectionScreen", () => {
 
     await submitConnection();
 
-    expect(screen.getByRole("button", { name: "Checking Runtime connection" })).toBeDisabled();
-    expect(screen.getByLabelText("Runtime URL")).toBeDisabled();
-    expect(screen.getByLabelText("Runtime API key")).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("Verifying Runtime readiness");
+    expect(screen.getByRole("button", { name: "Checking WA Runtime connection" })).toBeDisabled();
+    expect(screen.getByLabelText("WA Runtime URL")).toBeDisabled();
+    expect(screen.getByLabelText("WA Runtime API key")).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Verifying WA Runtime readiness");
   });
 
   it("submits with the keyboard and announces a readiness failure", async () => {
     const user = userEvent.setup();
     const probeConnection = vi
       .fn()
-      .mockRejectedValue(new Error("Runtime is not ready (HTTP 503)."));
+      .mockRejectedValue(new Error("WA Runtime is not ready (HTTP 503)."));
     renderScreen(probeConnection);
 
-    const apiKeyField = screen.getByLabelText("Runtime API key");
+    const apiKeyField = screen.getByLabelText("WA Runtime API key");
     await user.type(apiKeyField, "development-key{Enter}");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Runtime is not ready (HTTP 503).",
+      "WA Runtime is not ready (HTTP 503).",
     );
   });
 
   it("announces a rejected API key", async () => {
-    const probeConnection = vi.fn().mockRejectedValue(new Error("Runtime API key was rejected."));
+    const probeConnection = vi.fn().mockRejectedValue(new Error("WA Runtime API key was rejected."));
     renderScreen(probeConnection);
 
     await submitConnection();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Runtime API key was rejected.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("WA Runtime API key was rejected.");
   });
 
   it("reports session readiness after a successful probe", async () => {

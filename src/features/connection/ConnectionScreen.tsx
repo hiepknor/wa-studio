@@ -53,21 +53,21 @@ export function ConnectionScreen({
       <div className="connection-stage">
         <section className="intro connection-intro" aria-labelledby="page-title">
           <span className="eyebrow">Secure runtime access</span>
-          <h1 id="page-title">Connect to <span>Automation Runtime</span></h1>
+          <h1 id="page-title">Connect to <span>WA Runtime</span></h1>
           <p>
             Attach this workspace to the service that owns Gateway sessions and
             automation execution.
           </p>
 
           <dl className="connection-specs">
-            <div><dt>Protocol</dt><dd>Runtime API v1</dd></div>
+            <div><dt>Protocol</dt><dd>WA Runtime API v1</dd></div>
             <div><dt>Transport</dt><dd>HTTPS / localhost</dd></div>
             <div><dt>Credentials</dt><dd>Memory only</dd></div>
           </dl>
         </section>
 
         <form className="connection-form" onSubmit={handleSubmit}>
-          <article aria-label="Runtime connection" className="connection-card">
+          <article aria-label="WA Runtime connection" className="connection-card">
             <header className="connection-terminal-bar">
               <span className="connection-window-dots" aria-hidden="true">
                 <i /><i /><i />
@@ -86,7 +86,7 @@ export function ConnectionScreen({
                 icon="server"
                 id="runtime-url"
                 inputMode="url"
-                label="Runtime URL"
+                label="WA Runtime URL"
                 monospace
                 onChange={(event) => setBaseUrl(event.currentTarget.value)}
                 placeholder="https://runtime.example.com"
@@ -102,7 +102,7 @@ export function ConnectionScreen({
                 disabled={isChecking}
                 icon="key"
                 id="runtime-key"
-                label="Runtime API key"
+                label="WA Runtime API key"
                 monospace
                 onChange={(event) => setApiKey(event.currentTarget.value)}
                 placeholder="Enter the development key"
@@ -115,14 +115,14 @@ export function ConnectionScreen({
                 <div className="connection-status" role="status">
                   <StatusDot />
                   <strong>Waiting for credentials</strong>
-                  <span className="connection-alert-copy">No active Runtime session</span>
+                  <span className="connection-alert-copy">No active WA Runtime session</span>
                 </div>
               )}
               {state.status === "checking" && (
                 <div className="connection-status connection-status-checking" role="status">
                   <StatusDot glow tone="warning" />
                   <strong>Checking connection</strong>
-                  <span className="connection-alert-copy">Verifying Runtime readiness…</span>
+                  <span className="connection-alert-copy">Verifying WA Runtime readiness…</span>
                 </div>
               )}
               {state.status === "failed" && (
@@ -135,7 +135,7 @@ export function ConnectionScreen({
               {state.status === "connected" && (
                 <div className="connection-status connection-status-ok" role="status">
                   <StatusDot glow tone="success" />
-                  <strong>Runtime connected</strong>
+                  <strong>WA Runtime connected</strong>
                   <span className="connection-alert-copy">
                     {state.result.readySessions} of {state.result.sessionCount} sessions ready.
                   </span>
@@ -146,7 +146,7 @@ export function ConnectionScreen({
             <footer className="card-footer">
               <span className="connection-shortcut" aria-hidden="true">↵ enter</span>
               <Button
-                aria-label={isChecking ? "Checking Runtime connection" : "Test connection"}
+                aria-label={isChecking ? "Checking WA Runtime connection" : "Test connection"}
                 className="connection-submit-button"
                 loading={isChecking}
                 size="lg"

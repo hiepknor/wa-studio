@@ -23,7 +23,7 @@ Status: completed.
 
 ### 2. Desktop shell
 
-Compose the shell from semantic header, navigation, content, and footer regions. Navigation is registry-driven and grouped into Operate (Groups, Campaigns, Runs, Activity) and System (Sessions, Settings). Keep page routing and the shared selected-session context in the application. Runtime connection actions belong to the toolbar menu, while concise operational context belongs to the status bar.
+Compose the shell from semantic header, navigation, content, and footer regions. Navigation is registry-driven and grouped into Operate (Groups, Campaigns, Runs, Activity) and System (Sessions, Settings). Keep page routing and the shared selected-session context in the application. WA Runtime connection actions belong to the toolbar menu, while concise operational context belongs to the status bar.
 
 Status: completed with the Sessions destination active and future destinations explicitly disabled until their slices exist.
 

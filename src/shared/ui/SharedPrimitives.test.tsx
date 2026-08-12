@@ -13,12 +13,12 @@ describe("shared UI primitives", () => {
       <TextField
         description="Never written to disk."
         icon="key"
-        label="Runtime API key"
+        label="WA Runtime API key"
         monospace
       />,
     );
 
-    const input = screen.getByRole("textbox", { name: "Runtime API key" });
+    const input = screen.getByRole("textbox", { name: "WA Runtime API key" });
     expect(input).toHaveAccessibleDescription("Never written to disk.");
     expect(input).toHaveClass("text-field-input-mono", "text-field-input-with-icon");
   });

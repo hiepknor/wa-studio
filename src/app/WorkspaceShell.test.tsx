@@ -123,7 +123,7 @@ function WorkspaceHarness() {
         onClick={() => connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" })}
         type="button"
       >
-        Connect test Runtime
+        Connect test WA Runtime
       </button>
     </>
   );
@@ -154,7 +154,7 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
 
     expect(await screen.findByRole("heading", { name: "Sessions" })).toBeInTheDocument();
     expect(screen.getByText("Selected")).toBeInTheDocument();
@@ -181,9 +181,9 @@ describe("WorkspaceShell", () => {
       "100",
     );
 
-    await user.click(screen.getByRole("button", { name: "Runtime" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Disconnect Runtime" }));
-    expect(screen.getByRole("button", { name: "Connect test Runtime" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "WA Runtime" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Disconnect WA Runtime" }));
+    expect(screen.getByRole("button", { name: "Connect test WA Runtime" })).toBeInTheDocument();
     expect(screen.getByText("Selected: none")).toBeInTheDocument();
   });
 
@@ -212,15 +212,15 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
     await user.click(await screen.findByRole("button", { name: "Refresh" }));
-    await user.click(screen.getByRole("button", { name: "Runtime" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Disconnect Runtime" }));
+    await user.click(screen.getByRole("button", { name: "WA Runtime" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Disconnect WA Runtime" }));
 
     await act(async () => resolveRefresh?.([session]));
 
     expect(screen.getByText("Selected: none")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect test Runtime" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect test WA Runtime" })).toBeInTheDocument();
   });
 
   it("uses the toolbar selector as the shared active-session context", async () => {
@@ -244,7 +244,7 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
     const sessionCombobox = await screen.findByRole("combobox", { name: "Active session" });
     sessionCombobox.focus();
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
@@ -286,7 +286,7 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
     await user.click(await screen.findByRole("button", { name: "Sync session" }));
 
     const startingButton = screen.getByRole("button", { name: "Starting full sync" });
@@ -326,12 +326,12 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
-    const runtimeButton = await screen.findByRole("button", { name: "Runtime" });
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
+    const runtimeButton = await screen.findByRole("button", { name: "WA Runtime" });
     runtimeButton.focus();
     await user.keyboard("{ArrowDown}");
 
-    expect(screen.getByRole("menuitem", { name: "Disconnect Runtime" })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Disconnect WA Runtime" })).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(runtimeButton).toHaveFocus();
@@ -375,7 +375,7 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
     await user.click(await screen.findByRole("button", { name: "Groups" }));
 
     expect(await screen.findByRole("heading", { name: "Groups" })).toBeInTheDocument();
@@ -419,7 +419,7 @@ describe("WorkspaceShell", () => {
     ));
     await waitFor(() => expect(getGroup).toHaveBeenCalledTimes(2));
     expect(listGroupMembers).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/Runtime is still processing/)).toBeInTheDocument();
+    expect(screen.getByText(/WA Runtime is still processing/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
@@ -492,7 +492,7 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
     await user.click(await screen.findByRole("button", { name: "Groups" }));
     await user.click(await screen.findByRole("button", { name: "View Release room" }));
 
@@ -611,7 +611,7 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
     await user.click(await screen.findByRole("button", { name: "Groups" }));
     await user.click(await screen.findByRole("button", { name: "View Release room" }));
     await waitFor(() => expect(fakeApi.listGroupMembers).toHaveBeenCalledTimes(1));
@@ -660,7 +660,7 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test Runtime" }));
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
     await user.click(await screen.findByRole("button", { name: "Groups" }));
     await user.click(await screen.findByRole("button", { name: `View ${longName}` }));
 

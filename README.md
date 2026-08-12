@@ -1,13 +1,13 @@
 # WA Studio
 
-Desktop operations client for Automation Runtime. WA Studio manages sessions, groups, campaigns, preflight, runs, and delivery visibility through the versioned Runtime API; it never talks to OpenWA directly.
+Desktop operations client for WA Runtime. WA Studio manages sessions, groups, campaigns, preflight, runs, and delivery visibility through the versioned WA Runtime API; it never talks to OpenWA directly.
 
 ## Prerequisites
 
 - Node.js 24+
 - Rust stable
 - macOS: Xcode or Xcode Command Line Tools
-- A running Automation Runtime and an `X-Runtime-Key`
+- A running WA Runtime and an `X-Runtime-Key`
 
 ## Development
 
@@ -18,7 +18,7 @@ npm test
 npm run tauri dev
 ```
 
-The default development Runtime URL is `http://127.0.0.1:3100`. Enter the development key in the connection screen; the current milestone keeps it in memory only.
+The default development WA Runtime URL is `http://127.0.0.1:3100`. Enter the development key in the connection screen; the current milestone keeps it in memory only.
 
 ## Checks
 

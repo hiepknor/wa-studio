@@ -707,7 +707,7 @@ export interface components {
             sessionId: string;
             /** @example 120363000000000000@g.us */
             recipientId: string;
-            /** @example Hello from Automation Runtime */
+            /** @example Hello from WA Runtime */
             text: string;
             /**
              * @description Defaults to now

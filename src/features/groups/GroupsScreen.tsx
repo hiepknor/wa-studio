@@ -33,9 +33,9 @@ function capabilityLabel(status: RuntimeGroup["sendCapability"]["status"]): stri
 }
 
 const CAPABILITY_REASON_COPY: Record<string, string> = {
-  SEND_ALLOWED: "Runtime confirmed that this group can receive messages.",
-  SEND_DENIED: "Runtime determined that this group cannot receive messages.",
-  SEND_UNKNOWN: "Runtime could not confirm whether this group can receive messages.",
+  SEND_ALLOWED: "WA Runtime confirmed that this group can receive messages.",
+  SEND_DENIED: "WA Runtime determined that this group cannot receive messages.",
+  SEND_UNKNOWN: "WA Runtime could not confirm whether this group can receive messages.",
   group_is_read_only: "The group currently does not accept new messages.",
   session_is_admin: "The active session is a group administrator.",
   session_is_member: "The active session is a group member.",
@@ -43,7 +43,7 @@ const CAPABILITY_REASON_COPY: Record<string, string> = {
 };
 
 function capabilityReasonCopy(reason: string): string {
-  return CAPABILITY_REASON_COPY[reason] ?? "Runtime returned a capability policy result.";
+  return CAPABILITY_REASON_COPY[reason] ?? "WA Runtime returned a capability policy result.";
 }
 
 function accessLabel(isAdmin: boolean | null): string {
@@ -297,7 +297,7 @@ export function GroupsScreen() {
         setCapabilityNotice(
           previousRevision !== undefined && nextDetail.sendCapability.revision > previousRevision
             ? "Capability result updated."
-            : "Refresh queued. Runtime is still processing the request.",
+            : "Refresh queued. WA Runtime is still processing the request.",
         );
       } catch (error) {
         if (revision === capabilityRevision.current) {

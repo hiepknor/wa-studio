@@ -156,7 +156,7 @@ export function WorkspaceShell() {
         </nav>
 
         <div className="workspace-runtime-summary">
-          <span className="workspace-runtime-label">Runtime status</span>
+          <span className="workspace-runtime-label">WA Runtime status</span>
           <StatusIndicator glow tone={sessionTone(selectedSession?.status)}>
             {selectedSession?.status === "ready" ? "Operational" : "Attention required"}
           </StatusIndicator>
@@ -191,18 +191,18 @@ export function WorkspaceShell() {
                 type="button"
               >
                 <StatusDot glow tone={sessionTone(selectedSession?.status)} />
-                <span className="workspace-runtime-text">Runtime</span>
+                <span className="workspace-runtime-text">WA Runtime</span>
                 <AppIcon className="workspace-runtime-chevron" name="chevron-down" size="xs" />
               </button>
               {runtimeMenuOpen && (
                 <div
-                  aria-label="Runtime connection"
+                  aria-label="WA Runtime connection"
                   className="menu-content"
                   onKeyDown={handleRuntimeMenuKeyDown}
                   role="menu"
                 >
                   <div className="runtime-menu-context" role="presentation">
-                    <span>Runtime endpoint</span>
+                    <span>WA Runtime endpoint</span>
                     <code>{connected.profile.baseUrl}</code>
                   </div>
                   <div className="menu-separator" role="separator" />
@@ -218,7 +218,7 @@ export function WorkspaceShell() {
                     type="button"
                     variant="danger"
                   >
-                    Disconnect Runtime
+                    Disconnect WA Runtime
                   </Button>
                 </div>
               )}

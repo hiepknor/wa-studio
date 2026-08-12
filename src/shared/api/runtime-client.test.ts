@@ -72,7 +72,7 @@ describe("probeRuntimeConnection", () => {
         { baseUrl: "http://127.0.0.1:3100", apiKey: "wrong-key" },
         runtimeFetch,
       ),
-    ).rejects.toThrow("Runtime API key was rejected.");
+    ).rejects.toThrow("WA Runtime API key was rejected.");
   });
 });
 

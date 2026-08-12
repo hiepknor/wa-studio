@@ -208,19 +208,19 @@ export function SessionsScreen() {
 
         <div className="data-table-scroll">
           <table>
-            <caption>Automation Runtime sessions</caption>
+            <caption>WA Runtime sessions</caption>
             <thead>
               <tr>
                 <th scope="col">Session</th>
                 <th scope="col">Status</th>
                 <th scope="col">Engine</th>
-                <th scope="col">Runtime sync</th>
+                <th scope="col">WA Runtime sync</th>
                 <th className="align-end" scope="col">Active session</th>
               </tr>
             </thead>
             <tbody>
               {filteredSessions.length === 0 ? (
-                <tr><td className="data-table-empty" colSpan={5}>No allowlisted sessions were returned by Runtime.</td></tr>
+                <tr><td className="data-table-empty" colSpan={5}>No allowlisted sessions were returned by WA Runtime.</td></tr>
               ) : filteredSessions.map((session) => (
                 <tr data-selected={session.id === selectedSessionId || undefined} key={session.id}>
                   <td>
