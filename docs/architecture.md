@@ -56,7 +56,10 @@ WA Studio owns its semantic React controls and CSS. The interface follows a Warp
 
 The first slice holds `X-Runtime-Key` only in process memory. It is never placed in source control, local storage, logs, or a Vite environment variable. Before persistent connection profiles are added, store secrets in the OS-backed Tauri Stronghold integration. Production WA Runtime URLs must use HTTPS; plain HTTP is reserved for local development.
 
-Tauri HTTP permissions and its custom-header feature are intentionally explicit. The development build permits only `127.0.0.1:3100` and `localhost:3100`; add the exact HTTPS WA Runtime origin to the release capability when the production endpoint is settled. Arbitrary user-entered origins remain blocked by the native layer.
+Tauri HTTP permissions and its custom-header feature are intentionally explicit. The build permits
+the local development origins and `https://wa-runtime-staging.onio.cc`. Add the exact production WA
+Runtime origin only when that endpoint is settled. Arbitrary user-entered origins remain blocked by
+the native layer.
 
 ## Initial workflow
 
