@@ -391,6 +391,9 @@ select:focus-visible {
 .runtime-menu-context span { color: var(--dim); font-size: 9px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
 .runtime-menu-context code { overflow: hidden; color: #c5c8d1; font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .menu-item { width: 100%; justify-content: flex-start; min-height: 32px; padding: 0 10px; border: 0; border-radius: 7px; text-align: left; }
+.menu-item-rich { height: auto; flex-direction: column; align-items: flex-start; gap: 3px; padding-top: 8px; padding-bottom: 8px; }
+.menu-item-label { color: #d9dce4; font-size: 11px; font-weight: 600; }
+.menu-item-description { color: var(--dim); font-size: 9px; font-weight: 450; line-height: 1.4; }
 button.menu-item:hover { background: rgb(255 255 255 / 6%); }
 button.menu-item:focus-visible {
   background: var(--focus-surface);

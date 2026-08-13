@@ -1,4 +1,6 @@
 .groups-screen { min-width: 0; }
+.groups-actions-trigger { width: 142px; }
+.groups-actions-menu { min-width: 286px; }
 .groups-list-panel { min-width: 0; container: groups-list / inline-size; }
 .groups-toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
 .groups-toolbar-row {

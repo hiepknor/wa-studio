@@ -13,6 +13,7 @@ import type {
   RuntimeSession,
 } from "@/shared/api/runtime-client";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
+import { ToastProvider } from "@/shared/ui/Toast";
 
 const pollCapabilityRefresh = vi.hoisted(() => vi.fn());
 
@@ -139,7 +140,7 @@ function renderGroups(overrides: Partial<RuntimeApi> = {}) {
         sessions: [session, secondSession],
       })}
     >
-      <GroupsHarness />
+      <ToastProvider><GroupsHarness /></ToastProvider>
     </RuntimeConnectionProvider>,
   );
   return { api, listGroupMembers };

@@ -1,4 +1,4 @@
-import { KeyboardEvent, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { useRuntimeConnection } from "./RuntimeConnectionContext";
 import { SessionSwitcher } from "./SessionSwitcher";
@@ -11,8 +11,12 @@ import { SessionsScreen } from "@/features/sessions/SessionsScreen";
 import { GroupsScreen } from "@/features/groups/GroupsScreen";
 import { AppIcon, type AppIconName } from "@/shared/ui/AppIcon";
 import { BrandMark } from "@/shared/ui/BrandMark";
-import { Button } from "@/shared/ui/Button";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/shared/ui/DropdownMenu";
 import { StatusDot, StatusIndicator, type StatusTone } from "@/shared/ui/StatusIndicator";
 
 const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
@@ -58,52 +62,6 @@ export function WorkspaceShell() {
     selectSession,
   } = useRuntimeConnection();
   const [activePage, setActivePage] = useState<WorkspacePageId>(DEFAULT_WORKSPACE_PAGE);
-  const [runtimeMenuOpen, setRuntimeMenuOpen] = useState(false);
-  const runtimeMenuRef = useRef<HTMLDivElement>(null);
-  const runtimeMenuButtonRef = useRef<HTMLButtonElement>(null);
-  const disconnectButtonRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!runtimeMenuOpen) return;
-    disconnectButtonRef.current?.focus();
-
-    function closeFromOutside(event: PointerEvent) {
-      if (!runtimeMenuRef.current?.contains(event.target as Node)) {
-        setRuntimeMenuOpen(false);
-      }
-    }
-
-    document.addEventListener("pointerdown", closeFromOutside);
-    return () => document.removeEventListener("pointerdown", closeFromOutside);
-  }, [runtimeMenuOpen]);
-
-  function closeRuntimeMenu({ restoreFocus = false } = {}) {
-    setRuntimeMenuOpen(false);
-    if (restoreFocus) runtimeMenuButtonRef.current?.focus();
-  }
-
-  function handleRuntimeTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key !== "ArrowDown") return;
-    event.preventDefault();
-    setRuntimeMenuOpen(true);
-  }
-
-  function handleRuntimeMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeRuntimeMenu({ restoreFocus: true });
-      return;
-    }
-    if (event.key === "Tab") {
-      closeRuntimeMenu();
-      return;
-    }
-    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      event.preventDefault();
-      disconnectButtonRef.current?.focus();
-    }
-  }
-
   if (!connected) throw new Error("WorkspaceShell requires a Runtime connection");
 
   const selectedSession =
@@ -180,49 +138,25 @@ export function WorkspaceShell() {
               sessions={connected.sessions}
             />
 
-            <div className="menu" ref={runtimeMenuRef}>
-              <button
-                aria-expanded={runtimeMenuOpen}
-                aria-haspopup="menu"
-                className="workspace-runtime-button"
-                onClick={() => setRuntimeMenuOpen((open) => !open)}
-                onKeyDown={handleRuntimeTriggerKeyDown}
-                ref={runtimeMenuButtonRef}
-                type="button"
-              >
-                <StatusDot glow tone={sessionTone(selectedSession?.status)} />
-                <span className="workspace-runtime-text">WA Runtime</span>
-                <AppIcon className="workspace-runtime-chevron" name="chevron-down" size="xs" />
-              </button>
-              {runtimeMenuOpen && (
-                <div
-                  aria-label="WA Runtime connection"
-                  className="menu-content"
-                  onKeyDown={handleRuntimeMenuKeyDown}
-                  role="menu"
-                >
-                  <div className="runtime-menu-context" role="presentation">
-                    <span>WA Runtime endpoint</span>
-                    <code>{connected.profile.baseUrl}</code>
-                  </div>
-                  <div className="menu-separator" role="separator" />
-                  <Button
-                    className="menu-item"
-                    onClick={() => {
-                      closeRuntimeMenu();
-                      disconnect();
-                    }}
-                    ref={disconnectButtonRef}
-                    role="menuitem"
-                    size="sm"
-                    type="button"
-                    variant="danger"
-                  >
-                    Disconnect WA Runtime
-                  </Button>
-                </div>
+            <DropdownMenu
+              ariaLabel="WA Runtime connection"
+              trigger={(triggerProps) => (
+                <button className="workspace-runtime-button" {...triggerProps} type="button">
+                  <StatusDot glow tone={sessionTone(selectedSession?.status)} />
+                  <span className="workspace-runtime-text">WA Runtime</span>
+                  <AppIcon className="workspace-runtime-chevron" name="chevron-down" size="xs" />
+                </button>
               )}
-            </div>
+            >
+              <div className="runtime-menu-context" role="presentation">
+                <span>WA Runtime endpoint</span>
+                <code>{connected.profile.baseUrl}</code>
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="button-danger" onSelect={disconnect}>
+                Disconnect WA Runtime
+              </DropdownMenuItem>
+            </DropdownMenu>
           </div>
         </header>
 

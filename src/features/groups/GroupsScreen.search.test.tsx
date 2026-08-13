@@ -14,6 +14,7 @@ import type {
   RuntimeSession,
 } from "@/shared/api/runtime-client";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
+import { ToastProvider } from "@/shared/ui/Toast";
 import { GroupsScreen } from "./GroupsScreen";
 
 const session: RuntimeSession = {
@@ -108,7 +109,7 @@ function renderGroups(listGroups: RuntimeApi["listGroups"]) {
         sessions: [session, secondSession],
       })}
     >
-      <GroupsHarness />
+      <ToastProvider><GroupsHarness /></ToastProvider>
     </RuntimeConnectionProvider>,
   );
   return api;

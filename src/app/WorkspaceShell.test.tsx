@@ -15,6 +15,7 @@ import type {
   RuntimeSession,
   RuntimeSyncRun,
 } from "@/shared/api/runtime-client";
+import { ToastProvider } from "@/shared/ui/Toast";
 
 const session: RuntimeSession = {
   id: "session-id",
@@ -115,7 +116,7 @@ const groupMemberPage = {
 
 function WorkspaceHarness() {
   const { connect, connected, selectedSessionId } = useRuntimeConnection();
-  if (connected) return <WorkspaceShell />;
+  if (connected) return <ToastProvider><WorkspaceShell /></ToastProvider>;
   return (
     <>
       <span>Selected: {selectedSessionId ?? "none"}</span>
@@ -396,7 +397,7 @@ describe("WorkspaceShell", () => {
 
     expect(await screen.findByRole("heading", { name: "Groups" })).toBeInTheDocument();
     expect(screen.getByText(`Groups synchronized for ${session.name}.`)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reload groups" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Group data actions" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Participants" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Record synced" })).toBeInTheDocument();
     await waitFor(() => expect(listGroups).toHaveBeenCalledWith({
