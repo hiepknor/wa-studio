@@ -33,17 +33,10 @@ export function GroupSearchToolbar({
 
   return (
     <DataFilterToolbar
-      clearSearchLabel="Clear group search"
       filterCount={filterCount}
       filtersOpen={filtersOpen}
       idPrefix="group-list"
       loading={loading}
-      onClearSearch={() => setState((current) => ({
-        ...current,
-        inputQuery: "",
-        query: "",
-        offset: 0,
-      }))}
       onCloseFilters={() => setFiltersOpen(false)}
       onSearchChange={(inputQuery) => setState((current) => ({ ...current, inputQuery }))}
       onToggleFilters={() => setFiltersOpen((open) => !open)}

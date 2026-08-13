@@ -96,7 +96,7 @@ describe("SessionsScreen", () => {
     await user.type(search, "8490111");
     expect(screen.getByText("Production gateway")).toBeInTheDocument();
     expect(screen.queryByText("Recovery gateway")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Clear session search" }));
+    await user.clear(search);
 
     await user.click(screen.getByRole("button", { name: "Filters" }));
     const panel = screen.getByRole("region", { name: "Session filters" });

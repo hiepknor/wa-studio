@@ -124,7 +124,6 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
           filtersOpen={filtersOpen}
           idPrefix="session-list"
           loading={reloading}
-          onClearSearch={() => setSearch("")}
           onCloseFilters={() => setFiltersOpen(false)}
           onSearchChange={setSearch}
           onToggleFilters={() => setFiltersOpen((open) => !open)}

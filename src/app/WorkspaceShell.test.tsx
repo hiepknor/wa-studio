@@ -83,12 +83,19 @@ const groupMemberPage = {
 
 function WorkspaceHarness() {
   const { connect, connected, selectedSessionId } = useRuntimeConnection();
-  if (connected) return <ToastProvider><WorkspaceShell /></ToastProvider>;
+  if (connected)
+    return (
+      <ToastProvider>
+        <WorkspaceShell />
+      </ToastProvider>
+    );
   return (
     <>
       <span>Selected: {selectedSessionId ?? "none"}</span>
       <button
-        onClick={() => connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" })}
+        onClick={() =>
+          connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" })
+        }
         type="button"
       >
         Connect test WA Runtime
@@ -121,16 +128,22 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
-
-    expect(await screen.findByRole("heading", { name: "Sessions" })).toBeInTheDocument();
-    expect(screen.getByText("Selected")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Active session" })).toHaveTextContent(
-      /dev-session.*ready/,
+    await user.click(
+      screen.getByRole("button", { name: "Connect test WA Runtime" }),
     );
+
+    expect(
+      await screen.findByRole("heading", { name: "Sessions" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Selected")).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Active session" }),
+    ).toHaveTextContent(/dev-session.*ready/);
     expect(screen.getByText("Connected")).toBeInTheDocument();
     const statusBar = screen.getByLabelText("Workspace status");
-    expect(within(statusBar).getByText("Connected to http://127.0.0.1:3100")).toBeInTheDocument();
+    expect(
+      within(statusBar).getByText("Connected to http://127.0.0.1:3100"),
+    ).toBeInTheDocument();
     expect(within(statusBar).queryByText(/session:/i)).not.toBeInTheDocument();
     expect(screen.getByText("1 session")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Groups" })).toBeEnabled();
@@ -142,23 +155,45 @@ describe("WorkspaceShell", () => {
       "data-variant",
       "secondary",
     );
-    const sessionsTable = screen.getByRole("table", { name: "WA Runtime sessions" });
-    expect(within(sessionsTable).getByText(session.name)).toHaveClass("data-primary-text");
-    expect(within(sessionsTable).getByText(`${session.pushName} · ${session.phone}`))
-      .toHaveClass("data-secondary-text");
-    expect(within(sessionsTable).getByText(session.name).closest("td"))
-      .toHaveClass("data-cell-primary");
-    expect(screen.getByText("Selected").closest("td")).toHaveClass("data-cell-action");
+    const sessionsTable = screen.getByRole("table", {
+      name: "WA Runtime sessions",
+    });
+    expect(within(sessionsTable).getByText(session.name)).toHaveClass(
+      "data-primary-text",
+    );
+    expect(
+      within(sessionsTable).getByText(`${session.pushName} · ${session.phone}`),
+    ).toHaveClass("data-secondary-text");
+    expect(
+      within(sessionsTable).getByText(session.name).closest("td"),
+    ).toHaveClass("data-cell-primary");
+    expect(screen.getByText("Selected").closest("td")).toHaveClass(
+      "data-cell-action",
+    );
 
-    expect(screen.getByRole("button", { name: "Reload sessions" })).toHaveTextContent("Reload");
-    expect(screen.queryByRole("button", { name: /Sync/i })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Reload sessions" }),
+    ).toHaveTextContent("Reload");
+    expect(
+      screen.queryByRole("button", { name: /Sync/i }),
+    ).not.toBeInTheDocument();
 
-    expect(screen.queryByRole("button", { name: "WA Runtime" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Disconnect WA Runtime" }));
-    const disconnectDialog = screen.getByRole("dialog", { name: "Disconnect from WA Runtime?" });
+    expect(
+      screen.queryByRole("button", { name: "WA Runtime" }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Disconnect WA Runtime" }),
+    );
+    const disconnectDialog = screen.getByRole("dialog", {
+      name: "Disconnect from WA Runtime?",
+    });
     expect(disconnectDialog).toHaveTextContent("does not stop WA Runtime");
-    await user.click(within(disconnectDialog).getByRole("button", { name: "Disconnect" }));
-    expect(screen.getByRole("button", { name: "Connect test WA Runtime" })).toBeInTheDocument();
+    await user.click(
+      within(disconnectDialog).getByRole("button", { name: "Disconnect" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Connect test WA Runtime" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Selected: none")).toBeInTheDocument();
   });
 
@@ -187,15 +222,27 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
-    await user.click(await screen.findByRole("button", { name: "Reload sessions" }));
-    await user.click(screen.getByRole("button", { name: "Disconnect WA Runtime" }));
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
+    await user.click(
+      screen.getByRole("button", { name: "Connect test WA Runtime" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Reload sessions" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Disconnect WA Runtime" }),
+    );
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Disconnect",
+      }),
+    );
 
     await act(async () => resolveRefresh?.([session]));
 
     expect(screen.getByText("Selected: none")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect test WA Runtime" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Connect test WA Runtime" }),
+    ).toBeInTheDocument();
   });
 
   it("uses the toolbar selector as the shared active-session context", async () => {
@@ -219,8 +266,12 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
-    const sessionCombobox = await screen.findByRole("combobox", { name: "Active session" });
+    await user.click(
+      screen.getByRole("button", { name: "Connect test WA Runtime" }),
+    );
+    const sessionCombobox = await screen.findByRole("combobox", {
+      name: "Active session",
+    });
     sessionCombobox.focus();
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
 
@@ -229,7 +280,9 @@ describe("WorkspaceShell", () => {
     expect(screen.getByText("2 sessions")).toBeInTheDocument();
 
     await user.click(sessionCombobox);
-    expect(screen.getByRole("listbox", { name: "Gateway sessions" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("listbox", { name: "Gateway sessions" }),
+    ).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(sessionCombobox).toHaveFocus();
@@ -256,18 +309,32 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
-    const disconnectButton = await screen.findByRole("button", { name: "Disconnect WA Runtime" });
+    await user.click(
+      screen.getByRole("button", { name: "Connect test WA Runtime" }),
+    );
+    const disconnectButton = await screen.findByRole("button", {
+      name: "Disconnect WA Runtime",
+    });
     await user.click(disconnectButton);
-    const dialog = screen.getByRole("dialog", { name: "Disconnect from WA Runtime?" });
-    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    const dialog = screen.getByRole("dialog", {
+      name: "Disconnect from WA Runtime?",
+    });
+    expect(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    ).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(disconnectButton).toHaveFocus();
 
     await user.click(disconnectButton);
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
-    expect(screen.getByRole("heading", { name: "Sessions" })).toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Sessions" }),
+    ).toBeInTheDocument();
     expect(disconnectButton).toHaveFocus();
   });
 
@@ -276,8 +343,14 @@ describe("WorkspaceShell", () => {
     const secondGroup = { ...group, id: "second@g.us", name: "Product room" };
     const listGroups = vi
       .fn()
-      .mockResolvedValueOnce({ data: [group], meta: { total: 21, limit: 20, offset: 0 } })
-      .mockResolvedValueOnce({ data: [secondGroup], meta: { total: 21, limit: 20, offset: 20 } });
+      .mockResolvedValueOnce({
+        data: [group],
+        meta: { total: 21, limit: 20, offset: 0 },
+      })
+      .mockResolvedValueOnce({
+        data: [secondGroup],
+        meta: { total: 21, limit: 20, offset: 20 },
+      });
     const refreshedDetail = {
       ...groupDetail,
       detailsSyncedAt: "2026-08-11T09:01:00.000Z",
@@ -286,7 +359,8 @@ describe("WorkspaceShell", () => {
         checkedAt: "2026-08-11T09:01:00.000Z",
       },
     };
-    const getGroup = vi.fn()
+    const getGroup = vi
+      .fn()
       .mockResolvedValueOnce(groupDetail)
       .mockResolvedValue(refreshedDetail);
     const listGroupMembers = vi.fn().mockResolvedValue(groupMemberPage);
@@ -314,77 +388,117 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
+    await user.click(
+      screen.getByRole("button", { name: "Connect test WA Runtime" }),
+    );
     await user.click(await screen.findByRole("button", { name: "Groups" }));
 
-    expect(await screen.findByRole("heading", { name: "Groups" })).toBeInTheDocument();
-    expect(screen.getByText(`Groups synchronized for ${session.name}.`)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Update groups" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Participants" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Record synced" })).toBeInTheDocument();
-    await waitFor(() => expect(listGroups).toHaveBeenCalledWith({
-      sessionId: session.id,
-      limit: 20,
-      offset: 0,
-    }));
+    expect(
+      await screen.findByRole("heading", { name: "Groups" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(`Groups synchronized for ${session.name}.`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Update groups" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Participants" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Record synced" }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(listGroups).toHaveBeenCalledWith({
+        sessionId: session.id,
+        limit: 20,
+        offset: 0,
+      }),
+    );
     expect(screen.getByText("1–1 of 21")).toBeInTheDocument();
     expect(screen.getByText(group.name)).toHaveClass("data-primary-text");
     expect(screen.getByText(group.id)).toHaveClass("data-identifier");
-    expect(screen.getByText(group.id).closest("td")).toHaveClass("data-cell-primary");
-    expect(screen.getByRole("button", { name: `View ${group.name}` }).closest("td"))
-      .toHaveClass("data-cell-action");
+    expect(screen.getByText(group.id).closest("td")).toHaveClass(
+      "data-cell-primary",
+    );
+    expect(
+      screen.getByRole("button", { name: `View ${group.name}` }).closest("td"),
+    ).toHaveClass("data-cell-action");
 
     await user.click(screen.getByRole("button", { name: "View Release room" }));
-    await waitFor(() => expect(getGroup).toHaveBeenCalledWith(session.id, group.id));
-    await waitFor(() => expect(listGroupMembers).toHaveBeenCalledWith({
-      sessionId: session.id,
-      groupId: group.id,
-      limit: 25,
-      offset: 0,
-    }));
-    expect(await screen.findByRole("dialog", { name: "Release room" })).toHaveAttribute(
-      "aria-modal",
-      "true",
+    await waitFor(() =>
+      expect(getGroup).toHaveBeenCalledWith(session.id, group.id),
     );
+    expect(listGroupMembers).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole("tab", { name: /Members/ }));
+    await waitFor(() =>
+      expect(listGroupMembers).toHaveBeenCalledWith({
+        sessionId: session.id,
+        groupId: group.id,
+        limit: 25,
+        offset: 0,
+      }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Release room" }),
+    ).toHaveAttribute("aria-modal", "true");
     expect(await screen.findByText("Hiep Mai")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Send readiness" })).toBeInTheDocument();
-    expect(screen.getByText("The active session is a group administrator.")).toBeInTheDocument();
-    expect(screen.getByText("session_is_admin")).toBeInTheDocument();
     expect(screen.getByText("1 synced of 2")).toBeInTheDocument();
-    expect(screen.getByText(/1 synchronized member records are available for 2 participants/))
-      .toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /1 synchronized member records are available for 2 participants/,
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Overview" }));
+    expect(
+      screen.getByRole("heading", { name: "Send readiness" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("The active session is a group administrator."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("session_is_admin")).toBeInTheDocument();
     expect(screen.getByText("All members")).toBeInTheDocument();
     expect(screen.getByText("Unlocked")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Copy group ID" }));
-    expect(screen.getByRole("button", { name: "Copied group ID" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copied group ID" }),
+    ).toBeInTheDocument();
     await expect(navigator.clipboard.readText()).resolves.toBe(group.id);
 
-    await user.click(screen.getByRole("button", { name: "Refresh capability" }));
-    await waitFor(() => expect(requestGroupCapabilityRefresh).toHaveBeenCalledWith(
-      session.id,
-      group.id,
-    ));
+    await user.click(
+      screen.getByRole("button", { name: "Refresh capability" }),
+    );
+    await waitFor(() =>
+      expect(requestGroupCapabilityRefresh).toHaveBeenCalledWith(
+        session.id,
+        group.id,
+      ),
+    );
     expect(screen.getByText("Refresh requested")).toBeInTheDocument();
-    expect(screen.getByText("Waiting for WA Runtime to publish a new result…"))
-      .toBeInTheDocument();
+    expect(
+      screen.getByText("Waiting for WA Runtime to publish a new result…"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Capability updated")).not.toBeInTheDocument();
     await waitFor(() => expect(getGroup).toHaveBeenCalledTimes(2));
     expect(listGroupMembers).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("Capability updated")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
-      sessionId: session.id,
-      limit: 20,
-      offset: 20,
-    }));
+    await waitFor(() =>
+      expect(listGroups).toHaveBeenLastCalledWith({
+        sessionId: session.id,
+        limit: 20,
+        offset: 20,
+      }),
+    );
     expect(await screen.findByText("Product room")).toBeInTheDocument();
   });
 
   it("pages and searches the synchronized member dataset on the server", async () => {
     const user = userEvent.setup();
-    let resolveStaleSearch: ((value: typeof groupMemberPage) => void) | undefined;
+    let resolveStaleSearch:
+      ((value: typeof groupMemberPage) => void) | undefined;
     const staleSearch = new Promise<typeof groupMemberPage>((resolve) => {
       resolveStaleSearch = resolve;
     });
@@ -393,31 +507,33 @@ describe("WorkspaceShell", () => {
       meta: { total: 1, limit: 25, offset: 25 },
     };
     const freshSearchPage = {
-      data: [{
-        participantId: "server-result@c.us",
-        phoneNumber: "84888888888",
-        displayName: "Backend-selected result",
-        isAdmin: false,
-        isSuperAdmin: false,
-      }],
+      data: [
+        {
+          participantId: "server-result@c.us",
+          phoneNumber: "84888888888",
+          displayName: "Backend-selected result",
+          isAdmin: false,
+          isSuperAdmin: false,
+        },
+      ],
       meta: { total: 1, limit: 25, offset: 0 },
     };
-    const listGroupMembers = vi.fn((input: {
-      offset?: number;
-      query?: string;
-    }) => {
-      if (input.query === "needle") return staleSearch;
-      if (input.query === "fresh") return Promise.resolve(freshSearchPage);
-      if (input.query === "no matches") return Promise.resolve({
-        data: [],
-        meta: { total: 0, limit: 25, offset: 0 },
-      });
-      if (input.offset === 25) return Promise.resolve(nowOutOfRangePage);
-      return Promise.resolve({
-        ...groupMemberPage,
-        meta: { total: 30, limit: 25, offset: 0 },
-      });
-    });
+    const listGroupMembers = vi.fn(
+      (input: { offset?: number; query?: string }) => {
+        if (input.query === "needle") return staleSearch;
+        if (input.query === "fresh") return Promise.resolve(freshSearchPage);
+        if (input.query === "no matches")
+          return Promise.resolve({
+            data: [],
+            meta: { total: 0, limit: 25, offset: 0 },
+          });
+        if (input.offset === 25) return Promise.resolve(nowOutOfRangePage);
+        return Promise.resolve({
+          ...groupMemberPage,
+          meta: { total: 30, limit: 25, offset: 0 },
+        });
+      },
+    );
     const fakeApi = {
       getGroup: vi.fn().mockResolvedValue(groupDetail),
       getSessionSyncRun: vi.fn(),
@@ -444,51 +560,68 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
+    await user.click(
+      screen.getByRole("button", { name: "Connect test WA Runtime" }),
+    );
     await user.click(await screen.findByRole("button", { name: "Groups" }));
-    await user.click(await screen.findByRole("button", { name: "View Release room" }));
+    await user.click(
+      await screen.findByRole("button", { name: "View Release room" }),
+    );
+    await user.click(await screen.findByRole("tab", { name: /Members/ }));
 
     expect(await screen.findByText("1–1 of 30")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next member page" }));
-    await waitFor(() => expect(listGroupMembers).toHaveBeenCalledWith({
-      sessionId: session.id,
-      groupId: group.id,
-      limit: 25,
-      offset: 25,
-    }));
-    await waitFor(() => expect(listGroupMembers).toHaveBeenLastCalledWith({
-      sessionId: session.id,
-      groupId: group.id,
-      limit: 25,
-      offset: 0,
-    }));
-    expect(screen.getByText("Hiep Mai")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(listGroupMembers).toHaveBeenCalledWith({
+        sessionId: session.id,
+        groupId: group.id,
+        limit: 25,
+        offset: 25,
+      }),
+    );
+    await waitFor(() =>
+      expect(listGroupMembers).toHaveBeenCalledWith({
+        sessionId: session.id,
+        groupId: group.id,
+        limit: 25,
+        offset: 0,
+      }),
+    );
+    expect(await screen.findByText("Hiep Mai")).toBeInTheDocument();
 
-    const search = screen.getByRole("searchbox", { name: "Search synchronized members" });
+    const search = screen.getByRole("searchbox", {
+      name: "Search synchronized members",
+    });
     await user.clear(search);
     await user.type(search, "needle");
-    await waitFor(() => expect(listGroupMembers).toHaveBeenLastCalledWith({
-      sessionId: session.id,
-      groupId: group.id,
-      limit: 25,
-      offset: 0,
-      query: "needle",
-    }));
+    await waitFor(() =>
+      expect(listGroupMembers).toHaveBeenLastCalledWith({
+        sessionId: session.id,
+        groupId: group.id,
+        limit: 25,
+        offset: 0,
+        query: "needle",
+      }),
+    );
 
     await user.clear(search);
     await user.type(search, "fresh");
-    expect(await screen.findByText("Backend-selected result")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Backend-selected result"),
+    ).toBeInTheDocument();
     expect(screen.getByText("1 matches")).toBeInTheDocument();
 
     await act(async () => {
       resolveStaleSearch?.({
-        data: [{
-          participantId: "stale@c.us",
-          phoneNumber: "84777777777",
-          displayName: "Stale response",
-          isAdmin: false,
-          isSuperAdmin: false,
-        }],
+        data: [
+          {
+            participantId: "stale@c.us",
+            phoneNumber: "84777777777",
+            displayName: "Stale response",
+            isAdmin: false,
+            isSuperAdmin: false,
+          },
+        ],
         meta: { total: 1, limit: 25, offset: 0 },
       });
     });
@@ -497,50 +630,65 @@ describe("WorkspaceShell", () => {
 
     await user.clear(search);
     await user.type(search, "   ");
-    await waitFor(() => expect(listGroupMembers).toHaveBeenLastCalledWith({
-      sessionId: session.id,
-      groupId: group.id,
-      limit: 25,
-      offset: 0,
-    }));
+    await waitFor(() =>
+      expect(listGroupMembers).toHaveBeenLastCalledWith({
+        sessionId: session.id,
+        groupId: group.id,
+        limit: 25,
+        offset: 0,
+      }),
+    );
 
     await user.clear(search);
     await user.type(search, "no matches");
-    await waitFor(() => expect(listGroupMembers).toHaveBeenLastCalledWith({
-      sessionId: session.id,
-      groupId: group.id,
-      limit: 25,
-      offset: 0,
-      query: "no matches",
-    }));
-    expect(await screen.findByText("No synchronized members match this search."))
-      .toBeInTheDocument();
+    await waitFor(() =>
+      expect(listGroupMembers).toHaveBeenLastCalledWith({
+        sessionId: session.id,
+        groupId: group.id,
+        limit: 25,
+        offset: 0,
+        query: "no matches",
+      }),
+    );
+    expect(
+      await screen.findByText("No synchronized members match this search."),
+    ).toBeInTheDocument();
   });
 
   it("does not show a late member response from a previously selected group", async () => {
     const user = userEvent.setup();
     const secondGroup = { ...group, id: "second@g.us", name: "Product room" };
-    let resolveFirstGroup: ((value: typeof groupMemberPage) => void) | undefined;
+    let resolveFirstGroup:
+      ((value: typeof groupMemberPage) => void) | undefined;
     const firstGroupMembers = new Promise<typeof groupMemberPage>((resolve) => {
       resolveFirstGroup = resolve;
     });
     const secondGroupMembers = {
-      data: [{
-        participantId: "product@c.us",
-        phoneNumber: "84666666666",
-        displayName: "Product member",
-        isAdmin: false,
-        isSuperAdmin: false,
-      }],
+      data: [
+        {
+          participantId: "product@c.us",
+          phoneNumber: "84666666666",
+          displayName: "Product member",
+          isAdmin: false,
+          isSuperAdmin: false,
+        },
+      ],
       meta: { total: 1, limit: 25, offset: 0 },
     };
     const fakeApi = {
-      getGroup: vi.fn((_sessionId: string, groupId: string) => Promise.resolve(
-        groupId === secondGroup.id ? { ...groupDetail, ...secondGroup } : groupDetail,
-      )),
+      getGroup: vi.fn((_sessionId: string, groupId: string) =>
+        Promise.resolve(
+          groupId === secondGroup.id
+            ? { ...groupDetail, ...secondGroup }
+            : groupDetail,
+        ),
+      ),
       getSessionSyncRun: vi.fn(),
       listGroupMembers: vi.fn(({ groupId }: { groupId: string }) =>
-        groupId === secondGroup.id ? Promise.resolve(secondGroupMembers) : firstGroupMembers),
+        groupId === secondGroup.id
+          ? Promise.resolve(secondGroupMembers)
+          : firstGroupMembers,
+      ),
       listGroups: vi.fn().mockResolvedValue({
         data: [group, secondGroup],
         meta: { total: 2, limit: 20, offset: 0 },
@@ -563,12 +711,20 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
+    await user.click(
+      screen.getByRole("button", { name: "Connect test WA Runtime" }),
+    );
     await user.click(await screen.findByRole("button", { name: "Groups" }));
-    await user.click(await screen.findByRole("button", { name: "View Release room" }));
-    await waitFor(() => expect(fakeApi.listGroupMembers).toHaveBeenCalledTimes(1));
+    await user.click(
+      await screen.findByRole("button", { name: "View Release room" }),
+    );
+    await user.click(await screen.findByRole("tab", { name: /Members/ }));
+    await waitFor(() =>
+      expect(fakeApi.listGroupMembers).toHaveBeenCalledTimes(1),
+    );
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
     await user.click(screen.getByRole("button", { name: "View Product room" }));
+    await user.click(await screen.findByRole("tab", { name: /Members/ }));
     expect(await screen.findByText("Product member")).toBeInTheDocument();
 
     await act(async () => {
@@ -580,9 +736,12 @@ describe("WorkspaceShell", () => {
 
   it("keeps the selected group name visible when detail loading fails", async () => {
     const user = userEvent.setup();
-    const longName = "Nhóm điều phối ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 không được mất tên";
+    const longName =
+      "Nhóm điều phối ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 không được mất tên";
     const longNameGroup = { ...group, name: longName };
-    const getGroup = vi.fn().mockRejectedValue(new Error("Runtime detail unavailable."));
+    const getGroup = vi
+      .fn()
+      .mockRejectedValue(new Error("Runtime detail unavailable."));
     const fakeApi = {
       getGroup,
       getSessionSyncRun: vi.fn(),
@@ -612,12 +771,23 @@ describe("WorkspaceShell", () => {
       </RuntimeConnectionProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
+    await user.click(
+      screen.getByRole("button", { name: "Connect test WA Runtime" }),
+    );
     await user.click(await screen.findByRole("button", { name: "Groups" }));
-    await user.click(await screen.findByRole("button", { name: `View ${longName}` }));
+    await user.click(
+      await screen.findByRole("button", { name: `View ${longName}` }),
+    );
 
-    expect(await screen.findByRole("dialog", { name: longName })).toBeInTheDocument();
-    expect(await screen.findByText("Runtime detail unavailable.")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: longName })).toHaveAttribute("title", longName);
+    expect(
+      await screen.findByRole("dialog", { name: longName }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("Runtime detail unavailable."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: longName })).toHaveAttribute(
+      "title",
+      longName,
+    );
   });
 });

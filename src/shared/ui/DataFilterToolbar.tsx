@@ -1,18 +1,15 @@
 import { useRef, type ReactNode } from "react";
 
-import { AppIcon } from "./AppIcon";
 import { Button } from "./Button";
-import { TextField } from "./TextField";
+import { SearchField } from "./SearchField";
 import "./data-filter-toolbar.css";
 
 interface DataFilterToolbarProps {
   children?: ReactNode | ((closeFilters: () => void) => ReactNode);
-  clearSearchLabel?: string;
   filterCount: number;
   filtersOpen: boolean;
   idPrefix: string;
   loading?: boolean;
-  onClearSearch: () => void;
   onCloseFilters: () => void;
   onSearchChange: (value: string) => void;
   onToggleFilters: () => void;
@@ -24,12 +21,10 @@ interface DataFilterToolbarProps {
 
 export function DataFilterToolbar({
   children,
-  clearSearchLabel,
   filterCount,
   filtersOpen,
   idPrefix,
   loading = false,
-  onClearSearch,
   onCloseFilters,
   onSearchChange,
   onToggleFilters,
@@ -57,31 +52,15 @@ export function DataFilterToolbar({
     >
       <div className="data-filter-toolbar-row">
         <div className="data-filter-controls">
-          <div className="data-filter-search-wrap">
-            <TextField
-              aria-busy={loading || undefined}
-              containerClassName="data-filter-search"
-              icon="search"
-              id={`${idPrefix}-search`}
-              label={searchLabel}
-              labelHidden
-              onChange={(event) => onSearchChange(event.currentTarget.value)}
-              placeholder={searchPlaceholder}
-              size="sm"
-              type="search"
-              value={searchValue}
-            />
-            {searchValue && (
-              <button
-                aria-label={clearSearchLabel ?? `Clear ${searchLabel.toLocaleLowerCase()}`}
-                className="data-filter-search-clear"
-                onClick={onClearSearch}
-                type="button"
-              >
-                <AppIcon name="close" size="xs" />
-              </button>
-            )}
-          </div>
+          <SearchField
+            id={`${idPrefix}-search`}
+            label={searchLabel}
+            loading={loading}
+            onChange={onSearchChange}
+            placeholder={searchPlaceholder}
+            value={searchValue}
+            variant="toolbar"
+          />
           <Button
             aria-controls={`${idPrefix}-filter-panel`}
             aria-expanded={filtersOpen}

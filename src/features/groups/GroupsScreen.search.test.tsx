@@ -139,7 +139,7 @@ describe("GroupsScreen global search and filters", () => {
       offset: 0,
       query: "Release room",
     }));
-    expect(screen.getByRole("button", { name: "Clear group search" })).toBeInTheDocument();
+    expect(search).toHaveAttribute("type", "search");
     expect(screen.queryByText("Search: Release room")).not.toBeInTheDocument();
   });
 
@@ -290,7 +290,7 @@ describe("GroupsScreen global search and filters", () => {
       capabilityStatus: ["DENIED"],
     }));
 
-    await user.click(screen.getByRole("button", { name: "Clear group search" }));
+    await user.clear(search);
     expect(search).toHaveValue("");
     expect(screen.getByRole("button", {
       name: "Remove Capability: Denied filter",
