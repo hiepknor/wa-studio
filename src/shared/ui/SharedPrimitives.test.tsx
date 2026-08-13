@@ -45,6 +45,17 @@ describe("shared UI primitives", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("announces informational feedback as status rather than an error alert", () => {
+    render(
+      <InlineAlert title="Refresh requested" tone="info">
+        Waiting for WA Runtime.
+      </InlineAlert>,
+    );
+
+    expect(screen.getByRole("status")).toHaveClass("inline-alert-info");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("composes page headings and visual badges without owning feature state", () => {
     render(
       <PageHeader

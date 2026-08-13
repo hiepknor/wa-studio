@@ -183,8 +183,12 @@ describe("GroupsScreen capability refresh", () => {
 
     await user.click(screen.getByRole("button", { name: "Refresh capability" }));
 
-    expect(await screen.findByText("Capability refresh requested.")).toBeInTheDocument();
-    expect(screen.queryByText("Capability result updated.")).not.toBeInTheDocument();
+    expect(await screen.findByText("Refresh requested")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for WA Runtime to publish a new result…"))
+      .toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Send readiness" }).closest("section"))
+      .toContainElement(screen.getByText("Refresh requested").closest("[role='status']"));
+    expect(screen.queryByText("Capability updated")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refreshing capability…" })).toBeDisabled();
     expect(screen.getByText("Last member")).toBeInTheDocument();
     expect(screen.getByText("26–26 of 30")).toBeInTheDocument();
@@ -193,9 +197,9 @@ describe("GroupsScreen capability refresh", () => {
 
     await act(async () => resolvePoll?.({ status: "timed-out", detail: null, error: null }));
 
-    expect(screen.getByText("Refresh is still processing. Reopen or retry shortly."))
-      .toBeInTheDocument();
-    expect(screen.queryByText("Capability result updated.")).not.toBeInTheDocument();
+    expect(screen.getByText("Refresh still processing")).toBeInTheDocument();
+    expect(screen.getByText("Reopen or retry shortly.")).toBeInTheDocument();
+    expect(screen.queryByText("Capability updated")).not.toBeInTheDocument();
     expect(screen.getByText("Last member")).toBeInTheDocument();
     expect(screen.getByText("26–26 of 30")).toBeInTheDocument();
     expect(search).toHaveValue("needle");
@@ -230,7 +234,7 @@ describe("GroupsScreen capability refresh", () => {
     renderGroups();
     await openInspector(user);
     await user.click(screen.getByRole("button", { name: "Refresh capability" }));
-    expect(await screen.findByText("Capability refresh requested.")).toBeInTheDocument();
+    expect(await screen.findByText("Refresh requested")).toBeInTheDocument();
     const signal = pollCapabilityRefresh.mock.calls[0][0].signal as AbortSignal;
 
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
@@ -247,7 +251,7 @@ describe("GroupsScreen capability refresh", () => {
     renderGroups();
     await openInspector(user);
     await user.click(screen.getByRole("button", { name: "Refresh capability" }));
-    expect(await screen.findByText("Capability refresh requested.")).toBeInTheDocument();
+    expect(await screen.findByText("Refresh requested")).toBeInTheDocument();
     const signal = pollCapabilityRefresh.mock.calls[0][0].signal as AbortSignal;
 
     act(() => screen.getByRole("button", { name: "Switch session" }).click());
@@ -272,13 +276,13 @@ describe("GroupsScreen capability refresh", () => {
     });
     await openInspector(user);
     await user.click(screen.getByRole("button", { name: "Refresh capability" }));
-    expect(await screen.findByText("Capability refresh requested.")).toBeInTheDocument();
+    expect(await screen.findByText("Refresh requested")).toBeInTheDocument();
     const signal = pollCapabilityRefresh.mock.calls[0][0].signal as AbortSignal;
 
     act(() => screen.getByRole("button", { name: "View Second group" }).click());
 
     expect(signal.aborted).toBe(true);
     expect(await screen.findByRole("dialog", { name: "Second group" })).toBeInTheDocument();
-    expect(screen.queryByText("Capability result updated.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Capability updated")).not.toBeInTheDocument();
   });
 });

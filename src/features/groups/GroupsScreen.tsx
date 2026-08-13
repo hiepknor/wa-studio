@@ -333,7 +333,7 @@ export function GroupsScreen() {
       await runtimeApi.requestGroupCapabilityRefresh(sessionId, groupId);
       if (!capabilityFlowIsCurrent(revision, sessionId, groupId)) return;
       setCapabilityRefreshState("pending");
-      setCapabilityNotice("Capability refresh requested.");
+      setCapabilityNotice("Waiting for WA Runtime to publish a new result…");
 
       const result = await pollCapabilityRefresh({
         baseline,
@@ -349,14 +349,14 @@ export function GroupsScreen() {
       ) return;
       if (result.status === "completed") {
         setCapabilityRefreshState("completed");
-        setCapabilityNotice("Capability result updated.");
+        setCapabilityNotice("The latest capability result is now shown.");
       } else if (result.status === "failed") {
         setCapabilityRefreshState("failed");
         setCapabilityNotice(null);
         setCapabilityError("WA Runtime could not refresh this capability.");
       } else {
         setCapabilityRefreshState("timed-out");
-        setCapabilityNotice("Refresh is still processing. Reopen or retry shortly.");
+        setCapabilityNotice("Reopen or retry shortly.");
         if (result.error) {
           setCapabilityError(errorMessage(
             result.error,
@@ -536,18 +536,6 @@ export function GroupsScreen() {
             {detailError && (
               <InlineAlert title="Could not load group details">{detailError}</InlineAlert>
             )}
-            {capabilityError && (
-              <InlineAlert title="Capability refresh issue">{capabilityError}</InlineAlert>
-            )}
-            {capabilityNotice && (
-              <InlineAlert
-                title="Capability refresh"
-                tone={capabilityRefreshState === "completed" ? "success" : "warning"}
-              >
-                {capabilityNotice}
-              </InlineAlert>
-            )}
-
             {detail && (
               <div className="groups-inspector stack stack-lg">
                 <section aria-labelledby="group-identity-title" className="groups-inspector-section groups-identity">
@@ -603,6 +591,33 @@ export function GroupsScreen() {
                   >
                     {refreshingCapability ? "Refreshing capability…" : "Refresh capability"}
                   </Button>
+                  {capabilityRefreshState === "failed" && capabilityError && (
+                    <InlineAlert
+                      className="groups-capability-feedback"
+                      title="Capability refresh failed"
+                    >
+                      {capabilityError}
+                    </InlineAlert>
+                  )}
+                  {capabilityNotice && capabilityRefreshState !== "failed" && (
+                    <InlineAlert
+                      className="groups-capability-feedback"
+                      title={capabilityRefreshState === "completed"
+                        ? "Capability updated"
+                        : capabilityRefreshState === "timed-out"
+                          ? "Refresh still processing"
+                          : "Refresh requested"}
+                      tone={capabilityRefreshState === "completed"
+                        ? "success"
+                        : capabilityRefreshState === "timed-out"
+                          ? "warning"
+                          : "info"}
+                    >
+                      {capabilityRefreshState === "timed-out" && capabilityError
+                        ? `${capabilityNotice} Last check: ${capabilityError}`
+                        : capabilityNotice}
+                    </InlineAlert>
+                  )}
                 </section>
 
                 <section aria-labelledby="group-configuration-title" className="groups-inspector-section">

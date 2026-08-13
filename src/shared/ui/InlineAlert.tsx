@@ -1,13 +1,12 @@
 import type { HTMLAttributes, ReactNode } from "react";
 
-import type { StatusTone } from "./StatusIndicator";
 import "./inline-alert.css";
 
 interface InlineAlertProps extends Omit<HTMLAttributes<HTMLDivElement>, "title"> {
   action?: ReactNode;
   children?: ReactNode;
   title: ReactNode;
-  tone?: Extract<StatusTone, "success" | "warning" | "danger">;
+  tone?: "info" | "success" | "warning" | "danger";
 }
 
 export function InlineAlert({

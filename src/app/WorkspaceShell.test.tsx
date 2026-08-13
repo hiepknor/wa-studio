@@ -427,11 +427,13 @@ describe("WorkspaceShell", () => {
       session.id,
       group.id,
     ));
-    expect(screen.getByText("Capability refresh requested.")).toBeInTheDocument();
-    expect(screen.queryByText("Capability result updated.")).not.toBeInTheDocument();
+    expect(screen.getByText("Refresh requested")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for WA Runtime to publish a new result…"))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Capability updated")).not.toBeInTheDocument();
     await waitFor(() => expect(getGroup).toHaveBeenCalledTimes(2));
     expect(listGroupMembers).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText("Capability result updated.")).toBeInTheDocument();
+    expect(await screen.findByText("Capability updated")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({

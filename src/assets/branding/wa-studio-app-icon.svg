@@ -2,11 +2,10 @@
   <rect x="16" y="16" width="480" height="480" rx="112" fill="#0b0c10" />
   <rect x="16.75" y="16.75" width="478.5" height="478.5" rx="111.25" stroke="#ffffff" stroke-opacity=".12" stroke-width="1.5" />
   <path
-    d="M85 153 190 374l66-118 67-135 104 253M256 256h126"
+    d="M48 116 98 396l54-160 54 160 50-280M280 396l86-280 90 280M316 284h104"
     stroke="#8f82f5"
-    stroke-width="50"
+    stroke-width="44"
     stroke-linecap="square"
     stroke-linejoin="miter"
   />
-  <circle cx="256" cy="256" r="23" fill="#f2f3f5" />
 </svg>
