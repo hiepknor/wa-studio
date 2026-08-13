@@ -3,6 +3,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  CloudDownload,
   KeyRound,
   PanelsTopLeft,
   Play,
@@ -32,7 +33,8 @@ export type AppIconName =
   | "search"
   | "server"
   | "sessions"
-  | "settings";
+  | "settings"
+  | "sync";
 
 export type AppIconSize = "xs" | "sm" | "md" | "lg" | "xl";
 
@@ -57,6 +59,7 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   server: Server,
   sessions: PanelsTopLeft,
   settings: Settings2,
+  sync: CloudDownload,
 };
 
 const ICON_SIZES: Record<AppIconSize, number> = {

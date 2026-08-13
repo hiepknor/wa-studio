@@ -9,6 +9,8 @@ import {
   useState,
 } from "react";
 
+import { AppIcon, type AppIconName } from "./AppIcon";
+
 interface DropdownTriggerProps {
   "aria-controls": string;
   "aria-expanded": boolean;
@@ -131,6 +133,7 @@ interface DropdownMenuItemProps {
   className?: string;
   description?: ReactNode;
   disabled?: boolean;
+  icon?: AppIconName;
   onSelect: () => void;
 }
 
@@ -139,18 +142,22 @@ export function DropdownMenuItem({
   className = "",
   description,
   disabled = false,
+  icon,
   onSelect,
 }: DropdownMenuItemProps) {
   return (
     <button
-      className={`menu-item menu-item-rich ${className}`.trim()}
+      className={`menu-item ${description ? "menu-item-rich" : ""} ${className}`.trim()}
       disabled={disabled}
       onClick={onSelect}
       role="menuitem"
       type="button"
     >
-      <span className="menu-item-label">{children}</span>
-      {description && <span className="menu-item-description">{description}</span>}
+      {icon && <AppIcon className="menu-item-icon" name={icon} size="sm" />}
+      <span className="menu-item-copy">
+        <span className="menu-item-label">{children}</span>
+        {description && <span className="menu-item-description">{description}</span>}
+      </span>
     </button>
   );
 }

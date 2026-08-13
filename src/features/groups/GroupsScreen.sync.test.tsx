@@ -100,7 +100,7 @@ function renderGroups(overrides: Partial<RuntimeApi> = {}) {
 async function connectAndOpenMenu(user: ReturnType<typeof userEvent.setup>) {
   const connectButton = screen.queryByRole("button", { name: "Connect" });
   if (connectButton) await user.click(connectButton);
-  const trigger = await screen.findByRole("button", { name: "Group data actions" });
+  const trigger = await screen.findByRole("button", { name: "Update groups" });
   await user.click(trigger);
   return screen.getByRole("menu", { name: "Group data actions" });
 }
@@ -112,7 +112,7 @@ describe("GroupsScreen Reload and Sync", () => {
     const user = userEvent.setup();
     renderGroups();
     await user.click(screen.getByRole("button", { name: "Connect" }));
-    const trigger = await screen.findByRole("button", { name: "Group data actions" });
+    const trigger = await screen.findByRole("button", { name: "Update groups" });
     trigger.focus();
     await user.keyboard("{ArrowDown}");
     const menu = screen.getByRole("menu", { name: "Group data actions" });

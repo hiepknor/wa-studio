@@ -397,7 +397,7 @@ describe("WorkspaceShell", () => {
 
     expect(await screen.findByRole("heading", { name: "Groups" })).toBeInTheDocument();
     expect(screen.getByText(`Groups synchronized for ${session.name}.`)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Group data actions" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update groups" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Participants" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Record synced" })).toBeInTheDocument();
     await waitFor(() => expect(listGroups).toHaveBeenCalledWith({

@@ -642,27 +642,29 @@ export function GroupsScreen() {
             trigger={(triggerProps) => (
               <button
                 {...triggerProps}
-                aria-label={syncing ? "Syncing groups" : loading ? "Reloading groups" : "Group data actions"}
-                className="workspace-runtime-button groups-actions-trigger"
+                aria-label={syncing ? "Syncing groups" : loading ? "Reloading groups" : "Update groups"}
+                aria-busy={loading || syncing || undefined}
+                className="button button-md button-secondary groups-actions-trigger"
                 disabled={!selectedSessionId}
                 type="button"
               >
                 <AppIcon
-                  className={loading || syncing ? "ui-icon-spin" : ""}
+                  className={`button-icon ${loading || syncing ? "ui-icon-spin" : ""}`.trim()}
                   name="refresh"
                   size="sm"
                 />
-                <span className="workspace-runtime-text">
-                  {syncing ? "Syncing…" : loading ? "Reloading…" : "Reload / Sync"}
+                <span className="button-label groups-actions-label">
+                  {syncing ? "Syncing…" : loading ? "Reloading…" : "Update"}
                 </span>
-                <AppIcon className="workspace-runtime-chevron" name="chevron-down" size="xs" />
+                <span aria-hidden="true" className="groups-actions-divider" />
+                <AppIcon className="groups-actions-chevron" name="chevron-down" size="xs" />
               </button>
             )}
           >
-            <DropdownMenuItem disabled={loading} onSelect={() => void reloadGroups()} description="Reload groups currently stored in WA Runtime.">
+            <DropdownMenuItem disabled={loading} icon="refresh" onSelect={() => void reloadGroups()} description="Reload groups currently stored in WA Runtime.">
               Reload
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={syncing} onSelect={() => setSyncConfirmationOpen(true)} description="Synchronize groups and members from OpenWA.">
+            <DropdownMenuItem disabled={syncing} icon="sync" onSelect={() => setSyncConfirmationOpen(true)} description="Synchronize groups and members from OpenWA.">
               Sync
             </DropdownMenuItem>
           </DropdownMenu>
