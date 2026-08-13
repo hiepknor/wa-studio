@@ -1,4 +1,4 @@
-import brandMarkUrl from "@/assets/branding/wa-studio-logo.svg";
+import brandMarkUrl from "@/assets/branding/wa-studio-logo.svg?no-inline";
 import "./brand-mark.css";
 
 interface BrandMarkProps {

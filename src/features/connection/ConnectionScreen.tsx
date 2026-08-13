@@ -22,7 +22,7 @@ interface ConnectionScreenProps {
 export function ConnectionScreen({
   probeConnection = probeRuntimeConnection,
 }: ConnectionScreenProps = {}) {
-  const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:3100");
+  const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [state, setState] = useState<ConnectionState>({ status: "idle" });
   const isChecking = state.status === "checking";
@@ -86,10 +86,10 @@ export function ConnectionScreen({
                 icon="server"
                 id="runtime-url"
                 inputMode="url"
-                label="WA Runtime URL"
+                label="WA Runtime base URL"
                 monospace
                 onChange={(event) => setBaseUrl(event.currentTarget.value)}
-                placeholder="https://runtime.example.com"
+                placeholder="https://wa-runtime.example.com"
                 required
                 spellCheck={false}
                 type="url"
