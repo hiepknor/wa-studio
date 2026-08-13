@@ -3,8 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import type {
   RuntimeGroup,
-  RuntimeGroupCapabilityFreshness,
-  RuntimeGroupCapabilityStatus,
   RuntimeGroupDetail,
   RuntimeGroupMemberPage,
   RuntimeGroupPage,
@@ -17,72 +15,20 @@ import { PageHeader } from "@/shared/ui/PageHeader";
 import { TextField } from "@/shared/ui/TextField";
 import { pollCapabilityRefresh } from "./capability-refresh";
 import {
+  groupListRequestKey,
+  initialGroupListState,
+  type GroupListRequestState,
+  type GroupListState,
+} from "./group-list-filters";
+import {
   GroupCapabilityStatus,
   groupCapabilityIsStale,
 } from "./GroupCapabilityStatus";
+import { GroupSearchToolbar } from "./GroupSearchToolbar";
 import "./groups.css";
 
 const PAGE_SIZE = 20;
 const MEMBER_PAGE_SIZE = 25;
-
-interface GroupListRequestState {
-  sessionId: string | null;
-  query: string;
-  capabilityStatuses: RuntimeGroupCapabilityStatus[];
-  capabilityFreshness: RuntimeGroupCapabilityFreshness[];
-  isActive: boolean | undefined;
-  offset: number;
-}
-
-interface GroupListState extends GroupListRequestState {
-  inputQuery: string;
-}
-
-const CAPABILITY_STATUS_OPTIONS: ReadonlyArray<{
-  label: string;
-  value: RuntimeGroupCapabilityStatus;
-}> = [
-  { label: "Allowed", value: "ALLOWED" },
-  { label: "Denied", value: "DENIED" },
-  { label: "Unknown", value: "UNKNOWN" },
-];
-
-const CAPABILITY_FRESHNESS_OPTIONS: ReadonlyArray<{
-  label: string;
-  value: RuntimeGroupCapabilityFreshness;
-}> = [
-  { label: "Current", value: "CURRENT" },
-  { label: "Stale", value: "STALE" },
-];
-
-function initialGroupListState(sessionId: string | null): GroupListState {
-  return {
-    sessionId,
-    inputQuery: "",
-    query: "",
-    capabilityStatuses: [],
-    capabilityFreshness: [],
-    isActive: undefined,
-    offset: 0,
-  };
-}
-
-function toggleFilterValue<T extends string>(values: T[], value: T): T[] {
-  return values.includes(value)
-    ? values.filter((candidate) => candidate !== value)
-    : [...values, value];
-}
-
-function groupListRequestKey(state: GroupListRequestState): string {
-  return JSON.stringify({
-    sessionId: state.sessionId,
-    query: state.query,
-    capabilityStatuses: state.capabilityStatuses,
-    capabilityFreshness: state.capabilityFreshness,
-    isActive: state.isActive,
-    offset: state.offset,
-  });
-}
 
 type CapabilityRefreshState =
   | "idle"
@@ -488,9 +434,6 @@ export function GroupsScreen() {
     || listState.capabilityFreshness.length
     || listState.isActive !== undefined
   );
-  const activeFilterCount = listState.capabilityStatuses.length
-    + listState.capabilityFreshness.length
-    + (listState.isActive === undefined ? 0 : 1);
   const total = visiblePage?.meta.total ?? 0;
   const firstItem = total === 0 ? 0 : offset + 1;
   const lastItem = Math.min(offset + (visiblePage?.data.length ?? 0), total);
@@ -516,18 +459,6 @@ export function GroupsScreen() {
     } catch {
       setCopyState("failed");
     }
-  }
-
-  function clearListCriteria() {
-    setListState((current) => ({
-      ...current,
-      inputQuery: "",
-      query: "",
-      capabilityStatuses: [],
-      capabilityFreshness: [],
-      isActive: undefined,
-      offset: 0,
-    }));
   }
 
   return (
@@ -557,127 +488,16 @@ export function GroupsScreen() {
 
       <>
         <div className="data-table-container groups-list-panel">
-          <div className="data-table-toolbar groups-toolbar">
-            <div className="groups-toolbar-row">
-              <div className="groups-search-controls">
-                <TextField
-                  containerClassName="groups-filter"
-                  icon="search"
-                  id="group-filter"
-                  label="Search all synchronized groups"
-                  labelHidden
-                  onChange={(event) => {
-                    const inputQuery = event.currentTarget.value;
-                    setListState((current) => ({ ...current, inputQuery }));
-                  }}
-                  placeholder="Search name, ID, or description"
-                  size="sm"
-                  type="search"
-                  value={listState.inputQuery}
-                />
-                <Button
-                  aria-controls="group-list-filter-panel"
-                  aria-expanded={filtersOpen}
-                  icon="settings"
-                  onClick={() => setFiltersOpen((open) => !open)}
-                  size="sm"
-                >
-                  Filters{activeFilterCount ? ` · ${activeFilterCount}` : ""}
-                </Button>
-              </div>
-              <span className="groups-range" aria-live="polite">
-                {firstItem}–{lastItem} of {total}{hasListCriteria ? " matches" : ""}
-              </span>
-            </div>
-
-            {filtersOpen && (
-              <div className="groups-filter-panel" id="group-list-filter-panel">
-                <fieldset>
-                  <legend>Send capability</legend>
-                  {CAPABILITY_STATUS_OPTIONS.map((option) => (
-                    <label key={option.value}>
-                      <input
-                        checked={listState.capabilityStatuses.includes(option.value)}
-                        onChange={() => setListState((current) => ({
-                          ...current,
-                          capabilityStatuses: toggleFilterValue(
-                            current.capabilityStatuses,
-                            option.value,
-                          ),
-                          offset: 0,
-                        }))}
-                        type="checkbox"
-                      />
-                      <span>{option.label}</span>
-                    </label>
-                  ))}
-                </fieldset>
-                <fieldset>
-                  <legend>Capability freshness</legend>
-                  {CAPABILITY_FRESHNESS_OPTIONS.map((option) => (
-                    <label key={option.value}>
-                      <input
-                        checked={listState.capabilityFreshness.includes(option.value)}
-                        onChange={() => setListState((current) => ({
-                          ...current,
-                          capabilityFreshness: toggleFilterValue(
-                            current.capabilityFreshness,
-                            option.value,
-                          ),
-                          offset: 0,
-                        }))}
-                        type="checkbox"
-                      />
-                      <span>{option.label}</span>
-                    </label>
-                  ))}
-                </fieldset>
-                <fieldset>
-                  <legend>Group state</legend>
-                  <label>
-                    <input
-                      checked={listState.isActive === undefined}
-                      name="group-state-filter"
-                      onChange={() => setListState((current) => ({
-                        ...current,
-                        isActive: undefined,
-                        offset: 0,
-                      }))}
-                      type="radio"
-                    />
-                    <span>Active</span>
-                  </label>
-                  <label>
-                    <input
-                      checked={listState.isActive === false}
-                      name="group-state-filter"
-                      onChange={() => setListState((current) => ({
-                        ...current,
-                        isActive: false,
-                        offset: 0,
-                      }))}
-                      type="radio"
-                    />
-                    <span>Inactive</span>
-                  </label>
-                </fieldset>
-              </div>
-            )}
-
-            {hasListCriteria && (
-              <div className="groups-active-filters" aria-label="Active group search and filters">
-                {listState.query && <Badge>Search: {listState.query}</Badge>}
-                {listState.capabilityStatuses.map((status) => (
-                  <Badge key={status}>Capability: {status.toLocaleLowerCase()}</Badge>
-                ))}
-                {listState.capabilityFreshness.map((freshness) => (
-                  <Badge key={freshness}>Freshness: {freshness.toLocaleLowerCase()}</Badge>
-                ))}
-                {listState.isActive === false && <Badge>Inactive groups</Badge>}
-                <Button onClick={clearListCriteria} size="sm" variant="ghost">Clear all</Button>
-              </div>
-            )}
-          </div>
+          <GroupSearchToolbar
+            filtersOpen={filtersOpen}
+            firstItem={firstItem}
+            lastItem={lastItem}
+            loading={loading}
+            setFiltersOpen={setFiltersOpen}
+            setState={setListState}
+            state={listState}
+            total={total}
+          />
 
           {listError && (
             <InlineAlert
@@ -689,7 +509,11 @@ export function GroupsScreen() {
             </InlineAlert>
           )}
 
-          <div className="data-table-scroll groups-table-scroll">
+          <div
+            aria-busy={loading}
+            className="data-table-scroll groups-table-scroll"
+            data-updating={loading && Boolean(visiblePage) || undefined}
+          >
             <table>
               <caption>Groups in the active Gateway session</caption>
               <colgroup>

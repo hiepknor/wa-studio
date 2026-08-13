@@ -138,7 +138,8 @@ describe("GroupsScreen global search and filters", () => {
       offset: 0,
       query: "Release room",
     }));
-    expect(screen.getByText("Search: Release room")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear group search" })).toBeInTheDocument();
+    expect(screen.queryByText("Search: Release room")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -174,9 +175,10 @@ describe("GroupsScreen global search and filters", () => {
     await connect(user);
 
     await user.click(screen.getByRole("button", { name: "Filters" }));
+    expect(screen.getByRole("radio", { name: "Active" })).toBeChecked();
+    expect(screen.getByText("No filters applied")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "Denied" }));
     await user.click(screen.getByRole("checkbox", { name: "Unknown" }));
-    await user.click(screen.getByRole("checkbox", { name: "Current" }));
     await user.click(screen.getByRole("checkbox", { name: "Stale" }));
     await user.click(screen.getByRole("radio", { name: "Inactive" }));
 
@@ -185,13 +187,171 @@ describe("GroupsScreen global search and filters", () => {
       limit: 20,
       offset: 0,
       capabilityStatus: ["DENIED", "UNKNOWN"],
-      capabilityFreshness: ["CURRENT", "STALE"],
+      capabilityFreshness: ["STALE"],
       isActive: false,
     }));
-    expect(screen.getByRole("button", { name: "Filters · 5" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Filters · 3" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeInTheDocument();
+    const deniedChip = screen.getByRole("button", {
+      name: "Remove Capability: Denied filter",
+    });
+    expect(deniedChip.closest(".groups-filter-summary")).not.toBeNull();
+    expect(screen.getByRole("button", {
+      name: "Remove Capability: Unknown filter",
+    })).toBeInTheDocument();
+    expect(screen.getByRole("button", {
+      name: "Remove Freshness: Stale filter",
+    })).toBeInTheDocument();
+
+    await user.click(deniedChip);
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 20,
+      offset: 0,
+      capabilityStatus: ["UNKNOWN"],
+      capabilityFreshness: ["STALE"],
+      isActive: false,
+    }));
+    expect(screen.getByRole("button", { name: "Filters · 3" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close group filters" }));
+    expect(screen.getByRole("button", { name: "Filters · 3" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByRole("region", { name: "Group filters" })).not.toBeInTheDocument();
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "Filters · 3" }),
+    ).toHaveFocus());
+
+    await user.click(screen.getByRole("button", { name: "Filters · 3" }));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Group filters" })).not.toBeInTheDocument();
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "Filters · 3" }),
+    ).toHaveFocus());
+  });
+
+  it("preserves a complete filter domain and sends every selected value", async () => {
+    const user = userEvent.setup();
+    const listGroups = vi.fn().mockResolvedValue(defaultPage);
+    renderGroups(listGroups);
+    await connect(user);
+
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    await user.click(screen.getByRole("checkbox", { name: "Allowed" }));
+    await user.click(screen.getByRole("checkbox", { name: "Denied" }));
+    await user.click(screen.getByRole("checkbox", { name: "Unknown" }));
+
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 20,
+      offset: 0,
+      capabilityStatus: ["ALLOWED", "DENIED", "UNKNOWN"],
+    }));
+    expect(screen.getByRole("button", { name: "Filters · 1" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.queryByText("No filters applied")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Allowed" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Denied" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Unknown" })).toBeChecked();
+    expect(screen.getByRole("button", {
+      name: "Remove Capability: Allowed filter",
+    })).toBeInTheDocument();
+    expect(screen.getByRole("button", {
+      name: "Remove Capability: Denied filter",
+    })).toBeInTheDocument();
+    expect(screen.getByRole("button", {
+      name: "Remove Capability: Unknown filter",
+    })).toBeInTheDocument();
+  });
+
+  it("clears search independently from filters and clears filters independently from search", async () => {
+    const user = userEvent.setup();
+    const listGroups = vi.fn().mockResolvedValue(defaultPage);
+    renderGroups(listGroups);
+    await connect(user);
+
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    await user.click(screen.getByRole("checkbox", { name: "Denied" }));
+    const search = screen.getByRole("searchbox", { name: "Search all synchronized groups" });
+    await user.type(search, "needle");
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 20,
+      offset: 0,
+      query: "needle",
+      capabilityStatus: ["DENIED"],
+    }));
+
+    await user.click(screen.getByRole("button", { name: "Clear group search" }));
+    expect(search).toHaveValue("");
+    expect(screen.getByRole("button", {
+      name: "Remove Capability: Denied filter",
+    })).toBeInTheDocument();
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 20,
+      offset: 0,
+      capabilityStatus: ["DENIED"],
+    }));
+
+    await user.type(search, "keep me");
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: "keep me",
+      capabilityStatus: ["DENIED"],
+    })));
+    await user.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(search).toHaveValue("keep me");
+    expect(screen.queryByRole("button", {
+      name: "Remove Capability: Denied filter",
+    })).not.toBeInTheDocument();
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 20,
+      offset: 0,
+      query: "keep me",
+    }));
+  });
+
+  it("marks retained rows as updating while new criteria are loading", async () => {
+    const user = userEvent.setup();
+    let resolveFiltered: ((page: RuntimeGroupPage) => void) | undefined;
+    const filtered = new Promise<RuntimeGroupPage>((resolve) => {
+      resolveFiltered = resolve;
+    });
+    const listGroups = vi.fn((input: RuntimeGroupListInput) => (
+      input.query ? filtered : Promise.resolve(defaultPage)
+    ));
+    renderGroups(listGroups);
+    await connect(user);
+    expect(await screen.findByText("Release room")).toBeInTheDocument();
+
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search all synchronized groups" }),
+      "new result",
+    );
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith(expect.objectContaining({
+      query: "new result",
+    })));
+
+    expect(screen.getByText("Updating results…")).toBeInTheDocument();
+    const results = screen.getByRole("table").parentElement;
+    expect(results).toHaveAttribute("aria-busy", "true");
+    expect(results).toHaveAttribute("data-updating", "true");
+
+    resolveFiltered?.({
+      data: [group("updated@g.us", "Updated result")],
+      meta: { total: 1, limit: 20, offset: 0 },
+    });
+    expect(await screen.findByText("Updated result")).toBeInTheDocument();
+    expect(results).toHaveAttribute("aria-busy", "false");
+    expect(results).not.toHaveAttribute("data-updating");
   });
 
   it("resets pagination for search and uses filtered meta.total", async () => {
