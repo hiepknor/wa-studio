@@ -6,7 +6,7 @@ import {
 } from "@/shared/api/runtime-client";
 import { BrandMark } from "@/shared/ui/BrandMark";
 import { Button } from "@/shared/ui/Button";
-import { StatusDot } from "@/shared/ui/StatusIndicator";
+import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { TextField } from "@/shared/ui/TextField";
 
 type ConnectionState =
@@ -112,34 +112,39 @@ export function ConnectionScreen({
               />
 
               {state.status === "idle" && (
-                <div className="connection-status" role="status">
-                  <StatusDot />
-                  <strong>Waiting for credentials</strong>
-                  <span className="connection-alert-copy">No active WA Runtime session</span>
-                </div>
+                <InlineAlert
+                  className="connection-status"
+                  indicator
+                  title="Waiting for credentials"
+                  tone="neutral"
+                >
+                  No active WA Runtime session
+                </InlineAlert>
               )}
               {state.status === "checking" && (
-                <div className="connection-status connection-status-checking" role="status">
-                  <StatusDot glow tone="warning" />
-                  <strong>Checking connection</strong>
-                  <span className="connection-alert-copy">Verifying WA Runtime readiness…</span>
-                </div>
+                <InlineAlert
+                  className="connection-status"
+                  indicator
+                  title="Checking connection"
+                  tone="warning"
+                >
+                  Verifying WA Runtime readiness…
+                </InlineAlert>
               )}
               {state.status === "failed" && (
-                <div className="connection-status connection-status-danger" role="alert">
-                  <StatusDot glow tone="danger" />
-                  <strong>Connection failed</strong>
-                  <span className="connection-alert-copy">{state.message}</span>
-                </div>
+                <InlineAlert className="connection-status" indicator title="Connection failed">
+                  {state.message}
+                </InlineAlert>
               )}
               {state.status === "connected" && (
-                <div className="connection-status connection-status-ok" role="status">
-                  <StatusDot glow tone="success" />
-                  <strong>WA Runtime connected</strong>
-                  <span className="connection-alert-copy">
-                    {state.result.readySessions} of {state.result.sessionCount} sessions ready.
-                  </span>
-                </div>
+                <InlineAlert
+                  className="connection-status"
+                  indicator
+                  title="WA Runtime connected"
+                  tone="success"
+                >
+                  {state.result.readySessions} of {state.result.sessionCount} sessions ready.
+                </InlineAlert>
               )}
             </div>
 

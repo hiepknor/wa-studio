@@ -1,0 +1,73 @@
+.toast-viewport {
+  position: fixed;
+  z-index: 60;
+  left: 20px;
+  bottom: 20px;
+  width: min(380px, calc(100vw - 40px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+body:has(.workspace) .toast-viewport {
+  left: 244px;
+  bottom: 46px;
+  width: min(380px, calc(100vw - 264px));
+}
+
+.toast {
+  position: relative;
+  min-height: 48px;
+  align-items: flex-start;
+  overflow: hidden;
+  border-color: var(--border-strong);
+  background: rgb(21 23 29 / 96%);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 38%);
+  pointer-events: auto;
+  backdrop-filter: blur(18px);
+}
+
+.toast::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: currentColor;
+  content: "";
+}
+
+.toast .inline-alert-copy {
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.toast .inline-alert-copy span { white-space: normal; }
+.toast-actions { display: flex; align-items: center; gap: 6px; }
+.toast-dismiss {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  place-items: center;
+  background: transparent;
+  color: currentColor;
+  opacity: .7;
+}
+.toast-dismiss:hover { background: rgb(255 255 255 / 7%); opacity: 1; }
+
+@media (max-width: 760px) {
+  body:has(.workspace) .toast-viewport { left: 84px; width: calc(100vw - 104px); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast { animation: toast-enter 140ms ease-out; }
+}
+
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}

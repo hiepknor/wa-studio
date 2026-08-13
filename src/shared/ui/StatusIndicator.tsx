@@ -1,8 +1,9 @@
 import type { HTMLAttributes, ReactNode } from "react";
 
+import type { FeedbackTone } from "./feedback-tone";
 import "./status-indicator.css";
 
-export type StatusTone = "neutral" | "success" | "warning" | "danger";
+export type StatusTone = FeedbackTone;
 
 interface StatusDotProps extends HTMLAttributes<HTMLSpanElement> {
   glow?: boolean;

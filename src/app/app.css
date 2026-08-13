@@ -115,20 +115,20 @@ textarea:focus-visible,
 select:focus-visible {
   border-color: rgb(166 154 255 / 72%);
 }
-.connection-status {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+.connection-status.inline-alert {
+  display: flex;
   align-items: center;
   gap: 8px;
   min-height: 34px;
-  padding-top: 2px;
+  padding: 2px 0 0;
+  border: 0;
+  background: transparent;
   color: #8a8f9d;
   font-size: 9px;
 }
-.connection-status strong { color: #b8bbc4; font-size: inherit; font-weight: 500; }
-.connection-status .connection-alert-copy { overflow: hidden; color: var(--dim); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-.connection-status-danger strong, .connection-status-danger .connection-alert-copy { color: #f18c85; }
-.connection-status-ok strong { color: #80db89; }
+.connection-status .inline-alert-copy { flex: 1; }
+.connection-status .inline-alert-copy strong { color: currentColor; font-size: inherit; font-weight: 500; }
+.connection-status .inline-alert-copy span { margin-left: auto; color: currentColor; text-align: right; }
 .connection-shortcut { color: #555b68; font-family: var(--font-mono); font-size: 9px; }
 .connection-footer {
   height: 42px;

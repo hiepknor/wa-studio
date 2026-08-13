@@ -22,6 +22,7 @@
 .status-dot-glow { box-shadow: 0 0 7px color-mix(in srgb, currentColor 46%, transparent); }
 
 .status-tone-neutral { color: var(--muted); }
+.status-tone-info { color: var(--accent-hover); }
 .status-tone-success { color: var(--ok); }
 .status-tone-warning { color: var(--warning); }
 .status-tone-danger { color: var(--danger); }

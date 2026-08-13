@@ -1,4 +1,5 @@
 import { ConnectionScreen } from "@/features/connection/ConnectionScreen";
+import { ToastProvider } from "@/shared/ui/Toast";
 import { RuntimeConnectionProvider, useRuntimeConnection } from "./RuntimeConnectionContext";
 import { WorkspaceShell } from "./WorkspaceShell";
 import "./app.css";
@@ -10,8 +11,10 @@ function AppContent() {
 
 export function App() {
   return (
-    <RuntimeConnectionProvider>
-      <AppContent />
-    </RuntimeConnectionProvider>
+    <ToastProvider>
+      <RuntimeConnectionProvider>
+        <AppContent />
+      </RuntimeConnectionProvider>
+    </ToastProvider>
   );
 }

@@ -15,6 +15,7 @@
 .inline-alert-copy strong { flex: 0 0 auto; }
 .inline-alert-copy span { min-width: 0; overflow: hidden; opacity: .78; text-overflow: ellipsis; white-space: nowrap; }
 .inline-alert-action { flex: 0 0 auto; }
+.inline-alert-neutral { color: var(--muted); }
 .inline-alert-danger { border-color: rgb(244 112 103 / 25%); background: var(--danger-soft); color: #ffaaa4; }
 .inline-alert-info { border-color: rgb(143 130 245 / 25%); background: rgb(126 108 246 / 9%); color: #c4bcff; }
 .inline-alert-warning { border-color: rgb(227 179 65 / 22%); background: var(--warning-soft); color: #f1cf77; }
