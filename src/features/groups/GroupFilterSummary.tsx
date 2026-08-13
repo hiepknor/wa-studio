@@ -26,7 +26,7 @@ function FilterChip({ accessibleLabel, label, onRemove }: FilterChipProps) {
   return (
     <button
       aria-label={`Remove ${accessibleLabel} filter`}
-      className="groups-filter-chip"
+      className="data-filter-chip"
       onClick={onRemove}
       type="button"
     >
@@ -47,11 +47,11 @@ export function GroupFilterSummary({
   return (
     <div
       aria-label="Selected group filters"
-      className="groups-filter-summary"
+      className="data-filter-summary"
     >
-      <div className="groups-filter-summary-chips">
+      <div className="data-filter-chips">
         {!filtersApplied && showEmpty && (
-          <span className="groups-filter-summary-empty">No filters applied</span>
+          <span className="data-filter-summary-empty">No filters applied</span>
         )}
         {state.capabilityStatuses.map((value) => (
           <FilterChip

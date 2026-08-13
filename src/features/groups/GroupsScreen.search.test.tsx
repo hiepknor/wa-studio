@@ -199,7 +199,7 @@ describe("GroupsScreen global search and filters", () => {
     const deniedChip = screen.getByRole("button", {
       name: "Remove Capability: Denied filter",
     });
-    expect(deniedChip.closest(".groups-filter-summary")).not.toBeNull();
+    expect(deniedChip.closest(".data-filter-summary")).not.toBeNull();
     expect(screen.getByRole("button", {
       name: "Remove Capability: Unknown filter",
     })).toBeInTheDocument();

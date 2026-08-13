@@ -1,8 +1,6 @@
-import { useRef, type Dispatch, type SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 
-import { AppIcon } from "@/shared/ui/AppIcon";
-import { Button } from "@/shared/ui/Button";
-import { TextField } from "@/shared/ui/TextField";
+import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
 import {
   activeGroupFilterCount,
   type GroupListState,
@@ -30,85 +28,39 @@ export function GroupSearchToolbar({
   state,
   total,
 }: GroupSearchToolbarProps) {
-  const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const filterCount = activeGroupFilterCount(state);
   const hasAppliedCriteria = Boolean(state.query || filterCount);
 
-  function closeFilters() {
-    setFiltersOpen(false);
-    window.requestAnimationFrame(() => filterTriggerRef.current?.focus());
-  }
-
   return (
-    <div
-      className="data-table-toolbar groups-toolbar"
-      onKeyDown={(event) => {
-        if (!filtersOpen || event.key !== "Escape") return;
-        event.preventDefault();
-        event.stopPropagation();
-        closeFilters();
-      }}
+    <DataFilterToolbar
+      clearSearchLabel="Clear group search"
+      filterCount={filterCount}
+      filtersOpen={filtersOpen}
+      idPrefix="group-list"
+      loading={loading}
+      onClearSearch={() => setState((current) => ({
+        ...current,
+        inputQuery: "",
+        query: "",
+        offset: 0,
+      }))}
+      onCloseFilters={() => setFiltersOpen(false)}
+      onSearchChange={(inputQuery) => setState((current) => ({ ...current, inputQuery }))}
+      onToggleFilters={() => setFiltersOpen((open) => !open)}
+      resultSummary={loading
+        ? "Updating results…"
+        : `${firstItem}–${lastItem} of ${total}${hasAppliedCriteria ? " matches" : ""}`}
+      searchLabel="Search all synchronized groups"
+      searchPlaceholder="Search name, ID, or description"
+      searchValue={state.inputQuery}
     >
-      <div className="groups-toolbar-row">
-        <div className="groups-search-controls">
-          <div className="groups-search-field-wrap">
-            <TextField
-              aria-busy={loading || undefined}
-              containerClassName="groups-filter"
-              icon="search"
-              id="group-filter"
-              label="Search all synchronized groups"
-              labelHidden
-              onChange={(event) => {
-                const inputQuery = event.currentTarget.value;
-                setState((current) => ({ ...current, inputQuery }));
-              }}
-              placeholder="Search name, ID, or description"
-              size="sm"
-              type="search"
-              value={state.inputQuery}
-            />
-            {state.inputQuery && (
-              <button
-                aria-label="Clear group search"
-                className="groups-search-clear"
-                onClick={() => setState((current) => ({
-                  ...current,
-                  inputQuery: "",
-                  query: "",
-                  offset: 0,
-                }))}
-                type="button"
-              >
-                <AppIcon name="close" size="xs" />
-              </button>
-            )}
-          </div>
-          <Button
-            aria-controls="group-list-filter-panel"
-            aria-expanded={filtersOpen}
-            icon="settings"
-            onClick={() => setFiltersOpen((open) => !open)}
-            ref={filterTriggerRef}
-            size="sm"
-          >
-            Filters{filterCount ? ` · ${filterCount}` : ""}
-          </Button>
-        </div>
-        <span className="groups-range" aria-live="polite">
-          {loading
-            ? "Updating results…"
-            : `${firstItem}–${lastItem} of ${total}${hasAppliedCriteria ? " matches" : ""}`}
-        </span>
-      </div>
-
-      {filtersOpen && (
+      {(closeFilters) => filtersOpen && (
         <GroupFilterPanel
           onClose={closeFilters}
           setState={setState}
           state={state}
         />
       )}
-    </div>
+    </DataFilterToolbar>
   );
 }

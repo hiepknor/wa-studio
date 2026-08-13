@@ -8,7 +8,6 @@ import type {
   RuntimeGroupPage,
   RuntimeSyncRun,
 } from "@/shared/api/runtime-client";
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -18,6 +17,8 @@ import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { TextField } from "@/shared/ui/TextField";
 import { useToast } from "@/shared/ui/Toast";
+import { UpdateActionTrigger } from "@/shared/ui/UpdateActionTrigger";
+import { useSessionSync } from "@/shared/hooks/useSessionSync";
 import { pollCapabilityRefresh } from "./capability-refresh";
 import {
   groupListRequestKey,
@@ -30,7 +31,6 @@ import {
   groupCapabilityIsStale,
 } from "./GroupCapabilityStatus";
 import { GroupSearchToolbar } from "./GroupSearchToolbar";
-import { pollSessionSync } from "./session-sync";
 import "./groups.css";
 
 const PAGE_SIZE = 20;
@@ -45,14 +45,6 @@ type CapabilityRefreshState =
   | "failed";
 
 type GroupListLoadReason = "automatic" | "reload" | "post-sync";
-type SessionSyncState =
-  | "idle"
-  | "requesting"
-  | "running"
-  | "updating"
-  | "background"
-  | "failed";
-
 const CAPABILITY_REASON_COPY: Record<string, string> = {
   SEND_ALLOWED: "WA Runtime confirmed that this group can receive messages.",
   SEND_DENIED: "WA Runtime determined that this group cannot receive messages.",
@@ -112,9 +104,6 @@ export function GroupsScreen() {
   const [listLoadReason, setListLoadReason] = useState<GroupListLoadReason | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [syncConfirmationOpen, setSyncConfirmationOpen] = useState(false);
-  const [syncState, setSyncState] = useState<SessionSyncState>("idle");
-  const [syncRun, setSyncRun] = useState<RuntimeSyncRun | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<RuntimeGroup | null>(null);
   const [detail, setDetail] = useState<RuntimeGroupDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -138,9 +127,6 @@ export function GroupsScreen() {
   const membersRevision = useRef(0);
   const capabilityRevision = useRef(0);
   const capabilityAbortRef = useRef<AbortController | null>(null);
-  const syncRevision = useRef(0);
-  const syncAbortRef = useRef<AbortController | null>(null);
-  const syncTargetRef = useRef<{ runtimeOrigin: string; sessionId: string } | null>(null);
   const capabilityTargetRef = useRef<{ sessionId: string; groupId: string } | null>(null);
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
   capabilityTargetRef.current = selectedSessionId
@@ -148,40 +134,16 @@ export function GroupsScreen() {
     && selectedGroup.sessionId === selectedSessionId
     ? { sessionId: selectedSessionId, groupId: selectedGroup.id }
     : null;
-  syncTargetRef.current = selectedSessionId
-    ? { runtimeOrigin, sessionId: selectedSessionId }
-    : null;
   listTargetRef.current = groupListRequestKey(listState);
   listStateRef.current = listState;
   const refreshingCapability = capabilityRefreshState === "requesting"
     || capabilityRefreshState === "pending";
   const loading = listLoadReason !== null;
-  const syncForeground = syncState === "requesting"
-    || syncState === "running"
-    || syncState === "updating";
-  const syncActive = syncForeground;
 
   const cancelCapabilityRefresh = useCallback(() => {
     capabilityRevision.current += 1;
     capabilityAbortRef.current?.abort();
     capabilityAbortRef.current = null;
-  }, []);
-
-  const cancelSessionSync = useCallback(() => {
-    syncRevision.current += 1;
-    syncAbortRef.current?.abort();
-    syncAbortRef.current = null;
-  }, []);
-
-  const syncFlowIsCurrent = useCallback((
-    revision: number,
-    runtimeOrigin: string,
-    sessionId: string,
-  ) => {
-    const target = syncTargetRef.current;
-    return revision === syncRevision.current
-      && target?.runtimeOrigin === runtimeOrigin
-      && target.sessionId === sessionId;
   }, []);
 
   const capabilityFlowIsCurrent = useCallback((
@@ -243,6 +205,28 @@ export function GroupsScreen() {
     }
   }, [runtimeApi, selectedSessionId]);
 
+  const sync = useSessionSync({
+    runtimeApi,
+    runtimeOrigin,
+    sessionId: selectedSessionId,
+    onCompleted: async () => {
+      const warnings: string[] = [];
+      try {
+        await refreshSessions();
+      } catch (error) {
+        warnings.push(errorMessage(error, "Reload session metadata manually."));
+      }
+      const viewReloaded = await loadGroups(listStateRef.current, "post-sync");
+      if (!viewReloaded) warnings.push("The current groups view could not be updated.");
+      return warnings.length ? `Sync finished. ${warnings.join(" ")}` : undefined;
+    },
+  });
+  const syncState = sync.state;
+  const syncRun = sync.run;
+  const syncError = sync.error;
+  const syncForeground = sync.active;
+  const syncActive = sync.active;
+
   const loadMembers = useCallback(async (
     sessionId: string,
     groupId: string,
@@ -288,7 +272,6 @@ export function GroupsScreen() {
     detailRevision.current += 1;
     membersRevision.current += 1;
     cancelCapabilityRefresh();
-    cancelSessionSync();
     setPage(null);
     setListState(initialGroupListState(selectedSessionId));
     setFiltersOpen(false);
@@ -309,10 +292,7 @@ export function GroupsScreen() {
     setMembersError(null);
     setSyncedMemberTotal(null);
     setSyncConfirmationOpen(false);
-    setSyncState("idle");
-    setSyncRun(null);
-    setSyncError(null);
-  }, [cancelCapabilityRefresh, cancelSessionSync, listState.sessionId, selectedSessionId]);
+  }, [cancelCapabilityRefresh, listState.sessionId, selectedSessionId]);
 
   useEffect(() => {
     const {
@@ -344,15 +324,7 @@ export function GroupsScreen() {
   ]);
 
   useEffect(() => () => cancelCapabilityRefresh(), [cancelCapabilityRefresh]);
-  useEffect(() => () => cancelSessionSync(), [cancelSessionSync]);
-
-  useEffect(() => {
-    cancelSessionSync();
-    setSyncConfirmationOpen(false);
-    setSyncState("idle");
-    setSyncRun(null);
-    setSyncError(null);
-  }, [cancelSessionSync, runtimeApi, runtimeOrigin]);
+  useEffect(() => setSyncConfirmationOpen(false), [runtimeApi, runtimeOrigin]);
 
   useEffect(() => {
     const normalizedQuery = listState.inputQuery.trim();
@@ -510,77 +482,16 @@ export function GroupsScreen() {
   }
 
   async function startSessionSync() {
-    if (!selectedSessionId || syncActive) return;
+    if (!selectedSessionId || sync.active) return;
     setSyncConfirmationOpen(false);
-    cancelSessionSync();
-    const revision = syncRevision.current;
-    const controller = new AbortController();
-    syncAbortRef.current = controller;
-    const sessionId = selectedSessionId;
-    const targetRuntimeOrigin = runtimeOrigin;
-    setSyncState("requesting");
-    setSyncRun(null);
-    setSyncError(null);
-
-    try {
-      const initialRun = await runtimeApi.requestSessionSync(sessionId);
-      if (!syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) return;
-      setSyncRun(initialRun);
-      setSyncState("running");
-
-      const result = await pollSessionSync({
-        initialRun,
-        signal: controller.signal,
-        read: () => runtimeApi.getSessionSyncRun(sessionId, initialRun.id),
-        onObservation: (nextRun) => {
-          if (!syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) return;
-          setSyncRun(nextRun);
-        },
-      });
-      if (!syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId) || result.status === "cancelled") {
-        return;
-      }
-
-      setSyncRun(result.run);
-      if (result.status === "completed") {
-        setSyncState("updating");
-        let metadataReloadError: string | null = null;
-        try {
-          await refreshSessions();
-        } catch (error) {
-          if (syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) {
-            metadataReloadError = errorMessage(error, "Reload session metadata manually.");
-          }
-        }
-        if (syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) {
-          const viewReloaded = await loadGroups(listStateRef.current, "post-sync");
-          if (!syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) return;
-          setSyncState("idle");
-          const viewUpdated = viewReloaded && !metadataReloadError;
-          toast.notify({
-            description: viewUpdated
-              ? syncProgressCopy(result.run)
-              : metadataReloadError
-                ? `Sync finished. ${metadataReloadError}`
-                : "Sync finished, but the current groups view could not be updated.",
-            id: "groups-sync",
-            title: viewUpdated ? "Sync completed." : "Sync completed with an update warning.",
-            tone: viewUpdated ? "success" : "warning",
-          });
-        }
-      } else if (result.status === "failed") {
-        setSyncState("failed");
-        setSyncError(result.run.error ?? "Retry when the Runtime is ready.");
-      } else {
-        setSyncState("background");
-      }
-    } catch (error) {
-      if (!syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) return;
-      setSyncState("failed");
-      setSyncError(errorMessage(error, "Could not start session sync."));
-    } finally {
-      if (syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) syncAbortRef.current = null;
-    }
+    const result = await sync.start();
+    if (result?.status !== "completed") return;
+    toast.notify({
+      description: result.warning ?? syncProgressCopy(result.run),
+      id: "groups-sync",
+      title: result.warning ? "Sync completed with an update warning." : "Sync completed.",
+      tone: result.warning ? "warning" : "success",
+    });
   }
 
   const listContextIsCurrent = listState.sessionId === selectedSessionId;
@@ -637,11 +548,10 @@ export function GroupsScreen() {
           <DropdownMenu
             ariaLabel="Group data actions"
             disabled={!selectedSessionId}
-            contentClassName="groups-actions-menu"
+            contentClassName="update-action-menu"
             trigger={(triggerProps) => (
-              <button
-                {...triggerProps}
-                aria-label={
+              <UpdateActionTrigger
+                ariaLabel={
                   syncState === "updating"
                     ? "Updating groups view"
                     : syncForeground
@@ -650,28 +560,16 @@ export function GroupsScreen() {
                         ? "Reloading groups"
                         : "Update groups"
                 }
-                aria-busy={syncForeground || listLoadReason === "reload" || undefined}
-                className="button button-md button-secondary groups-actions-trigger"
-                disabled={!selectedSessionId}
-                type="button"
-              >
-                <AppIcon
-                  className={`button-icon ${syncForeground || listLoadReason === "reload" ? "ui-icon-spin" : ""}`.trim()}
-                  name="refresh"
-                  size="sm"
-                />
-                <span className="button-label groups-actions-label">
-                  {syncState === "updating"
+                busy={syncForeground || listLoadReason === "reload"}
+                label={syncState === "updating"
                     ? "Updating view…"
                     : syncForeground
                       ? "Syncing…"
                       : listLoadReason === "reload"
                         ? "Reloading…"
                         : "Update"}
-                </span>
-                <span aria-hidden="true" className="groups-actions-divider" />
-                <AppIcon className="groups-actions-chevron" name="chevron-down" size="xs" />
-              </button>
+                triggerProps={triggerProps}
+              />
             )}
           >
             <DropdownMenuItem disabled={loading} icon="refresh" onSelect={() => void reloadGroups()} description="Reload groups currently stored in WA Runtime.">

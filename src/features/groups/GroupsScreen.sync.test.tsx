@@ -15,10 +15,10 @@ import type {
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ToastProvider } from "@/shared/ui/Toast";
 import { GroupsScreen } from "./GroupsScreen";
-import { pollSessionSync } from "./session-sync";
+import { pollSessionSync } from "@/shared/hooks/session-sync-poller";
 
-vi.mock("./session-sync", async (importOriginal) => {
-  const original = await importOriginal<typeof import("./session-sync")>();
+vi.mock("@/shared/hooks/session-sync-poller", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/shared/hooks/session-sync-poller")>();
   return { ...original, pollSessionSync: vi.fn() };
 });
 

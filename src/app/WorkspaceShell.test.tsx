@@ -13,7 +13,6 @@ import type {
   RuntimeGroup,
   RuntimeGroupDetail,
   RuntimeSession,
-  RuntimeSyncRun,
 } from "@/shared/api/runtime-client";
 import { ToastProvider } from "@/shared/ui/Toast";
 
@@ -39,38 +38,6 @@ const standbySession: RuntimeSession = {
   name: "standby-session",
   status: "disconnected",
   engineLoaded: false,
-};
-
-const secondReadySession: RuntimeSession = {
-  ...session,
-  id: "second-session-id",
-  name: "second-session",
-};
-
-const pendingSync: RuntimeSyncRun = {
-  id: "pending-sync-id",
-  sessionId: session.id,
-  syncType: "FULL",
-  status: "PENDING",
-  groupsSynced: 0,
-  membersSynced: 0,
-  error: null,
-  requestedAt: "2026-08-11T09:00:00.000Z",
-  startedAt: null,
-  completedAt: null,
-};
-
-const completedSync: RuntimeSyncRun = {
-  id: "sync-id",
-  sessionId: session.id,
-  syncType: "FULL",
-  status: "COMPLETED",
-  groupsSynced: 512,
-  membersSynced: 2048,
-  error: null,
-  requestedAt: "2026-08-11T09:00:00.000Z",
-  startedAt: "2026-08-11T09:00:01.000Z",
-  completedAt: "2026-08-11T09:00:10.000Z",
 };
 
 const group: RuntimeGroup = {
@@ -131,7 +98,7 @@ function WorkspaceHarness() {
 }
 
 describe("WorkspaceShell", () => {
-  it("enters the workspace, selects the ready session, starts sync, and disconnects", async () => {
+  it("enters the workspace, selects the ready session, and disconnects", async () => {
     const user = userEvent.setup();
     const connectionResult: RuntimeConnectionResult = {
       sessionCount: 1,
@@ -139,11 +106,10 @@ describe("WorkspaceShell", () => {
       sessions: [session],
     };
     const probeConnection = vi.fn().mockResolvedValue(connectionResult);
-    const requestSessionSync = vi.fn().mockResolvedValue(completedSync);
     const fakeApi = {
       getSessionSyncRun: vi.fn(),
       listSessions: vi.fn().mockResolvedValue([session]),
-      requestSessionSync,
+      requestSessionSync: vi.fn(),
     } as unknown as RuntimeApi;
 
     render(
@@ -178,18 +144,14 @@ describe("WorkspaceShell", () => {
     );
     const sessionsTable = screen.getByRole("table", { name: "WA Runtime sessions" });
     expect(within(sessionsTable).getByText(session.name)).toHaveClass("data-primary-text");
-    expect(within(sessionsTable).getByText(session.pushName!)).toHaveClass("data-secondary-text");
+    expect(within(sessionsTable).getByText(`${session.pushName} · ${session.phone}`))
+      .toHaveClass("data-secondary-text");
     expect(within(sessionsTable).getByText(session.name).closest("td"))
       .toHaveClass("data-cell-primary");
     expect(screen.getByText("Selected").closest("td")).toHaveClass("data-cell-action");
 
-    await user.click(screen.getByRole("button", { name: "Sync session" }));
-
-    await waitFor(() => expect(requestSessionSync).toHaveBeenCalledWith(session.id));
-    expect(screen.getByRole("progressbar", { name: "Session sync: completed" })).toHaveAttribute(
-      "aria-valuenow",
-      "100",
-    );
+    expect(screen.getByRole("button", { name: "Reload sessions" })).toHaveTextContent("Reload");
+    expect(screen.queryByRole("button", { name: /Sync/i })).not.toBeInTheDocument();
 
     expect(screen.queryByRole("button", { name: "WA Runtime" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Disconnect WA Runtime" }));
@@ -271,51 +233,6 @@ describe("WorkspaceShell", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(sessionCombobox).toHaveFocus();
-  });
-
-  it("prevents duplicate sync runs and clears progress when the active session changes", async () => {
-    const user = userEvent.setup();
-    let resolveSync: ((run: RuntimeSyncRun) => void) | undefined;
-    const syncPromise = new Promise<RuntimeSyncRun>((resolve) => {
-      resolveSync = resolve;
-    });
-    const requestSessionSync = vi.fn().mockReturnValue(syncPromise);
-    const fakeApi = {
-      getSessionSyncRun: vi.fn(() => new Promise(() => undefined)),
-      listSessions: vi.fn(),
-      requestSessionSync,
-    } as unknown as RuntimeApi;
-
-    render(
-      <RuntimeConnectionProvider
-        createApi={() => fakeApi}
-        probeConnection={vi.fn().mockResolvedValue({
-          sessionCount: 2,
-          readySessions: 2,
-          sessions: [session, secondReadySession],
-        })}
-      >
-        <WorkspaceHarness />
-      </RuntimeConnectionProvider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
-    await user.click(await screen.findByRole("button", { name: "Sync session" }));
-
-    const startingButton = screen.getByRole("button", { name: "Starting full sync" });
-    expect(startingButton).toBeDisabled();
-    await user.click(startingButton);
-    expect(requestSessionSync).toHaveBeenCalledTimes(1);
-
-    await act(async () => resolveSync?.(pendingSync));
-    expect(await screen.findByRole("button", { name: "Sync in progress" })).toBeDisabled();
-    expect(screen.getByRole("progressbar", { name: "Session sync: pending" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("combobox", { name: "Active session" }));
-    await user.click(screen.getByRole("option", { name: /second-session/ }));
-
-    await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Sync session" })).toBeEnabled();
   });
 
   it("requires confirmation before disconnecting and restores focus after Cancel or Escape", async () => {

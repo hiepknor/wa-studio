@@ -33,12 +33,12 @@ function formatSyncTime(value: string | null | undefined): string {
   }).format(new Date(value));
 }
 
-function renderPage(pageId: WorkspacePageId) {
+function renderPage(pageId: WorkspacePageId, openGroups: () => void) {
   switch (pageId) {
     case "groups":
       return <GroupsScreen />;
     case "sessions":
-      return <SessionsScreen />;
+      return <SessionsScreen onOpenGroups={openGroups} />;
     default:
       throw new Error(`Workspace page is not implemented: ${pageId}`);
   }
@@ -145,7 +145,7 @@ export function WorkspaceShell() {
 
         <div className="workspace-body">
           <section aria-labelledby={`${activePage}-title`} className="workspace-content">
-            {renderPage(activePage)}
+            {renderPage(activePage, () => setActivePage("groups"))}
           </section>
         </div>
 

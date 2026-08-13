@@ -22,22 +22,17 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
   return (
     <section
       aria-label="Group filters"
-      className="groups-filter-panel"
+      className="data-filter-panel"
       id="group-list-filter-panel"
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        onClose();
-      }}
     >
-      <header className="groups-filter-panel-header">
+      <header className="data-filter-panel-header">
         <div>
           <strong>Filter groups</strong>
           <span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span>
         </div>
         <button
           aria-label="Close group filters"
-          className="groups-filter-panel-close"
+          className="data-filter-panel-close"
           onClick={onClose}
           type="button"
         >
@@ -45,10 +40,10 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
         </button>
       </header>
 
-      <div className="groups-filter-panel-body">
+      <div className="data-filter-panel-body">
         <fieldset>
           <legend>Send capability</legend>
-          <div className="groups-filter-options groups-filter-options-multi">
+          <div className="data-filter-options">
             {CAPABILITY_STATUS_OPTIONS.map((option) => (
               <label key={option.value}>
                 <input
@@ -64,7 +59,7 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
                   }))}
                   type="checkbox"
                 />
-                <span aria-hidden="true" className="groups-filter-option-check">
+                <span aria-hidden="true" className="data-filter-check">
                   <AppIcon name="check" size="xs" />
                 </span>
                 <span>{option.label}</span>
@@ -75,7 +70,7 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
 
         <fieldset>
           <legend>Freshness</legend>
-          <div className="groups-filter-options groups-filter-options-multi">
+          <div className="data-filter-options">
             {CAPABILITY_FRESHNESS_OPTIONS.map((option) => (
               <label key={option.value}>
                 <input
@@ -91,7 +86,7 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
                   }))}
                   type="checkbox"
                 />
-                <span aria-hidden="true" className="groups-filter-option-check">
+                <span aria-hidden="true" className="data-filter-check">
                   <AppIcon name="check" size="xs" />
                 </span>
                 <span>{option.label}</span>
@@ -102,7 +97,7 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
 
         <fieldset>
           <legend>Group state</legend>
-          <div className="groups-filter-options groups-filter-options-single">
+          <div className="data-filter-options data-filter-options-single">
             <label>
               <input
                 checked={state.isActive === undefined}

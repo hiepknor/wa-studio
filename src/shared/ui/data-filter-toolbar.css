@@ -1,0 +1,41 @@
+.data-filter-toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
+.data-filter-toolbar-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.data-filter-controls { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.data-filter-search-wrap { position: relative; width: clamp(280px, 34vw, 420px); }
+.data-filter-search { width: 100%; }
+.data-filter-search .text-field-control input { padding-right: 34px; border-color: rgb(255 255 255 / 9%); background: rgb(8 9 13 / 55%); font-size: 11px; }
+.data-filter-search input::-webkit-search-cancel-button { display: none; appearance: none; }
+.data-filter-search-clear { position: absolute; z-index: 1; top: 50%; right: 5px; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #686e7c; transform: translateY(-50%); }
+.data-filter-search-clear:hover { background: rgb(255 255 255 / 5%); color: #c8cbd4; }
+.data-filter-search-clear:focus-visible { color: #ddd9ff; outline: 1px solid var(--focus-border); box-shadow: 0 0 0 2px var(--focus-halo); }
+.data-filter-result-summary { flex: 0 0 auto; color: var(--dim); font-family: var(--font-mono); font-size: 9px; white-space: nowrap; }
+.data-filter-panel { width: min(620px, 100%); align-self: flex-start; border: 1px solid var(--border); border-radius: 8px; background: #0d0f14; box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%), 0 12px 28px rgb(0 0 0 / 14%); }
+.data-filter-panel-header { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 11px; }
+.data-filter-panel-header > div { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.data-filter-panel-header strong { color: #d9dce4; font-size: 11px; }
+.data-filter-panel-header span { color: var(--dim); font-size: 9px; }
+.data-filter-panel-close { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--dim); }
+.data-filter-panel-close:hover { background: rgb(255 255 255 / 5%); color: var(--foreground); }
+.data-filter-panel-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 4px 10px 10px; border-top: 1px solid rgb(255 255 255 / 6%); }
+.data-filter-panel fieldset { min-width: 0; margin: 0; padding: 9px 10px 5px; border: 0; }
+.data-filter-panel fieldset + fieldset { border-left: 1px solid rgb(255 255 255 / 6%); }
+.data-filter-panel legend { margin-bottom: 7px; color: #777c8b; font-size: 9px; font-weight: 650; letter-spacing: .055em; text-transform: uppercase; }
+.data-filter-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.data-filter-options label { position: relative; min-height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid rgb(255 255 255 / 8%); border-radius: 6px; color: #adb1bc; font-size: 10px; cursor: pointer; }
+.data-filter-options label:has(input:checked) { border-color: rgb(143 130 245 / 34%); background: var(--accent-soft); color: #ddd9ff; }
+.data-filter-options input { position: absolute; opacity: 0; pointer-events: none; }
+.data-filter-check { width: 12px; height: 12px; display: grid; place-items: center; border: 1px solid #545966; border-radius: 3px; color: transparent; }
+.data-filter-options input:checked + .data-filter-check { border-color: #8f82f5; background: #7568dd; color: white; }
+.data-filter-options-single input { position: static; width: 12px; height: 12px; margin: 0; opacity: 1; accent-color: #7568dd; pointer-events: auto; }
+.data-filter-summary { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px 6px 11px; border-top: 1px solid rgb(255 255 255 / 6%); }
+.data-filter-chips { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.data-filter-chip { min-height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid rgb(143 130 245 / 28%); border-radius: 6px; background: rgb(126 108 246 / 8%); color: #c9c3ff; font-size: 9px; white-space: nowrap; }
+.data-filter-summary-empty { color: var(--dim); font-size: 9px; }
+@media (max-width: 760px) {
+  .data-filter-toolbar-row { align-items: stretch; }
+  .data-filter-controls { flex: 1; }
+  .data-filter-search-wrap { width: 100%; }
+  .data-filter-result-summary { align-self: center; }
+  .data-filter-panel-body { grid-template-columns: 1fr; }
+  .data-filter-panel fieldset + fieldset { border-left: 0; border-top: 1px solid rgb(255 255 255 / 6%); }
+}

@@ -11,7 +11,7 @@ import {
 
 import { AppIcon, type AppIconName } from "./AppIcon";
 
-interface DropdownTriggerProps {
+export interface DropdownTriggerProps {
   "aria-controls": string;
   "aria-expanded": boolean;
   "aria-haspopup": "menu";
