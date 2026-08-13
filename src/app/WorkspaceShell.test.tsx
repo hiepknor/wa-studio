@@ -349,7 +349,17 @@ describe("WorkspaceShell", () => {
       .fn()
       .mockResolvedValueOnce({ data: [group], meta: { total: 21, limit: 20, offset: 0 } })
       .mockResolvedValueOnce({ data: [secondGroup], meta: { total: 21, limit: 20, offset: 20 } });
-    const getGroup = vi.fn().mockResolvedValue(groupDetail);
+    const refreshedDetail = {
+      ...groupDetail,
+      detailsSyncedAt: "2026-08-11T09:01:00.000Z",
+      sendCapability: {
+        ...groupDetail.sendCapability,
+        checkedAt: "2026-08-11T09:01:00.000Z",
+      },
+    };
+    const getGroup = vi.fn()
+      .mockResolvedValueOnce(groupDetail)
+      .mockResolvedValue(refreshedDetail);
     const listGroupMembers = vi.fn().mockResolvedValue(groupMemberPage);
     const requestGroupCapabilityRefresh = vi.fn().mockResolvedValue(undefined);
     const fakeApi = {
@@ -417,9 +427,11 @@ describe("WorkspaceShell", () => {
       session.id,
       group.id,
     ));
+    expect(screen.getByText("Capability refresh requested.")).toBeInTheDocument();
+    expect(screen.queryByText("Capability result updated.")).not.toBeInTheDocument();
     await waitFor(() => expect(getGroup).toHaveBeenCalledTimes(2));
     expect(listGroupMembers).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/WA Runtime is still processing/)).toBeInTheDocument();
+    expect(await screen.findByText("Capability result updated.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({

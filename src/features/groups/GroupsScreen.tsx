@@ -15,10 +15,19 @@ import { PageHeader } from "@/shared/ui/PageHeader";
 import type { StatusTone } from "@/shared/ui/StatusIndicator";
 import { StatusIndicator } from "@/shared/ui/StatusIndicator";
 import { TextField } from "@/shared/ui/TextField";
+import { pollCapabilityRefresh } from "./capability-refresh";
 import "./groups.css";
 
 const PAGE_SIZE = 20;
 const MEMBER_PAGE_SIZE = 25;
+
+type CapabilityRefreshState =
+  | "idle"
+  | "requesting"
+  | "pending"
+  | "completed"
+  | "timed-out"
+  | "failed";
 
 function capabilityTone(status: RuntimeGroup["sendCapability"]["status"]): StatusTone {
   if (status === "ALLOWED") return "success";
@@ -89,7 +98,8 @@ export function GroupsScreen() {
   const [detail, setDetail] = useState<RuntimeGroupDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [refreshingCapability, setRefreshingCapability] = useState(false);
+  const [capabilityRefreshState, setCapabilityRefreshState] =
+    useState<CapabilityRefreshState>("idle");
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
   const [capabilityNotice, setCapabilityNotice] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -104,7 +114,33 @@ export function GroupsScreen() {
   const detailRevision = useRef(0);
   const membersRevision = useRef(0);
   const capabilityRevision = useRef(0);
+  const capabilityAbortRef = useRef<AbortController | null>(null);
+  const capabilityTargetRef = useRef<{ sessionId: string; groupId: string } | null>(null);
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
+  capabilityTargetRef.current = selectedSessionId
+    && selectedGroup
+    && selectedGroup.sessionId === selectedSessionId
+    ? { sessionId: selectedSessionId, groupId: selectedGroup.id }
+    : null;
+  const refreshingCapability = capabilityRefreshState === "requesting"
+    || capabilityRefreshState === "pending";
+
+  const cancelCapabilityRefresh = useCallback(() => {
+    capabilityRevision.current += 1;
+    capabilityAbortRef.current?.abort();
+    capabilityAbortRef.current = null;
+  }, []);
+
+  const capabilityFlowIsCurrent = useCallback((
+    revision: number,
+    sessionId: string,
+    groupId: string,
+  ) => {
+    const target = capabilityTargetRef.current;
+    return revision === capabilityRevision.current
+      && target?.sessionId === sessionId
+      && target.groupId === groupId;
+  }, []);
 
   const loadGroups = useCallback(async (nextOffset: number) => {
     if (!selectedSessionId) return;
@@ -172,7 +208,7 @@ export function GroupsScreen() {
     listRevision.current += 1;
     detailRevision.current += 1;
     membersRevision.current += 1;
-    capabilityRevision.current += 1;
+    cancelCapabilityRefresh();
     setPage(null);
     setOffset(0);
     setFilter("");
@@ -181,7 +217,7 @@ export function GroupsScreen() {
     setDetail(null);
     setDetailLoading(false);
     setDetailError(null);
-    setRefreshingCapability(false);
+    setCapabilityRefreshState("idle");
     setCapabilityError(null);
     setCapabilityNotice(null);
     setCopyState("idle");
@@ -193,7 +229,9 @@ export function GroupsScreen() {
     setMembersError(null);
     setSyncedMemberTotal(null);
     void loadGroups(0);
-  }, [loadGroups]);
+  }, [cancelCapabilityRefresh, loadGroups]);
+
+  useEffect(() => () => cancelCapabilityRefresh(), [cancelCapabilityRefresh]);
 
   useEffect(() => {
     const normalizedQuery = memberFilter.trim();
@@ -222,14 +260,14 @@ export function GroupsScreen() {
   async function openGroup(group: RuntimeGroup, trigger: HTMLButtonElement) {
     if (!selectedSessionId) return;
     const revision = ++detailRevision.current;
-    capabilityRevision.current += 1;
+    cancelCapabilityRefresh();
     membersRevision.current += 1;
     detailTriggerRef.current = trigger;
     setSelectedGroup(group);
     setDetail(null);
     setDetailLoading(true);
     setDetailError(null);
-    setRefreshingCapability(false);
+    setCapabilityRefreshState("idle");
     setCapabilityError(null);
     setCapabilityNotice(null);
     setCopyState("idle");
@@ -255,12 +293,12 @@ export function GroupsScreen() {
   function closeDetail() {
     detailRevision.current += 1;
     membersRevision.current += 1;
-    capabilityRevision.current += 1;
+    cancelCapabilityRefresh();
     setSelectedGroup(null);
     setDetail(null);
     setDetailLoading(false);
     setDetailError(null);
-    setRefreshingCapability(false);
+    setCapabilityRefreshState("idle");
     setCapabilityError(null);
     setCapabilityNotice(null);
     setCopyState("idle");
@@ -278,39 +316,63 @@ export function GroupsScreen() {
       !selectedSessionId
       || !selectedGroup
       || selectedGroup.sessionId !== selectedSessionId
+      || !detail
       || refreshingCapability
     ) return;
-    const revision = ++capabilityRevision.current;
-    setRefreshingCapability(true);
+    cancelCapabilityRefresh();
+    const revision = capabilityRevision.current;
+    const controller = new AbortController();
+    capabilityAbortRef.current = controller;
+    const sessionId = selectedSessionId;
+    const groupId = selectedGroup.id;
+    const baseline = detail.sendCapability;
+    setCapabilityRefreshState("requesting");
     setCapabilityError(null);
     setCapabilityNotice(null);
     try {
-      await runtimeApi.requestGroupCapabilityRefresh(selectedSessionId, selectedGroup.id);
-      if (revision !== capabilityRevision.current) return;
-      setCapabilityNotice("Refresh queued. Checking for an updated result…");
+      await runtimeApi.requestGroupCapabilityRefresh(sessionId, groupId);
+      if (!capabilityFlowIsCurrent(revision, sessionId, groupId)) return;
+      setCapabilityRefreshState("pending");
+      setCapabilityNotice("Capability refresh requested.");
 
-      try {
-        const previousRevision = detail?.sendCapability.revision;
-        const nextDetail = await runtimeApi.getGroup(selectedSessionId, selectedGroup.id);
-        if (revision !== capabilityRevision.current) return;
-        setDetail(nextDetail);
-        setCapabilityNotice(
-          previousRevision !== undefined && nextDetail.sendCapability.revision > previousRevision
-            ? "Capability result updated."
-            : "Refresh queued. WA Runtime is still processing the request.",
-        );
-      } catch (error) {
-        if (revision === capabilityRevision.current) {
-          setCapabilityNotice("Refresh queued. The latest result is not available yet.");
-          setCapabilityError(errorMessage(error, "Could not read the latest capability result."));
+      const result = await pollCapabilityRefresh({
+        baseline,
+        signal: controller.signal,
+        read: () => runtimeApi.getGroup(sessionId, groupId),
+        onObservation: (nextDetail) => {
+          if (capabilityFlowIsCurrent(revision, sessionId, groupId)) setDetail(nextDetail);
+        },
+      });
+      if (
+        !capabilityFlowIsCurrent(revision, sessionId, groupId)
+        || result.status === "cancelled"
+      ) return;
+      if (result.status === "completed") {
+        setCapabilityRefreshState("completed");
+        setCapabilityNotice("Capability result updated.");
+      } else if (result.status === "failed") {
+        setCapabilityRefreshState("failed");
+        setCapabilityNotice(null);
+        setCapabilityError("WA Runtime could not refresh this capability.");
+      } else {
+        setCapabilityRefreshState("timed-out");
+        setCapabilityNotice("Refresh is still processing. Reopen or retry shortly.");
+        if (result.error) {
+          setCapabilityError(errorMessage(
+            result.error,
+            "Could not read the latest capability result.",
+          ));
         }
       }
     } catch (error) {
-      if (revision === capabilityRevision.current) {
+      if (capabilityFlowIsCurrent(revision, sessionId, groupId)) {
+        setCapabilityRefreshState("failed");
         setCapabilityError(errorMessage(error, "Could not refresh send capability."));
       }
     } finally {
-      if (revision === capabilityRevision.current) setRefreshingCapability(false);
+      if (capabilityFlowIsCurrent(revision, sessionId, groupId)) {
+        capabilityAbortRef.current = null;
+      }
     }
   }
 
@@ -478,7 +540,12 @@ export function GroupsScreen() {
               <InlineAlert title="Capability refresh issue">{capabilityError}</InlineAlert>
             )}
             {capabilityNotice && (
-              <InlineAlert title="Capability refresh" tone="success">{capabilityNotice}</InlineAlert>
+              <InlineAlert
+                title="Capability refresh"
+                tone={capabilityRefreshState === "completed" ? "success" : "warning"}
+              >
+                {capabilityNotice}
+              </InlineAlert>
             )}
 
             {detail && (
@@ -534,7 +601,7 @@ export function GroupsScreen() {
                     onClick={() => void refreshCapability()}
                     size="sm"
                   >
-                    Refresh capability
+                    {refreshingCapability ? "Refreshing capability…" : "Refresh capability"}
                   </Button>
                 </section>
 
