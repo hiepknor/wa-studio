@@ -11,10 +11,22 @@ export type RuntimeGroupPage = components["schemas"]["GroupListDto"];
 export type RuntimeGroupMember = components["schemas"]["GroupMemberDto"];
 export type RuntimeGroupMemberPage = components["schemas"]["GroupMemberListDto"];
 
+type RuntimeGroupListQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
+export type RuntimeGroupCapabilityStatus = NonNullable<
+  RuntimeGroupListQuery["capabilityStatus"]
+>[number];
+export type RuntimeGroupCapabilityFreshness = NonNullable<
+  RuntimeGroupListQuery["capabilityFreshness"]
+>[number];
+
 export interface RuntimeGroupListInput {
   sessionId: string;
   limit?: number;
   offset?: number;
+  query?: string;
+  capabilityStatus?: RuntimeGroupCapabilityStatus[];
+  capabilityFreshness?: RuntimeGroupCapabilityFreshness[];
+  isActive?: boolean;
 }
 
 export interface RuntimeGroupMemberListInput {
@@ -143,9 +155,25 @@ export class RuntimeApi {
     sessionId,
     limit = 25,
     offset = 0,
+    query,
+    capabilityStatus,
+    capabilityFreshness,
+    isActive,
   }: RuntimeGroupListInput): Promise<RuntimeGroupPage> {
+    const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/groups", {
-      params: { query: { sessionId, limit, offset } },
+      params: {
+        query: {
+          sessionId,
+          limit,
+          offset,
+          ...(normalizedQuery ? { query: normalizedQuery } : {}),
+          ...(capabilityStatus?.length ? { capabilityStatus } : {}),
+          ...(capabilityFreshness?.length ? { capabilityFreshness } : {}),
+          ...(isActive === undefined ? {} : { isActive }),
+        },
+      },
+      querySerializer: { array: { style: "form", explode: false } },
     });
     if (!result.response.ok || !result.data) {
       throw new RuntimeRequestError(

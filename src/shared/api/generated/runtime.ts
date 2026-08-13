@@ -79,7 +79,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List active groups from the Runtime read model */
+        /**
+         * Search and filter synchronized groups from the Runtime read model
+         * @description Results are ordered deterministically by group name and group ID. Search and filters are applied before pagination and meta.total counts the filtered dataset.
+         */
         get: operations["GroupController_list"];
         put?: never;
         post?: never;
@@ -481,14 +484,15 @@ export interface components {
             syncedAt: string;
             sendCapability: components["schemas"]["GroupSendCapabilityDto"];
         };
-        PageMetaDto: {
+        GroupListPageMetaDto: {
+            /** @description Total synchronized group records matching all current search and filter predicates */
             total: number;
             limit: number;
             offset: number;
         };
         GroupListDto: {
             data: components["schemas"]["GroupDto"][];
-            meta: components["schemas"]["PageMetaDto"];
+            meta: components["schemas"]["GroupListPageMetaDto"];
         };
         GroupDetailDto: {
             /** Format: uuid */
@@ -563,6 +567,11 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        PageMetaDto: {
+            total: number;
+            limit: number;
+            offset: number;
         };
         CampaignListDto: {
             data: components["schemas"]["CampaignDto"][];
@@ -835,6 +844,14 @@ export interface operations {
                 offset?: number;
                 /** @description Gateway session owning the read model */
                 sessionId: string;
+                /** @description Case-insensitive literal substring search across group name, group ID, and description. Whitespace is trimmed; an empty value disables search. */
+                query?: string;
+                /** @description Comma-separated capability statuses. Values are ORed; this filter is ANDed with other filters. */
+                capabilityStatus?: ("ALLOWED" | "DENIED" | "UNKNOWN")[];
+                /** @description Comma-separated freshness values. CURRENT means no capability invalidation is pending; STALE means invalidated. Values are ORed. */
+                capabilityFreshness?: ("CURRENT" | "STALE")[];
+                /** @description Filter active or inactive synchronized groups. Omission preserves the active-only list behavior. */
+                isActive?: boolean;
             };
             header?: never;
             path?: never;

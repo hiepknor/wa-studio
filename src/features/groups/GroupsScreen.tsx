@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import type {
   RuntimeGroup,
+  RuntimeGroupCapabilityFreshness,
+  RuntimeGroupCapabilityStatus,
   RuntimeGroupDetail,
   RuntimeGroupMemberPage,
   RuntimeGroupPage,
@@ -22,6 +24,65 @@ import "./groups.css";
 
 const PAGE_SIZE = 20;
 const MEMBER_PAGE_SIZE = 25;
+
+interface GroupListRequestState {
+  sessionId: string | null;
+  query: string;
+  capabilityStatuses: RuntimeGroupCapabilityStatus[];
+  capabilityFreshness: RuntimeGroupCapabilityFreshness[];
+  isActive: boolean | undefined;
+  offset: number;
+}
+
+interface GroupListState extends GroupListRequestState {
+  inputQuery: string;
+}
+
+const CAPABILITY_STATUS_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: RuntimeGroupCapabilityStatus;
+}> = [
+  { label: "Allowed", value: "ALLOWED" },
+  { label: "Denied", value: "DENIED" },
+  { label: "Unknown", value: "UNKNOWN" },
+];
+
+const CAPABILITY_FRESHNESS_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: RuntimeGroupCapabilityFreshness;
+}> = [
+  { label: "Current", value: "CURRENT" },
+  { label: "Stale", value: "STALE" },
+];
+
+function initialGroupListState(sessionId: string | null): GroupListState {
+  return {
+    sessionId,
+    inputQuery: "",
+    query: "",
+    capabilityStatuses: [],
+    capabilityFreshness: [],
+    isActive: undefined,
+    offset: 0,
+  };
+}
+
+function toggleFilterValue<T extends string>(values: T[], value: T): T[] {
+  return values.includes(value)
+    ? values.filter((candidate) => candidate !== value)
+    : [...values, value];
+}
+
+function groupListRequestKey(state: GroupListRequestState): string {
+  return JSON.stringify({
+    sessionId: state.sessionId,
+    query: state.query,
+    capabilityStatuses: state.capabilityStatuses,
+    capabilityFreshness: state.capabilityFreshness,
+    isActive: state.isActive,
+    offset: state.offset,
+  });
+}
 
 type CapabilityRefreshState =
   | "idle"
@@ -74,8 +135,10 @@ export function GroupsScreen() {
   const runtimeApi = connected.api;
   const selectedSession = connected.sessions.find(({ id }) => id === selectedSessionId) ?? null;
   const [page, setPage] = useState<RuntimeGroupPage | null>(null);
-  const [offset, setOffset] = useState(0);
-  const [filter, setFilter] = useState("");
+  const [listState, setListState] = useState<GroupListState>(() =>
+    initialGroupListState(selectedSessionId)
+  );
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<RuntimeGroup | null>(null);
@@ -95,6 +158,7 @@ export function GroupsScreen() {
   const [membersError, setMembersError] = useState<string | null>(null);
   const [syncedMemberTotal, setSyncedMemberTotal] = useState<number | null>(null);
   const listRevision = useRef(0);
+  const listTargetRef = useRef("");
   const detailRevision = useRef(0);
   const membersRevision = useRef(0);
   const capabilityRevision = useRef(0);
@@ -106,6 +170,7 @@ export function GroupsScreen() {
     && selectedGroup.sessionId === selectedSessionId
     ? { sessionId: selectedSessionId, groupId: selectedGroup.id }
     : null;
+  listTargetRef.current = groupListRequestKey(listState);
   const refreshingCapability = capabilityRefreshState === "requesting"
     || capabilityRefreshState === "pending";
 
@@ -126,26 +191,46 @@ export function GroupsScreen() {
       && target.groupId === groupId;
   }, []);
 
-  const loadGroups = useCallback(async (nextOffset: number) => {
-    if (!selectedSessionId) return;
+  const loadGroups = useCallback(async (state: GroupListRequestState) => {
+    if (!state.sessionId || state.sessionId !== selectedSessionId) return;
     const revision = ++listRevision.current;
+    const requestKey = groupListRequestKey(state);
     setLoading(true);
     setListError(null);
     try {
       const nextPage = await runtimeApi.listGroups({
-        sessionId: selectedSessionId,
+        sessionId: state.sessionId,
         limit: PAGE_SIZE,
-        offset: nextOffset,
+        offset: state.offset,
+        ...(state.query ? { query: state.query } : {}),
+        ...(state.capabilityStatuses.length
+          ? { capabilityStatus: state.capabilityStatuses }
+          : {}),
+        ...(state.capabilityFreshness.length
+          ? { capabilityFreshness: state.capabilityFreshness }
+          : {}),
+        ...(state.isActive === undefined ? {} : { isActive: state.isActive }),
       });
-      if (revision !== listRevision.current) return;
+      if (revision !== listRevision.current || requestKey !== listTargetRef.current) return;
+
+      if (state.offset > 0 && nextPage.data.length === 0 && nextPage.meta.total <= state.offset) {
+        const lastOffset = nextPage.meta.total === 0
+          ? 0
+          : Math.floor((nextPage.meta.total - 1) / PAGE_SIZE) * PAGE_SIZE;
+        setListState((current) => ({ ...current, offset: lastOffset }));
+        if (nextPage.meta.total === 0) setPage(nextPage);
+        return;
+      }
+
       setPage(nextPage);
-      setOffset(nextOffset);
     } catch (error) {
-      if (revision === listRevision.current) {
+      if (revision === listRevision.current && requestKey === listTargetRef.current) {
         setListError(errorMessage(error, "Could not load groups."));
       }
     } finally {
-      if (revision === listRevision.current) setLoading(false);
+      if (revision === listRevision.current && requestKey === listTargetRef.current) {
+        setLoading(false);
+      }
     }
   }, [runtimeApi, selectedSessionId]);
 
@@ -189,13 +274,14 @@ export function GroupsScreen() {
   }, [runtimeApi]);
 
   useEffect(() => {
+    if (listState.sessionId === selectedSessionId) return;
     listRevision.current += 1;
     detailRevision.current += 1;
     membersRevision.current += 1;
     cancelCapabilityRefresh();
     setPage(null);
-    setOffset(0);
-    setFilter("");
+    setListState(initialGroupListState(selectedSessionId));
+    setFiltersOpen(false);
     setLoading(false);
     setSelectedGroup(null);
     setDetail(null);
@@ -212,10 +298,53 @@ export function GroupsScreen() {
     setMembersLoading(false);
     setMembersError(null);
     setSyncedMemberTotal(null);
-    void loadGroups(0);
-  }, [cancelCapabilityRefresh, loadGroups]);
+  }, [cancelCapabilityRefresh, listState.sessionId, selectedSessionId]);
+
+  useEffect(() => {
+    const {
+      sessionId,
+      query,
+      capabilityStatuses,
+      capabilityFreshness,
+      isActive,
+      offset,
+    } = listState;
+    if (sessionId !== selectedSessionId) return;
+    void loadGroups({
+      sessionId,
+      query,
+      capabilityStatuses,
+      capabilityFreshness,
+      isActive,
+      offset,
+    });
+  }, [
+    listState.sessionId,
+    listState.query,
+    listState.capabilityStatuses,
+    listState.capabilityFreshness,
+    listState.isActive,
+    listState.offset,
+    loadGroups,
+    selectedSessionId,
+  ]);
 
   useEffect(() => () => cancelCapabilityRefresh(), [cancelCapabilityRefresh]);
+
+  useEffect(() => {
+    const normalizedQuery = listState.inputQuery.trim();
+    const timeout = window.setTimeout(() => {
+      setListState((current) => {
+        if (
+          current.sessionId !== listState.sessionId
+          || current.inputQuery !== listState.inputQuery
+          || current.query === normalizedQuery
+        ) return current;
+        return { ...current, query: normalizedQuery, offset: 0 };
+      });
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [listState.inputQuery, listState.sessionId]);
 
   useEffect(() => {
     const normalizedQuery = memberFilter.trim();
@@ -230,16 +359,6 @@ export function GroupsScreen() {
     if (!selectedSessionId || !selectedGroup || selectedGroup.sessionId !== selectedSessionId) return;
     void loadMembers(selectedSessionId, selectedGroup.id, memberOffset, memberQuery);
   }, [loadMembers, memberOffset, memberQuery, selectedGroup, selectedSessionId]);
-
-  const filteredGroups = useMemo(() => {
-    const query = filter.trim().toLocaleLowerCase();
-    if (!query) return page?.data ?? [];
-    return (page?.data ?? []).filter((group) =>
-      [group.name, group.id, group.description]
-        .filter(Boolean)
-        .some((value) => value?.toLocaleLowerCase().includes(query)),
-    );
-  }, [filter, page]);
 
   async function openGroup(group: RuntimeGroup, trigger: HTMLButtonElement) {
     if (!selectedSessionId) return;
@@ -360,11 +479,23 @@ export function GroupsScreen() {
     }
   }
 
-  const total = page?.meta.total ?? 0;
+  const listContextIsCurrent = listState.sessionId === selectedSessionId;
+  const visiblePage = listContextIsCurrent ? page : null;
+  const offset = listState.offset;
+  const hasListCriteria = Boolean(
+    listState.query
+    || listState.capabilityStatuses.length
+    || listState.capabilityFreshness.length
+    || listState.isActive !== undefined
+  );
+  const activeFilterCount = listState.capabilityStatuses.length
+    + listState.capabilityFreshness.length
+    + (listState.isActive === undefined ? 0 : 1);
+  const total = visiblePage?.meta.total ?? 0;
   const firstItem = total === 0 ? 0 : offset + 1;
-  const lastItem = Math.min(offset + (page?.data.length ?? 0), total);
+  const lastItem = Math.min(offset + (visiblePage?.data.length ?? 0), total);
   const canGoBack = offset > 0 && !loading;
-  const canGoForward = offset + (page?.meta.limit ?? PAGE_SIZE) < total && !loading;
+  const canGoForward = offset + (visiblePage?.meta.limit ?? PAGE_SIZE) < total && !loading;
   const memberTotal = memberPage?.meta.total ?? 0;
   const memberPageOffset = memberPage?.meta.offset ?? memberOffset;
   const memberFirstItem = memberTotal === 0 ? 0 : memberPageOffset + 1;
@@ -387,6 +518,18 @@ export function GroupsScreen() {
     }
   }
 
+  function clearListCriteria() {
+    setListState((current) => ({
+      ...current,
+      inputQuery: "",
+      query: "",
+      capabilityStatuses: [],
+      capabilityFreshness: [],
+      isActive: undefined,
+      offset: 0,
+    }));
+  }
+
   return (
     <div className="groups-screen stack stack-lg">
       <PageHeader
@@ -396,7 +539,7 @@ export function GroupsScreen() {
             disabled={!selectedSessionId}
             icon="refresh"
             loading={loading}
-            onClick={() => void loadGroups(offset)}
+            onClick={() => void loadGroups(listState)}
           >
             Reload groups
           </Button>
@@ -415,26 +558,130 @@ export function GroupsScreen() {
       <>
         <div className="data-table-container groups-list-panel">
           <div className="data-table-toolbar groups-toolbar">
-            <TextField
-              containerClassName="groups-filter"
-              icon="search"
-              id="group-filter"
-              label="Filter groups on this page"
-              labelHidden
-              onChange={(event) => setFilter(event.currentTarget.value)}
-              placeholder="Filter this page"
-              size="sm"
-              type="search"
-              value={filter}
-            />
-            <span className="groups-range" aria-live="polite">
-              {firstItem}–{lastItem} of {total}
-            </span>
+            <div className="groups-toolbar-row">
+              <div className="groups-search-controls">
+                <TextField
+                  containerClassName="groups-filter"
+                  icon="search"
+                  id="group-filter"
+                  label="Search all synchronized groups"
+                  labelHidden
+                  onChange={(event) => {
+                    const inputQuery = event.currentTarget.value;
+                    setListState((current) => ({ ...current, inputQuery }));
+                  }}
+                  placeholder="Search name, ID, or description"
+                  size="sm"
+                  type="search"
+                  value={listState.inputQuery}
+                />
+                <Button
+                  aria-controls="group-list-filter-panel"
+                  aria-expanded={filtersOpen}
+                  icon="settings"
+                  onClick={() => setFiltersOpen((open) => !open)}
+                  size="sm"
+                >
+                  Filters{activeFilterCount ? ` · ${activeFilterCount}` : ""}
+                </Button>
+              </div>
+              <span className="groups-range" aria-live="polite">
+                {firstItem}–{lastItem} of {total}{hasListCriteria ? " matches" : ""}
+              </span>
+            </div>
+
+            {filtersOpen && (
+              <div className="groups-filter-panel" id="group-list-filter-panel">
+                <fieldset>
+                  <legend>Send capability</legend>
+                  {CAPABILITY_STATUS_OPTIONS.map((option) => (
+                    <label key={option.value}>
+                      <input
+                        checked={listState.capabilityStatuses.includes(option.value)}
+                        onChange={() => setListState((current) => ({
+                          ...current,
+                          capabilityStatuses: toggleFilterValue(
+                            current.capabilityStatuses,
+                            option.value,
+                          ),
+                          offset: 0,
+                        }))}
+                        type="checkbox"
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  ))}
+                </fieldset>
+                <fieldset>
+                  <legend>Capability freshness</legend>
+                  {CAPABILITY_FRESHNESS_OPTIONS.map((option) => (
+                    <label key={option.value}>
+                      <input
+                        checked={listState.capabilityFreshness.includes(option.value)}
+                        onChange={() => setListState((current) => ({
+                          ...current,
+                          capabilityFreshness: toggleFilterValue(
+                            current.capabilityFreshness,
+                            option.value,
+                          ),
+                          offset: 0,
+                        }))}
+                        type="checkbox"
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  ))}
+                </fieldset>
+                <fieldset>
+                  <legend>Group state</legend>
+                  <label>
+                    <input
+                      checked={listState.isActive === undefined}
+                      name="group-state-filter"
+                      onChange={() => setListState((current) => ({
+                        ...current,
+                        isActive: undefined,
+                        offset: 0,
+                      }))}
+                      type="radio"
+                    />
+                    <span>Active</span>
+                  </label>
+                  <label>
+                    <input
+                      checked={listState.isActive === false}
+                      name="group-state-filter"
+                      onChange={() => setListState((current) => ({
+                        ...current,
+                        isActive: false,
+                        offset: 0,
+                      }))}
+                      type="radio"
+                    />
+                    <span>Inactive</span>
+                  </label>
+                </fieldset>
+              </div>
+            )}
+
+            {hasListCriteria && (
+              <div className="groups-active-filters" aria-label="Active group search and filters">
+                {listState.query && <Badge>Search: {listState.query}</Badge>}
+                {listState.capabilityStatuses.map((status) => (
+                  <Badge key={status}>Capability: {status.toLocaleLowerCase()}</Badge>
+                ))}
+                {listState.capabilityFreshness.map((freshness) => (
+                  <Badge key={freshness}>Freshness: {freshness.toLocaleLowerCase()}</Badge>
+                ))}
+                {listState.isActive === false && <Badge>Inactive groups</Badge>}
+                <Button onClick={clearListCriteria} size="sm" variant="ghost">Clear all</Button>
+              </div>
+            )}
           </div>
 
           {listError && (
             <InlineAlert
-              action={<Button onClick={() => void loadGroups(offset)} size="sm">Retry</Button>}
+              action={<Button onClick={() => void loadGroups(listState)} size="sm">Retry</Button>}
               className="data-table-error"
               title="Could not load groups"
             >
@@ -462,17 +709,19 @@ export function GroupsScreen() {
                 </tr>
               </thead>
               <tbody>
-                {!page && loading ? (
+                {!visiblePage && loading ? (
                   <tr><td className="data-table-empty" colSpan={5}>Loading groups…</td></tr>
-                ) : !page && listError ? (
+                ) : !visiblePage && listError ? (
                   <tr><td className="data-table-empty" colSpan={5}>Groups are unavailable.</td></tr>
-                ) : filteredGroups.length === 0 ? (
+                ) : (visiblePage?.data.length ?? 0) === 0 ? (
                   <tr>
                     <td className="data-table-empty" colSpan={5}>
-                      {filter ? "No groups match this page filter." : "No groups were returned for this session."}
+                      {hasListCriteria
+                        ? "No groups match this search or filters."
+                        : "No groups were returned for this session."}
                     </td>
                   </tr>
-                ) : filteredGroups.map((group) => (
+                ) : visiblePage?.data.map((group) => (
                   <tr data-selected={group.id === selectedGroup?.id || undefined} key={group.id}>
                     <td className="data-cell-primary">
                       <div className="stack stack-xs groups-name-cell">
@@ -506,10 +755,16 @@ export function GroupsScreen() {
           <div className="groups-pagination">
             <span>Page {total === 0 ? 0 : Math.floor(offset / PAGE_SIZE) + 1}</span>
             <div>
-              <Button disabled={!canGoBack} onClick={() => void loadGroups(Math.max(0, offset - PAGE_SIZE))} size="sm">
+              <Button disabled={!canGoBack} onClick={() => setListState((current) => ({
+                ...current,
+                offset: Math.max(0, current.offset - PAGE_SIZE),
+              }))} size="sm">
                 Previous
               </Button>
-              <Button disabled={!canGoForward} onClick={() => void loadGroups(offset + PAGE_SIZE)} size="sm">
+              <Button disabled={!canGoForward} onClick={() => setListState((current) => ({
+                ...current,
+                offset: current.offset + PAGE_SIZE,
+              }))} size="sm">
                 Next
               </Button>
             </div>

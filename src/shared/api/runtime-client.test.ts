@@ -194,6 +194,71 @@ describe("RuntimeApi", () => {
     );
   });
 
+  it("serializes global group search and filters using the Runtime contract", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      data: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await api.listGroups({
+      sessionId: "session id",
+      limit: 20,
+      offset: 0,
+      query: "  release room  ",
+      capabilityStatus: ["DENIED", "UNKNOWN"],
+      capabilityFreshness: ["CURRENT", "STALE"],
+      isActive: false,
+    });
+
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.url).toBe(
+      "http://127.0.0.1:3100/api/v1/groups?sessionId=session%20id&limit=20&offset=0&query=release%20room&capabilityStatus=DENIED,UNKNOWN&capabilityFreshness=CURRENT,STALE&isActive=false",
+    );
+  });
+
+  it("omits empty group search and filter values", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      data: [],
+      meta: { total: 0, limit: 25, offset: 0 },
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await api.listGroups({
+      sessionId: "session id",
+      query: "   ",
+      capabilityStatus: [],
+      capabilityFreshness: [],
+    });
+
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.url).toBe(
+      "http://127.0.0.1:3100/api/v1/groups?sessionId=session%20id&limit=25&offset=0",
+    );
+  });
+
+  it.each([400, 401, 404])(
+    "preserves HTTP %s when group-list validation or access fails",
+    async (status) => {
+      const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(null, { status }),
+      );
+      const api = new RuntimeApi(
+        { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+        runtimeFetch,
+      );
+
+      await expect(api.listGroups({ sessionId: "session id" }))
+        .rejects.toThrow(`Could not load groups (HTTP ${status}).`);
+    },
+  );
+
   it("preserves the member endpoint HTTP status in request errors", async () => {
     const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(null, { status: 404 }),
