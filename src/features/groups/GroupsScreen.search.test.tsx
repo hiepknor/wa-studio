@@ -390,7 +390,7 @@ describe("GroupsScreen global search and filters", () => {
     }));
     expect(await screen.findByText("Backend match")).toBeInTheDocument();
     expect(screen.getByText("1–1 of 3 matches")).toBeInTheDocument();
-    expect(screen.getByText("Page 1")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 1")).toBeInTheDocument();
   });
 
   it("shows filtered empty results and clamps an out-of-range page", async () => {
@@ -427,6 +427,7 @@ describe("GroupsScreen global search and filters", () => {
     expect(await screen.findByText("No groups match this search or filters."))
       .toBeInTheDocument();
     expect(screen.getByText("0–0 of 0 matches")).toBeInTheDocument();
+    expect(screen.getByText("Page 0 of 0")).toBeInTheDocument();
   });
 
   it("ignores stale search and previous-session responses", async () => {

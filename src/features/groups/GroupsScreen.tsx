@@ -435,6 +435,10 @@ export function GroupsScreen() {
     || listState.isActive !== undefined
   );
   const total = visiblePage?.meta.total ?? 0;
+  const pageLimit = visiblePage?.meta.limit ?? PAGE_SIZE;
+  const pageOffset = visiblePage?.meta.offset ?? offset;
+  const pageCount = total === 0 ? 0 : Math.ceil(total / pageLimit);
+  const pageNumber = total === 0 ? 0 : Math.floor(pageOffset / pageLimit) + 1;
   const firstItem = total === 0 ? 0 : offset + 1;
   const lastItem = Math.min(offset + (visiblePage?.data.length ?? 0), total);
   const canGoBack = offset > 0 && !loading;
@@ -577,7 +581,7 @@ export function GroupsScreen() {
           </div>
 
           <div className="groups-pagination">
-            <span>Page {total === 0 ? 0 : Math.floor(offset / PAGE_SIZE) + 1}</span>
+            <span>Page {pageNumber} of {pageCount}</span>
             <div>
               <Button disabled={!canGoBack} onClick={() => setListState((current) => ({
                 ...current,
