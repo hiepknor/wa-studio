@@ -24,4 +24,12 @@ describe("Button", () => {
     expect(button).toHaveAttribute("aria-busy", "true");
     expect(button).toHaveTextContent("Refresh");
   });
+
+  it("does not render an empty label for icon-only buttons", () => {
+    render(<Button aria-label="Disconnect" icon="disconnect" />);
+
+    const button = screen.getByRole("button", { name: "Disconnect" });
+    expect(button).toHaveTextContent("");
+    expect(button.querySelector(".button-label")).not.toBeInTheDocument();
+  });
 });

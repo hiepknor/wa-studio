@@ -162,8 +162,11 @@ describe("WorkspaceShell", () => {
     expect(screen.getByRole("combobox", { name: "Active session" })).toHaveTextContent(
       /dev-session.*ready/,
     );
-    expect(screen.getByText("Operational")).toBeInTheDocument();
-    expect(screen.getByText("1 Gateway session")).toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    const statusBar = screen.getByLabelText("Workspace status");
+    expect(within(statusBar).getByText("Connected to http://127.0.0.1:3100")).toBeInTheDocument();
+    expect(within(statusBar).queryByText(/session:/i)).not.toBeInTheDocument();
+    expect(screen.getByText("1 session")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Groups" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sessions" })).toHaveAttribute(
       "aria-current",
@@ -188,8 +191,11 @@ describe("WorkspaceShell", () => {
       "100",
     );
 
-    await user.click(screen.getByRole("button", { name: "WA Runtime" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Disconnect WA Runtime" }));
+    expect(screen.queryByRole("button", { name: "WA Runtime" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Disconnect WA Runtime" }));
+    const disconnectDialog = screen.getByRole("dialog", { name: "Disconnect from WA Runtime?" });
+    expect(disconnectDialog).toHaveTextContent("does not stop WA Runtime");
+    await user.click(within(disconnectDialog).getByRole("button", { name: "Disconnect" }));
     expect(screen.getByRole("button", { name: "Connect test WA Runtime" })).toBeInTheDocument();
     expect(screen.getByText("Selected: none")).toBeInTheDocument();
   });
@@ -221,8 +227,8 @@ describe("WorkspaceShell", () => {
 
     await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
     await user.click(await screen.findByRole("button", { name: "Reload sessions" }));
-    await user.click(screen.getByRole("button", { name: "WA Runtime" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Disconnect WA Runtime" }));
+    await user.click(screen.getByRole("button", { name: "Disconnect WA Runtime" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
 
     await act(async () => resolveRefresh?.([session]));
 
@@ -257,8 +263,8 @@ describe("WorkspaceShell", () => {
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
 
     expect(sessionCombobox).toHaveTextContent(/standby-session.*disconnected/);
-    expect(screen.getByText("Attention required")).toBeInTheDocument();
-    expect(screen.getByText("2 Gateway sessions")).toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText("2 sessions")).toBeInTheDocument();
 
     await user.click(sessionCombobox);
     expect(screen.getByRole("listbox", { name: "Gateway sessions" })).toBeInTheDocument();
@@ -312,7 +318,7 @@ describe("WorkspaceShell", () => {
     expect(screen.getByRole("button", { name: "Sync session" })).toBeEnabled();
   });
 
-  it("supports keyboard focus, Escape, and outside dismissal for the Runtime menu", async () => {
+  it("requires confirmation before disconnecting and restores focus after Cancel or Escape", async () => {
     const user = userEvent.setup();
     const fakeApi = {
       getSessionSyncRun: vi.fn(),
@@ -334,19 +340,18 @@ describe("WorkspaceShell", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
-    const runtimeButton = await screen.findByRole("button", { name: "WA Runtime" });
-    runtimeButton.focus();
-    await user.keyboard("{ArrowDown}");
-
-    expect(screen.getByRole("menuitem", { name: "Disconnect WA Runtime" })).toHaveFocus();
+    const disconnectButton = await screen.findByRole("button", { name: "Disconnect WA Runtime" });
+    await user.click(disconnectButton);
+    const dialog = screen.getByRole("dialog", { name: "Disconnect from WA Runtime?" });
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    expect(runtimeButton).toHaveFocus();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(disconnectButton).toHaveFocus();
 
-    await user.click(runtimeButton);
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-    await user.click(screen.getByRole("heading", { name: "Sessions" }));
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await user.click(disconnectButton);
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("heading", { name: "Sessions" })).toBeInTheDocument();
+    expect(disconnectButton).toHaveFocus();
   });
 
   it("browses paginated groups, inspects members, and queues capability refresh", async () => {

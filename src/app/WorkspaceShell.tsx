@@ -11,13 +11,10 @@ import { SessionsScreen } from "@/features/sessions/SessionsScreen";
 import { GroupsScreen } from "@/features/groups/GroupsScreen";
 import { AppIcon, type AppIconName } from "@/shared/ui/AppIcon";
 import { BrandMark } from "@/shared/ui/BrandMark";
+import { Button } from "@/shared/ui/Button";
+import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
-import {
-  DropdownMenu,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@/shared/ui/DropdownMenu";
-import { StatusDot, StatusIndicator, type StatusTone } from "@/shared/ui/StatusIndicator";
+import { StatusDot, StatusIndicator } from "@/shared/ui/StatusIndicator";
 
 const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
   activity: "activity",
@@ -27,13 +24,6 @@ const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
   sessions: "sessions",
   settings: "settings",
 };
-
-function sessionTone(status: string | undefined): StatusTone {
-  if (status === "ready") return "success";
-  if (status === "failed" || status === "disconnected") return "danger";
-  if (status === "initializing" || status === "authenticating") return "warning";
-  return "neutral";
-}
 
 function formatSyncTime(value: string | null | undefined): string {
   if (!value) return "not synced";
@@ -62,11 +52,12 @@ export function WorkspaceShell() {
     selectSession,
   } = useRuntimeConnection();
   const [activePage, setActivePage] = useState<WorkspacePageId>(DEFAULT_WORKSPACE_PAGE);
+  const [disconnectConfirmationOpen, setDisconnectConfirmationOpen] = useState(false);
   if (!connected) throw new Error("WorkspaceShell requires a Runtime connection");
 
   const selectedSession =
     connected.sessions.find((session) => session.id === selectedSessionId) ?? null;
-  const sessionCountLabel = `${connected.sessions.length} Gateway ${
+  const sessionCountLabel = `${connected.sessions.length} ${
     connected.sessions.length === 1 ? "session" : "sessions"
   }`;
   const activePageLabel = WORKSPACE_SECTIONS.flatMap((section) => section.pages).find(
@@ -113,12 +104,24 @@ export function WorkspaceShell() {
           ))}
         </nav>
 
-        <div className="workspace-runtime-summary">
-          <span className="workspace-runtime-label">WA Runtime status</span>
-          <StatusIndicator glow tone={sessionTone(selectedSession?.status)}>
-            {selectedSession?.status === "ready" ? "Operational" : "Attention required"}
-          </StatusIndicator>
-          <span className="workspace-runtime-meta">{sessionCountLabel}</span>
+        <div aria-label="WA Runtime connection" className="workspace-runtime-summary">
+          <div className="workspace-runtime-copy">
+            <span className="workspace-runtime-label">WA Runtime</span>
+            <div className="workspace-runtime-state">
+              <StatusIndicator glow tone="success">Connected</StatusIndicator>
+              <span aria-hidden="true" className="workspace-runtime-divider">·</span>
+              <span className="workspace-runtime-meta">{sessionCountLabel}</span>
+            </div>
+          </div>
+          <Button
+            aria-label="Disconnect WA Runtime"
+            className="workspace-runtime-disconnect"
+            icon="disconnect"
+            onClick={() => setDisconnectConfirmationOpen(true)}
+            size="sm"
+            title="Disconnect WA Runtime"
+            variant="danger"
+          />
         </div>
       </aside>
 
@@ -137,26 +140,6 @@ export function WorkspaceShell() {
               selectedSessionId={selectedSessionId}
               sessions={connected.sessions}
             />
-
-            <DropdownMenu
-              ariaLabel="WA Runtime connection"
-              trigger={(triggerProps) => (
-                <button className="workspace-runtime-button" {...triggerProps} type="button">
-                  <StatusDot glow tone={sessionTone(selectedSession?.status)} />
-                  <span className="workspace-runtime-text">WA Runtime</span>
-                  <AppIcon className="workspace-runtime-chevron" name="chevron-down" size="xs" />
-                </button>
-              )}
-            >
-              <div className="runtime-menu-context" role="presentation">
-                <span>WA Runtime endpoint</span>
-                <code>{connected.profile.baseUrl}</code>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="button-danger" onSelect={disconnect}>
-                Disconnect WA Runtime
-              </DropdownMenuItem>
-            </DropdownMenu>
           </div>
         </header>
 
@@ -166,14 +149,25 @@ export function WorkspaceShell() {
           </section>
         </div>
 
-        <footer className="status-bar">
+        <footer aria-label="Workspace status" className="status-bar">
           <span><StatusDot glow tone="success" />Connected to {connected.profile.baseUrl}</span>
-          <span className="status-bar-session">session: {selectedSession?.name ?? "none"}</span>
           <span>Last sync: {formatSyncTime(selectedSession?.syncedAt)}</span>
         </footer>
         </div>
 
         <DrawerHost className="workspace-drawer-host" />
+        <ConfirmationDialog
+          body="WA Studio will clear the current connection and in-memory credentials. This does not stop WA Runtime or any sync already running in the background."
+          confirmLabel="Disconnect"
+          confirmVariant="danger"
+          onCancel={() => setDisconnectConfirmationOpen(false)}
+          onConfirm={() => {
+            setDisconnectConfirmationOpen(false);
+            disconnect();
+          }}
+          open={disconnectConfirmationOpen}
+          title="Disconnect from WA Runtime?"
+        />
       </main>
     </DrawerProvider>
   );

@@ -146,9 +146,26 @@ describe("GroupsScreen Reload and Sync", () => {
     const menu = await connectAndOpenMenu(user);
     await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
     const dialog = screen.getByRole("dialog", { name: "Sync groups and members?" });
+    expect(dialog).toHaveTextContent("for prod-session from OpenWA");
     expect(dialog).toHaveTextContent("Large sessions may take several minutes");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(requestSessionSync).not.toHaveBeenCalled();
+  });
+
+  it("does not label automatic list loading as a manual reload", async () => {
+    const user = userEvent.setup();
+    let resolveList!: (value: RuntimeGroupPage) => void;
+    const listGroups = vi.fn().mockReturnValue(new Promise<RuntimeGroupPage>((resolve) => {
+      resolveList = resolve;
+    }));
+    renderGroups({ listGroups });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    const trigger = await screen.findByRole("button", { name: "Update groups" });
+    expect(trigger).toHaveTextContent("Update");
+    expect(trigger).not.toHaveTextContent("Reloading");
+    resolveList(page);
+    await waitFor(() => expect(listGroups).toHaveBeenCalledOnce());
   });
 
   it("confirms the active session, polls the returned run, then reloads sessions and groups", async () => {
@@ -187,7 +204,9 @@ describe("GroupsScreen Reload and Sync", () => {
     let menu = await connectAndOpenMenu(user);
     await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
-    expect(await screen.findByText("Sync failed. Retry when the Runtime is ready.")).toBeInTheDocument();
+    expect(await screen.findByText("Sync failed")).toBeInTheDocument();
+    expect(screen.getByText("Safe failure")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     expect(listGroups).toHaveBeenCalledOnce();
     expect(listGroupMembers).not.toHaveBeenCalled();
 
@@ -195,7 +214,10 @@ describe("GroupsScreen Reload and Sync", () => {
     menu = await connectAndOpenMenu(user);
     await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
-    expect(await screen.findByText("Sync continues in the background. Reload later to see progress.")).toBeInTheDocument();
+    expect(await screen.findByText("Sync continues in the background")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload groups" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Update groups" }));
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: /Sync/ })).toBeEnabled();
   });
 
   it("keeps a completed run successful when session metadata reload fails", async () => {
@@ -209,8 +231,7 @@ describe("GroupsScreen Reload and Sync", () => {
     const menu = await connectAndOpenMenu(user);
     await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
-    expect(await screen.findByText("Sync completed.")).toBeInTheDocument();
-    expect(await screen.findByText("Sync completed, but session metadata could not be reloaded."))
+    expect(await screen.findByText("Sync completed with an update warning."))
       .toBeInTheDocument();
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(2));
   });
@@ -224,7 +245,7 @@ describe("GroupsScreen Reload and Sync", () => {
     const menu = await connectAndOpenMenu(user);
     await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
-    await screen.findByText("Syncing groups and members…");
+    await screen.findByText(/Sync pending ·/);
     await user.click(screen.getByRole("button", { name: "Switch session" }));
     resolvePoll({ status: "completed", run: completedRun });
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: secondSession.id })));

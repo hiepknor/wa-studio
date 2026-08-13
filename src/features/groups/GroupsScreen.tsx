@@ -44,7 +44,14 @@ type CapabilityRefreshState =
   | "timed-out"
   | "failed";
 
-type SessionSyncState = "idle" | "requesting" | "running" | "background" | "failed";
+type GroupListLoadReason = "automatic" | "reload" | "post-sync";
+type SessionSyncState =
+  | "idle"
+  | "requesting"
+  | "running"
+  | "updating"
+  | "background"
+  | "failed";
 
 const CAPABILITY_REASON_COPY: Record<string, string> = {
   SEND_ALLOWED: "WA Runtime confirmed that this group can receive messages.",
@@ -102,11 +109,12 @@ export function GroupsScreen() {
     initialGroupListState(selectedSessionId)
   );
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [listLoadReason, setListLoadReason] = useState<GroupListLoadReason | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [syncConfirmationOpen, setSyncConfirmationOpen] = useState(false);
   const [syncState, setSyncState] = useState<SessionSyncState>("idle");
   const [syncRun, setSyncRun] = useState<RuntimeSyncRun | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<RuntimeGroup | null>(null);
   const [detail, setDetail] = useState<RuntimeGroupDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -147,7 +155,11 @@ export function GroupsScreen() {
   listStateRef.current = listState;
   const refreshingCapability = capabilityRefreshState === "requesting"
     || capabilityRefreshState === "pending";
-  const syncing = syncState === "requesting" || syncState === "running";
+  const loading = listLoadReason !== null;
+  const syncForeground = syncState === "requesting"
+    || syncState === "running"
+    || syncState === "updating";
+  const syncActive = syncForeground;
 
   const cancelCapabilityRefresh = useCallback(() => {
     capabilityRevision.current += 1;
@@ -183,11 +195,14 @@ export function GroupsScreen() {
       && target.groupId === groupId;
   }, []);
 
-  const loadGroups = useCallback(async (state: GroupListRequestState): Promise<boolean> => {
+  const loadGroups = useCallback(async (
+    state: GroupListRequestState,
+    reason: GroupListLoadReason = "automatic",
+  ): Promise<boolean> => {
     if (!state.sessionId || state.sessionId !== selectedSessionId) return false;
     const revision = ++listRevision.current;
     const requestKey = groupListRequestKey(state);
-    setLoading(true);
+    setListLoadReason(reason);
     setListError(null);
     try {
       const nextPage = await runtimeApi.listGroups({
@@ -223,7 +238,7 @@ export function GroupsScreen() {
       return false;
     } finally {
       if (revision === listRevision.current && requestKey === listTargetRef.current) {
-        setLoading(false);
+        setListLoadReason(null);
       }
     }
   }, [runtimeApi, selectedSessionId]);
@@ -277,7 +292,7 @@ export function GroupsScreen() {
     setPage(null);
     setListState(initialGroupListState(selectedSessionId));
     setFiltersOpen(false);
-    setLoading(false);
+    setListLoadReason(null);
     setSelectedGroup(null);
     setDetail(null);
     setDetailLoading(false);
@@ -296,6 +311,7 @@ export function GroupsScreen() {
     setSyncConfirmationOpen(false);
     setSyncState("idle");
     setSyncRun(null);
+    setSyncError(null);
   }, [cancelCapabilityRefresh, cancelSessionSync, listState.sessionId, selectedSessionId]);
 
   useEffect(() => {
@@ -335,6 +351,7 @@ export function GroupsScreen() {
     setSyncConfirmationOpen(false);
     setSyncState("idle");
     setSyncRun(null);
+    setSyncError(null);
   }, [cancelSessionSync, runtimeApi, runtimeOrigin]);
 
   useEffect(() => {
@@ -486,14 +503,14 @@ export function GroupsScreen() {
   }
 
   async function reloadGroups() {
-    const reloaded = await loadGroups(listState);
+    const reloaded = await loadGroups(listState, "reload");
     if (reloaded && listTargetRef.current === groupListRequestKey(listState)) {
       toast.notify({ id: "groups-reload", title: "Groups reloaded.", tone: "success" });
     }
   }
 
   async function startSessionSync() {
-    if (!selectedSessionId || syncing) return;
+    if (!selectedSessionId || syncActive) return;
     setSyncConfirmationOpen(false);
     cancelSessionSync();
     const revision = syncRevision.current;
@@ -503,17 +520,13 @@ export function GroupsScreen() {
     const targetRuntimeOrigin = runtimeOrigin;
     setSyncState("requesting");
     setSyncRun(null);
+    setSyncError(null);
 
     try {
       const initialRun = await runtimeApi.requestSessionSync(sessionId);
       if (!syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) return;
       setSyncRun(initialRun);
       setSyncState("running");
-      toast.notify({
-        description: syncProgressCopy(initialRun),
-        id: "groups-sync",
-        title: "Syncing groups and members…",
-      });
 
       const result = await pollSessionSync({
         initialRun,
@@ -522,11 +535,6 @@ export function GroupsScreen() {
         onObservation: (nextRun) => {
           if (!syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) return;
           setSyncRun(nextRun);
-          toast.notify({
-            description: syncProgressCopy(nextRun),
-            id: "groups-sync",
-            title: "Syncing groups and members…",
-          });
         },
       });
       if (!syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId) || result.status === "cancelled") {
@@ -535,57 +543,41 @@ export function GroupsScreen() {
 
       setSyncRun(result.run);
       if (result.status === "completed") {
-        setSyncState("idle");
-        toast.notify({
-          description: syncProgressCopy(result.run),
-          id: "groups-sync",
-          title: "Sync completed.",
-          tone: "success",
-        });
+        setSyncState("updating");
+        let metadataReloadError: string | null = null;
         try {
           await refreshSessions();
         } catch (error) {
           if (syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) {
-            toast.notify({
-              description: errorMessage(error, "Reload session metadata manually."),
-              id: "groups-sync-reload",
-              title: "Sync completed, but session metadata could not be reloaded.",
-              tone: "warning",
-            });
+            metadataReloadError = errorMessage(error, "Reload session metadata manually.");
           }
         }
         if (syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) {
-          await loadGroups(listStateRef.current);
+          const viewReloaded = await loadGroups(listStateRef.current, "post-sync");
+          if (!syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) return;
+          setSyncState("idle");
+          const viewUpdated = viewReloaded && !metadataReloadError;
+          toast.notify({
+            description: viewUpdated
+              ? syncProgressCopy(result.run)
+              : metadataReloadError
+                ? `Sync finished. ${metadataReloadError}`
+                : "Sync finished, but the current groups view could not be updated.",
+            id: "groups-sync",
+            title: viewUpdated ? "Sync completed." : "Sync completed with an update warning.",
+            tone: viewUpdated ? "success" : "warning",
+          });
         }
       } else if (result.status === "failed") {
         setSyncState("failed");
-        toast.notify({
-          description: result.run.error ?? "Retry when the Runtime is ready.",
-          duration: 0,
-          id: "groups-sync",
-          title: "Sync failed. Retry when the Runtime is ready.",
-          tone: "danger",
-        });
+        setSyncError(result.run.error ?? "Retry when the Runtime is ready.");
       } else {
         setSyncState("background");
-        toast.notify({
-          description: syncProgressCopy(result.run),
-          duration: 8_000,
-          id: "groups-sync",
-          title: "Sync continues in the background. Reload later to see progress.",
-          tone: "warning",
-        });
       }
     } catch (error) {
       if (!syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) return;
       setSyncState("failed");
-      toast.notify({
-        description: errorMessage(error, "Could not start session sync."),
-        duration: 0,
-        id: "groups-sync",
-        title: "Sync failed. Retry when the Runtime is ready.",
-        tone: "danger",
-      });
+      setSyncError(errorMessage(error, "Could not start session sync."));
     } finally {
       if (syncFlowIsCurrent(revision, targetRuntimeOrigin, sessionId)) syncAbortRef.current = null;
     }
@@ -621,6 +613,13 @@ export function GroupsScreen() {
   const detailCapabilityIsStale = detail
     ? groupCapabilityIsStale(detail.sendCapability)
     : false;
+  const groupsDescription = syncState === "requesting"
+    ? "Requesting a full groups and members sync from WA Runtime…"
+    : syncRun && syncState === "running"
+      ? `${syncRun.status === "PENDING" ? "Sync pending" : "Sync running"} · ${syncProgressCopy(syncRun)}`
+      : syncState === "updating"
+        ? "Sync finished · Updating session metadata and the current groups page…"
+        : `Groups synchronized for ${selectedSession?.name ?? "the active session"}.`;
 
   async function copyGroupId(groupId: string) {
     try {
@@ -642,19 +641,33 @@ export function GroupsScreen() {
             trigger={(triggerProps) => (
               <button
                 {...triggerProps}
-                aria-label={syncing ? "Syncing groups" : loading ? "Reloading groups" : "Update groups"}
-                aria-busy={loading || syncing || undefined}
+                aria-label={
+                  syncState === "updating"
+                    ? "Updating groups view"
+                    : syncForeground
+                      ? "Syncing groups"
+                      : listLoadReason === "reload"
+                        ? "Reloading groups"
+                        : "Update groups"
+                }
+                aria-busy={syncForeground || listLoadReason === "reload" || undefined}
                 className="button button-md button-secondary groups-actions-trigger"
                 disabled={!selectedSessionId}
                 type="button"
               >
                 <AppIcon
-                  className={`button-icon ${loading || syncing ? "ui-icon-spin" : ""}`.trim()}
+                  className={`button-icon ${syncForeground || listLoadReason === "reload" ? "ui-icon-spin" : ""}`.trim()}
                   name="refresh"
                   size="sm"
                 />
                 <span className="button-label groups-actions-label">
-                  {syncing ? "Syncing…" : loading ? "Reloading…" : "Update"}
+                  {syncState === "updating"
+                    ? "Updating view…"
+                    : syncForeground
+                      ? "Syncing…"
+                      : listLoadReason === "reload"
+                        ? "Reloading…"
+                        : "Update"}
                 </span>
                 <span aria-hidden="true" className="groups-actions-divider" />
                 <AppIcon className="groups-actions-chevron" name="chevron-down" size="xs" />
@@ -664,18 +677,18 @@ export function GroupsScreen() {
             <DropdownMenuItem disabled={loading} icon="refresh" onSelect={() => void reloadGroups()} description="Reload groups currently stored in WA Runtime.">
               Reload
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={syncing} icon="sync" onSelect={() => setSyncConfirmationOpen(true)} description="Synchronize groups and members from OpenWA.">
+            <DropdownMenuItem disabled={syncActive} icon="sync" onSelect={() => setSyncConfirmationOpen(true)} description="Synchronize groups and members from OpenWA.">
               Sync
             </DropdownMenuItem>
           </DropdownMenu>
         )}
-        description={`Groups synchronized for ${selectedSession?.name ?? "the active session"}.`}
+        description={groupsDescription}
         title="Groups"
         titleId="groups-title"
       />
 
       <ConfirmationDialog
-        body="Synchronize all groups and members from OpenWA? Large sessions may take several minutes."
+        body={`Synchronize all groups and members for ${selectedSession?.name ?? "the active session"} from OpenWA? Large sessions may take several minutes.`}
         confirmLabel="Sync"
         onCancel={() => setSyncConfirmationOpen(false)}
         onConfirm={() => void startSessionSync()}
@@ -683,9 +696,24 @@ export function GroupsScreen() {
         title="Sync groups and members?"
       />
 
-      {syncRun && syncing && (
-        <InlineAlert indicator title={syncRun.status === "PENDING" ? "Sync pending" : "Sync running"}>
-          {syncProgressCopy(syncRun)}
+      {syncRun && syncState === "background" && (
+        <InlineAlert
+          action={<Button onClick={() => void reloadGroups()} size="sm">Reload groups</Button>}
+          indicator
+          title="Sync continues in the background"
+          tone="warning"
+        >
+          {syncProgressCopy(syncRun)}. Reload later to see synchronized data.
+        </InlineAlert>
+      )}
+
+      {syncState === "failed" && (
+        <InlineAlert
+          action={<Button onClick={() => setSyncConfirmationOpen(true)} size="sm">Retry</Button>}
+          indicator
+          title="Sync failed"
+        >
+          {syncError ?? "Retry when WA Runtime is ready."}
         </InlineAlert>
       )}
 

@@ -13,6 +13,7 @@ import {
   Server,
   Settings2,
   UsersRound,
+  Unplug,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -26,6 +27,7 @@ export type AppIconName =
   | "chevron-down"
   | "close"
   | "copy"
+  | "disconnect"
   | "groups"
   | "key"
   | "refresh"
@@ -51,6 +53,7 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   "chevron-down": ChevronDown,
   close: X,
   copy: Copy,
+  disconnect: Unplug,
   groups: UsersRound,
   key: KeyRound,
   refresh: RefreshCw,

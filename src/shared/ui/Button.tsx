@@ -6,7 +6,7 @@ import "./button.css";
 type ButtonSize = "sm" | "md" | "lg";
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: AppIconName;
   loading?: boolean;
   size?: ButtonSize;
@@ -32,8 +32,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     ...props
   },
   ref,
-) {
+  ) {
   const leadingIcon = loading ? "refresh" : icon;
+  const hasLabel = children !== undefined && children !== null && children !== false;
 
   return (
     <button
@@ -51,7 +52,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
           size={ICON_SIZE[size]}
         />
       )}
-      <span className="button-label">{children}</span>
+      {hasLabel && <span className="button-label">{children}</span>}
     </button>
   );
 });

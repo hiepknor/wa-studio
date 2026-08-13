@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ComponentProps, type ReactNode, useEffect, useRef } from "react";
 
 import { Button } from "./Button";
 import "./confirmation-dialog.css";
@@ -8,6 +8,7 @@ interface ConfirmationDialogProps {
   body: ReactNode;
   cancelLabel?: string;
   confirmLabel: string;
+  confirmVariant?: ComponentProps<typeof Button>["variant"];
   onCancel: () => void;
   onConfirm: () => void;
   open: boolean;
@@ -18,6 +19,7 @@ export function ConfirmationDialog({
   body,
   cancelLabel = "Cancel",
   confirmLabel,
+  confirmVariant = "primary",
   onCancel,
   onConfirm,
   open,
@@ -73,7 +75,7 @@ export function ConfirmationDialog({
         </div>
         <footer className="confirmation-dialog-footer">
           <Button onClick={onCancel} ref={cancelRef}>{cancelLabel}</Button>
-          <Button onClick={onConfirm} ref={confirmRef} variant="primary">{confirmLabel}</Button>
+          <Button onClick={onConfirm} ref={confirmRef} variant={confirmVariant}>{confirmLabel}</Button>
         </footer>
       </section>
     </div>,
