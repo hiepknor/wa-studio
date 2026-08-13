@@ -158,6 +158,40 @@ describe("GroupsScreen capability refresh", () => {
     vi.restoreAllMocks();
   });
 
+  it("presents stale definitive capability as warning in both list and inspector", async () => {
+    const user = userEvent.setup();
+    const staleAllowedGroup = {
+      ...group,
+      sendCapability: {
+        ...group.sendCapability,
+        status: "ALLOWED" as const,
+      },
+    };
+    renderGroups({
+      getGroup: vi.fn().mockResolvedValue(staleAllowedGroup),
+      listGroups: vi.fn().mockResolvedValue({
+        data: [staleAllowedGroup],
+        meta: { total: 1, limit: 20, offset: 0 },
+      }),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    const listStatus = await screen.findByLabelText("Allowed, stale");
+    expect(listStatus).toHaveClass("status-tone-warning");
+    expect(listStatus).toHaveTextContent("Allowed · stale");
+    expect(screen.getByText("847").closest("td")).toHaveClass("data-cell-number");
+
+    await user.click(screen.getByRole("button", { name: "View Staging group" }));
+
+    const capabilityCard = await screen.findByRole("heading", { name: "Send readiness" });
+    const inspectorStatus = capabilityCard.closest("section")
+      ?.querySelector<HTMLElement>("[aria-label='Allowed, stale']");
+    expect(inspectorStatus).toHaveClass("ui-badge-warning");
+    expect(inspectorStatus).toHaveTextContent("Allowed");
+    expect(capabilityCard.closest("section")).toHaveTextContent("Stale");
+  });
+
   it("shows requested then timeout semantics while preserving the member page", async () => {
     const user = userEvent.setup();
     let resolvePoll: ((result: { status: "timed-out"; detail: null; error: null }) => void)

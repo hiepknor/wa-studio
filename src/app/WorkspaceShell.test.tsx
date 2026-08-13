@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -172,6 +172,12 @@ describe("WorkspaceShell", () => {
       "data-variant",
       "secondary",
     );
+    const sessionsTable = screen.getByRole("table", { name: "WA Runtime sessions" });
+    expect(within(sessionsTable).getByText(session.name)).toHaveClass("data-primary-text");
+    expect(within(sessionsTable).getByText(session.pushName!)).toHaveClass("data-secondary-text");
+    expect(within(sessionsTable).getByText(session.name).closest("td"))
+      .toHaveClass("data-cell-primary");
+    expect(screen.getByText("Selected").closest("td")).toHaveClass("data-cell-action");
 
     await user.click(screen.getByRole("button", { name: "Sync session" }));
 
@@ -213,7 +219,7 @@ describe("WorkspaceShell", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
-    await user.click(await screen.findByRole("button", { name: "Refresh" }));
+    await user.click(await screen.findByRole("button", { name: "Reload sessions" }));
     await user.click(screen.getByRole("button", { name: "WA Runtime" }));
     await user.click(await screen.findByRole("menuitem", { name: "Disconnect WA Runtime" }));
 
@@ -389,12 +395,21 @@ describe("WorkspaceShell", () => {
     await user.click(await screen.findByRole("button", { name: "Groups" }));
 
     expect(await screen.findByRole("heading", { name: "Groups" })).toBeInTheDocument();
+    expect(screen.getByText(`Groups synchronized for ${session.name}.`)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload groups" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Participants" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Record synced" })).toBeInTheDocument();
     await waitFor(() => expect(listGroups).toHaveBeenCalledWith({
       sessionId: session.id,
       limit: 20,
       offset: 0,
     }));
     expect(screen.getByText("1–1 of 21")).toBeInTheDocument();
+    expect(screen.getByText(group.name)).toHaveClass("data-primary-text");
+    expect(screen.getByText(group.id)).toHaveClass("data-identifier");
+    expect(screen.getByText(group.id).closest("td")).toHaveClass("data-cell-primary");
+    expect(screen.getByRole("button", { name: `View ${group.name}` }).closest("td"))
+      .toHaveClass("data-cell-action");
 
     await user.click(screen.getByRole("button", { name: "View Release room" }));
     await waitFor(() => expect(getGroup).toHaveBeenCalledWith(session.id, group.id));

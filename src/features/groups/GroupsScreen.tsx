@@ -12,10 +12,12 @@ import { Button } from "@/shared/ui/Button";
 import { Drawer } from "@/shared/ui/Drawer";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
-import type { StatusTone } from "@/shared/ui/StatusIndicator";
-import { StatusIndicator } from "@/shared/ui/StatusIndicator";
 import { TextField } from "@/shared/ui/TextField";
 import { pollCapabilityRefresh } from "./capability-refresh";
+import {
+  GroupCapabilityStatus,
+  groupCapabilityIsStale,
+} from "./GroupCapabilityStatus";
 import "./groups.css";
 
 const PAGE_SIZE = 20;
@@ -28,18 +30,6 @@ type CapabilityRefreshState =
   | "completed"
   | "timed-out"
   | "failed";
-
-function capabilityTone(status: RuntimeGroup["sendCapability"]["status"]): StatusTone {
-  if (status === "ALLOWED") return "success";
-  if (status === "DENIED") return "danger";
-  return "warning";
-}
-
-function capabilityLabel(status: RuntimeGroup["sendCapability"]["status"]): string {
-  if (status === "ALLOWED") return "Allowed";
-  if (status === "DENIED") return "Denied";
-  return "Unknown";
-}
 
 const CAPABILITY_REASON_COPY: Record<string, string> = {
   SEND_ALLOWED: "WA Runtime confirmed that this group can receive messages.",
@@ -63,12 +53,6 @@ function accessLabel(isAdmin: boolean | null): string {
 function booleanLabel(value: boolean | null, positive: string, negative: string): string {
   if (value === null) return "Unknown";
   return value ? positive : negative;
-}
-
-function capabilityIsStale(capability: RuntimeGroup["sendCapability"]): boolean {
-  if (!capability.invalidatedAt) return false;
-  if (!capability.checkedAt) return true;
-  return new Date(capability.invalidatedAt) >= new Date(capability.checkedAt);
 }
 
 function formatDate(value: string | null): string {
@@ -390,6 +374,9 @@ export function GroupsScreen() {
   );
   const canGoToPreviousMembers = memberOffset > 0 && !membersLoading;
   const canGoToNextMembers = memberOffset + MEMBER_PAGE_SIZE < memberTotal && !membersLoading;
+  const detailCapabilityIsStale = detail
+    ? groupCapabilityIsStale(detail.sendCapability)
+    : false;
 
   async function copyGroupId(groupId: string) {
     try {
@@ -405,16 +392,16 @@ export function GroupsScreen() {
       <PageHeader
         actions={(
           <Button
-            aria-label={loading ? "Refreshing groups" : "Refresh groups"}
+            aria-label={loading ? "Reloading groups" : "Reload groups"}
             disabled={!selectedSessionId}
             icon="refresh"
             loading={loading}
             onClick={() => void loadGroups(offset)}
           >
-            Refresh
+            Reload groups
           </Button>
         )}
-        description={`Read-model groups for ${selectedSession?.name ?? "the active session"}.`}
+        description={`Groups synchronized for ${selectedSession?.name ?? "the active session"}.`}
         title="Groups"
         titleId="groups-title"
       />
@@ -458,12 +445,19 @@ export function GroupsScreen() {
           <div className="data-table-scroll groups-table-scroll">
             <table>
               <caption>Groups in the active Gateway session</caption>
+              <colgroup>
+                <col className="groups-column-identity" />
+                <col className="groups-column-participants" />
+                <col className="groups-column-capability" />
+                <col className="groups-column-synced" />
+                <col className="groups-column-action" />
+              </colgroup>
               <thead>
                 <tr>
                   <th scope="col">Group</th>
-                  <th scope="col">Members</th>
+                  <th className="data-column-number" scope="col">Participants</th>
                   <th scope="col">Send capability</th>
-                  <th scope="col">Synced</th>
+                  <th scope="col">Record synced</th>
                   <th aria-label="Actions" scope="col" />
                 </tr>
               </thead>
@@ -480,20 +474,20 @@ export function GroupsScreen() {
                   </tr>
                 ) : filteredGroups.map((group) => (
                   <tr data-selected={group.id === selectedGroup?.id || undefined} key={group.id}>
-                    <td>
+                    <td className="data-cell-primary">
                       <div className="stack stack-xs groups-name-cell">
-                        <strong title={group.name}>{group.name}</strong>
-                        <span className="muted-copy">{group.id}</span>
+                        <strong className="data-primary-text" title={group.name}>{group.name}</strong>
+                        <span className="data-identifier" title={group.id}>{group.id}</span>
                       </div>
                     </td>
-                    <td>{group.participantsCount ?? "—"}</td>
-                    <td>
-                      <StatusIndicator glow tone={capabilityTone(group.sendCapability.status)}>
-                        {capabilityLabel(group.sendCapability.status)}
-                      </StatusIndicator>
+                    <td className="data-cell-number">{group.participantsCount ?? "—"}</td>
+                    <td className="data-cell-status">
+                      <GroupCapabilityStatus capability={group.sendCapability} />
                     </td>
-                    <td>{formatDate(group.syncedAt)}</td>
-                    <td className="align-end">
+                    <td className="data-cell-time" title={formatDate(group.syncedAt)}>
+                      {formatDate(group.syncedAt)}
+                    </td>
+                    <td className="data-cell-action">
                       <Button
                         aria-label={`View ${group.name}`}
                         onClick={(event) => void openGroup(group, event.currentTarget)}
@@ -568,17 +562,19 @@ export function GroupsScreen() {
                       <p>{capabilityReasonCopy(detail.sendCapability.reason)}</p>
                       <code>{detail.sendCapability.reason}</code>
                     </div>
-                    <Badge tone={capabilityTone(detail.sendCapability.status)}>
-                      {capabilityLabel(detail.sendCapability.status)}
-                    </Badge>
+                    <GroupCapabilityStatus
+                      appearance="badge"
+                      capability={detail.sendCapability}
+                      includeFreshness={false}
+                    />
                   </div>
                   <dl className="groups-capability-meta">
                     <div><dt>Checked</dt><dd>{formatDate(detail.sendCapability.checkedAt)}</dd></div>
                     <div>
                       <dt>Freshness</dt>
                       <dd>
-                        <Badge tone={capabilityIsStale(detail.sendCapability) ? "warning" : "success"}>
-                          {capabilityIsStale(detail.sendCapability) ? "Stale" : "Current"}
+                        <Badge tone={detailCapabilityIsStale ? "warning" : "success"}>
+                          {detailCapabilityIsStale ? "Stale" : "Current"}
                         </Badge>
                       </dd>
                     </div>

@@ -73,7 +73,7 @@ export function SessionsScreen() {
     try {
       await refreshSessions();
     } catch (error) {
-      setSessionsError(error instanceof Error ? error.message : "Could not refresh sessions.");
+      setSessionsError(error instanceof Error ? error.message : "Could not reload sessions.");
     } finally {
       setRefreshing(false);
     }
@@ -118,7 +118,7 @@ export function SessionsScreen() {
           } catch (error) {
             if (active) {
               setSessionsError(
-                error instanceof Error ? error.message : "Could not refresh sessions.",
+                error instanceof Error ? error.message : "Could not reload sessions.",
               );
             }
           }
@@ -186,13 +186,13 @@ export function SessionsScreen() {
             value={search}
           />
           <Button
-            aria-label={refreshing ? "Refreshing sessions" : "Refresh"}
+            aria-label={refreshing ? "Reloading sessions" : "Reload sessions"}
             className="sessions-refresh-button"
             icon="refresh"
             loading={refreshing}
             onClick={handleRefresh}
           >
-            Refresh
+            Reload
           </Button>
         </div>
 
@@ -200,7 +200,7 @@ export function SessionsScreen() {
           <InlineAlert
             action={<Button onClick={handleRefresh} size="sm">Retry</Button>}
             className="data-table-error"
-            title="Could not refresh sessions"
+            title="Could not reload sessions"
           >
             {sessionsError}
           </InlineAlert>
@@ -223,24 +223,36 @@ export function SessionsScreen() {
                 <tr><td className="data-table-empty" colSpan={5}>No allowlisted sessions were returned by WA Runtime.</td></tr>
               ) : filteredSessions.map((session) => (
                 <tr data-selected={session.id === selectedSessionId || undefined} key={session.id}>
-                  <td>
+                  <td className="data-cell-primary">
                     <div className="stack stack-xs">
-                      <strong>{session.name}</strong>
-                      <span className="muted-copy">{session.pushName ?? session.phone ?? "No profile"}</span>
+                      <strong className="data-primary-text" title={session.name}>
+                        {session.name}
+                      </strong>
+                      <span
+                        className="data-secondary-text"
+                        title={session.pushName ?? session.phone ?? "No profile"}
+                      >
+                        {session.pushName ?? session.phone ?? "No profile"}
+                      </span>
                     </div>
                   </td>
-                  <td>
+                  <td className="data-cell-status">
                     <StatusIndicator glow tone={statusTone(session.status)}>
                       {session.status}
                     </StatusIndicator>
                   </td>
-                  <td>
+                  <td className="data-cell-status">
                     <Badge tone={session.engineLoaded ? "success" : "warning"}>
                       {session.engineLoaded ? "Loaded" : "Not loaded"}
                     </Badge>
                   </td>
-                  <td>{formatDate(session.syncedAt)}</td>
-                  <td className="align-end">
+                  <td
+                    className="data-cell-time"
+                    title={session.syncedAt ? formatDate(session.syncedAt) : undefined}
+                  >
+                    {formatDate(session.syncedAt)}
+                  </td>
+                  <td className="data-cell-action">
                     {session.id === selectedSessionId ? (
                       <Badge tone="success">Selected</Badge>
                     ) : (

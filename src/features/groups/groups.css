@@ -13,10 +13,12 @@
   font-size: 9px;
   white-space: nowrap;
 }
-.groups-table-scroll table { min-width: 690px; }
-.groups-name-cell { max-width: 240px; }
-.groups-name-cell strong, .groups-name-cell span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.groups-name-cell span { font-family: var(--font-mono); font-size: 9px; }
+.groups-table-scroll table { min-width: 690px; table-layout: fixed; }
+.groups-column-participants { width: 100px; }
+.groups-column-capability { width: 140px; }
+.groups-column-synced { width: 175px; }
+.groups-column-action { width: 70px; }
+.groups-name-cell { min-width: 0; }
 .groups-pagination {
   min-height: 48px;
   display: flex;
