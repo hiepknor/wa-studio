@@ -85,7 +85,7 @@ async function connect(user: ReturnType<typeof userEvent.setup>) {
 async function openCampaign(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText("Release");
   await user.click(screen.getByRole("button", { name: "Edit" }));
-  await screen.findByRole("heading", { name: "Campaign details" });
+  await screen.findByRole("heading", { name: "Content & schedule" });
 }
 
 function report(
@@ -108,7 +108,7 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
 
-    const summary = screen.getByLabelText("Campaign workspace summary");
+    const summary = screen.getByLabelText("Campaign metadata");
     expect(within(summary).getByText("DRAFT")).toBeInTheDocument();
     expect(within(summary).getByText("Immediate")).toBeInTheDocument();
     expect(within(summary).getByText("r3 · t4")).toBeInTheDocument();

@@ -49,13 +49,14 @@ describe("Tabs", () => {
     render(
       <Tabs
         activeTab="details"
+        appearance="steps"
         ariaLabel="Campaign steps"
         idPrefix="campaign-steps"
         onChange={() => undefined}
         tabs={[
-          { id: "details", label: "Details" },
-          { disabled: true, id: "targets", label: "Targets" },
-          { id: "preflight", label: "Preflight" },
+          { id: "details", label: "Details", step: 1 },
+          { disabled: true, id: "targets", label: "Targets", step: 2 },
+          { id: "preflight", label: "Preflight", step: 3 },
         ]}
       />,
     );
@@ -63,6 +64,8 @@ describe("Tabs", () => {
     const details = screen.getByRole("tab", { name: "Details" });
     const targets = screen.getByRole("tab", { name: "Targets" });
     const preflight = screen.getByRole("tab", { name: "Preflight" });
+    expect(details).toHaveAttribute("aria-current", "step");
+    expect(details.closest("[role='tablist']")).toHaveClass("tabs-steps");
     expect(targets).toBeDisabled();
     details.focus();
     await user.keyboard("{ArrowRight}");

@@ -41,7 +41,7 @@
   transform: translateX(100%);
   transition: transform 140ms ease;
 }
-.drawer-surface-wide { width: min(620px, calc(100% - 48px)); }
+.drawer-surface-wide { width: min(560px, calc(100% - 48px)); }
 .drawer-layer[data-state="open"] .drawer-backdrop { opacity: 1; }
 .drawer-layer[data-state="open"] .drawer-surface { transform: translateX(0); }
 .drawer-header {

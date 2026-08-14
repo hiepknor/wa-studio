@@ -470,6 +470,8 @@ export function CampaignsScreen() {
     : editorTab === "targets"
       ? targetsDirty ? `${draftTargetIds.length} targets selected · changes not saved` : "Target set is up to date"
       : reportStale ? "Run preflight again after saving changes" : preflight ? `Last result: ${preflight.status}` : "No preflight result yet";
+  const editorStep = editorTab === "details" ? 1 : editorTab === "targets" ? 2 : 3;
+  const editorStepLabel = editorTab === "details" ? "Details" : editorTab === "targets" ? "Targets" : "Preflight";
   const footerAction = editorTab === "details" ? (
     <Button disabled={!editable || (Boolean(campaign) && !detailsDirty)} loading={savingDetails} onClick={() => void saveDetails()} variant="primary">
       {campaign ? "Save details" : "Create draft"}
@@ -532,47 +534,48 @@ export function CampaignsScreen() {
         className="campaign-editor-drawer"
         contentKey={`${campaign?.id ?? "new"}:${editorEpochRef.current}`}
         description={campaign
-          ? `Revision ${campaign.revision} · target revision ${campaign.targetsRevision}`
-          : "Create the persisted DRAFT before selecting targets or running preflight."}
+          ? "Edit persisted details, targets, and Runtime readiness in sequence."
+          : "Step 1 of 3 · Define content and delivery timing."}
         eyebrow="Campaign workspace"
-        footer={editor.kind === "open" && <div className="campaign-workspace-footer"><div className="campaign-workspace-footer-copy"><strong>{editorTab === "details" ? "Campaign details" : editorTab === "targets" ? "Target selection" : "Runtime preflight"}</strong><span>{footerState}</span></div><div className="campaign-workspace-footer-actions">{footerAction}</div></div>}
+        footer={editor.kind === "open" && <div className="campaign-workspace-footer"><div className="campaign-workspace-footer-copy"><strong>Step {editorStep} of 3 · {editorStepLabel}</strong><span>{footerState}</span></div><div className="campaign-workspace-footer-actions">{footerAction}</div></div>}
         onClose={requestCloseEditor}
         open={editor.kind === "open"}
         size="wide"
         title={campaign?.name ?? "New campaign draft"}
       >
         {editor.kind === "open" && (
-          <div className="campaign-editor stack stack-lg">
+          <div className="campaign-editor">
             {campaign && campaign.status !== "DRAFT" && <InlineAlert title="Read-only campaign" tone="warning">Runtime status is {campaign.status}; only DRAFT campaigns are editable.</InlineAlert>}
-            <div aria-label="Campaign workspace summary" className="campaign-workspace-context" role="group">
-              <Badge tone={campaign ? statusTone(campaign.status) : "neutral"}>{campaign?.status ?? "NEW DRAFT"}</Badge>
-              <dl>
+            <div className="campaign-workspace-navigation">
+              <Tabs
+                activeTab={editorTab}
+                appearance="steps"
+                ariaLabel="Campaign editor sections"
+                idPrefix="campaign-editor"
+                onChange={setEditorTab}
+                tabs={[
+                  { id: "details", label: "Details", step: 1, warning: Boolean(campaign && detailsDirty) },
+                  { badge: campaign ? draftTargetIds.length : undefined, disabled: !campaign, id: "targets", label: "Targets", step: 2, warning: Boolean(campaign && targetsDirty) },
+                  { badge: preflight?.status, disabled: !campaign, id: "preflight", label: "Preflight", step: 3, warning: reportStale },
+                ]}
+              />
+              {campaign && <dl aria-label="Campaign metadata" className="campaign-workspace-meta">
+                <div><dt>Status</dt><dd><Badge tone={statusTone(campaign.status)}>{campaign.status}</Badge></dd></div>
                 <div><dt>Schedule</dt><dd>{form.scheduleType === "IMMEDIATE" ? "Immediate" : formatDraftSchedule(form.scheduledAt)}</dd></div>
-                <div><dt>Targets</dt><dd>{campaign ? draftTargetIds.length : "—"}</dd></div>
-              </dl>
-              {campaign && <span className="campaign-workspace-revision">r{campaign.revision} · t{campaign.targetsRevision}</span>}
+                <div><dt>Targets</dt><dd>{draftTargetIds.length}</dd></div>
+                <div><dt>Revision</dt><dd>r{campaign.revision} · t{campaign.targetsRevision}</dd></div>
+              </dl>}
             </div>
-            <Tabs
-              activeTab={editorTab}
-              ariaLabel="Campaign editor sections"
-              idPrefix="campaign-editor"
-              onChange={setEditorTab}
-              tabs={[
-                { id: "details", label: "Details", warning: Boolean(campaign && detailsDirty) },
-                { badge: campaign ? draftTargetIds.length : undefined, disabled: !campaign, id: "targets", label: "Targets", warning: Boolean(campaign && targetsDirty) },
-                { badge: preflight?.status, disabled: !campaign, id: "preflight", label: "Preflight", warning: reportStale },
-              ]}
-            />
-
+            <div className="campaign-workspace-content">
             {editorTab === "details" && <section aria-labelledby="campaign-editor-details-tab" className="campaign-tab-panel stack stack-lg" id="campaign-editor-details-panel" role="tabpanel">
-              <div className="campaign-section-heading"><div><h3>Campaign details</h3><p>Define the content first, then choose when Runtime should schedule it.</p></div></div>
+              <div className="campaign-section-heading"><div><span>Step 1 · Required</span><h3>Content &amp; schedule</h3><p>Define the message draft and when Runtime should schedule it.</p></div></div>
               {detailsError && <InlineAlert title="Could not save details">{detailsError}</InlineAlert>}
-              <section aria-labelledby="campaign-content-title" className="campaign-form-section stack stack-md"><div className="campaign-form-section-heading"><h4 id="campaign-content-title">Content</h4><span>Required</span></div><TextField description={fieldDescription(formErrors.name)} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} /><TextAreaField description={fieldDescription(formErrors.text, "Plain text sent only by a later run milestone.")} disabled={!editable} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} /></section>
-              <section aria-labelledby="campaign-timing-title" className="campaign-form-section stack stack-md"><div className="campaign-form-section-heading"><h4 id="campaign-timing-title">Delivery timing</h4><span>Runtime canonicalized</span></div><SelectMenu description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />{form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</section>
+              <section aria-labelledby="campaign-content-title" className="campaign-form-section stack stack-md"><h4 id="campaign-content-title">Message draft</h4><TextField description={fieldDescription(formErrors.name)} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} /><TextAreaField description={fieldDescription(formErrors.text, "Plain text sent only by a later run milestone.")} disabled={!editable} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} /></section>
+              <section aria-labelledby="campaign-timing-title" className="campaign-form-section stack stack-md"><div className="campaign-form-section-heading"><h4 id="campaign-timing-title">Delivery timing</h4><span>Canonicalized by Runtime</span></div><SelectMenu description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />{form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</section>
             </section>}
 
             {editorTab === "targets" && <section aria-labelledby="campaign-editor-targets-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-targets-panel" role="tabpanel">
-              <div className="campaign-section-heading"><div><h3>Group targets</h3><p>Complete replacement · {draftTargetIds.length} selected · maximum 1,000</p></div></div>
+              <div className="campaign-section-heading"><div><span>Step 2 · Persisted set</span><h3>Audience selection</h3><p>Choose the complete group target set · maximum 1,000.</p></div></div>
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Targets belong to a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {targetsError && <InlineAlert title="Target update">{targetsError}</InlineAlert>}
@@ -587,7 +590,7 @@ export function CampaignsScreen() {
             </section>}
 
             {editorTab === "preflight" && <section aria-labelledby="campaign-editor-preflight-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-preflight-panel" role="tabpanel">
-              <div className="campaign-section-heading"><div><h3>Preflight</h3><p>Evaluates persisted state only; never creates a run or sends a message.</p></div></div>
+              <div className="campaign-section-heading"><div><span>Step 3 · Runtime policy</span><h3>Readiness review</h3><p>Evaluate persisted state without creating a run or sending a message.</p></div></div>
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Preflight requires a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {(detailsDirty || targetsDirty) && <InlineAlert title="Save before preflight" tone="warning">Preflight reads persisted Runtime state, not unsaved edits.</InlineAlert>}
@@ -597,6 +600,7 @@ export function CampaignsScreen() {
                 {!preflight && !preflightError && <div className="campaign-empty-state"><span className="campaign-empty-state-icon"><AppIcon name="check" size="lg" /></span><strong>No preflight report</strong><p>Run DRY_RUN or LIVE to evaluate the persisted campaign and target set. This does not send messages.</p></div>}
               </>}
             </section>}
+            </div>
           </div>
         )}
       </Drawer>
