@@ -17,6 +17,7 @@ import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SearchField } from "@/shared/ui/SearchField";
 import { Tabs } from "@/shared/ui/Tabs";
+import { TablePagination } from "@/shared/ui/TablePagination";
 import { useToast } from "@/shared/ui/Toast";
 import { UpdateActionTrigger } from "@/shared/ui/UpdateActionTrigger";
 import { useSessionSync } from "@/shared/hooks/useSessionSync";
@@ -707,13 +708,8 @@ export function GroupsScreen() {
   const total = visiblePage?.meta.total ?? 0;
   const pageLimit = visiblePage?.meta.limit ?? PAGE_SIZE;
   const pageOffset = visiblePage?.meta.offset ?? offset;
-  const pageCount = total === 0 ? 0 : Math.ceil(total / pageLimit);
-  const pageNumber = total === 0 ? 0 : Math.floor(pageOffset / pageLimit) + 1;
   const firstItem = total === 0 ? 0 : offset + 1;
   const lastItem = Math.min(offset + (visiblePage?.data.length ?? 0), total);
-  const canGoBack = offset > 0 && !loading;
-  const canGoForward =
-    offset + (visiblePage?.meta.limit ?? PAGE_SIZE) < total && !loading;
   const memberTotal = memberPage?.meta.total ?? 0;
   const memberPageOffset = memberPage?.meta.offset ?? memberOffset;
   const memberFirstItem = memberTotal === 0 ? 0 : memberPageOffset + 1;
@@ -972,37 +968,13 @@ export function GroupsScreen() {
             </table>
           </div>
 
-          <div className="groups-pagination">
-            <span>
-              Page {pageNumber} of {pageCount}
-            </span>
-            <div>
-              <Button
-                disabled={!canGoBack}
-                onClick={() =>
-                  setListState((current) => ({
-                    ...current,
-                    offset: Math.max(0, current.offset - PAGE_SIZE),
-                  }))
-                }
-                size="sm"
-              >
-                Previous
-              </Button>
-              <Button
-                disabled={!canGoForward}
-                onClick={() =>
-                  setListState((current) => ({
-                    ...current,
-                    offset: current.offset + PAGE_SIZE,
-                  }))
-                }
-                size="sm"
-              >
-                Next
-              </Button>
-            </div>
-          </div>
+          <TablePagination
+            limit={pageLimit}
+            loading={loading}
+            offset={pageOffset}
+            onOffsetChange={(nextOffset) => setListState((current) => ({ ...current, offset: nextOffset }))}
+            total={total}
+          />
         </div>
 
         <Drawer

@@ -12,7 +12,9 @@
   border: 0;
 }
 .text-field-control { position: relative; }
-.text-field-control input {
+.text-field-control input,
+.text-field-control select,
+.text-field-control textarea {
   width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: 7px;
@@ -22,13 +24,19 @@
   font-size: 12px;
   transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
+.text-field-control select { width: 100%; height: 42px; padding: 0 12px; }
+.text-field-control textarea { width: 100%; min-height: 112px; padding: 10px 12px; resize: vertical; line-height: 1.5; }
 .text-field-sm .text-field-control input { height: 36px; padding: 0 11px; }
 .text-field-md .text-field-control input { height: 42px; padding: 0 12px; }
 .text-field-control input.text-field-input-with-icon { padding-left: 34px; }
 .text-field-control input.text-field-input-mono { font-family: var(--font-mono); }
 .text-field-control input::placeholder { color: var(--dim); }
-.text-field-control input:hover { border-color: rgb(255 255 255 / 18%); }
-.text-field-control input:focus { background: #0b0d12; }
+.text-field-control input:hover,
+.text-field-control select:hover,
+.text-field-control textarea:hover { border-color: rgb(255 255 255 / 18%); }
+.text-field-control input:focus,
+.text-field-control select:focus,
+.text-field-control textarea:focus { background: #0b0d12; }
 .text-field-icon {
   position: absolute;
   z-index: 1;

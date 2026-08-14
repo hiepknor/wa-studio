@@ -6,6 +6,8 @@ import { InlineAlert } from "./InlineAlert";
 import { PageHeader } from "./PageHeader";
 import { StatusIndicator } from "./StatusIndicator";
 import { TextField } from "./TextField";
+import { SelectField } from "./SelectField";
+import { TextAreaField } from "./TextAreaField";
 
 describe("shared UI primitives", () => {
   it("connects TextField labels and descriptions to the native input", () => {
@@ -21,6 +23,15 @@ describe("shared UI primitives", () => {
     const input = screen.getByRole("textbox", { name: "WA Runtime API key" });
     expect(input).toHaveAccessibleDescription("Never written to disk.");
     expect(input).toHaveClass("text-field-input-mono", "text-field-input-with-icon");
+  });
+
+  it("connects shared textarea and select labels to accessible descriptions", () => {
+    render(<>
+      <TextAreaField description="Persisted campaign content." label="Message text" />
+      <SelectField description="Runtime schedule policy." label="Schedule"><option>Immediate</option></SelectField>
+    </>);
+    expect(screen.getByRole("textbox", { name: "Message text" })).toHaveAccessibleDescription("Persisted campaign content.");
+    expect(screen.getByRole("combobox", { name: "Schedule" })).toHaveAccessibleDescription("Runtime schedule policy.");
   });
 
   it("uses semantic status text while keeping its dot decorative", () => {

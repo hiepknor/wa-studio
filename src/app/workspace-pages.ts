@@ -26,7 +26,7 @@ export const WORKSPACE_SECTIONS: readonly WorkspaceSectionDefinition[] = [
     label: "Operate",
     pages: [
       { available: true, id: "groups", label: "Groups" },
-      { available: false, id: "campaigns", label: "Campaigns" },
+      { available: true, id: "campaigns", label: "Campaigns" },
       { available: false, id: "runs", label: "Runs" },
       { available: false, id: "activity", label: "Activity" },
     ],

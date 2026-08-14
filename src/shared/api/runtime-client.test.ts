@@ -5,6 +5,7 @@ import {
   probeRuntimeConnection,
   RuntimeApi,
   RuntimeConnectionError,
+  RuntimeRequestError,
 } from "./runtime-client";
 
 describe("normalizeRuntimeBaseUrl", () => {
@@ -77,6 +78,118 @@ describe("probeRuntimeConnection", () => {
 });
 
 describe("RuntimeApi", () => {
+  it("keeps the caller-owned Idempotency-Key stable across create retries and accepts HTTP 200 replay", async () => {
+    const created = {
+      id: "campaign-id",
+      sessionId: "session-id",
+      name: "Release",
+      text: "Ship it",
+      scheduleType: "IMMEDIATE",
+      scheduledAt: null,
+      status: "DRAFT",
+      targetCount: 0,
+      revision: 1,
+      targetsRevision: 0,
+      createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt: "2026-08-14T00:00:00.000Z",
+    } as const;
+    const runtimeFetch = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("response lost"))
+      .mockResolvedValueOnce(Response.json(created, { status: 200 }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+    const key = "37ce30a8-07e3-43b7-a499-1be2d40090a9";
+    const payload = {
+      sessionId: "session-id",
+      name: "Release",
+      text: "Ship it",
+      scheduleType: "IMMEDIATE",
+    } as const;
+
+    await expect(api.createCampaign(payload, key)).rejects.toThrow("response lost");
+    await expect(api.createCampaign(payload, key)).resolves.toEqual(created);
+    expect(runtimeFetch).toHaveBeenCalledTimes(2);
+    for (const call of runtimeFetch.mock.calls) {
+      const request = call[0] as Request;
+      expect(request.headers.get("Idempotency-Key")).toBe(key);
+      expect(request.method).toBe("POST");
+      await expect(request.clone().json()).resolves.toMatchObject({
+        scheduleType: "IMMEDIATE",
+        scheduledAt: null,
+      });
+    }
+  });
+
+  it("preserves typed campaign conflicts", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      code: "CAMPAIGN_IDEMPOTENCY_CONFLICT",
+      message: "same key, different payload",
+      fieldErrors: { name: ["different"] },
+      details: { campaignId: "existing" },
+    }, { status: 409 }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    const error = await api.createCampaign({
+      sessionId: "session-id",
+      name: "Release",
+      text: "Ship it",
+      scheduleType: "IMMEDIATE",
+    }, "same-key").catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(RuntimeRequestError);
+    expect(error).toMatchObject({
+      code: "CAMPAIGN_IDEMPOTENCY_CONFLICT",
+      status: 409,
+      fieldErrors: { name: ["different"] },
+      details: { campaignId: "existing" },
+    });
+  });
+
+  it("only exposes draft, target, and preflight campaign endpoints for this milestone", async () => {
+    const campaign = {
+      id: "campaign-id", sessionId: "session-id", name: "Release", text: "Ship it",
+      scheduleType: "IMMEDIATE", scheduledAt: null, status: "DRAFT", targetCount: 1,
+      revision: 1, targetsRevision: 2, createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt: "2026-08-14T00:00:00.000Z",
+    } as const;
+    const target = {
+      groupId: "group@g.us", groupName: "Group", enabled: false,
+      sendCapability: { status: "UNKNOWN", reason: "not_checked", checkedAt: null, invalidatedAt: null, revision: 0 },
+    } as const;
+    const report = {
+      status: "WARN", policyVersion: 2, campaignRevision: 1, targetsRevision: 2,
+      executionMode: "LIVE", checkedAt: "2026-08-14T00:00:00.000Z", totalTargets: 1,
+      allowedTargets: 0, deniedTargets: 0, unknownTargets: 1, checks: [], targetIssues: [],
+    } as const;
+    const runtimeFetch = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ data: [target] }))
+      .mockResolvedValueOnce(Response.json({ data: [target] }))
+      .mockResolvedValueOnce(Response.json(campaign))
+      .mockResolvedValueOnce(Response.json(report));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await api.listCampaignTargets(campaign.id);
+    await api.replaceCampaignTargets(campaign.id, [target.groupId]);
+    await api.updateCampaign(campaign.id, { text: "New text" });
+    await api.preflightCampaign(campaign.id, "LIVE");
+
+    const requests = runtimeFetch.mock.calls.map((call) => call[0] as Request);
+    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
+      ["GET", "/api/v1/campaigns/campaign-id/targets"],
+      ["PUT", "/api/v1/campaigns/campaign-id/targets"],
+      ["PATCH", "/api/v1/campaigns/campaign-id"],
+      ["POST", "/api/v1/campaigns/campaign-id/preflight"],
+    ]);
+    expect(requests.some((request) => request.url.includes("/runs") || request.url.includes("message"))).toBe(false);
+  });
+
   it("starts a full session sync through the versioned Runtime endpoint", async () => {
     const syncRun = {
       id: "sync-id",

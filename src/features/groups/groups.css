@@ -10,19 +10,6 @@
 .groups-column-synced { width: 175px; }
 .groups-column-action { width: 70px; }
 .groups-name-cell { min-width: 0; }
-.groups-pagination {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  border-top: 1px solid rgb(255 255 255 / 6%);
-  color: var(--dim);
-  font-family: var(--font-mono);
-  font-size: 9px;
-}
-.groups-pagination > div { display: flex; gap: 6px; }
 .groups-detail-state { margin: 0; color: var(--dim); font-size: 11px; }
 .groups-tab-panel { min-width: 0; }
 .groups-inspector-section, .groups-members { display: flex; flex-direction: column; gap: 11px; }

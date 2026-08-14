@@ -25,7 +25,7 @@ Status: completed.
 
 Compose the shell from semantic header, navigation, content, and footer regions. Navigation is registry-driven and grouped into Operate (Groups, Campaigns, Runs, Activity) and System (Sessions, Settings). Keep page routing and the shared selected-session context in the application. WA Runtime connection actions belong to the toolbar menu, while concise operational context belongs to the status bar.
 
-Status: completed with the Sessions and Groups destinations active and future destinations explicitly disabled until their slices exist.
+Status: completed with the Sessions, Groups, and Campaigns destinations active and future destinations explicitly disabled until their slices exist.
 
 ### 3. Sessions and groups
 
@@ -36,6 +36,8 @@ Status: completed. Sessions owns selection, status, and read-model refresh. Grou
 ### 4. Campaign editor and preflight
 
 Use labelled form controls for campaign content and scheduling, controlled group selection for targets, and scoped alerts for preflight findings. A live run action remains visually and behaviorally distinct from dry-run or draft actions.
+
+Status: completed for v0.2.0 through persisted drafts, complete target replacement, and DRY_RUN/LIVE preflight review. Campaign execution and message sending remain deferred; LIVE here is a preflight policy mode, not a launch action.
 
 ### 5. Run monitoring
 
@@ -49,9 +51,11 @@ Use native progress elements, status feedback, controlled delivery tables, and a
 4. Bundle-size changes are recorded when new UI dependencies or substantial styles are introduced.
 5. No feature may call OpenWA or redefine Runtime DTOs.
 
-Current Groups and Sessions MVP baseline: 272.99 kB JavaScript (83.95 kB gzip) and 41.34 kB CSS (8.80 kB gzip), plus 106.41 kB of locally bundled variable-font subsets. The production brand mark is an inlined SVG; native bundle icons are generated from the dedicated SVG app-icon master.
+Current Campaign Drafts & Preflight baseline: 296.03 kB JavaScript (89.90 kB gzip) and 44.88 kB CSS (9.34 kB gzip), plus 106.41 kB of locally bundled variable-font subsets. The production brand mark is an inlined SVG; native bundle icons are generated from the dedicated SVG app-icon master.
 
 Groups and Sessions MVP validation (2026-08-14): `npm run check` passes with 104 tests; the macOS debug app and DMG build successfully; and staging smoke coverage passes for session reload, Runtime-backed group search, compact-window group inspection, member pagination, capability refresh, full-sync background handoff, and completed-sync metadata reconciliation. Focus treatment, compact resizing, and the overlay drawer were inspected in the debug app. The macOS reduced-motion setting was not toggled during this validation.
+
+Campaign Drafts & Preflight validation (2026-08-14): `npm run check` passes with 160 tests, including the pinned contract checksum, generated nullable update scheduling type, idempotent create replay, canonical target replacement, typed Runtime errors, all DRY_RUN/LIVE status variants, revision staleness, late-response protection, discard confirmation, and shared form-control accessibility. Campaigns reuses the same data table, pagination, drawer, tabs, search, capability, feedback, and action primitives as Groups/Sessions. The Vite production build and Rust fmt/clippy gates pass. Native packaging and staging smoke testing were not run because this milestone was not requested for deployment.
 
 ## Dependency policy
 

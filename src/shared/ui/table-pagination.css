@@ -1,0 +1,13 @@
+.table-pagination {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid rgb(255 255 255 / 6%);
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.table-pagination > div { display: flex; gap: 6px; }

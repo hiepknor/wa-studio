@@ -10,6 +10,16 @@ export type RuntimeGroupDetail = components["schemas"]["GroupDetailDto"];
 export type RuntimeGroupPage = components["schemas"]["GroupListDto"];
 export type RuntimeGroupMember = components["schemas"]["GroupMemberDto"];
 export type RuntimeGroupMemberPage = components["schemas"]["GroupMemberListDto"];
+export type RuntimeCampaign = components["schemas"]["CampaignDto"];
+export type RuntimeCampaignPage = components["schemas"]["CampaignListDto"];
+export type RuntimeCreateCampaign = components["schemas"]["CreateCampaignDto"];
+export type RuntimeUpdateCampaign = components["schemas"]["UpdateCampaignDto"];
+export type RuntimeCampaignTarget = components["schemas"]["CampaignTargetDto"];
+export type RuntimeCampaignTargetList = components["schemas"]["CampaignTargetListDto"];
+export type RuntimeCampaignPreflight = components["schemas"]["CampaignPreflightDto"];
+export type RuntimeCampaignExecutionMode =
+  components["schemas"]["CampaignPreflightRequestDto"]["executionMode"];
+export type RuntimeError = components["schemas"]["RuntimeErrorDto"];
 
 type RuntimeGroupListQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
 export type RuntimeGroupCapabilityStatus = NonNullable<
@@ -37,6 +47,12 @@ export interface RuntimeGroupMemberListInput {
   query?: string;
 }
 
+export interface RuntimeCampaignListInput {
+  sessionId: string;
+  limit?: number;
+  offset?: number;
+}
+
 export interface RuntimeConnectionInput {
   baseUrl: string;
   apiKey: string;
@@ -56,10 +72,54 @@ export class RuntimeConnectionError extends Error {
 }
 
 export class RuntimeRequestError extends Error {
-  constructor(message: string) {
+  readonly code: string | null;
+  readonly details: Record<string, unknown>;
+  readonly fieldErrors: Record<string, string[]>;
+  readonly status: number;
+
+  constructor(
+    message: string,
+    options: {
+      code?: string;
+      details?: Record<string, unknown>;
+      fieldErrors?: Record<string, string[]>;
+      status?: number;
+    } = {},
+  ) {
     super(message);
     this.name = "RuntimeRequestError";
+    this.code = options.code ?? null;
+    this.details = options.details ?? {};
+    this.fieldErrors = options.fieldErrors ?? {};
+    this.status = options.status ?? 0;
   }
+}
+
+function isRuntimeError(value: unknown): value is RuntimeError {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && "code" in value
+    && typeof value.code === "string"
+    && "message" in value
+    && typeof value.message === "string",
+  );
+}
+
+function runtimeRequestError(
+  fallback: string,
+  status: number,
+  value: unknown,
+): RuntimeRequestError {
+  if (!isRuntimeError(value)) {
+    return new RuntimeRequestError(`${fallback} (HTTP ${status}).`, { status });
+  }
+  return new RuntimeRequestError(value.message, {
+    code: value.code,
+    details: value.details,
+    fieldErrors: value.fieldErrors,
+    status,
+  });
 }
 
 export function normalizeRuntimeBaseUrl(value: string): string {
@@ -234,6 +294,129 @@ export class RuntimeApi {
         `Could not refresh send capability (HTTP ${result.response.status}).`,
       );
     }
+  }
+
+  async listCampaigns({
+    sessionId,
+    limit = 50,
+    offset = 0,
+  }: RuntimeCampaignListInput): Promise<RuntimeCampaignPage> {
+    const result = await this.client.GET("/api/v1/campaigns", {
+      params: { query: { sessionId, limit, offset } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load campaigns",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async getCampaign(campaignId: string): Promise<RuntimeCampaign> {
+    const result = await this.client.GET("/api/v1/campaigns/{id}", {
+      params: { path: { id: campaignId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load campaign",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async createCampaign(
+    input: RuntimeCreateCampaign,
+    idempotencyKey: string,
+  ): Promise<RuntimeCampaign> {
+    // The v0.2.0 scheduling semantics require the canonical IMMEDIATE value on
+    // the wire even though CreateCampaignDto models scheduledAt as optional.
+    const body = input.scheduleType === "IMMEDIATE"
+      ? { ...input, scheduledAt: null }
+      : input;
+    const result = await this.client.POST("/api/v1/campaigns", {
+      body: body as RuntimeCreateCampaign,
+      params: { header: { "Idempotency-Key": idempotencyKey } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not create campaign",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async updateCampaign(
+    campaignId: string,
+    input: RuntimeUpdateCampaign,
+  ): Promise<RuntimeCampaign> {
+    const result = await this.client.PATCH("/api/v1/campaigns/{id}", {
+      body: input,
+      params: { path: { id: campaignId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not update campaign",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async listCampaignTargets(campaignId: string): Promise<RuntimeCampaignTargetList> {
+    const result = await this.client.GET("/api/v1/campaigns/{id}/targets", {
+      params: { path: { id: campaignId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load campaign targets",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async replaceCampaignTargets(
+    campaignId: string,
+    groupIds: string[],
+  ): Promise<RuntimeCampaignTargetList> {
+    const result = await this.client.PUT("/api/v1/campaigns/{id}/targets", {
+      body: { groupIds },
+      params: { path: { id: campaignId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not replace campaign targets",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async preflightCampaign(
+    campaignId: string,
+    executionMode: RuntimeCampaignExecutionMode,
+  ): Promise<RuntimeCampaignPreflight> {
+    const result = await this.client.POST("/api/v1/campaigns/{id}/preflight", {
+      body: { executionMode },
+      params: { path: { id: campaignId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not run campaign preflight",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
   }
 }
 

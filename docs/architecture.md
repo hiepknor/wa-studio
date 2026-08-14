@@ -15,7 +15,7 @@ This boundary lets future web and mobile clients use the same WA Runtime contrac
 
 ## Source of truth
 
-- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied from `wa-runtime/contracts/runtime/v1/openapi.json`.
+- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime revision `9dc0643ddfa09cc3f74ce76fbcf2e58f6026f4ee` (SHA-256 `3b8ff2cbb110ebf1f79ff40f1b8b9549a51527cf6e2488dec292ceb727034e7a`).
 - `src/shared/api/generated/runtime.ts` is generated; do not edit it by hand.
 - `src/shared/api/runtime-client.ts` owns URL normalization, authentication headers, transport, and error mapping.
 - Feature modules consume the typed client and must not redefine Runtime DTOs.
@@ -29,7 +29,7 @@ src/app                  composition and application shell
 src/features/connection first-run connection and credential validation
 src/features/sessions   session selection, status, and read-model refresh
 src/features/groups     browse, filter, inspect, capability, and full sync
-src/features/campaigns  draft, targets, preflight, launch (later)
+src/features/campaigns  draft details, complete target replacement, preflight
 src/features/runs       progress, delivery failures, controls (later)
 src/shared/api          generated contract and WA Runtime transport
 src/shared/platform     typed adapters for optional desktop capabilities
@@ -75,3 +75,11 @@ After authentication, `RuntimeConnectionProvider` holds the normalized WA Runtim
 The shell treats the selected session as shared workspace context. Its toolbar selector is therefore the single context switch used by current and future Groups, Campaigns, Runs, and Activity pages. Destinations and availability live in `src/app/workspace-pages.ts`; adding a feature page means registering it there and adding its renderer, without duplicating sidebar or status-bar logic. Unimplemented destinations remain visibly disabled rather than presenting mock workflows.
 
 Disconnect clears the connection profile, API client, sessions, and selection. A monotonically increasing connection revision prevents late connect or refresh responses from restoring state after disconnect. Session full sync follows the durable WA Runtime workflow: create a sync run, poll its status, then refresh session read models after completion.
+
+## Campaign draft boundary
+
+Campaign creation owns one UUID idempotency key per create intent. The key survives transport failure and response loss; only opening a new create intent allocates a new key. HTTP 201 and HTTP 200 replay are reconciled by campaign ID so the list cannot gain a duplicate row.
+
+The editor keeps Runtime DTOs authoritative. The transport canonicalizes IMMEDIATE create requests to `scheduledAt: null`; content-only PATCH requests omit scheduling fields. Changing ONCE to IMMEDIATE sends `scheduledAt: null`; changing IMMEDIATE to ONCE sends a timezone-qualified timestamp that Runtime canonicalizes to UTC. Target PUT requests are complete replacement sets, validated for uniqueness and the 1,000-item limit before submission. The UI commits only the canonical response and refreshes the campaign afterward to obtain its new `targetsRevision`.
+
+Preflight evaluates persisted state only. The UI renders Runtime status, counters, stable check codes, and stable issue reasons without recomputing policy. Local edits make a displayed result stale, successful details/target persistence clears it, and returned campaign/target revisions are checked against the current campaign. Editor epochs prevent late responses from a closed editor or a different session from being applied. No campaign-run or message-send operation is exposed by the Studio client in v0.2.0.

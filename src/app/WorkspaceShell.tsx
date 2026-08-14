@@ -9,6 +9,7 @@ import {
 } from "./workspace-pages";
 import { SessionsScreen } from "@/features/sessions/SessionsScreen";
 import { GroupsScreen } from "@/features/groups/GroupsScreen";
+import { CampaignsScreen } from "@/features/campaigns/CampaignsScreen";
 import { AppIcon, type AppIconName } from "@/shared/ui/AppIcon";
 import { BrandMark } from "@/shared/ui/BrandMark";
 import { Button } from "@/shared/ui/Button";
@@ -35,6 +36,8 @@ function formatSyncTime(value: string | null | undefined): string {
 
 function renderPage(pageId: WorkspacePageId, openGroups: () => void) {
   switch (pageId) {
+    case "campaigns":
+      return <CampaignsScreen />;
     case "groups":
       return <GroupsScreen />;
     case "sessions":

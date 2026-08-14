@@ -594,6 +594,17 @@ export interface components {
             /** @description Pagination metadata for the filtered synchronized member dataset */
             meta: components["schemas"]["GroupMemberPageMetaDto"];
         };
+        RuntimeErrorDto: {
+            /** @example CAMPAIGN_NOT_FOUND */
+            code: string;
+            message: string;
+            fieldErrors?: {
+                [key: string]: string[];
+            };
+            details?: {
+                [key: string]: unknown;
+            };
+        };
         CreateCampaignDto: {
             /** Format: uuid */
             sessionId: string;
@@ -606,7 +617,7 @@ export interface components {
             scheduleType: "IMMEDIATE" | "ONCE";
             /**
              * Format: date-time
-             * @description Required only for ONCE scheduling
+             * @description Required for ONCE. Ignored and returned as null for IMMEDIATE.
              */
             scheduledAt?: string;
         };
@@ -624,6 +635,10 @@ export interface components {
             /** @enum {string} */
             status: "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED";
             targetCount: number;
+            /** @description Revision of campaign content and scheduling. */
+            revision: number;
+            /** @description Revision of the complete target set. */
+            targetsRevision: number;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -643,8 +658,11 @@ export interface components {
             text?: string;
             /** @enum {string} */
             scheduleType?: "IMMEDIATE" | "ONCE";
-            /** Format: date-time */
-            scheduledAt?: Record<string, never> | null;
+            /**
+             * Format: date-time
+             * @description Required when changing to ONCE; null is the canonical value for IMMEDIATE.
+             */
+            scheduledAt?: string | null;
         };
         CampaignTargetDto: {
             groupId: string;
@@ -657,6 +675,7 @@ export interface components {
         };
         ReplaceCampaignTargetsDto: {
             /**
+             * @description Complete replacement set. Duplicate IDs are rejected and response order is canonical.
              * @example [
              *       "120363000000000000@g.us"
              *     ]
@@ -671,7 +690,8 @@ export interface components {
             executionMode: "DRY_RUN" | "LIVE";
         };
         CampaignPreflightCheckDto: {
-            code: string;
+            /** @enum {string} */
+            code: "CONTENT_VALID" | "TARGETS_VALID" | "SESSION_SENDABLE" | "GROUP_CAPABILITY" | "LIVE_SEND_ALLOWED";
             /** @enum {string} */
             status: "PASS" | "WARN" | "BLOCK";
             message: string;
@@ -681,12 +701,15 @@ export interface components {
             groupName: string;
             /** @enum {string} */
             capability: "ALLOWED" | "DENIED" | "UNKNOWN";
-            reason: string;
+            /** @enum {string} */
+            reason: "TARGET_CAPABILITY_DENIED" | "TARGET_CAPABILITY_UNKNOWN";
         };
         CampaignPreflightDto: {
             /** @enum {string} */
             status: "PASS" | "WARN" | "BLOCK";
             policyVersion: number;
+            campaignRevision: number;
+            targetsRevision: number;
             /** @enum {string} */
             executionMode: "DRY_RUN" | "LIVE";
             /** Format: date-time */
@@ -1040,12 +1063,46 @@ export interface operations {
                     "application/json": components["schemas"]["CampaignListDto"];
                 };
             };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
         };
     };
     CampaignController_create: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1055,12 +1112,53 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignDto"];
+                };
+            };
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["CampaignDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
         };
@@ -1082,6 +1180,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CampaignDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
         };
@@ -1109,6 +1239,38 @@ export interface operations {
                     "application/json": components["schemas"]["CampaignDto"];
                 };
             };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
         };
     };
     CampaignController_listTargets: {
@@ -1128,6 +1290,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CampaignTargetListDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
         };
@@ -1155,6 +1349,38 @@ export interface operations {
                     "application/json": components["schemas"]["CampaignTargetListDto"];
                 };
             };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
         };
     };
     CampaignController_preflight: {
@@ -1180,6 +1406,38 @@ export interface operations {
                     "application/json": components["schemas"]["CampaignPreflightDto"];
                 };
             };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
         };
     };
     CampaignController_listRuns: {
@@ -1202,6 +1460,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CampaignRunListDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
         };
@@ -1229,6 +1519,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CampaignRunDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
         };
