@@ -19,7 +19,7 @@ import { Drawer } from "@/shared/ui/Drawer";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SearchField } from "@/shared/ui/SearchField";
-import { SelectField } from "@/shared/ui/SelectField";
+import { SelectMenu } from "@/shared/ui/SelectMenu";
 import { Tabs } from "@/shared/ui/Tabs";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import { TextAreaField } from "@/shared/ui/TextAreaField";
@@ -53,6 +53,18 @@ type EditorState =
 type CampaignEditorTab = "details" | "targets" | "preflight";
 
 const PAGE_SIZE = 50;
+const SCHEDULE_OPTIONS = [
+  {
+    description: "No scheduled timestamp.",
+    label: "Immediate",
+    value: "IMMEDIATE",
+  },
+  {
+    description: "Send at one scheduled time.",
+    label: "Once",
+    value: "ONCE",
+  },
+] as const;
 
 function formatDate(value: string | null): string {
   if (!value) return "Immediate";
@@ -552,7 +564,7 @@ export function CampaignsScreen() {
               <div className="campaign-section-heading"><div><h3>Campaign details</h3><p>Text and scheduling persist independently from targets.</p></div>{campaign && <Badge tone={statusTone(campaign.status)}>{campaign.status}</Badge>}</div>
               {detailsError && <InlineAlert title="Could not save details">{detailsError}</InlineAlert>}
               <div className="campaign-workspace-section stack stack-md"><div className="campaign-workspace-section-title"><h4>Content</h4><small>Required</small></div><TextField description={fieldDescription(formErrors.name)} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} /><TextAreaField description={fieldDescription(formErrors.text, "Plain text sent only by a later run milestone.")} disabled={!editable} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} /></div>
-              <div className="campaign-workspace-section stack stack-md"><div className="campaign-workspace-section-title"><h4>Delivery timing</h4><small>Runtime canonicalized</small></div><SelectField description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(event) => updateForm("scheduleType", event.target.value as CampaignFormValues["scheduleType"])} value={form.scheduleType}><option value="IMMEDIATE">Immediate</option><option value="ONCE">Once</option></SelectField>{form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</div>
+              <div className="campaign-workspace-section stack stack-md"><div className="campaign-workspace-section-title"><h4>Delivery timing</h4><small>Runtime canonicalized</small></div><SelectMenu description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />{form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</div>
             </section>}
 
             {editorTab === "targets" && <section aria-labelledby="campaign-editor-targets-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-targets-panel" role="tabpanel">

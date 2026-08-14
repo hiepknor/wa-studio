@@ -115,7 +115,17 @@ describe("CampaignsScreen", () => {
     expect(screen.getByText("Details are up to date")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Campaign name" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Message text" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Schedule" })).toBeInTheDocument();
+    const schedule = screen.getByRole("combobox", { name: "Schedule" });
+    await user.click(schedule);
+    await user.click(screen.getByRole("option", { name: /Once/ }));
+    expect(screen.getByLabelText("Scheduled date and time")).toBeInTheDocument();
+    await user.click(schedule);
+    await user.click(screen.getByRole("option", { name: /Immediate/ }));
+    expect(screen.queryByLabelText("Scheduled date and time")).not.toBeInTheDocument();
+    await user.click(schedule);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox", { name: "Schedule" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Release" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     expect(screen.getByText("Target set is up to date")).toBeInTheDocument();
