@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import { GroupCapabilityStatus } from "@/features/groups/GroupCapabilityStatus";
@@ -6,6 +6,7 @@ import {
   RuntimeRequestError,
   type RuntimeCampaign,
   type RuntimeCampaignExecutionMode,
+  type RuntimeCampaignPage,
   type RuntimeCampaignPreflight,
   type RuntimeCampaignTarget,
   type RuntimeGroup,
@@ -23,6 +24,12 @@ import { TablePagination } from "@/shared/ui/TablePagination";
 import { TextAreaField } from "@/shared/ui/TextAreaField";
 import { TextField } from "@/shared/ui/TextField";
 import { useToast } from "@/shared/ui/Toast";
+import { CampaignListToolbar } from "./CampaignListToolbar";
+import {
+  campaignListRequestKey,
+  initialCampaignListState,
+  type CampaignListRequestState,
+} from "./campaign-list-state";
 import {
   campaignErrorMessage,
   campaignFormFromDto,
@@ -83,9 +90,9 @@ export function CampaignsScreen() {
   if (!connected) throw new Error("CampaignsScreen requires a Runtime connection");
 
   const api = connected.api;
-  const [campaigns, setCampaigns] = useState<RuntimeCampaign[]>([]);
-  const [campaignTotal, setCampaignTotal] = useState(0);
-  const [campaignOffset, setCampaignOffset] = useState(0);
+  const [campaignPage, setCampaignPage] = useState<RuntimeCampaignPage | null>(null);
+  const [listState, setListState] = useState(() => initialCampaignListState(selectedSessionId));
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [listLoading, setListLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState>({ kind: "closed" });
@@ -110,7 +117,13 @@ export function CampaignsScreen() {
   const createKeyRef = useRef<string | null>(null);
   const editorEpochRef = useRef(0);
   const listRequestRef = useRef(0);
-  const previousSessionRef = useRef(selectedSessionId);
+  const listTargetRef = useRef(campaignListRequestKey(listState));
+  const pageKeyRef = useRef("");
+  const errorKeyRef = useRef("");
+  const listStateRef = useRef(listState);
+  const currentListRequestKey = campaignListRequestKey(listState);
+  listTargetRef.current = currentListRequestKey;
+  listStateRef.current = listState;
 
   const campaign = editor.kind === "open" ? editor.campaign : null;
   const editable = !campaign || campaign.status === "DRAFT";
@@ -126,40 +139,84 @@ export function CampaignsScreen() {
     ? detailsDirty || targetsDirty
     : Boolean(form.name || form.text || form.scheduledAt || form.scheduleType !== "IMMEDIATE");
 
-  async function loadCampaigns(sessionId: string, offset = campaignOffset) {
+  const loadCampaigns = useCallback(async (state: CampaignListRequestState) => {
+    if (!state.sessionId) return;
     const request = ++listRequestRef.current;
+    const requestKey = campaignListRequestKey(state);
     setListLoading(true);
     setListError(null);
     try {
-      const page = await api.listCampaigns({ sessionId, limit: PAGE_SIZE, offset });
-      if (request !== listRequestRef.current || sessionId !== selectedSessionId) return;
-      setCampaigns(page.data);
-      setCampaignTotal(page.meta.total);
+      const page = await api.listCampaigns({
+        sessionId: state.sessionId,
+        limit: PAGE_SIZE,
+        offset: state.offset,
+        ...(state.query ? { query: state.query } : {}),
+        ...(state.statuses.length ? { statuses: state.statuses } : {}),
+        ...(state.scheduleTypes.length ? { scheduleTypes: state.scheduleTypes } : {}),
+      });
+      if (request !== listRequestRef.current || requestKey !== listTargetRef.current) return;
+      if (state.offset > 0 && page.data.length === 0 && page.meta.total <= state.offset) {
+        const lastOffset = page.meta.total === 0
+          ? 0
+          : Math.floor((page.meta.total - 1) / PAGE_SIZE) * PAGE_SIZE;
+        if (page.meta.total === 0) {
+          setCampaignPage({ data: [...page.data], meta: { ...page.meta } });
+          pageKeyRef.current = requestKey;
+        }
+        setListState((current) => campaignListRequestKey(current) === requestKey
+          ? { ...current, offset: lastOffset }
+          : current);
+        return;
+      }
+      setCampaignPage({ data: [...page.data], meta: { ...page.meta } });
+      pageKeyRef.current = requestKey;
     } catch (error) {
-      if (request !== listRequestRef.current) return;
+      if (request !== listRequestRef.current || requestKey !== listTargetRef.current) return;
+      errorKeyRef.current = requestKey;
       setListError(campaignErrorMessage(error, "Could not load campaigns."));
     } finally {
-      if (request === listRequestRef.current) setListLoading(false);
+      if (request === listRequestRef.current && requestKey === listTargetRef.current) {
+        setListLoading(false);
+      }
     }
-  }
+  }, [api]);
 
   useEffect(() => {
-    const sessionChanged = previousSessionRef.current !== selectedSessionId;
-    previousSessionRef.current = selectedSessionId;
-    if (sessionChanged) {
-      editorEpochRef.current += 1;
-      setEditor({ kind: "closed" });
-      setDiscardConfirmationOpen(false);
-    }
-    setCampaigns([]);
-    setCampaignTotal(0);
-    setCampaignOffset(0);
+    if (listState.sessionId === selectedSessionId) return;
+    listRequestRef.current += 1;
+    editorEpochRef.current += 1;
+    pageKeyRef.current = "";
+    errorKeyRef.current = "";
+    setEditor({ kind: "closed" });
+    setDiscardConfirmationOpen(false);
+    setCampaignPage(null);
+    setListState(initialCampaignListState(selectedSessionId));
+    setFiltersOpen(false);
+    setListLoading(false);
+    setListError(null);
     setPreflight(null);
-    if (selectedSessionId) void loadCampaigns(selectedSessionId, 0);
-    else setListLoading(false);
-    // loadCampaigns intentionally follows the selected workspace session.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSessionId]);
+  }, [listState.sessionId, selectedSessionId]);
+
+  useEffect(() => {
+    if (listState.sessionId !== selectedSessionId || !listState.sessionId) return;
+    void loadCampaigns(listStateRef.current);
+  }, [currentListRequestKey, listState.sessionId, loadCampaigns, selectedSessionId]);
+
+  useEffect(() => {
+    const normalizedQuery = listState.inputQuery.trim();
+    const timeout = window.setTimeout(() => {
+      setListState((current) => current.inputQuery === listState.inputQuery
+        && current.query !== normalizedQuery
+        ? { ...current, offset: 0, query: normalizedQuery }
+        : current);
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [listState.inputQuery]);
+
+  useEffect(() => () => {
+    listRequestRef.current += 1;
+    listTargetRef.current = "";
+  }, []);
 
   async function loadTargets(campaignId: string, epoch: number) {
     setTargetsLoading(true);
@@ -251,14 +308,6 @@ export function CampaignsScreen() {
     setFormErrors((current) => ({ ...current, [field]: undefined }));
   }
 
-  function upsertCampaign(saved: RuntimeCampaign) {
-    setCampaigns((current) => {
-      const existing = current.findIndex((candidate) => candidate.id === saved.id);
-      if (existing === -1) return [saved, ...current];
-      return current.map((candidate) => candidate.id === saved.id ? saved : candidate);
-    });
-  }
-
   async function saveDetails() {
     if (!selectedSessionId || !editable) return;
     const validation = validateCampaignForm(form);
@@ -287,9 +336,8 @@ export function CampaignsScreen() {
       setForm(campaignFormFromDto(saved));
       setPreflight(null);
       createKeyRef.current = null;
-      upsertCampaign(saved);
+      void loadCampaigns(listStateRef.current);
       if (created) {
-        setCampaignTotal((total) => total + (campaigns.some((item) => item.id === saved.id) ? 0 : 1));
         const targetEpoch = editorEpochRef.current;
         void Promise.all([loadTargets(saved.id, targetEpoch), loadGroups()]);
         setEditorTab("targets");
@@ -349,7 +397,7 @@ export function CampaignsScreen() {
       setEditor({ campaign: refreshed, kind: "open" });
       setForm(campaignFormFromDto(refreshed));
       setRevisionRefreshRequired(false);
-      upsertCampaign(refreshed);
+      void loadCampaigns(listStateRef.current);
       toast.notify({ id: `targets-saved-${campaign.id}`, title: "Target set replaced.", tone: "success" });
     } catch (error) {
       if (epoch !== editorEpochRef.current) return;
@@ -385,6 +433,18 @@ export function CampaignsScreen() {
     }
   }
 
+  const visiblePage = pageKeyRef.current === currentListRequestKey ? campaignPage : null;
+  const visibleListError = errorKeyRef.current === currentListRequestKey ? listError : null;
+  const listPending = listLoading || Boolean(selectedSessionId && !visiblePage && !visibleListError);
+  const total = visiblePage?.meta.total ?? 0;
+  const pageOffset = visiblePage?.meta.offset ?? listState.offset;
+  const pageLimit = visiblePage?.meta.limit ?? PAGE_SIZE;
+  const firstItem = total === 0 ? 0 : pageOffset + 1;
+  const lastItem = Math.min(pageOffset + (visiblePage?.data.length ?? 0), total);
+  const hasListCriteria = Boolean(
+    listState.query || listState.statuses.length || listState.scheduleTypes.length,
+  );
+
   return (
     <div className="campaigns-screen stack stack-lg">
       <PageHeader
@@ -393,17 +453,28 @@ export function CampaignsScreen() {
         title="Campaigns"
         titleId="campaigns-title"
       />
-      {listError && <InlineAlert action={<Button onClick={() => selectedSessionId && void loadCampaigns(selectedSessionId, campaignOffset)} size="sm">Retry</Button>} title="Could not load campaigns">{listError}</InlineAlert>}
       <div className="data-table-container campaign-list-panel">
-        <div className="data-table-toolbar campaign-list-summary"><span>{listLoading ? "Loading campaigns…" : `${campaigns.length} of ${campaignTotal} campaigns`}</span></div>
+        <CampaignListToolbar
+          filtersOpen={filtersOpen}
+          firstItem={firstItem}
+          lastItem={lastItem}
+          loading={listPending}
+          setFiltersOpen={setFiltersOpen}
+          setState={setListState}
+          state={listState}
+          total={total}
+        />
+        {visibleListError && <InlineAlert action={<Button onClick={() => void loadCampaigns(listStateRef.current)} size="sm">Retry</Button>} className="data-table-error" title="Could not load campaigns">{visibleListError}</InlineAlert>}
         <div className="data-table-scroll">
           <table>
             <caption>Campaigns for the active session</caption>
             <thead><tr><th scope="col">Campaign</th><th scope="col">Status</th><th scope="col">Schedule</th><th scope="col">Targets</th><th className="align-end" scope="col">Action</th></tr></thead>
             <tbody>
               {!selectedSessionId ? <tr><td className="data-table-empty" colSpan={5}>Select a session to view campaigns.</td></tr>
-                : !listLoading && !campaigns.length ? <tr><td className="data-table-empty" colSpan={5}>No campaigns yet. Create a DRAFT to get started.</td></tr>
-                : campaigns.map((item) => <tr key={item.id}>
+                : !visiblePage && listPending ? <tr><td className="data-table-empty" colSpan={5}>Loading campaigns…</td></tr>
+                : !visiblePage && visibleListError ? <tr><td className="data-table-empty" colSpan={5}>Campaigns are unavailable.</td></tr>
+                : !visiblePage?.data.length ? <tr><td className="data-table-empty" colSpan={5}>{hasListCriteria ? "No campaigns match this search or filters." : "No campaigns yet. Create a DRAFT to get started."}</td></tr>
+                : visiblePage.data.map((item) => <tr key={item.id}>
                   <td className="data-cell-primary"><div className="stack stack-xs"><strong className="data-primary-text">{item.name}</strong><span className="data-secondary-text">Revision {item.revision}</span></div></td>
                   <td><Badge tone={statusTone(item.status)}>{item.status}</Badge></td>
                   <td>{item.scheduleType === "IMMEDIATE" ? "Immediate" : formatDate(item.scheduledAt)}</td>
@@ -414,14 +485,11 @@ export function CampaignsScreen() {
           </table>
         </div>
         <TablePagination
-          limit={PAGE_SIZE}
-          loading={listLoading}
-          offset={campaignOffset}
-          onOffsetChange={(nextOffset) => {
-            setCampaignOffset(nextOffset);
-            if (selectedSessionId) void loadCampaigns(selectedSessionId, nextOffset);
-          }}
-          total={campaignTotal}
+          limit={pageLimit}
+          loading={listPending}
+          offset={pageOffset}
+          onOffsetChange={(nextOffset) => setListState((current) => ({ ...current, offset: nextOffset }))}
+          total={total}
         />
       </div>
 

@@ -132,7 +132,10 @@ describe("CampaignsScreen", () => {
     const createCampaign = vi.fn()
       .mockRejectedValueOnce(new TypeError("response lost"))
       .mockResolvedValueOnce(created);
-    renderCampaigns({ createCampaign }, []);
+    const listCampaigns = vi.fn()
+      .mockResolvedValueOnce({ data: [], meta: { total: 0, limit: 50, offset: 0 } })
+      .mockResolvedValue({ data: [created], meta: { total: 1, limit: 50, offset: 0 } });
+    renderCampaigns({ createCampaign, listCampaigns }, []);
     await connect(user);
     await user.click(screen.getByRole("button", { name: "New campaign" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus());
@@ -150,7 +153,7 @@ describe("CampaignsScreen", () => {
       sessionId: session.id, name: "New release", text: "Ship it", scheduleType: "IMMEDIATE",
     });
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
-    expect(screen.getAllByText("New release")).toHaveLength(1);
+    expect(await screen.findAllByText("New release")).toHaveLength(1);
   });
 
   it("does not alter scheduling on content PATCH and maps typed scheduling/edit conflicts", async () => {

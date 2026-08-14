@@ -22,11 +22,20 @@ export type RuntimeCampaignExecutionMode =
 export type RuntimeError = components["schemas"]["RuntimeErrorDto"];
 
 type RuntimeGroupListQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
+type RuntimeCampaignListQuery = NonNullable<
+  paths["/api/v1/campaigns"]["get"]["parameters"]["query"]
+>;
 export type RuntimeGroupCapabilityStatus = NonNullable<
   RuntimeGroupListQuery["capabilityStatus"]
 >[number];
 export type RuntimeGroupCapabilityFreshness = NonNullable<
   RuntimeGroupListQuery["capabilityFreshness"]
+>[number];
+export type RuntimeCampaignStatus = NonNullable<
+  RuntimeCampaignListQuery["status"]
+>[number];
+export type RuntimeCampaignScheduleType = NonNullable<
+  RuntimeCampaignListQuery["scheduleType"]
 >[number];
 
 export interface RuntimeGroupListInput {
@@ -51,6 +60,9 @@ export interface RuntimeCampaignListInput {
   sessionId: string;
   limit?: number;
   offset?: number;
+  query?: string;
+  statuses?: RuntimeCampaignStatus[];
+  scheduleTypes?: RuntimeCampaignScheduleType[];
 }
 
 export interface RuntimeConnectionInput {
@@ -300,9 +312,21 @@ export class RuntimeApi {
     sessionId,
     limit = 50,
     offset = 0,
+    query,
+    statuses,
+    scheduleTypes,
   }: RuntimeCampaignListInput): Promise<RuntimeCampaignPage> {
+    const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/campaigns", {
-      params: { query: { sessionId, limit, offset } },
+      params: { query: {
+        sessionId,
+        limit,
+        offset,
+        ...(normalizedQuery ? { query: normalizedQuery } : {}),
+        ...(statuses?.length ? { status: statuses } : {}),
+        ...(scheduleTypes?.length ? { scheduleType: scheduleTypes } : {}),
+      } },
+      querySerializer: { array: { style: "form", explode: false } },
     });
     if (!result.response.ok || !result.data) {
       throw runtimeRequestError(

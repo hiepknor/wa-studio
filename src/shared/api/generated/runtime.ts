@@ -153,7 +153,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List campaigns for allowlisted sessions */
+        /**
+         * Search and filter campaigns for allowlisted sessions
+         * @description Search and filters are applied before pagination. Results use updatedAt DESC and campaign ID ASC ordering; meta.total counts the filtered dataset.
+         */
         get: operations["CampaignController_list"];
         put?: never;
         /** Create a text campaign draft */
@@ -644,14 +647,15 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        PageMetaDto: {
+        CampaignListPageMetaDto: {
+            /** @description Total campaigns matching current session scope, search, and filter predicates. */
             total: number;
             limit: number;
             offset: number;
         };
         CampaignListDto: {
             data: components["schemas"]["CampaignDto"][];
-            meta: components["schemas"]["PageMetaDto"];
+            meta: components["schemas"]["CampaignListPageMetaDto"];
         };
         UpdateCampaignDto: {
             name?: string;
@@ -767,6 +771,11 @@ export interface components {
             completedAt: string | null;
             /** Format: date-time */
             createdAt: string;
+        };
+        PageMetaDto: {
+            total: number;
+            limit: number;
+            offset: number;
         };
         CampaignRunListDto: {
             data: components["schemas"]["CampaignRunDto"][];
@@ -1048,6 +1057,12 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 sessionId?: string;
+                /** @description Trimmed case-insensitive literal substring search on campaign name, or exact campaign UUID. */
+                query?: string;
+                /** @description Comma-separated campaign statuses. Values are ORed and combined with other filters using AND. */
+                status?: ("DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED")[];
+                /** @description Comma-separated schedule types. Values are ORed and combined with other filters using AND. */
+                scheduleType?: ("IMMEDIATE" | "ONCE")[];
             };
             header?: never;
             path?: never;

@@ -1,0 +1,106 @@
+import type { Dispatch, SetStateAction } from "react";
+
+import { AppIcon } from "@/shared/ui/AppIcon";
+import { Button } from "@/shared/ui/Button";
+import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
+import {
+  activeCampaignFilterCount,
+  CAMPAIGN_SCHEDULE_OPTIONS,
+  CAMPAIGN_STATUS_OPTIONS,
+  clearCampaignFilters,
+  hasCampaignFilters,
+  toggleCampaignFilter,
+  type CampaignListState,
+} from "./campaign-list-state";
+
+interface CampaignListToolbarProps {
+  filtersOpen: boolean;
+  firstItem: number;
+  lastItem: number;
+  loading: boolean;
+  setFiltersOpen: Dispatch<SetStateAction<boolean>>;
+  setState: Dispatch<SetStateAction<CampaignListState>>;
+  state: CampaignListState;
+  total: number;
+}
+
+export function CampaignListToolbar({
+  filtersOpen,
+  firstItem,
+  lastItem,
+  loading,
+  setFiltersOpen,
+  setState,
+  state,
+  total,
+}: CampaignListToolbarProps) {
+  const filterCount = activeCampaignFilterCount(state);
+  const hasCriteria = Boolean(state.query || filterCount);
+
+  return (
+    <DataFilterToolbar
+      filterCount={filterCount}
+      filtersOpen={filtersOpen}
+      idPrefix="campaign-list"
+      loading={loading}
+      onCloseFilters={() => setFiltersOpen(false)}
+      onSearchChange={(inputQuery) => setState((current) => ({ ...current, inputQuery }))}
+      onToggleFilters={() => setFiltersOpen((open) => !open)}
+      resultSummary={loading
+        ? "Updating results…"
+        : `${firstItem}–${lastItem} of ${total}${hasCriteria ? " matches" : ""}`}
+      searchLabel="Search campaigns"
+      searchPlaceholder="Search campaign name or exact UUID"
+      searchValue={state.inputQuery}
+    >
+      {(closeFilters) => filtersOpen && (
+        <CampaignFilterPanel onClose={closeFilters} setState={setState} state={state} />
+      )}
+    </DataFilterToolbar>
+  );
+}
+
+interface CampaignFilterPanelProps {
+  onClose: () => void;
+  setState: Dispatch<SetStateAction<CampaignListState>>;
+  state: CampaignListState;
+}
+
+function CampaignFilterPanel({ onClose, setState, state }: CampaignFilterPanelProps) {
+  const filterCount = activeCampaignFilterCount(state);
+  return (
+    <section aria-label="Campaign filters" className="data-filter-panel" id="campaign-list-filter-panel">
+      <header className="data-filter-panel-header">
+        <div><strong>Filter campaigns</strong><span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span></div>
+        <button aria-label="Close campaign filters" className="data-filter-panel-close" onClick={onClose} type="button"><AppIcon name="close" size="xs" /></button>
+      </header>
+      <div className="data-filter-panel-body">
+        <fieldset><legend>Status</legend><div className="data-filter-options">
+          {CAMPAIGN_STATUS_OPTIONS.map((option) => <label key={option.value}><input checked={state.statuses.includes(option.value)} onChange={() => setState((current) => ({ ...current, offset: 0, statuses: toggleCampaignFilter(current.statuses, option.value, CAMPAIGN_STATUS_OPTIONS) }))} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{option.label}</span></label>)}
+        </div></fieldset>
+        <fieldset><legend>Schedule</legend><div className="data-filter-options">
+          {CAMPAIGN_SCHEDULE_OPTIONS.map((option) => <label key={option.value}><input checked={state.scheduleTypes.includes(option.value)} onChange={() => setState((current) => ({ ...current, offset: 0, scheduleTypes: toggleCampaignFilter(current.scheduleTypes, option.value, CAMPAIGN_SCHEDULE_OPTIONS) }))} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{option.label}</span></label>)}
+        </div></fieldset>
+      </div>
+      <CampaignFilterSummary setState={setState} state={state} />
+    </section>
+  );
+}
+
+function CampaignFilterSummary({ setState, state }: Pick<CampaignFilterPanelProps, "setState" | "state">) {
+  const filtersApplied = hasCampaignFilters(state);
+  return (
+    <div aria-label="Selected campaign filters" className="data-filter-summary">
+      <div className="data-filter-chips">
+        {!filtersApplied && <span className="data-filter-summary-empty">No filters applied</span>}
+        {state.statuses.map((value) => <FilterChip key={value} label={CAMPAIGN_STATUS_OPTIONS.find((option) => option.value === value)?.label ?? value} onRemove={() => setState((current) => ({ ...current, offset: 0, statuses: current.statuses.filter((candidate) => candidate !== value) }))} />)}
+        {state.scheduleTypes.map((value) => <FilterChip key={value} label={CAMPAIGN_SCHEDULE_OPTIONS.find((option) => option.value === value)?.label ?? value} onRemove={() => setState((current) => ({ ...current, offset: 0, scheduleTypes: current.scheduleTypes.filter((candidate) => candidate !== value) }))} />)}
+      </div>
+      <Button disabled={!filtersApplied} onClick={() => setState(clearCampaignFilters)} size="sm" variant="ghost">Clear all</Button>
+    </div>
+  );
+}
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return <button aria-label={`Remove ${label} filter`} className="data-filter-chip" onClick={onRemove} type="button"><span>{label}</span><AppIcon name="close" size="xs" /></button>;
+}

@@ -136,6 +136,9 @@ export function isPreflightStale(
 const ERROR_COPY: Record<string, string> = {
   CAMPAIGN_IDEMPOTENCY_CONFLICT:
     "This create key was already used with different campaign details. Start a new campaign intent.",
+  CAMPAIGN_FILTER_STATUS_INVALID: "One or more campaign status filters are invalid.",
+  CAMPAIGN_FILTER_SCHEDULE_TYPE_INVALID: "One or more campaign schedule filters are invalid.",
+  CAMPAIGN_QUERY_INVALID: "Campaign search must be 200 characters or fewer.",
   CAMPAIGN_NOT_EDITABLE: "Only DRAFT campaigns can be edited.",
   CAMPAIGN_NOT_FOUND: "This campaign no longer exists or is outside the active session.",
   CAMPAIGN_SCHEDULE_REQUIRED: "Choose when this campaign should run.",

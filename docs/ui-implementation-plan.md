@@ -37,7 +37,7 @@ Status: completed. Sessions owns selection, status, and read-model refresh. Grou
 
 Use labelled form controls for campaign content and scheduling, controlled group selection for targets, and scoped alerts for preflight findings. A live run action remains visually and behaviorally distinct from dry-run or draft actions.
 
-Status: completed for v0.2.0 through persisted drafts, complete target replacement, and DRY_RUN/LIVE preflight review. Campaign execution and message sending remain deferred; LIVE here is a preflight policy mode, not a launch action.
+Status: completed for v0.2.0 through Runtime-backed campaign search, multi-select status/schedule filtering, persisted drafts, complete target replacement, and DRY_RUN/LIVE preflight review. Campaign execution and message sending remain deferred; LIVE here is a preflight policy mode, not a launch action.
 
 ### 5. Run monitoring
 
@@ -51,11 +51,13 @@ Use native progress elements, status feedback, controlled delivery tables, and a
 4. Bundle-size changes are recorded when new UI dependencies or substantial styles are introduced.
 5. No feature may call OpenWA or redefine Runtime DTOs.
 
-Current Campaign Drafts & Preflight baseline: 296.03 kB JavaScript (89.90 kB gzip) and 44.88 kB CSS (9.34 kB gzip), plus 106.41 kB of locally bundled variable-font subsets. The production brand mark is an inlined SVG; native bundle icons are generated from the dedicated SVG app-icon master.
+Current Campaign Drafts, Search & Preflight baseline: 301.72 kB JavaScript (90.77 kB gzip) and 44.88 kB CSS (9.34 kB gzip), plus 106.41 kB of locally bundled variable-font subsets. The production brand mark is an inlined SVG; native bundle icons are generated from the dedicated SVG app-icon master.
 
 Groups and Sessions MVP validation (2026-08-14): `npm run check` passes with 104 tests; the macOS debug app and DMG build successfully; and staging smoke coverage passes for session reload, Runtime-backed group search, compact-window group inspection, member pagination, capability refresh, full-sync background handoff, and completed-sync metadata reconciliation. Focus treatment, compact resizing, and the overlay drawer were inspected in the debug app. The macOS reduced-motion setting was not toggled during this validation.
 
 Campaign Drafts & Preflight validation (2026-08-14): `npm run check` passes with 160 tests, including the pinned contract checksum, generated nullable update scheduling type, idempotent create replay, canonical target replacement, typed Runtime errors, all DRY_RUN/LIVE status variants, revision staleness, late-response protection, discard confirmation, and shared form-control accessibility. Campaigns reuses the same data table, pagination, drawer, tabs, search, capability, feedback, and action primitives as Groups/Sessions. The Vite production build and Rust fmt/clippy gates pass. Native packaging and staging smoke testing were not run because this milestone was not requested for deployment.
+
+Campaign server-side search/filter validation (2026-08-14): `npm run check` passes with 181 tests, covering 300 ms debouncing, trimmed/omitted queries, comma-separated multi-select filters, filtered pagination and empty states, offset recovery, typed validation errors, session/query/filter/unmount race protection, and the existing Draft/Target/Preflight and target-picker regressions. The Vite production build and Rust fmt/clippy gates pass. Native packaging and staging smoke testing were not run because deployment was outside this change.
 
 ## Dependency policy
 

@@ -78,6 +78,59 @@ describe("probeRuntimeConnection", () => {
 });
 
 describe("RuntimeApi", () => {
+  it("omits new campaign search/filter parameters by default", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      data: [], meta: { total: 0, limit: 50, offset: 0 },
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+    await api.listCampaigns({ sessionId: "session id" });
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.url).toBe("http://127.0.0.1:3100/api/v1/campaigns?sessionId=session%20id&limit=50&offset=0");
+  });
+
+  it("trims campaign search and serializes multi-value filters comma-separated", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      data: [], meta: { total: 0, limit: 20, offset: 40 },
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+    await api.listCampaigns({
+      sessionId: "session-id",
+      limit: 20,
+      offset: 40,
+      query: "  release_%\\  ",
+      statuses: ["DRAFT", "PAUSED"],
+      scheduleTypes: ["IMMEDIATE", "ONCE"],
+    });
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.url).toBe("http://127.0.0.1:3100/api/v1/campaigns?sessionId=session-id&limit=20&offset=40&query=release_%25%5C&status=DRAFT,PAUSED&scheduleType=IMMEDIATE,ONCE");
+  });
+
+  it("omits whitespace campaign search and empty filters", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      data: [], meta: { total: 0, limit: 50, offset: 0 },
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+    await api.listCampaigns({
+      sessionId: "session-id",
+      query: "   ",
+      statuses: [],
+      scheduleTypes: [],
+    });
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.url).not.toContain("query=");
+    expect(request.url).not.toContain("status=");
+    expect(request.url).not.toContain("scheduleType=");
+  });
+
   it("keeps the caller-owned Idempotency-Key stable across create retries and accepts HTTP 200 replay", async () => {
     const created = {
       id: "campaign-id",

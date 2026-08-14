@@ -15,7 +15,7 @@ This boundary lets future web and mobile clients use the same WA Runtime contrac
 
 ## Source of truth
 
-- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime revision `9dc0643ddfa09cc3f74ce76fbcf2e58f6026f4ee` (SHA-256 `3b8ff2cbb110ebf1f79ff40f1b8b9549a51527cf6e2488dec292ceb727034e7a`).
+- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime revision `f2eb638ce8e51b74f4ff224850093b59aa11ee6a` (SHA-256 `e77b1058958dfa8238ebc3f71940165eaf5b82fd7ae2a487b183c3990071cdf2`).
 - `src/shared/api/generated/runtime.ts` is generated; do not edit it by hand.
 - `src/shared/api/runtime-client.ts` owns URL normalization, authentication headers, transport, and error mapping.
 - Feature modules consume the typed client and must not redefine Runtime DTOs.
@@ -29,7 +29,7 @@ src/app                  composition and application shell
 src/features/connection first-run connection and credential validation
 src/features/sessions   session selection, status, and read-model refresh
 src/features/groups     browse, filter, inspect, capability, and full sync
-src/features/campaigns  draft details, complete target replacement, preflight
+src/features/campaigns  server-backed browse/filter, draft details, targets, preflight
 src/features/runs       progress, delivery failures, controls (later)
 src/shared/api          generated contract and WA Runtime transport
 src/shared/platform     typed adapters for optional desktop capabilities
@@ -77,6 +77,8 @@ The shell treats the selected session as shared workspace context. Its toolbar s
 Disconnect clears the connection profile, API client, sessions, and selection. A monotonically increasing connection revision prevents late connect or refresh responses from restoring state after disconnect. Session full sync follows the durable WA Runtime workflow: create a sync run, poll its status, then refresh session read models after completion.
 
 ## Campaign draft boundary
+
+The Campaign list is a Runtime-owned projection. Studio sends the trimmed, debounced query and selected status/schedule arrays to Runtime, renders the returned page in Runtime order, and uses `meta.total` for pagination. Search input remains separate from the applied request state. Query, filter, offset, session, and component-lifetime request keys prevent late responses from replacing newer results; a session change clears all list criteria. Studio neither filters nor sorts the returned page locally.
 
 Campaign creation owns one UUID idempotency key per create intent. The key survives transport failure and response loss; only opening a new create intent allocates a new key. HTTP 201 and HTTP 200 replay are reconciled by campaign ID so the list cannot gain a duplicate row.
 
