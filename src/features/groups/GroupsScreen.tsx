@@ -32,10 +32,24 @@ import {
   groupCapabilityIsStale,
 } from "./GroupCapabilityStatus";
 import { GroupSearchToolbar } from "./GroupSearchToolbar";
+import { reconcileMemberDatasetRevision } from "./member-dataset";
+import {
+  memberDisplayName,
+  memberIdentityPresentation,
+} from "./member-presentation";
 import "./groups.css";
 
 const PAGE_SIZE = 20;
 const MEMBER_PAGE_SIZE = 25;
+
+function memberPageKey(
+  sessionId: string,
+  groupId: string,
+  offset: number,
+  query: string,
+): string {
+  return `${sessionId}\u0000${groupId}\u0000${offset}\u0000${query}`;
+}
 
 type CapabilityRefreshState =
   "idle" | "requesting" | "pending" | "completed" | "timed-out" | "failed";
@@ -143,8 +157,10 @@ export function GroupsScreen() {
   const listStateRef = useRef(listState);
   const detailRevision = useRef(0);
   const membersRevision = useRef(0);
+  const memberDatasetRevisionRef = useRef<number | null>(null);
   const memberPageKeyRef = useRef("");
   const memberRequestKeyRef = useRef("");
+  const memberTargetKeyRef = useRef("");
   const capabilityRevision = useRef(0);
   const capabilityAbortRef = useRef<AbortController | null>(null);
   const capabilityTargetRef = useRef<{
@@ -160,6 +176,17 @@ export function GroupsScreen() {
       : null;
   listTargetRef.current = groupListRequestKey(listState);
   listStateRef.current = listState;
+  memberTargetKeyRef.current =
+    inspectorTab === "members" &&
+    selectedSessionId &&
+    selectedGroup?.sessionId === selectedSessionId
+      ? memberPageKey(
+          selectedSessionId,
+          selectedGroup.id,
+          memberOffset,
+          memberQuery,
+        )
+      : "";
   const refreshingCapability =
     capabilityRefreshState === "requesting" ||
     capabilityRefreshState === "pending";
@@ -283,44 +310,93 @@ export function GroupsScreen() {
       query: string,
     ) => {
       const revision = ++membersRevision.current;
-      const pageKey = `${sessionId}\u0000${groupId}\u0000${nextOffset}\u0000${query}`;
-      memberRequestKeyRef.current = pageKey;
+      let requestOffset = nextOffset;
+      let requestKey = memberPageKey(
+        sessionId,
+        groupId,
+        requestOffset,
+        query,
+      );
+      let restartAvailable = true;
+      memberRequestKeyRef.current = requestKey;
       setMembersLoading(true);
       setMembersError(null);
       try {
-        const nextPage = await runtimeApi.listGroupMembers({
-          sessionId,
-          groupId,
-          limit: MEMBER_PAGE_SIZE,
-          offset: nextOffset,
-          ...(query ? { query } : {}),
-        });
-        if (revision !== membersRevision.current) return;
+        while (true) {
+          const nextPage = await runtimeApi.listGroupMembers({
+            sessionId,
+            groupId,
+            limit: MEMBER_PAGE_SIZE,
+            offset: requestOffset,
+            ...(query ? { query } : {}),
+          });
+          if (
+            revision !== membersRevision.current ||
+            requestKey !== memberTargetKeyRef.current
+          )
+            return;
 
-        if (
-          nextOffset > 0 &&
-          nextPage.data.length === 0 &&
-          nextPage.meta.total <= nextOffset
-        ) {
-          const lastOffset =
-            nextPage.meta.total === 0
-              ? 0
-              : Math.floor((nextPage.meta.total - 1) / MEMBER_PAGE_SIZE) *
-                MEMBER_PAGE_SIZE;
-          setMemberOffset(lastOffset);
-          if (nextPage.meta.total === 0) setMemberPage(nextPage);
+          const datasetDecision = reconcileMemberDatasetRevision(
+            memberDatasetRevisionRef.current,
+            nextPage.meta.datasetRevision,
+            restartAvailable,
+          );
+          memberDatasetRevisionRef.current = datasetDecision.revision;
+
+          if (datasetDecision.action === "restart") {
+            restartAvailable = false;
+            requestOffset = 0;
+            requestKey = memberPageKey(sessionId, groupId, 0, query);
+            memberTargetKeyRef.current = requestKey;
+            memberRequestKeyRef.current = requestKey;
+            memberPageKeyRef.current = "";
+            setMemberPage(null);
+            setMemberOffset(0);
+            setSyncedMemberTotal(null);
+            continue;
+          }
+
+          if (
+            requestOffset > 0 &&
+            nextPage.data.length === 0 &&
+            nextPage.meta.total <= requestOffset
+          ) {
+            const lastOffset =
+              nextPage.meta.total === 0
+                ? 0
+                : Math.floor((nextPage.meta.total - 1) / MEMBER_PAGE_SIZE) *
+                  MEMBER_PAGE_SIZE;
+            memberTargetKeyRef.current = memberPageKey(
+              sessionId,
+              groupId,
+              lastOffset,
+              query,
+            );
+            setMemberOffset(lastOffset);
+            if (nextPage.meta.total === 0) {
+              setMemberPage(nextPage);
+              memberPageKeyRef.current = memberTargetKeyRef.current;
+            } else {
+              setMemberPage(null);
+              memberPageKeyRef.current = "";
+            }
+            return;
+          }
+
+          setMemberPage(nextPage);
+          memberPageKeyRef.current = requestKey;
+          if (!query) setSyncedMemberTotal(nextPage.meta.total);
           return;
         }
-
-        setMemberPage(nextPage);
-        memberPageKeyRef.current = pageKey;
-        if (!query) setSyncedMemberTotal(nextPage.meta.total);
       } catch (error) {
-        if (revision === membersRevision.current) {
+        if (
+          revision === membersRevision.current &&
+          requestKey === memberTargetKeyRef.current
+        ) {
           setMembersError(errorMessage(error, "Could not load group members."));
         }
       } finally {
-        if (memberRequestKeyRef.current === pageKey)
+        if (memberRequestKeyRef.current === requestKey)
           memberRequestKeyRef.current = "";
         if (revision === membersRevision.current) setMembersLoading(false);
       }
@@ -348,6 +424,7 @@ export function GroupsScreen() {
     setCopyState("idle");
     setInspectorTab("overview");
     setMemberPage(null);
+    memberDatasetRevisionRef.current = null;
     memberPageKeyRef.current = "";
     memberRequestKeyRef.current = "";
     setMemberFilter("");
@@ -389,6 +466,13 @@ export function GroupsScreen() {
   ]);
 
   useEffect(() => () => cancelCapabilityRefresh(), [cancelCapabilityRefresh]);
+  useEffect(
+    () => () => {
+      membersRevision.current += 1;
+      memberTargetKeyRef.current = "";
+    },
+    [],
+  );
   useEffect(() => setSyncConfirmationOpen(false), [runtimeApi, runtimeOrigin]);
 
   useEffect(() => {
@@ -410,11 +494,14 @@ export function GroupsScreen() {
   useEffect(() => {
     const normalizedQuery = memberFilter.trim();
     const timeout = window.setTimeout(() => {
+      if (normalizedQuery === memberQuery) return;
+      membersRevision.current += 1;
+      memberRequestKeyRef.current = "";
       setMemberOffset(0);
       setMemberQuery(normalizedQuery);
     }, 300);
     return () => window.clearTimeout(timeout);
-  }, [memberFilter]);
+  }, [memberFilter, memberQuery]);
 
   useEffect(() => {
     if (
@@ -424,7 +511,12 @@ export function GroupsScreen() {
       selectedGroup.sessionId !== selectedSessionId
     )
       return;
-    const pageKey = `${selectedSessionId}\u0000${selectedGroup.id}\u0000${memberOffset}\u0000${memberQuery}`;
+    const pageKey = memberPageKey(
+      selectedSessionId,
+      selectedGroup.id,
+      memberOffset,
+      memberQuery,
+    );
     if (memberPage && memberPageKeyRef.current === pageKey) return;
     if (memberRequestKeyRef.current === pageKey) return;
     void loadMembers(
@@ -459,6 +551,7 @@ export function GroupsScreen() {
     setCopyState("idle");
     setInspectorTab("overview");
     setMemberPage(null);
+    memberDatasetRevisionRef.current = null;
     memberPageKeyRef.current = "";
     memberRequestKeyRef.current = "";
     setMemberFilter("");
@@ -493,6 +586,7 @@ export function GroupsScreen() {
     setCopyState("idle");
     setInspectorTab("overview");
     setMemberPage(null);
+    memberDatasetRevisionRef.current = null;
     memberPageKeyRef.current = "";
     memberRequestKeyRef.current = "";
     setMemberFilter("");
@@ -1235,34 +1329,36 @@ export function GroupsScreen() {
                     </p>
                   ) : (
                     <ul aria-busy={membersLoading || undefined}>
-                      {(memberPage?.data ?? []).map((member) => (
-                        <li key={member.participantId}>
-                          <span className="stack stack-xs">
-                            <strong>
-                              {member.displayName || member.phoneNumber}
-                            </strong>
-                            <code>{member.phoneNumber}</code>
-                            {member.participantId !== member.phoneNumber && (
-                              <code className="groups-member-id">
-                                {member.participantId}
-                              </code>
-                            )}
-                          </span>
-                          <Badge
-                            tone={
-                              member.isAdmin || member.isSuperAdmin
-                                ? "success"
-                                : "neutral"
-                            }
-                          >
-                            {member.isSuperAdmin
-                              ? "Owner"
-                              : member.isAdmin
-                                ? "Admin"
-                                : "Member"}
-                          </Badge>
-                        </li>
-                      ))}
+                      {(memberPage?.data ?? []).map((member) => {
+                        const identity = memberIdentityPresentation(member);
+                        return (
+                          <li key={member.participantId}>
+                            <span className="stack stack-xs">
+                              <strong>{memberDisplayName(member)}</strong>
+                              <code>{identity.label}</code>
+                              {identity.resolvedPhoneNumber &&
+                                identity.participantId && (
+                                  <code className="groups-member-id">
+                                    {identity.participantId}
+                                  </code>
+                                )}
+                            </span>
+                            <Badge
+                              tone={
+                                member.isAdmin || member.isSuperAdmin
+                                  ? "success"
+                                  : "neutral"
+                              }
+                            >
+                              {member.isSuperAdmin
+                                ? "Owner"
+                                : member.isAdmin
+                                  ? "Admin"
+                                  : "Member"}
+                            </Badge>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                   {memberPage && memberTotal > 0 && (
@@ -1274,11 +1370,13 @@ export function GroupsScreen() {
                         <Button
                           aria-label="Previous member page"
                           disabled={!canGoToPreviousMembers}
-                          onClick={() =>
+                          onClick={() => {
+                            membersRevision.current += 1;
+                            memberRequestKeyRef.current = "";
                             setMemberOffset(
                               Math.max(0, memberOffset - MEMBER_PAGE_SIZE),
-                            )
-                          }
+                            );
+                          }}
                           size="sm"
                         >
                           Previous
@@ -1286,9 +1384,11 @@ export function GroupsScreen() {
                         <Button
                           aria-label="Next member page"
                           disabled={!canGoToNextMembers}
-                          onClick={() =>
-                            setMemberOffset(memberOffset + MEMBER_PAGE_SIZE)
-                          }
+                          onClick={() => {
+                            membersRevision.current += 1;
+                            memberRequestKeyRef.current = "";
+                            setMemberOffset(memberOffset + MEMBER_PAGE_SIZE);
+                          }}
                           size="sm"
                         >
                           Next

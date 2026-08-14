@@ -81,11 +81,15 @@ const firstMemberPage = {
       participantId: "first@c.us",
       phoneNumber: "84900000001",
       displayName: "First member",
+      identityType: "PHONE_JID" as const,
+      resolvedPhoneNumber: "84900000001",
+      displayNameSource: "OPENWA_CONTACT_NAME" as const,
+      projectionRevision: 0,
       isAdmin: false,
       isSuperAdmin: false,
     },
   ],
-  meta: { total: 30, limit: 25, offset: 0 },
+  meta: { total: 30, limit: 25, offset: 0, datasetRevision: 0 },
 };
 const secondMemberPage = {
   data: [
@@ -93,11 +97,15 @@ const secondMemberPage = {
       participantId: "last@c.us",
       phoneNumber: "84900000030",
       displayName: "Last member",
+      identityType: "PHONE_JID" as const,
+      resolvedPhoneNumber: "84900000030",
+      displayNameSource: "OPENWA_CONTACT_NAME" as const,
+      projectionRevision: 0,
       isAdmin: false,
       isSuperAdmin: false,
     },
   ],
-  meta: { total: 30, limit: 25, offset: 25 },
+  meta: { total: 30, limit: 25, offset: 25, datasetRevision: 0 },
 };
 
 function GroupsHarness() {

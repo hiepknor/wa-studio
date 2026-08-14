@@ -74,11 +74,15 @@ const groupMemberPage = {
       participantId: "84900000000@c.us",
       phoneNumber: "84900000000",
       displayName: "Hiep Mai",
+      identityType: "PHONE_JID" as const,
+      resolvedPhoneNumber: "84900000000",
+      displayNameSource: "OPENWA_CONTACT_NAME" as const,
+      projectionRevision: 0,
       isAdmin: true,
       isSuperAdmin: false,
     },
   ],
-  meta: { total: 1, limit: 25, offset: 0 },
+  meta: { total: 1, limit: 25, offset: 0, datasetRevision: 0 },
 };
 
 function WorkspaceHarness() {
@@ -504,7 +508,7 @@ describe("WorkspaceShell", () => {
     });
     const nowOutOfRangePage = {
       data: [],
-      meta: { total: 1, limit: 25, offset: 25 },
+      meta: { total: 1, limit: 25, offset: 25, datasetRevision: 0 },
     };
     const freshSearchPage = {
       data: [
@@ -512,11 +516,15 @@ describe("WorkspaceShell", () => {
           participantId: "server-result@c.us",
           phoneNumber: "84888888888",
           displayName: "Backend-selected result",
+          identityType: "PHONE_JID" as const,
+          resolvedPhoneNumber: "84888888888",
+          displayNameSource: "OPENWA_CONTACT_NAME" as const,
+          projectionRevision: 0,
           isAdmin: false,
           isSuperAdmin: false,
         },
       ],
-      meta: { total: 1, limit: 25, offset: 0 },
+      meta: { total: 1, limit: 25, offset: 0, datasetRevision: 0 },
     };
     const listGroupMembers = vi.fn(
       (input: { offset?: number; query?: string }) => {
@@ -525,12 +533,12 @@ describe("WorkspaceShell", () => {
         if (input.query === "no matches")
           return Promise.resolve({
             data: [],
-            meta: { total: 0, limit: 25, offset: 0 },
+            meta: { total: 0, limit: 25, offset: 0, datasetRevision: 0 },
           });
         if (input.offset === 25) return Promise.resolve(nowOutOfRangePage);
         return Promise.resolve({
           ...groupMemberPage,
-          meta: { total: 30, limit: 25, offset: 0 },
+          meta: { total: 30, limit: 25, offset: 0, datasetRevision: 0 },
         });
       },
     );
@@ -618,11 +626,15 @@ describe("WorkspaceShell", () => {
             participantId: "stale@c.us",
             phoneNumber: "84777777777",
             displayName: "Stale response",
+            identityType: "PHONE_JID",
+            resolvedPhoneNumber: "84777777777",
+            displayNameSource: "OPENWA_CONTACT_NAME",
+            projectionRevision: 0,
             isAdmin: false,
             isSuperAdmin: false,
           },
         ],
-        meta: { total: 1, limit: 25, offset: 0 },
+        meta: { total: 1, limit: 25, offset: 0, datasetRevision: 0 },
       });
     });
     expect(screen.queryByText("Stale response")).not.toBeInTheDocument();
@@ -669,11 +681,15 @@ describe("WorkspaceShell", () => {
           participantId: "product@c.us",
           phoneNumber: "84666666666",
           displayName: "Product member",
+          identityType: "PHONE_JID" as const,
+          resolvedPhoneNumber: "84666666666",
+          displayNameSource: "OPENWA_CONTACT_NAME" as const,
+          projectionRevision: 0,
           isAdmin: false,
           isSuperAdmin: false,
         },
       ],
-      meta: { total: 1, limit: 25, offset: 0 },
+      meta: { total: 1, limit: 25, offset: 0, datasetRevision: 0 },
     };
     const fakeApi = {
       getGroup: vi.fn((_sessionId: string, groupId: string) =>
@@ -747,7 +763,7 @@ describe("WorkspaceShell", () => {
       getSessionSyncRun: vi.fn(),
       listGroupMembers: vi.fn().mockResolvedValue({
         data: [],
-        meta: { total: 0, limit: 25, offset: 0 },
+        meta: { total: 0, limit: 25, offset: 0, datasetRevision: 0 },
       }),
       listGroups: vi.fn().mockResolvedValue({
         data: [longNameGroup],

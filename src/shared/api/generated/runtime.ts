@@ -47,7 +47,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Queue a full session, group and group-member sync */
+        /** Queue durable discovery and group reconciliation */
         post: operations["SessionController_requestSync"];
         delete?: never;
         options?: never;
@@ -117,8 +117,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List synchronized group members without a contacts dependency
-         * @description Results use deterministic super-admin, admin, normalized display name, and participant ID ordering.
+         * List materialized synchronized group members
+         * @description Results use deterministic super-admin, admin, normalized display name, and participant ID ordering. resolvedPhoneNumber is nullable and phoneNumber remains a deprecated upstream compatibility value. meta.datasetRevision changes when member enrichment is materialized.
          */
         get: operations["GroupController_members"];
         put?: never;
@@ -434,17 +434,46 @@ export interface components {
         SessionListDto: {
             data: components["schemas"]["SessionDto"][];
         };
+        SyncRequestDto: {
+            /**
+             * @description FULL reconciles every discovered group; INCREMENTAL reconciles only new, changed, invalidated or stale groups. Omission preserves FULL behavior.
+             * @default FULL
+             * @enum {string}
+             */
+            mode: "FULL" | "INCREMENTAL";
+        };
         SyncRunDto: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             sessionId: string;
-            /** @example FULL */
-            syncType: string;
+            /** @enum {string} */
+            syncType: "FULL" | "INCREMENTAL";
+            /** @enum {string} */
+            phase: "DISCOVERING" | "RECONCILING" | "COMPLETED";
             /** @enum {string} */
             status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
             groupsSynced: number;
+            /** @description Total groups returned by authoritative discovery */
+            groupsDiscovered: number;
+            /** @description Groups selected for detail reconciliation in this run */
+            groupsScheduled: number;
+            /** @description Groups whose reconciliation exhausted retries */
+            groupsFailed: number;
+            /** @description Groups skipped because they disappeared during reconciliation */
+            groupsSkipped: number;
+            /** @description Group reconciliations waiting for their first attempt */
+            groupsPending: number;
+            /** @description Group reconciliations that currently own a processing lease */
+            groupsRunning: number;
+            /** @description Group reconciliations waiting for a durable retry */
+            groupsRetrying: number;
+            /** @description Members observed in successfully reconciled group snapshots; not rows changed */
             membersSynced: number;
+            /** Format: date-time */
+            nextAttemptAt: string | null;
+            /** Format: date-time */
+            cooldownUntil: string | null;
             error: string | null;
             /** Format: date-time */
             requestedAt: string;
@@ -452,6 +481,18 @@ export interface components {
             startedAt: string | null;
             /** Format: date-time */
             completedAt: string | null;
+        };
+        SyncModeConflictDto: {
+            /** @example 409 */
+            statusCode: number;
+            /** @example SYNC_MODE_CONFLICT */
+            code: string;
+            /** @example A different synchronization mode is already active */
+            message: string;
+            /** Format: uuid */
+            activeRunId: string;
+            /** @enum {string} */
+            activeMode: "FULL" | "INCREMENTAL";
         };
         GroupSendCapabilityDto: {
             /** @enum {string} */
@@ -517,8 +558,26 @@ export interface components {
         };
         GroupMemberDto: {
             participantId: string;
+            /**
+             * @deprecated
+             * @description Legacy OpenWA participant number; may be a LID user-part. Use resolvedPhoneNumber.
+             */
             phoneNumber: string;
             displayName: string | null;
+            /**
+             * @description Normalized type of the exact upstream participant identity
+             * @enum {string|null}
+             */
+            identityType: "LID" | "PHONE_JID" | "OTHER_JID" | null;
+            /** @description Verified phone resolution; null for unresolved or conflicted identities */
+            resolvedPhoneNumber: string | null;
+            /**
+             * @description Provenance of displayName
+             * @enum {string|null}
+             */
+            displayNameSource: "OPENWA_CONTACT_NAME" | "GROUP_PARTICIPANT_NAME" | "OPENWA_PUSH_NAME" | "RESOLVED_ALIAS_PUSH_NAME" | null;
+            /** @description Monotonic materialized projection revision; 0 means legacy fallback */
+            projectionRevision: number;
             isAdmin: boolean;
             isSuperAdmin: boolean;
         };
@@ -527,6 +586,8 @@ export interface components {
             total: number;
             limit: number;
             offset: number;
+            /** @description Highest member projection revision in the group; clients may detect enrichment between page reads */
+            datasetRevision: number;
         };
         GroupMemberListDto: {
             data: components["schemas"]["GroupMemberDto"][];
@@ -803,7 +864,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SyncRequestDto"];
+            };
+        };
         responses: {
             202: {
                 headers: {
@@ -811,6 +876,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SyncRunDto"];
+                };
+            };
+            /** @description A different sync mode is already active */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncModeConflictDto"];
                 };
             };
         };

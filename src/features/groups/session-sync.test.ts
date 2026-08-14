@@ -7,9 +7,19 @@ const pendingRun: RuntimeSyncRun = {
   id: "run-id",
   sessionId: "session-id",
   syncType: "FULL",
+  phase: "DISCOVERING",
   status: "PENDING",
   groupsSynced: 0,
+  groupsDiscovered: 0,
+  groupsScheduled: 0,
+  groupsFailed: 0,
+  groupsSkipped: 0,
+  groupsPending: 0,
+  groupsRunning: 0,
+  groupsRetrying: 0,
   membersSynced: 0,
+  nextAttemptAt: null,
+  cooldownUntil: null,
   error: null,
   requestedAt: "2026-08-13T09:00:00.000Z",
   startedAt: null,
@@ -18,6 +28,7 @@ const pendingRun: RuntimeSyncRun = {
 
 const runningRun: RuntimeSyncRun = {
   ...pendingRun,
+  phase: "RECONCILING",
   status: "RUNNING",
   groupsSynced: 4,
   membersSynced: 80,
@@ -26,6 +37,7 @@ const runningRun: RuntimeSyncRun = {
 
 const completedRun: RuntimeSyncRun = {
   ...runningRun,
+  phase: "COMPLETED",
   status: "COMPLETED",
   completedAt: "2026-08-13T09:00:09.000Z",
 };

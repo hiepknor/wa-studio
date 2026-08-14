@@ -138,7 +138,7 @@ describe("RuntimeApi", () => {
       .mockResolvedValueOnce(Response.json(group))
       .mockResolvedValueOnce(Response.json({
         data: [],
-        meta: { total: 0, limit: 25, offset: 50 },
+        meta: { total: 0, limit: 25, offset: 50, datasetRevision: 0 },
       }));
     const api = new RuntimeApi(
       { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
@@ -175,7 +175,7 @@ describe("RuntimeApi", () => {
   it("omits an empty member search query", async () => {
     const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       data: [],
-      meta: { total: 0, limit: 50, offset: 0 },
+      meta: { total: 0, limit: 50, offset: 0, datasetRevision: 0 },
     }));
     const api = new RuntimeApi(
       { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
@@ -259,20 +259,23 @@ describe("RuntimeApi", () => {
     },
   );
 
-  it("preserves the member endpoint HTTP status in request errors", async () => {
-    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(null, { status: 404 }),
-    );
-    const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
-      runtimeFetch,
-    );
+  it.each([401, 404, 500])(
+    "preserves member endpoint HTTP %s behavior in request errors",
+    async (status) => {
+      const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(null, { status }),
+      );
+      const api = new RuntimeApi(
+        { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+        runtimeFetch,
+      );
 
-    await expect(api.listGroupMembers({
-      sessionId: "out-of-scope-session",
-      groupId: "missing@g.us",
-    })).rejects.toThrow("Could not load group members (HTTP 404).");
-  });
+      await expect(api.listGroupMembers({
+        sessionId: "out-of-scope-session",
+        groupId: "missing@g.us",
+      })).rejects.toThrow(`Could not load group members (HTTP ${status}).`);
+    },
+  );
 
   it("queues a group capability refresh", async () => {
     const runtimeFetch = vi
