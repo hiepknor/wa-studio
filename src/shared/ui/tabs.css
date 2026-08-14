@@ -32,6 +32,8 @@
 .tabs-trigger:hover {
   color: #c9ccd4;
 }
+.tabs-trigger:disabled { color: #555a66; cursor: not-allowed; }
+.tabs-trigger:disabled:hover { color: #555a66; }
 .tabs-trigger[aria-selected="true"] {
   color: #dedaff;
 }

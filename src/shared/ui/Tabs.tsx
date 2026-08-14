@@ -3,6 +3,7 @@ import "./tabs.css";
 
 export interface TabItem<T extends string> {
   badge?: ReactNode;
+  disabled?: boolean;
   id: T;
   label: string;
   warning?: boolean;
@@ -29,14 +30,19 @@ export function Tabs<T extends string>({
   ) {
     const direction =
       event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-    const nextIndex =
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? tabs.length - 1
-          : direction
-            ? (index + direction + tabs.length) % tabs.length
-            : -1;
+    const enabledIndexes = tabs
+      .map((tab, tabIndex) => tab.disabled ? -1 : tabIndex)
+      .filter((tabIndex) => tabIndex >= 0);
+    const currentEnabledIndex = enabledIndexes.indexOf(index);
+    const nextIndex = event.key === "Home"
+      ? (enabledIndexes[0] ?? -1)
+      : event.key === "End"
+        ? (enabledIndexes[enabledIndexes.length - 1] ?? -1)
+        : direction && enabledIndexes.length
+          ? enabledIndexes[
+            (currentEnabledIndex + direction + enabledIndexes.length) % enabledIndexes.length
+          ] ?? -1
+          : -1;
     if (nextIndex < 0) return;
     event.preventDefault();
     const next = tabs[nextIndex];
@@ -54,12 +60,13 @@ export function Tabs<T extends string>({
           aria-controls={`${idPrefix}-${tab.id}-panel`}
           aria-selected={activeTab === tab.id}
           className="tabs-trigger"
+          disabled={tab.disabled}
           id={`${idPrefix}-${tab.id}-tab`}
           key={tab.id}
           onClick={() => onChange(tab.id)}
           onKeyDown={(event) => handleKeyDown(event, index)}
           role="tab"
-          tabIndex={activeTab === tab.id ? 0 : -1}
+          tabIndex={activeTab === tab.id && !tab.disabled ? 0 : -1}
           type="button"
         >
           <span>{tab.label}</span>

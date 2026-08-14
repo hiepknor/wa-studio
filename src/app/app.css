@@ -517,6 +517,9 @@ progress::-webkit-progress-value { background: var(--accent); }
 .drawer-frame[data-drawer-mode="docked"] .workspace:has(> .workspace-drawer-host > .drawer-layer) {
   grid-template-columns: 224px minmax(0, 1fr) 384px;
 }
+.drawer-frame[data-drawer-mode="docked"] .workspace:has(> .workspace-drawer-host > .drawer-layer .drawer-surface-wide) {
+  grid-template-columns: 224px minmax(0, 1fr) 500px;
+}
 .drawer-frame[data-drawer-mode="docked"] .workspace-drawer-host {
   position: relative;
   z-index: auto;

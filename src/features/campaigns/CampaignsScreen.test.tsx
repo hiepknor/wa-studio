@@ -109,9 +109,9 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
 
     const summary = screen.getByLabelText("Campaign workspace summary");
-    expect(within(summary).getByText("State")).toBeInTheDocument();
+    expect(within(summary).getByText("DRAFT")).toBeInTheDocument();
     expect(within(summary).getByText("Immediate")).toBeInTheDocument();
-    expect(within(summary).getByText("3 / 4")).toBeInTheDocument();
+    expect(within(summary).getByText("r3 · t4")).toBeInTheDocument();
     expect(screen.getByText("Details are up to date")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Campaign name" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Message text" })).toBeInTheDocument();
@@ -129,7 +129,7 @@ describe("CampaignsScreen", () => {
 
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     expect(screen.getByText("Target set is up to date")).toBeInTheDocument();
-    expect(screen.getByText("Capacity")).toBeInTheDocument();
+    expect(screen.getByText("Remaining capacity")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
     expect(screen.getByText("No preflight report")).toBeInTheDocument();
@@ -152,6 +152,8 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await user.click(screen.getByRole("button", { name: "New campaign" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus());
+    expect(screen.getByRole("tab", { name: "Targets" })).toBeDisabled();
+    expect(screen.getByRole("tab", { name: "Preflight" })).toBeDisabled();
     await user.type(screen.getByRole("textbox", { name: "Campaign name" }), "Unsaved");
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
     expect(screen.getByRole("dialog", { name: "Discard campaign changes?" })).toBeInTheDocument();

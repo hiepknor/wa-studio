@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type HTMLAttributes,
+  type Key,
   type KeyboardEvent,
   type ReactNode,
   type RefObject,
@@ -95,12 +96,14 @@ export function DrawerHost({ className = "", ...props }: HTMLAttributes<HTMLDivE
 interface DrawerProps {
   children: ReactNode;
   className?: string;
+  contentKey?: Key;
   description?: ReactNode;
   eyebrow?: ReactNode;
   footer?: ReactNode;
   onClose: () => void;
   open: boolean;
   returnFocusRef?: RefObject<HTMLElement | null>;
+  size?: "default" | "wide";
   title: ReactNode;
 }
 
@@ -116,12 +119,14 @@ const FOCUSABLE = [
 export function Drawer({
   children,
   className = "",
+  contentKey,
   description,
   eyebrow,
   footer,
   onClose,
   open,
   returnFocusRef,
+  size = "default",
   title,
 }: DrawerProps) {
   const context = useContext(DrawerHostContext);
@@ -131,6 +136,7 @@ export function Drawer({
   const titleId = useId();
   const descriptionId = useId();
   const surfaceRef = useRef<HTMLElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnTargetRef = useRef<HTMLElement | null>(null);
   const restoreFocusPendingRef = useRef(false);
@@ -195,6 +201,10 @@ export function Drawer({
     return () => window.cancelAnimationFrame(frame);
   }, [host, mode, open]);
 
+  useLayoutEffect(() => {
+    if (open && bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [contentKey, open]);
+
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -237,7 +247,7 @@ export function Drawer({
         aria-describedby={description ? descriptionId : undefined}
         aria-labelledby={titleId}
         aria-modal={mode === "overlay" ? true : undefined}
-        className={`drawer-surface ${className}`.trim()}
+        className={`drawer-surface drawer-surface-${size} ${className}`.trim()}
         onKeyDown={handleKeyDown}
         ref={surfaceRef}
         role={mode === "overlay" ? "dialog" : "complementary"}
@@ -267,7 +277,7 @@ export function Drawer({
             Close
           </Button>
         </header>
-        <div className="drawer-body">{children}</div>
+        <div className="drawer-body" ref={bodyRef}>{children}</div>
         {footer && <footer className="drawer-footer">{footer}</footer>}
       </aside>
     </div>,

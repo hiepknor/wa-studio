@@ -51,9 +51,11 @@ function RetargetableDrawerHarness() {
       <button onClick={(event) => openFrom(event.currentTarget)} type="button">First group</button>
       <button onClick={(event) => openFrom(event.currentTarget)} type="button">Second group</button>
       <Drawer
+        contentKey={selection}
         onClose={() => setOpen(false)}
         open={open}
         returnFocusRef={latestTriggerRef}
+        size="wide"
         title={`Group details: ${selection}`}
       >
         Inspector content
@@ -172,10 +174,14 @@ describe("Drawer", () => {
     render(<RetargetableDrawerHarness />);
 
     await user.click(screen.getByRole("button", { name: "First group" }));
-    expect(await screen.findByRole("complementary", { name: "Group details: First group" }))
-      .toBeInTheDocument();
+    const firstPanel = await screen.findByRole("complementary", { name: "Group details: First group" });
+    expect(firstPanel).toHaveClass("drawer-surface-wide");
+    const body = firstPanel.querySelector<HTMLElement>(".drawer-body");
+    expect(body).not.toBeNull();
+    if (body) body.scrollTop = 140;
     const secondTrigger = screen.getByRole("button", { name: "Second group" });
     await user.click(secondTrigger);
+    expect(body).toHaveProperty("scrollTop", 0);
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
 
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());

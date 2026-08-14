@@ -43,4 +43,30 @@ describe("Tabs", () => {
     await user.keyboard("{End}");
     expect(members).toHaveFocus();
   });
+
+  it("disables unavailable workflow steps and skips them during keyboard navigation", async () => {
+    const user = userEvent.setup();
+    render(
+      <Tabs
+        activeTab="details"
+        ariaLabel="Campaign steps"
+        idPrefix="campaign-steps"
+        onChange={() => undefined}
+        tabs={[
+          { id: "details", label: "Details" },
+          { disabled: true, id: "targets", label: "Targets" },
+          { id: "preflight", label: "Preflight" },
+        ]}
+      />,
+    );
+
+    const details = screen.getByRole("tab", { name: "Details" });
+    const targets = screen.getByRole("tab", { name: "Targets" });
+    const preflight = screen.getByRole("tab", { name: "Preflight" });
+    expect(targets).toBeDisabled();
+    details.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(preflight).toHaveFocus();
+    expect(targets).not.toHaveFocus();
+  });
 });

@@ -530,6 +530,7 @@ export function CampaignsScreen() {
 
       <Drawer
         className="campaign-editor-drawer"
+        contentKey={`${campaign?.id ?? "new"}:${editorEpochRef.current}`}
         description={campaign
           ? `Revision ${campaign.revision} · target revision ${campaign.targetsRevision}`
           : "Create the persisted DRAFT before selecting targets or running preflight."}
@@ -537,17 +538,20 @@ export function CampaignsScreen() {
         footer={editor.kind === "open" && <div className="campaign-workspace-footer"><div className="campaign-workspace-footer-copy"><strong>{editorTab === "details" ? "Campaign details" : editorTab === "targets" ? "Target selection" : "Runtime preflight"}</strong><span>{footerState}</span></div><div className="campaign-workspace-footer-actions">{footerAction}</div></div>}
         onClose={requestCloseEditor}
         open={editor.kind === "open"}
+        size="wide"
         title={campaign?.name ?? "New campaign draft"}
       >
         {editor.kind === "open" && (
           <div className="campaign-editor stack stack-lg">
             {campaign && campaign.status !== "DRAFT" && <InlineAlert title="Read-only campaign" tone="warning">Runtime status is {campaign.status}; only DRAFT campaigns are editable.</InlineAlert>}
-            <dl aria-label="Campaign workspace summary" className="campaign-workspace-summary">
-              <div><dt>State</dt><dd><Badge tone={campaign ? statusTone(campaign.status) : "neutral"}>{campaign?.status ?? "NEW DRAFT"}</Badge></dd></div>
-              <div><dt>Schedule</dt><dd>{form.scheduleType === "IMMEDIATE" ? "Immediate" : formatDraftSchedule(form.scheduledAt)}</dd></div>
-              <div><dt>Targets</dt><dd>{draftTargetIds.length}<small>{campaign ? `${targets.length} persisted` : "not available"}</small></dd></div>
-              <div><dt>Revisions</dt><dd>{campaign ? `${campaign.revision} / ${campaign.targetsRevision}` : "—"}<small>campaign / targets</small></dd></div>
-            </dl>
+            <div aria-label="Campaign workspace summary" className="campaign-workspace-context" role="group">
+              <Badge tone={campaign ? statusTone(campaign.status) : "neutral"}>{campaign?.status ?? "NEW DRAFT"}</Badge>
+              <dl>
+                <div><dt>Schedule</dt><dd>{form.scheduleType === "IMMEDIATE" ? "Immediate" : formatDraftSchedule(form.scheduledAt)}</dd></div>
+                <div><dt>Targets</dt><dd>{campaign ? draftTargetIds.length : "—"}</dd></div>
+              </dl>
+              {campaign && <span className="campaign-workspace-revision">r{campaign.revision} · t{campaign.targetsRevision}</span>}
+            </div>
             <Tabs
               activeTab={editorTab}
               ariaLabel="Campaign editor sections"
@@ -555,16 +559,16 @@ export function CampaignsScreen() {
               onChange={setEditorTab}
               tabs={[
                 { id: "details", label: "Details", warning: Boolean(campaign && detailsDirty) },
-                { badge: draftTargetIds.length, id: "targets", label: "Targets", warning: Boolean(campaign && targetsDirty) },
-                { badge: preflight?.status, id: "preflight", label: "Preflight", warning: reportStale },
+                { badge: campaign ? draftTargetIds.length : undefined, disabled: !campaign, id: "targets", label: "Targets", warning: Boolean(campaign && targetsDirty) },
+                { badge: preflight?.status, disabled: !campaign, id: "preflight", label: "Preflight", warning: reportStale },
               ]}
             />
 
             {editorTab === "details" && <section aria-labelledby="campaign-editor-details-tab" className="campaign-tab-panel stack stack-lg" id="campaign-editor-details-panel" role="tabpanel">
-              <div className="campaign-section-heading"><div><h3>Campaign details</h3><p>Text and scheduling persist independently from targets.</p></div>{campaign && <Badge tone={statusTone(campaign.status)}>{campaign.status}</Badge>}</div>
+              <div className="campaign-section-heading"><div><h3>Campaign details</h3><p>Define the content first, then choose when Runtime should schedule it.</p></div></div>
               {detailsError && <InlineAlert title="Could not save details">{detailsError}</InlineAlert>}
-              <div className="campaign-workspace-section stack stack-md"><div className="campaign-workspace-section-title"><h4>Content</h4><small>Required</small></div><TextField description={fieldDescription(formErrors.name)} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} /><TextAreaField description={fieldDescription(formErrors.text, "Plain text sent only by a later run milestone.")} disabled={!editable} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} /></div>
-              <div className="campaign-workspace-section stack stack-md"><div className="campaign-workspace-section-title"><h4>Delivery timing</h4><small>Runtime canonicalized</small></div><SelectMenu description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />{form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</div>
+              <section aria-labelledby="campaign-content-title" className="campaign-form-section stack stack-md"><div className="campaign-form-section-heading"><h4 id="campaign-content-title">Content</h4><span>Required</span></div><TextField description={fieldDescription(formErrors.name)} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} /><TextAreaField description={fieldDescription(formErrors.text, "Plain text sent only by a later run milestone.")} disabled={!editable} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} /></section>
+              <section aria-labelledby="campaign-timing-title" className="campaign-form-section stack stack-md"><div className="campaign-form-section-heading"><h4 id="campaign-timing-title">Delivery timing</h4><span>Runtime canonicalized</span></div><SelectMenu description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />{form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</section>
             </section>}
 
             {editorTab === "targets" && <section aria-labelledby="campaign-editor-targets-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-targets-panel" role="tabpanel">
@@ -572,7 +576,7 @@ export function CampaignsScreen() {
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Targets belong to a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {targetsError && <InlineAlert title="Target update">{targetsError}</InlineAlert>}
-                <dl className="campaign-target-metrics"><div><dt>Selected</dt><dd>{draftTargetIds.length}</dd></div><div><dt>Persisted</dt><dd>{targets.length}</dd></div><div><dt>Capacity</dt><dd>{1000 - draftTargetIds.length}</dd></div></dl>
+                <dl className="campaign-target-metrics"><div><dt>Selected</dt><dd>{draftTargetIds.length}</dd></div><div><dt>Persisted</dt><dd>{targets.length}</dd></div><div><dt>Remaining capacity</dt><dd>{1000 - draftTargetIds.length}</dd></div></dl>
                 <div className="campaign-workspace-section campaign-target-section"><h3>Available groups</h3><p className="campaign-target-section-copy">Capability is evaluated at preflight.</p><div className="campaign-search-row"><SearchField label="Find synchronized groups" loading={groupsLoading} onChange={setGroupQuery} placeholder="Search group name or ID" value={groupQuery} /><Button disabled={groupsLoading} onClick={() => void loadGroups(groupQuery.trim())} size="sm">Search</Button></div><div aria-busy={groupsLoading || undefined} className="campaign-choice-list">
                   {groupsLoading ? <p>Loading groups…</p> : !groups.length ? <p>No synchronized groups found.</p> : groups.map((group) => <label className="campaign-choice" key={group.id}><input checked={draftTargetIds.includes(group.id)} disabled={!editable} onChange={() => toggleTarget(group.id)} type="checkbox" /><span><strong>{group.name}</strong><small>{group.id}</small></span><span className="campaign-choice-meta"><GroupCapabilityStatus appearance="badge" capability={group.sendCapability} includeFreshness={false} />{!group.isActive && <Badge tone="neutral">Inactive</Badge>}</span></label>)}
                 </div></div>
