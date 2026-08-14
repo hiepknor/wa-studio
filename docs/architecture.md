@@ -27,8 +27,8 @@ When WA Runtime changes, update the snapshot from a released WA Runtime revision
 ```text
 src/app                  composition and application shell
 src/features/connection first-run connection and credential validation
-src/features/sessions   session selection, status, and full sync
-src/features/groups     browse, filter, inspect capability (next)
+src/features/sessions   session selection, status, and read-model refresh
+src/features/groups     browse, filter, inspect, capability, and full sync
 src/features/campaigns  draft, targets, preflight, launch (later)
 src/features/runs       progress, delivery failures, controls (later)
 src/shared/api          generated contract and WA Runtime transport

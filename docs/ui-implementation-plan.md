@@ -25,13 +25,13 @@ Status: completed.
 
 Compose the shell from semantic header, navigation, content, and footer regions. Navigation is registry-driven and grouped into Operate (Groups, Campaigns, Runs, Activity) and System (Sessions, Settings). Keep page routing and the shared selected-session context in the application. WA Runtime connection actions belong to the toolbar menu, while concise operational context belongs to the status bar.
 
-Status: completed with the Sessions destination active and future destinations explicitly disabled until their slices exist.
+Status: completed with the Sessions and Groups destinations active and future destinations explicitly disabled until their slices exist.
 
 ### 3. Sessions and groups
 
 Use semantic tables, fields, buttons, badges, and alerts. Groups must use Runtime-backed pagination/filtering rather than loading a large session into a client-only table. A group detail panel shows send capability and exposes refresh as an explicit action.
 
-Status: Sessions selection, refresh, and durable full-sync monitoring completed; Groups remains next.
+Status: completed. Sessions owns selection, status, and read-model refresh. Groups owns Runtime-backed browse, search, filtering, pagination, detail and member inspection, capability refresh, and durable full-sync monitoring.
 
 ### 4. Campaign editor and preflight
 
@@ -49,7 +49,9 @@ Use native progress elements, status feedback, controlled delivery tables, and a
 4. Bundle-size changes are recorded when new UI dependencies or substantial styles are introduced.
 5. No feature may call OpenWA or redefine Runtime DTOs.
 
-Current post-migration frontend baseline: 228.64 kB JavaScript (72.10 kB gzip) and 26.49 kB CSS (6.04 kB gzip), plus 106.41 kB of locally bundled variable-font subsets. The production brand mark is an inlined SVG; native bundle icons are generated from the dedicated SVG app-icon master.
+Current Groups and Sessions MVP baseline: 272.99 kB JavaScript (83.95 kB gzip) and 41.34 kB CSS (8.80 kB gzip), plus 106.41 kB of locally bundled variable-font subsets. The production brand mark is an inlined SVG; native bundle icons are generated from the dedicated SVG app-icon master.
+
+Groups and Sessions MVP validation (2026-08-14): `npm run check` passes with 104 tests; the macOS debug app and DMG build successfully; and staging smoke coverage passes for session reload, Runtime-backed group search, compact-window group inspection, member pagination, capability refresh, full-sync background handoff, and completed-sync metadata reconciliation. Focus treatment, compact resizing, and the overlay drawer were inspected in the debug app. The macOS reduced-motion setting was not toggled during this validation.
 
 ## Dependency policy
 

@@ -121,6 +121,45 @@ async function connect(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("GroupsScreen global search and filters", () => {
+  it("shows the initial empty state returned by Runtime", async () => {
+    const user = userEvent.setup();
+    const listGroups = vi.fn().mockResolvedValue({
+      data: [],
+      meta: { total: 0, limit: 20, offset: 0 },
+    });
+    renderGroups(listGroups);
+    await connect(user);
+
+    expect(await screen.findByText("No groups were returned for this session."))
+      .toBeInTheDocument();
+    expect(screen.getByText("0–0 of 0")).toBeInTheDocument();
+    expect(screen.getByText("Page 0 of 0")).toBeInTheDocument();
+  });
+
+  it("shows a scoped list error and retries the same Runtime query", async () => {
+    const user = userEvent.setup();
+    const listGroups = vi.fn()
+      .mockRejectedValueOnce(new Error("Runtime is temporarily unavailable."))
+      .mockResolvedValueOnce(defaultPage);
+    renderGroups(listGroups);
+    await connect(user);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not load groups");
+    expect(alert).toHaveTextContent("Runtime is temporarily unavailable.");
+    expect(screen.getByText("Groups are unavailable.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("Release room")).toBeInTheDocument();
+    expect(listGroups).toHaveBeenNthCalledWith(2, {
+      sessionId: session.id,
+      limit: 20,
+      offset: 0,
+    });
+    expect(screen.queryByText("Could not load groups")).not.toBeInTheDocument();
+  });
+
   it("debounces trimmed global search across the Runtime-supported fields", async () => {
     const user = userEvent.setup();
     const listGroups = vi.fn().mockResolvedValue(defaultPage);
