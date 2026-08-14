@@ -11,6 +11,7 @@ import {
   type RuntimeCampaignTarget,
   type RuntimeGroup,
 } from "@/shared/api/runtime-client";
+import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -59,6 +60,12 @@ function formatDate(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatDraftSchedule(value: string): string {
+  if (!value) return "Date required";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Date required" : formatDate(date.toISOString());
 }
 
 function statusTone(status: "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED") {
@@ -444,6 +451,22 @@ export function CampaignsScreen() {
   const hasListCriteria = Boolean(
     listState.query || listState.statuses.length || listState.scheduleTypes.length,
   );
+  const footerState = editorTab === "details"
+    ? campaign
+      ? detailsDirty ? "Unsaved detail changes" : "Details are up to date"
+      : "Create the draft to unlock targets and preflight"
+    : editorTab === "targets"
+      ? targetsDirty ? `${draftTargetIds.length} targets selected · changes not saved` : "Target set is up to date"
+      : reportStale ? "Run preflight again after saving changes" : preflight ? `Last result: ${preflight.status}` : "No preflight result yet";
+  const footerAction = editorTab === "details" ? (
+    <Button disabled={!editable || (Boolean(campaign) && !detailsDirty)} loading={savingDetails} onClick={() => void saveDetails()} variant="primary">
+      {campaign ? "Save details" : "Create draft"}
+    </Button>
+  ) : editorTab === "targets" ? (
+    <Button disabled={!campaign || !editable || !targetsDirty || targetsLoading} loading={targetsSaving} onClick={() => void saveTargets()} variant="primary">Replace targets</Button>
+  ) : (
+    <><Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired} loading={preflightLoading} onClick={() => void runPreflight("DRY_RUN")}>DRY_RUN</Button><Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired} loading={preflightLoading} onClick={() => void runPreflight("LIVE")} variant="primary">LIVE</Button></>
+  );
 
   return (
     <div className="campaigns-screen stack stack-lg">
@@ -499,17 +522,7 @@ export function CampaignsScreen() {
           ? `Revision ${campaign.revision} · target revision ${campaign.targetsRevision}`
           : "Create the persisted DRAFT before selecting targets or running preflight."}
         eyebrow="Campaign workspace"
-        footer={editor.kind === "open" && (
-          editorTab === "details" ? (
-            <Button disabled={!editable || (Boolean(campaign) && !detailsDirty)} loading={savingDetails} onClick={() => void saveDetails()} variant="primary">
-              {campaign ? "Save details" : "Create draft"}
-            </Button>
-          ) : editorTab === "targets" ? (
-            <Button disabled={!campaign || !editable || !targetsDirty || targetsLoading} loading={targetsSaving} onClick={() => void saveTargets()} variant="primary">Replace targets</Button>
-          ) : (
-            <><Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired} loading={preflightLoading} onClick={() => void runPreflight("DRY_RUN")}>DRY_RUN</Button><Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired} loading={preflightLoading} onClick={() => void runPreflight("LIVE")} variant="primary">LIVE</Button></>
-          )
-        )}
+        footer={editor.kind === "open" && <div className="campaign-workspace-footer"><div className="campaign-workspace-footer-copy"><strong>{editorTab === "details" ? "Campaign details" : editorTab === "targets" ? "Target selection" : "Runtime preflight"}</strong><span>{footerState}</span></div><div className="campaign-workspace-footer-actions">{footerAction}</div></div>}
         onClose={requestCloseEditor}
         open={editor.kind === "open"}
         title={campaign?.name ?? "New campaign draft"}
@@ -517,6 +530,12 @@ export function CampaignsScreen() {
         {editor.kind === "open" && (
           <div className="campaign-editor stack stack-lg">
             {campaign && campaign.status !== "DRAFT" && <InlineAlert title="Read-only campaign" tone="warning">Runtime status is {campaign.status}; only DRAFT campaigns are editable.</InlineAlert>}
+            <dl aria-label="Campaign workspace summary" className="campaign-workspace-summary">
+              <div><dt>State</dt><dd><Badge tone={campaign ? statusTone(campaign.status) : "neutral"}>{campaign?.status ?? "NEW DRAFT"}</Badge></dd></div>
+              <div><dt>Schedule</dt><dd>{form.scheduleType === "IMMEDIATE" ? "Immediate" : formatDraftSchedule(form.scheduledAt)}</dd></div>
+              <div><dt>Targets</dt><dd>{draftTargetIds.length}<small>{campaign ? `${targets.length} persisted` : "not available"}</small></dd></div>
+              <div><dt>Revisions</dt><dd>{campaign ? `${campaign.revision} / ${campaign.targetsRevision}` : "—"}<small>campaign / targets</small></dd></div>
+            </dl>
             <Tabs
               activeTab={editorTab}
               ariaLabel="Campaign editor sections"
@@ -529,15 +548,11 @@ export function CampaignsScreen() {
               ]}
             />
 
-            {editorTab === "details" && <section aria-labelledby="campaign-editor-details-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-details-panel" role="tabpanel">
+            {editorTab === "details" && <section aria-labelledby="campaign-editor-details-tab" className="campaign-tab-panel stack stack-lg" id="campaign-editor-details-panel" role="tabpanel">
               <div className="campaign-section-heading"><div><h3>Campaign details</h3><p>Text and scheduling persist independently from targets.</p></div>{campaign && <Badge tone={statusTone(campaign.status)}>{campaign.status}</Badge>}</div>
               {detailsError && <InlineAlert title="Could not save details">{detailsError}</InlineAlert>}
-              <TextField description={fieldDescription(formErrors.name)} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} />
-              <TextAreaField description={fieldDescription(formErrors.text, "Plain text sent only by a later run milestone.")} disabled={!editable} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} />
-              <SelectField description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(event) => updateForm("scheduleType", event.target.value as CampaignFormValues["scheduleType"])} value={form.scheduleType}>
-                <option value="IMMEDIATE">Immediate</option><option value="ONCE">Once</option>
-              </SelectField>
-              {form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}
+              <div className="campaign-workspace-section stack stack-md"><div className="campaign-workspace-section-title"><h4>Content</h4><small>Required</small></div><TextField description={fieldDescription(formErrors.name)} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} /><TextAreaField description={fieldDescription(formErrors.text, "Plain text sent only by a later run milestone.")} disabled={!editable} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} /></div>
+              <div className="campaign-workspace-section stack stack-md"><div className="campaign-workspace-section-title"><h4>Delivery timing</h4><small>Runtime canonicalized</small></div><SelectField description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(event) => updateForm("scheduleType", event.target.value as CampaignFormValues["scheduleType"])} value={form.scheduleType}><option value="IMMEDIATE">Immediate</option><option value="ONCE">Once</option></SelectField>{form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</div>
             </section>}
 
             {editorTab === "targets" && <section aria-labelledby="campaign-editor-targets-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-targets-panel" role="tabpanel">
@@ -545,11 +560,11 @@ export function CampaignsScreen() {
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Targets belong to a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {targetsError && <InlineAlert title="Target update">{targetsError}</InlineAlert>}
-                <div className="campaign-search-row"><SearchField label="Find synchronized groups" loading={groupsLoading} onChange={setGroupQuery} placeholder="Search group name or ID" value={groupQuery} /><Button disabled={groupsLoading} onClick={() => void loadGroups(groupQuery.trim())} size="sm">Search</Button></div>
-                <div className="campaign-target-section"><h3>Available groups</h3><div aria-busy={groupsLoading || undefined} className="campaign-choice-list">
+                <dl className="campaign-target-metrics"><div><dt>Selected</dt><dd>{draftTargetIds.length}</dd></div><div><dt>Persisted</dt><dd>{targets.length}</dd></div><div><dt>Capacity</dt><dd>{1000 - draftTargetIds.length}</dd></div></dl>
+                <div className="campaign-workspace-section campaign-target-section"><h3>Available groups</h3><p className="campaign-target-section-copy">Capability is evaluated at preflight.</p><div className="campaign-search-row"><SearchField label="Find synchronized groups" loading={groupsLoading} onChange={setGroupQuery} placeholder="Search group name or ID" value={groupQuery} /><Button disabled={groupsLoading} onClick={() => void loadGroups(groupQuery.trim())} size="sm">Search</Button></div><div aria-busy={groupsLoading || undefined} className="campaign-choice-list">
                   {groupsLoading ? <p>Loading groups…</p> : !groups.length ? <p>No synchronized groups found.</p> : groups.map((group) => <label className="campaign-choice" key={group.id}><input checked={draftTargetIds.includes(group.id)} disabled={!editable} onChange={() => toggleTarget(group.id)} type="checkbox" /><span><strong>{group.name}</strong><small>{group.id}</small></span><span className="campaign-choice-meta"><GroupCapabilityStatus appearance="badge" capability={group.sendCapability} includeFreshness={false} />{!group.isActive && <Badge tone="neutral">Inactive</Badge>}</span></label>)}
                 </div></div>
-                <div className="campaign-target-section"><h3>Persisted canonical targets</h3><div aria-busy={targetsLoading || undefined} className="campaign-choice-list">
+                <div className="campaign-workspace-section campaign-target-section"><h3>Persisted canonical targets</h3><p className="campaign-target-section-copy">Authoritative Runtime response.</p><div aria-busy={targetsLoading || undefined} className="campaign-choice-list">
                   {targetsLoading ? <p>Loading targets…</p> : !targets.length ? <p>No persisted targets. Saving an empty set clears all targets.</p> : targets.map((target) => <div className="campaign-choice" key={target.groupId}><span><strong>{target.groupName}</strong><small>{target.groupId}</small></span><span className="campaign-choice-meta"><GroupCapabilityStatus appearance="badge" capability={target.sendCapability} includeFreshness={false} />{!target.enabled && <Badge tone="neutral">Inactive</Badge>}</span>{editable && draftTargetIds.includes(target.groupId) && <Button aria-label={`Remove ${target.groupName}`} onClick={() => toggleTarget(target.groupId)} size="sm" variant="ghost">Remove</Button>}</div>)}
                 </div></div>
               </>}
@@ -563,7 +578,7 @@ export function CampaignsScreen() {
                 {revisionRefreshRequired && <InlineAlert title="Revision refresh required" tone="warning">Reopen this campaign before running preflight.</InlineAlert>}
                 {preflightError && <InlineAlert title="Preflight failed">{preflightError}</InlineAlert>}
                 {preflight && <PreflightReport report={preflight} stale={reportStale} />}
-                {!preflight && !preflightError && <p className="campaign-empty-copy">Run DRY_RUN or LIVE preflight to review Runtime policy checks.</p>}
+                {!preflight && !preflightError && <div className="campaign-empty-state"><span className="campaign-empty-state-icon"><AppIcon name="check" size="lg" /></span><strong>No preflight report</strong><p>Run DRY_RUN or LIVE to evaluate the persisted campaign and target set. This does not send messages.</p></div>}
               </>}
             </section>}
           </div>

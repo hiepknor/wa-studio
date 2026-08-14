@@ -102,6 +102,32 @@ function report(
 }
 
 describe("CampaignsScreen", () => {
+  it("uses the shared drawer, tabs, fields, badges, and actions in a structured workspace", async () => {
+    const user = userEvent.setup();
+    renderCampaigns();
+    await connect(user);
+    await openCampaign(user);
+
+    const summary = screen.getByLabelText("Campaign workspace summary");
+    expect(within(summary).getByText("State")).toBeInTheDocument();
+    expect(within(summary).getByText("Immediate")).toBeInTheDocument();
+    expect(within(summary).getByText("3 / 4")).toBeInTheDocument();
+    expect(screen.getByText("Details are up to date")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Campaign name" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Message text" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Schedule" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    expect(screen.getByText("Target set is up to date")).toBeInTheDocument();
+    expect(screen.getByText("Capacity")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    expect(screen.getByText("No preflight report")).toBeInTheDocument();
+    expect(screen.getByText("No preflight result yet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "DRY_RUN" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "LIVE" })).toBeInTheDocument();
+  });
+
   it("renders the campaign list and empty state for the active session", async () => {
     const user = userEvent.setup();
     renderCampaigns({}, []);
