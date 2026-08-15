@@ -997,12 +997,15 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     const picker = await openSavedListPicker(user);
-    const selector = within(picker).getByRole("combobox", { name: "Group list" });
-    await waitFor(() => expect(selector).toBeEnabled());
-    await user.click(selector);
-    await user.click(screen.getByRole("option", { name: /Launch list/ }));
-    await user.click(screen.getByRole("button", { name: "Apply list" }));
-    const dialog = screen.getByRole("dialog", { name: "Apply group list snapshot?" });
+    expect(within(picker).getByRole("heading", { name: "Apply group list" })).toBeInTheDocument();
+    expect(within(picker).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(within(picker).getByText("No list selected")).toBeInTheDocument();
+    const listRow = await within(picker).findByRole("radio", { name: /Launch list/ });
+    await user.click(listRow);
+    expect(listRow).toHaveAttribute("aria-checked", "true");
+    expect(within(picker).getByText("Ready to review before applying.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    const dialog = screen.getByRole("dialog", { name: "Review target replacement" });
     await user.click(within(dialog).getByRole("button", { name: "Apply list" }));
     expect(await screen.findByText(/membership revision 7 was applied/)).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).toBeChecked();
@@ -1013,6 +1016,42 @@ describe("CampaignsScreen", () => {
     });
     expect(screen.getByText("From group list: Launch list snapshot")).toBeInTheDocument();
     expect(screen.getByText("Materialized from a saved list; this is not a live link.")).toBeInTheDocument();
+  });
+
+  it("paginates Group List results on the server and retains selection outside the current page", async () => {
+    const user = userEvent.setup();
+    const firstList: RuntimeGroupList = {
+      id: "71111111-1111-4111-8111-111111111111", sessionId: session.id,
+      name: "First page list", description: "Selected from page one", groupCount: 12,
+      revision: 1, membershipRevision: 3, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    };
+    const secondList: RuntimeGroupList = {
+      ...firstList,
+      id: "72222222-2222-4222-8222-222222222222",
+      name: "Second page list",
+    };
+    const listGroupLists = vi.fn(async (params: Parameters<RuntimeApi["listGroupLists"]>[0]) => ({
+      data: params.offset === 5 ? [secondList] : [firstList],
+      meta: { total: 6, limit: 5, offset: params.offset ?? 0 },
+    }));
+    renderCampaigns({ listGroupLists });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    const picker = await openSavedListPicker(user);
+    await user.click(await within(picker).findByRole("radio", { name: /First page list/ }));
+    expect(within(picker).getByRole("button", { name: "Review" })).toBeEnabled();
+
+    await user.click(within(picker).getByRole("button", { name: "Next" }));
+    expect(await within(picker).findByRole("radio", { name: /Second page list/ })).toBeInTheDocument();
+    expect(within(picker).getByText("Selected outside current results")).toBeInTheDocument();
+    expect(within(picker).getByRole("button", { name: "Review" })).toBeEnabled();
+    expect(listGroupLists).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 5,
+      offset: 5,
+    });
   });
 
   it("ignores a late atomic list apply response after the editor closes", async () => {
@@ -1032,12 +1071,9 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     const picker = await openSavedListPicker(user);
-    const selector = within(picker).getByRole("combobox", { name: "Group list" });
-    await waitFor(() => expect(selector).toBeEnabled());
-    await user.click(selector);
-    await user.click(screen.getByRole("option", { name: /Late list/ }));
-    await user.click(screen.getByRole("button", { name: "Apply list" }));
-    await user.click(within(screen.getByRole("dialog", { name: "Apply group list snapshot?" })).getByRole("button", { name: "Apply list" }));
+    await user.click(await within(picker).findByRole("radio", { name: /Late list/ }));
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(within(screen.getByRole("dialog", { name: "Review target replacement" })).getByRole("button", { name: "Apply list" }));
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
     await act(async () => pending.resolve({
       data: [], targetsRevision: 5,
@@ -1065,16 +1101,13 @@ describe("CampaignsScreen", () => {
     expect(listGroupLists).not.toHaveBeenCalled();
     await openSavedListPicker(user);
     await waitFor(() => expect(listGroupLists).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole("button", { name: "Close group lists" }));
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
     latePage.resolve({ data: [{ ...currentList, id: "late", name: "Late list" }], meta: { total: 1, limit: 100, offset: 0 } });
     await Promise.resolve();
     expect(screen.queryByRole("dialog", { name: "Apply group list" })).not.toBeInTheDocument();
     const picker = await openSavedListPicker(user);
-    const selector = within(picker).getByRole("combobox", { name: "Group list" });
-    await waitFor(() => expect(selector).toBeEnabled());
-    await user.click(selector);
-    expect(screen.getByRole("option", { name: /Current list/ })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /Late list/ })).not.toBeInTheDocument();
+    expect(await within(picker).findByRole("radio", { name: /Current list/ })).toBeInTheDocument();
+    expect(within(picker).queryByRole("radio", { name: /Late list/ })).not.toBeInTheDocument();
   });
 
   it("requires confirmation and atomically persists an empty Group List snapshot", async () => {
@@ -1097,14 +1130,11 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     const picker = await openSavedListPicker(user);
-    const selector = within(picker).getByRole("combobox", { name: "Group list" });
-    await waitFor(() => expect(selector).toBeEnabled());
-    await user.click(selector);
-    await user.click(screen.getByRole("option", { name: /Empty list/ }));
-    await user.click(screen.getByRole("button", { name: "Apply list" }));
+    await user.click(await within(picker).findByRole("radio", { name: /Empty list/ }));
+    await user.click(screen.getByRole("button", { name: "Review" }));
     expect(screen.getByText(/This list is empty/)).toBeInTheDocument();
     expect(screen.getByText("1 saved target · No unsaved changes")).toBeInTheDocument();
-    const dialog = screen.getByRole("dialog", { name: "Apply group list snapshot?" });
+    const dialog = screen.getByRole("dialog", { name: "Review target replacement" });
     await user.click(within(dialog).getByRole("button", { name: "Apply list" }));
     expect(await screen.findByText(/membership revision 0 was applied/)).toBeInTheDocument();
     expect(screen.getByText("Empty target set · No unsaved changes")).toBeInTheDocument();
@@ -1129,12 +1159,9 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     const picker = await openSavedListPicker(user);
-    const selector = within(picker).getByRole("combobox", { name: "Group list" });
-    await waitFor(() => expect(selector).toBeEnabled());
-    await user.click(selector);
-    await user.click(screen.getByRole("option", { name: /Moved list/ }));
-    await user.click(screen.getByRole("button", { name: "Apply list" }));
-    const dialog = screen.getByRole("dialog", { name: "Apply group list snapshot?" });
+    await user.click(await within(picker).findByRole("radio", { name: /Moved list/ }));
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    const dialog = screen.getByRole("dialog", { name: "Review target replacement" });
     await user.click(within(dialog).getByRole("button", { name: "Apply list" }));
     expect((await screen.findAllByText(/belongs to a different campaign session/)).length).toBeGreaterThan(0);
     expect(screen.getByText("1 saved target · No unsaved changes")).toBeInTheDocument();
@@ -1214,12 +1241,9 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     const picker = await openSavedListPicker(user);
-    const selector = within(picker).getByRole("combobox", { name: "Group list" });
-    await waitFor(() => expect(selector).toBeEnabled());
-    await user.click(selector);
-    await user.click(screen.getByRole("option", { name: /Changing list/ }));
-    await user.click(screen.getByRole("button", { name: "Apply list" }));
-    await user.click(within(screen.getByRole("dialog", { name: "Apply group list snapshot?" })).getByRole("button", { name: "Apply list" }));
+    await user.click(await within(picker).findByRole("radio", { name: /Changing list/ }));
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(within(screen.getByRole("dialog", { name: "Review target replacement" })).getByRole("button", { name: "Apply list" }));
     await waitFor(() => expect(listGroupLists).toHaveBeenCalledTimes(2));
     expect(applyGroupListToCampaignTargets).toHaveBeenCalledTimes(1);
     expect((await screen.findAllByText(/membership changed/)).length).toBeGreaterThan(0);
