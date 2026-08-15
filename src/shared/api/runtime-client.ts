@@ -46,6 +46,8 @@ export interface RuntimeGroupListInput {
   capabilityStatus?: RuntimeGroupCapabilityStatus[];
   capabilityFreshness?: RuntimeGroupCapabilityFreshness[];
   isActive?: boolean;
+  minParticipants?: number;
+  maxParticipants?: number;
 }
 
 export interface RuntimeGroupMemberListInput {
@@ -231,6 +233,8 @@ export class RuntimeApi {
     capabilityStatus,
     capabilityFreshness,
     isActive,
+    minParticipants,
+    maxParticipants,
   }: RuntimeGroupListInput): Promise<RuntimeGroupPage> {
     const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/groups", {
@@ -243,13 +247,17 @@ export class RuntimeApi {
           ...(capabilityStatus?.length ? { capabilityStatus } : {}),
           ...(capabilityFreshness?.length ? { capabilityFreshness } : {}),
           ...(isActive === undefined ? {} : { isActive }),
+          ...(minParticipants === undefined ? {} : { minParticipants }),
+          ...(maxParticipants === undefined ? {} : { maxParticipants }),
         },
       },
       querySerializer: { array: { style: "form", explode: false } },
     });
     if (!result.response.ok || !result.data) {
-      throw new RuntimeRequestError(
-        `Could not load groups (HTTP ${result.response.status}).`,
+      throw runtimeRequestError(
+        "Could not load groups",
+        result.response.status,
+        result.error,
       );
     }
     return result.data;

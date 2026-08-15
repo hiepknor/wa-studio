@@ -378,11 +378,13 @@ describe("RuntimeApi", () => {
       capabilityStatus: ["DENIED", "UNKNOWN"],
       capabilityFreshness: ["CURRENT", "STALE"],
       isActive: false,
+      minParticipants: 50,
+      maxParticipants: 500,
     });
 
     const request = runtimeFetch.mock.calls[0][0] as Request;
     expect(request.url).toBe(
-      "http://127.0.0.1:3100/api/v1/groups?sessionId=session%20id&limit=20&offset=0&query=release%20room&capabilityStatus=DENIED,UNKNOWN&capabilityFreshness=CURRENT,STALE&isActive=false",
+      "http://127.0.0.1:3100/api/v1/groups?sessionId=session%20id&limit=20&offset=0&query=release%20room&capabilityStatus=DENIED,UNKNOWN&capabilityFreshness=CURRENT,STALE&isActive=false&minParticipants=50&maxParticipants=500",
     );
   });
 
@@ -401,6 +403,8 @@ describe("RuntimeApi", () => {
       query: "   ",
       capabilityStatus: [],
       capabilityFreshness: [],
+      minParticipants: undefined,
+      maxParticipants: undefined,
     });
 
     const request = runtimeFetch.mock.calls[0][0] as Request;
@@ -424,6 +428,37 @@ describe("RuntimeApi", () => {
         .rejects.toThrow(`Could not load groups (HTTP ${status}).`);
     },
   );
+
+  it("preserves typed participant-filter validation errors", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      code: "GROUP_FILTER_PARTICIPANTS_RANGE_INVALID",
+      message: "Invalid participant range.",
+      fieldErrors: {
+        minParticipants: ["Must not exceed maxParticipants."],
+        maxParticipants: ["Must be at least minParticipants."],
+      },
+      details: {},
+    }, { status: 400 }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    const error = await api.listGroups({
+      sessionId: "session id",
+      minParticipants: 500,
+      maxParticipants: 50,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: "GROUP_FILTER_PARTICIPANTS_RANGE_INVALID",
+      status: 400,
+      fieldErrors: {
+        minParticipants: ["Must not exceed maxParticipants."],
+        maxParticipants: ["Must be at least minParticipants."],
+      },
+    });
+  });
 
   it.each([401, 404, 500])(
     "preserves member endpoint HTTP %s behavior in request errors",

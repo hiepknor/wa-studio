@@ -81,7 +81,7 @@ export interface paths {
         };
         /**
          * Search and filter synchronized groups from the Runtime read model
-         * @description Results are ordered deterministically by group name and group ID. Search and filters are applied before pagination and meta.total counts the filtered dataset.
+         * @description Results are ordered deterministically by group name and group ID. Search, capability, freshness, active-state, and inclusive participant-count filters are applied before pagination; meta.total counts the filtered dataset. Omitting isActive preserves active-only behavior.
          */
         get: operations["GroupController_list"];
         put?: never;
@@ -538,6 +538,17 @@ export interface components {
             data: components["schemas"]["GroupDto"][];
             meta: components["schemas"]["GroupListPageMetaDto"];
         };
+        RuntimeErrorDto: {
+            /** @example CAMPAIGN_NOT_FOUND */
+            code: string;
+            message: string;
+            fieldErrors?: {
+                [key: string]: string[];
+            };
+            details?: {
+                [key: string]: unknown;
+            };
+        };
         GroupDetailDto: {
             /** Format: uuid */
             sessionId: string;
@@ -596,17 +607,6 @@ export interface components {
             data: components["schemas"]["GroupMemberDto"][];
             /** @description Pagination metadata for the filtered synchronized member dataset */
             meta: components["schemas"]["GroupMemberPageMetaDto"];
-        };
-        RuntimeErrorDto: {
-            /** @example CAMPAIGN_NOT_FOUND */
-            code: string;
-            message: string;
-            fieldErrors?: {
-                [key: string]: string[];
-            };
-            details?: {
-                [key: string]: unknown;
-            };
         };
         CreateCampaignDto: {
             /** Format: uuid */
@@ -958,6 +958,10 @@ export interface operations {
                 capabilityFreshness?: ("CURRENT" | "STALE")[];
                 /** @description Filter active or inactive synchronized groups. Omission preserves the active-only list behavior. */
                 isActive?: boolean;
+                /** @description Inclusive minimum synchronized participant count. Groups with an unknown count do not match. */
+                minParticipants?: number;
+                /** @description Inclusive maximum synchronized participant count. Groups with an unknown count do not match. */
+                maxParticipants?: number;
             };
             header?: never;
             path?: never;
@@ -971,6 +975,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupListDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
         };

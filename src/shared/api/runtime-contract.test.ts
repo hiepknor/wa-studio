@@ -7,6 +7,7 @@ type UpdateCampaignDto = components["schemas"]["UpdateCampaignDto"];
 type CampaignListQuery = NonNullable<
   paths["/api/v1/campaigns"]["get"]["parameters"]["query"]
 >;
+type GroupListQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
 
 describe("authoritative WA Runtime contract", () => {
   it("keeps the canonical snapshot at the pinned SHA-256", async () => {
@@ -16,7 +17,7 @@ describe("authoritative WA Runtime contract", () => {
     );
     const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(checksum)
-      .toBe("e77b1058958dfa8238ebc3f71940165eaf5b82fd7ae2a487b183c3990071cdf2");
+      .toBe("411f2130011c309ac6f43c081983461c3c36b00b312215f6179d94456697c991");
   });
 
   it("generates nullable scheduledAt for UpdateCampaignDto", () => {
@@ -37,5 +38,15 @@ describe("authoritative WA Runtime contract", () => {
     };
     expect(query.status).toEqual(["DRAFT", "PAUSED"]);
     expect(query.scheduleType).toEqual(["IMMEDIATE", "ONCE"]);
+  });
+
+  it("generates participant bounds for the authoritative group-list query", () => {
+    const query: GroupListQuery = {
+      sessionId: "session-id",
+      minParticipants: 50,
+      maxParticipants: 500,
+    };
+    expect(query.minParticipants).toBe(50);
+    expect(query.maxParticipants).toBe(500);
   });
 });
