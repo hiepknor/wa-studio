@@ -8,6 +8,9 @@ type CampaignListQuery = NonNullable<
   paths["/api/v1/campaigns"]["get"]["parameters"]["query"]
 >;
 type GroupListQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
+type SavedGroupListQuery = paths["/api/v1/group-lists"]["get"]["parameters"]["query"];
+type CreateGroupListDto = components["schemas"]["CreateGroupListDto"];
+type GroupListMembershipDto = components["schemas"]["GroupListMembershipDto"];
 
 describe("authoritative WA Runtime contract", () => {
   it("keeps the canonical snapshot at the pinned SHA-256", async () => {
@@ -17,7 +20,7 @@ describe("authoritative WA Runtime contract", () => {
     );
     const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(checksum)
-      .toBe("411f2130011c309ac6f43c081983461c3c36b00b312215f6179d94456697c991");
+      .toBe("ce54abc0b8f1184b99d1d25e1266f0e7b27c66ce4bb72e03669594eebcaf2b4e");
   });
 
   it("generates nullable scheduledAt for UpdateCampaignDto", () => {
@@ -48,5 +51,24 @@ describe("authoritative WA Runtime contract", () => {
     };
     expect(query.minParticipants).toBe(50);
     expect(query.maxParticipants).toBe(500);
+  });
+
+  it("generates saved Group List browsing and atomic create membership types", () => {
+    const query: SavedGroupListQuery = {
+      sessionId: "session-id",
+      query: "launch",
+      limit: 20,
+      offset: 0,
+    };
+    const create: CreateGroupListDto = {
+      sessionId: "session-id",
+      name: "Launch groups",
+      description: null,
+      groupIds: ["one@g.us", "two@g.us"],
+    };
+    const membership = {} as GroupListMembershipDto;
+    expect(query.query).toBe("launch");
+    expect(create.groupIds).toEqual(["one@g.us", "two@g.us"]);
+    expect(membership).toEqual({});
   });
 });

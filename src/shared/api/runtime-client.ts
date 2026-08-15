@@ -10,6 +10,12 @@ export type RuntimeGroupDetail = components["schemas"]["GroupDetailDto"];
 export type RuntimeGroupPage = components["schemas"]["GroupListDto"];
 export type RuntimeGroupMember = components["schemas"]["GroupMemberDto"];
 export type RuntimeGroupMemberPage = components["schemas"]["GroupMemberListDto"];
+export type RuntimeSavedGroupList = components["schemas"]["SavedGroupListDto"];
+export type RuntimeSavedGroupListPage = components["schemas"]["SavedGroupListPageDto"];
+export type RuntimeCreateGroupList = components["schemas"]["CreateGroupListDto"];
+export type RuntimeUpdateGroupList = components["schemas"]["UpdateGroupListDto"];
+export type RuntimeGroupListGroup = components["schemas"]["GroupListGroupDto"];
+export type RuntimeGroupListMembership = components["schemas"]["GroupListMembershipDto"];
 export type RuntimeCampaign = components["schemas"]["CampaignDto"];
 export type RuntimeCampaignPage = components["schemas"]["CampaignListDto"];
 export type RuntimeCreateCampaign = components["schemas"]["CreateCampaignDto"];
@@ -53,6 +59,13 @@ export interface RuntimeGroupListInput {
 export interface RuntimeGroupMemberListInput {
   sessionId: string;
   groupId: string;
+  limit?: number;
+  offset?: number;
+  query?: string;
+}
+
+export interface RuntimeSavedGroupListInput {
+  sessionId: string;
   limit?: number;
   offset?: number;
   query?: string;
@@ -312,6 +325,126 @@ export class RuntimeApi {
     if (!result.response.ok) {
       throw new RuntimeRequestError(
         `Could not refresh send capability (HTTP ${result.response.status}).`,
+      );
+    }
+  }
+
+  async listSavedGroupLists({
+    sessionId,
+    limit = 20,
+    offset = 0,
+    query,
+  }: RuntimeSavedGroupListInput): Promise<RuntimeSavedGroupListPage> {
+    const normalizedQuery = query?.trim();
+    const result = await this.client.GET("/api/v1/group-lists", {
+      params: { query: {
+        sessionId,
+        limit,
+        offset,
+        ...(normalizedQuery ? { query: normalizedQuery } : {}),
+      } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load saved group lists",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async createGroupList(
+    input: RuntimeCreateGroupList,
+    idempotencyKey: string,
+  ): Promise<RuntimeSavedGroupList> {
+    const result = await this.client.POST("/api/v1/group-lists", {
+      body: input,
+      params: { header: { "Idempotency-Key": idempotencyKey } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not create group list",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async getGroupList(listId: string): Promise<RuntimeSavedGroupList> {
+    const result = await this.client.GET("/api/v1/group-lists/{id}", {
+      params: { path: { id: listId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load group list",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async getGroupListMembership(listId: string): Promise<RuntimeGroupListMembership> {
+    const result = await this.client.GET("/api/v1/group-lists/{id}/groups", {
+      params: { path: { id: listId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load group list membership",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async updateGroupList(
+    listId: string,
+    input: RuntimeUpdateGroupList,
+  ): Promise<RuntimeSavedGroupList> {
+    const result = await this.client.PATCH("/api/v1/group-lists/{id}", {
+      body: input,
+      params: { path: { id: listId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not update group list",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async replaceGroupListGroups(
+    listId: string,
+    groupIds: string[],
+  ): Promise<RuntimeGroupListMembership> {
+    const result = await this.client.PUT("/api/v1/group-lists/{id}/groups", {
+      body: { groupIds },
+      params: { path: { id: listId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not replace group list membership",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async archiveGroupList(listId: string): Promise<void> {
+    const result = await this.client.DELETE("/api/v1/group-lists/{id}", {
+      params: { path: { id: listId } },
+    });
+    if (!result.response.ok) {
+      throw runtimeRequestError(
+        "Could not archive group list",
+        result.response.status,
+        result.error,
       );
     }
   }

@@ -8,7 +8,7 @@ import {
   type WorkspacePageId,
 } from "./workspace-pages";
 import { SessionsScreen } from "@/features/sessions/SessionsScreen";
-import { GroupsScreen } from "@/features/groups/GroupsScreen";
+import { GroupsWorkspace } from "@/features/groups/GroupsWorkspace";
 import { CampaignsScreen } from "@/features/campaigns/CampaignsScreen";
 import { AppIcon, type AppIconName } from "@/shared/ui/AppIcon";
 import { BrandMark } from "@/shared/ui/BrandMark";
@@ -39,7 +39,7 @@ function renderPage(pageId: WorkspacePageId, openGroups: () => void) {
     case "campaigns":
       return <CampaignsScreen />;
     case "groups":
-      return <GroupsScreen />;
+      return <GroupsWorkspace />;
     case "sessions":
       return <SessionsScreen onOpenGroups={openGroups} />;
     default:

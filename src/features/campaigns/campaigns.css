@@ -54,6 +54,23 @@
 .campaign-form-section-heading span { color: var(--dim); font-size: 8px; text-align: right; }
 
 .campaign-target-section { display: flex; flex-direction: column; gap: 10px; }
+.campaign-saved-list-actions {
+  padding: 12px;
+  border: 1px solid rgb(137 123 240 / 22%);
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgb(118 103 232 / 8%), rgb(255 255 255 / 1%) 62%);
+}
+.campaign-saved-list-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.campaign-saved-list-heading h3 { margin: 0; color: #d8dbe2; font-size: 10px; font-weight: 600; }
+.campaign-saved-list-heading p { margin: 3px 0 0; color: var(--dim); font-size: 8px; }
+.campaign-saved-list-heading > span { color: var(--dim); font-family: var(--font-mono); font-size: 8px; }
+.campaign-saved-list-controls {
+  display: grid;
+  grid-template-columns: minmax(150px, .8fr) minmax(190px, 1.2fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+.campaign-saved-list-buttons { display: flex; gap: 6px; padding-bottom: 1px; }
 .campaign-target-section > .data-filter-toolbar {
   min-height: 54px;
   padding: 8px;
@@ -206,6 +223,8 @@
 .campaign-workspace-footer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
 
 @media (max-width: 600px) {
+  .campaign-saved-list-controls { grid-template-columns: 1fr; }
+  .campaign-saved-list-buttons { justify-content: flex-end; }
   .campaign-target-section-heading { align-items: flex-start; flex-direction: column; }
   .campaign-target-filter-panel .data-filter-panel-body { grid-template-columns: 1fr; }
   .campaign-target-filter-panel .data-filter-panel-body fieldset:nth-child(even) { border-left: 0; }

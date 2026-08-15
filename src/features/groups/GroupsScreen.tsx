@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import type {
@@ -110,7 +110,11 @@ function syncProgressCopy(run: RuntimeSyncRun): string {
   return `${run.groupsSynced} groups · ${run.membersSynced} members · ${elapsedSeconds}s elapsed`;
 }
 
-export function GroupsScreen() {
+interface GroupsScreenProps {
+  navigation?: ReactNode;
+}
+
+export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
   const { connected, refreshSessions, selectedSessionId } =
     useRuntimeConnection();
   const toast = useToast();
@@ -469,6 +473,8 @@ export function GroupsScreen() {
   useEffect(() => () => cancelCapabilityRefresh(), [cancelCapabilityRefresh]);
   useEffect(
     () => () => {
+      listRevision.current += 1;
+      listTargetRef.current = "";
       membersRevision.current += 1;
       memberTargetKeyRef.current = "";
     },
@@ -742,7 +748,7 @@ export function GroupsScreen() {
   }
 
   return (
-    <div className="groups-screen stack stack-lg">
+    <div aria-labelledby={navigation ? "groups-workspace-all-tab" : undefined} className="groups-screen stack stack-lg" id={navigation ? "groups-workspace-all-panel" : undefined} role={navigation ? "tabpanel" : undefined}>
       <PageHeader
         actions={
           <DropdownMenu
@@ -796,6 +802,8 @@ export function GroupsScreen() {
         title="Groups"
         titleId="groups-title"
       />
+
+      {navigation}
 
       <ConfirmationDialog
         body={`Synchronize all groups and members for ${selectedSession?.name ?? "the active session"} from OpenWA? Large sessions may take several minutes.`}

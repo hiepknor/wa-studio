@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
-import { GroupCapabilityStatus } from "@/features/groups/GroupCapabilityStatus";
+import {
+  GroupSelectionTable,
+  type GroupSelectionRow,
+} from "@/features/groups/selection/GroupSelectionTable";
+import { GroupSelectionToolbar } from "@/features/groups/selection/GroupSelectionToolbar";
+import { useGroupDirectoryQuery } from "@/features/groups/selection/useGroupDirectoryQuery";
+import {
+  applyGroupSelectionSnapshot,
+  sameGroupSelection,
+} from "@/features/groups/selection/group-selection";
 import {
   RuntimeRequestError,
   type RuntimeCampaign,
@@ -9,8 +18,8 @@ import {
   type RuntimeCampaignPage,
   type RuntimeCampaignPreflight,
   type RuntimeCampaignTarget,
-  type RuntimeGroup,
-  type RuntimeGroupPage,
+  type RuntimeGroupListGroup,
+  type RuntimeSavedGroupList,
 } from "@/shared/api/runtime-client";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
@@ -26,13 +35,7 @@ import { TextAreaField } from "@/shared/ui/TextAreaField";
 import { TextField } from "@/shared/ui/TextField";
 import { useToast } from "@/shared/ui/Toast";
 import { CampaignListToolbar } from "./CampaignListToolbar";
-import {
-  activeCampaignTargetFilterCount,
-  CampaignTargetToolbar,
-  emptyCampaignTargetFilters,
-  type CampaignTargetFilters,
-  type ParticipantFilterErrors,
-} from "./CampaignTargetToolbar";
+import { CampaignSavedListActions } from "./CampaignSavedListActions";
 import {
   campaignListRequestKey,
   initialCampaignListState,
@@ -60,16 +63,7 @@ type EditorState =
   | { campaign: RuntimeCampaign | null; kind: "open" };
 type CampaignEditorTab = "details" | "targets" | "preflight";
 
-interface TargetPickerRow {
-  groupId: string;
-  groupName: string;
-  isActive: boolean;
-  participantsCount: number | null;
-  sendCapability: RuntimeGroup["sendCapability"];
-}
-
 const PAGE_SIZE = 50;
-const TARGET_PAGE_SIZE = 20;
 const SCHEDULE_OPTIONS = [
   {
     description: "No scheduled timestamp.",
@@ -114,20 +108,10 @@ function statusLabel(status: "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED") {
   return status.charAt(0) + status.slice(1).toLocaleLowerCase();
 }
 
-function formatParticipants(value: number | null): string {
-  return value === null ? "—" : new Intl.NumberFormat().format(value);
-}
-
 function reportTone(status: "PASS" | "WARN" | "BLOCK") {
   if (status === "PASS") return "success" as const;
   if (status === "WARN") return "warning" as const;
   return "danger" as const;
-}
-
-function sameIds(left: readonly string[], right: readonly string[]): boolean {
-  if (left.length !== right.length) return false;
-  const expected = new Set(left);
-  return right.every((id) => expected.has(id));
 }
 
 function fieldDescription(error: string | undefined, hint?: string) {
@@ -158,18 +142,7 @@ export function CampaignsScreen() {
   const [targetsSaving, setTargetsSaving] = useState(false);
   const [targetsError, setTargetsError] = useState<string | null>(null);
   const [revisionRefreshRequired, setRevisionRefreshRequired] = useState(false);
-  const [groupInputQuery, setGroupInputQuery] = useState("");
-  const [groupQuery, setGroupQuery] = useState("");
-  const [groupOffset, setGroupOffset] = useState(0);
-  const [groupFilters, setGroupFilters] = useState<CampaignTargetFilters>(emptyCampaignTargetFilters);
-  const [groupFilterRevision, setGroupFilterRevision] = useState(0);
-  const [groupFiltersOpen, setGroupFiltersOpen] = useState(false);
-  const [participantFilterErrors, setParticipantFilterErrors] = useState<ParticipantFilterErrors>({});
-  const [groups, setGroups] = useState<RuntimeGroup[]>([]);
-  const [groupPageMeta, setGroupPageMeta] = useState<RuntimeGroupPage["meta"] | null>(null);
-  const [knownGroups, setKnownGroups] = useState<Record<string, RuntimeGroup>>({});
-  const [groupsLoading, setGroupsLoading] = useState(false);
-  const [groupsError, setGroupsError] = useState<string | null>(null);
+  const [appliedListRows, setAppliedListRows] = useState<Record<string, RuntimeGroupListGroup>>({});
   const [preflightMode, setPreflightMode] = useState<RuntimeCampaignExecutionMode>("DRY_RUN");
   const [preflight, setPreflight] = useState<RuntimeCampaignPreflight | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
@@ -178,8 +151,6 @@ export function CampaignsScreen() {
   const editorEpochRef = useRef(0);
   const listRequestRef = useRef(0);
   const listTargetRef = useRef(campaignListRequestKey(listState));
-  const groupsRequestRef = useRef(0);
-  const groupsTargetRef = useRef("");
   const pageKeyRef = useRef("");
   const errorKeyRef = useRef("");
   const listStateRef = useRef(listState);
@@ -191,6 +162,12 @@ export function CampaignsScreen() {
   const campaignId = campaign?.id ?? null;
   const editable = !campaign || campaign.status === "DRAFT";
   const detailsDirty = campaign ? hasCampaignChanges(campaign, form) : true;
+  const groupDirectory = useGroupDirectoryQuery({
+    api,
+    enabled: Boolean(campaignId),
+    scopeKey: campaignId ? `${campaignId}:${editorEpochRef.current}` : "closed",
+    sessionId: selectedSessionId,
+  });
   const targetIds = useMemo(() => targets.map((target) => target.groupId), [targets]);
   const targetDiff = useMemo(
     () => campaignTargetDiff(targetIds, draftTargetIds),
@@ -209,37 +186,28 @@ export function CampaignsScreen() {
     const reviewIds = new Set(reviewTargetIds);
     const groupIds = [
       ...reviewTargetIds,
-      ...groups.map((group) => group.id).filter((groupId) => !reviewIds.has(groupId)),
+      ...groupDirectory.groups.map((group) => group.id).filter((groupId) => !reviewIds.has(groupId)),
     ];
-    return groupIds.flatMap<TargetPickerRow>((groupId) => {
-      const group = knownGroups[groupId];
+    return groupIds.flatMap<GroupSelectionRow>((groupId) => {
+      const group = groupDirectory.knownGroups[groupId];
+      const applied = appliedListRows[groupId];
       const target = targetById.get(groupId);
-      const sendCapability = group?.sendCapability ?? target?.sendCapability;
+      const sendCapability = group?.sendCapability ?? applied?.sendCapability ?? target?.sendCapability;
       if (!sendCapability) return [];
       return [{
         groupId,
-        groupName: target?.groupName ?? group?.name ?? groupId,
-        isActive: group?.isActive ?? target?.enabled ?? true,
-        participantsCount: group?.participantsCount ?? null,
+        groupName: target?.groupName ?? applied?.groupName ?? group?.name ?? groupId,
+        isActive: group?.isActive ?? applied?.isActive ?? target?.enabled ?? true,
+        participantsCount: group?.participantsCount ?? applied?.participantsCount ?? null,
         sendCapability,
       }];
     });
-  }, [groups, knownGroups, reviewTargetIds, targetById]);
-  const groupPageIds = useMemo(() => groups.map((group) => group.id), [groups]);
-  const allPageTargetsSelected = groupPageIds.length > 0
-    && groupPageIds.every((groupId) => draftTargetIdSet.has(groupId));
-  const somePageTargetsSelected = groupPageIds.some((groupId) => draftTargetIdSet.has(groupId));
-  const normalizedGroupInputQuery = groupInputQuery.trim();
-  const groupFilterKey = JSON.stringify(groupFilters);
-  const hasGroupCriteria = Boolean(groupQuery || activeCampaignTargetFilterCount(groupFilters));
-  const groupSearchTargetKey = editor.kind === "open" && campaignId && selectedSessionId
-    ? `${selectedSessionId}:${campaignId}:${groupQuery}:${groupOffset}:${groupFilterKey}`
-    : "";
-  const intendedGroupOffset = normalizedGroupInputQuery === groupQuery ? groupOffset : 0;
-  groupsTargetRef.current = editor.kind === "open" && campaignId && selectedSessionId
-    ? `${selectedSessionId}:${campaignId}:${normalizedGroupInputQuery}:${intendedGroupOffset}:${groupFilterKey}`
-    : "";
-  const targetsDirty = !sameIds(targetIds, draftTargetIds);
+  }, [appliedListRows, groupDirectory.groups, groupDirectory.knownGroups, reviewTargetIds, targetById]);
+  const groupPageIds = useMemo(
+    () => groupDirectory.groups.map((group) => group.id),
+    [groupDirectory.groups],
+  );
+  const targetsDirty = !sameGroupSelection(targetIds, draftTargetIds);
   const reportStale = Boolean(
     preflight
     && campaign
@@ -304,19 +272,7 @@ export function CampaignsScreen() {
     setFiltersOpen(false);
     setListLoading(false);
     setListError(null);
-    groupsRequestRef.current += 1;
-    groupsTargetRef.current = "";
-    setGroupInputQuery("");
-    setGroupQuery("");
-    setGroupOffset(0);
-    setGroupFilters(emptyCampaignTargetFilters());
-    setGroupFiltersOpen(false);
-    setParticipantFilterErrors({});
-    setGroups([]);
-    setGroupPageMeta(null);
-    setKnownGroups({});
-    setGroupsLoading(false);
-    setGroupsError(null);
+    setAppliedListRows({});
     setPreflight(null);
   }, [listState.sessionId, selectedSessionId]);
 
@@ -339,8 +295,6 @@ export function CampaignsScreen() {
   useEffect(() => () => {
     listRequestRef.current += 1;
     listTargetRef.current = "";
-    groupsRequestRef.current += 1;
-    groupsTargetRef.current = "";
   }, []);
 
   async function loadTargets(campaignId: string, epoch: number) {
@@ -359,108 +313,6 @@ export function CampaignsScreen() {
     }
   }
 
-  const loadGroups = useCallback(async (
-    sessionId: string,
-    query: string,
-    offset: number,
-    filters: CampaignTargetFilters,
-    targetKey: string,
-    epoch: number,
-  ) => {
-    const request = ++groupsRequestRef.current;
-    setGroupsLoading(true);
-    setGroupsError(null);
-    setGroups([]);
-    try {
-      const page = await api.listGroups({
-        sessionId,
-        limit: TARGET_PAGE_SIZE,
-        offset,
-        ...(query ? { query } : {}),
-        ...(filters.capabilityStatuses.length
-          ? { capabilityStatus: filters.capabilityStatuses }
-          : {}),
-        ...(filters.capabilityFreshness.length
-          ? { capabilityFreshness: filters.capabilityFreshness }
-          : {}),
-        ...(filters.isActive === undefined ? {} : { isActive: filters.isActive }),
-        ...(filters.minParticipants === undefined
-          ? {}
-          : { minParticipants: filters.minParticipants }),
-        ...(filters.maxParticipants === undefined
-          ? {}
-          : { maxParticipants: filters.maxParticipants }),
-      });
-      if (
-        request !== groupsRequestRef.current
-        || epoch !== editorEpochRef.current
-        || targetKey !== groupsTargetRef.current
-      ) return;
-      if (offset > 0 && page.data.length === 0 && page.meta.total <= offset) {
-        const lastOffset = page.meta.total === 0
-          ? 0
-          : Math.floor((page.meta.total - 1) / TARGET_PAGE_SIZE) * TARGET_PAGE_SIZE;
-        if (page.meta.total === 0) {
-          setGroups([]);
-          setGroupPageMeta({ ...page.meta });
-        }
-        setGroupOffset(lastOffset);
-        return;
-      }
-      setGroups(page.data);
-      setGroupPageMeta({ ...page.meta });
-      setParticipantFilterErrors({});
-      setKnownGroups((current) => {
-        const next = { ...current };
-        page.data.forEach((group) => { next[group.id] = group; });
-        return next;
-      });
-    } catch (error) {
-      if (
-        request === groupsRequestRef.current
-        && epoch === editorEpochRef.current
-        && targetKey === groupsTargetRef.current
-      ) {
-        if (error instanceof RuntimeRequestError) {
-          setParticipantFilterErrors({
-            minParticipants: error.fieldErrors.minParticipants?.[0],
-            maxParticipants: error.fieldErrors.maxParticipants?.[0],
-          });
-        }
-        setGroupsError(campaignErrorMessage(error, "Could not load available groups."));
-      }
-    } finally {
-      if (
-        request === groupsRequestRef.current
-        && epoch === editorEpochRef.current
-        && targetKey === groupsTargetRef.current
-      ) setGroupsLoading(false);
-    }
-  }, [api]);
-
-  useEffect(() => {
-    if (!campaignId) return;
-    const timeout = window.setTimeout(() => {
-      setGroupOffset(0);
-      setGroupQuery((current) => current === normalizedGroupInputQuery
-        ? current
-        : normalizedGroupInputQuery);
-    }, 300);
-    return () => window.clearTimeout(timeout);
-  }, [campaignId, groupInputQuery, normalizedGroupInputQuery]);
-
-  useEffect(() => {
-    if (!groupSearchTargetKey || !campaignId || !selectedSessionId) return;
-    void loadGroups(
-      selectedSessionId,
-      groupQuery,
-      groupOffset,
-      groupFilters,
-      groupSearchTargetKey,
-      editorEpochRef.current,
-    );
-  }, [campaignId, groupFilterKey, groupFilterRevision, groupOffset, groupQuery, groupSearchTargetKey, loadGroups, selectedSessionId]);
-
   function openCreate() {
     editorEpochRef.current += 1;
     createKeyRef.current = null;
@@ -472,16 +324,7 @@ export function CampaignsScreen() {
     setTargets([]);
     setDraftTargetIds([]);
     setRevisionRefreshRequired(false);
-    setGroupInputQuery("");
-    setGroupQuery("");
-    setGroupOffset(0);
-    setGroupFilters(emptyCampaignTargetFilters());
-    setGroupFiltersOpen(false);
-    setParticipantFilterErrors({});
-    setGroups([]);
-    setGroupPageMeta(null);
-    setKnownGroups({});
-    setGroupsError(null);
+    setAppliedListRows({});
     setPreflightMode("DRY_RUN");
     setPreflight(null);
     setPreflightError(null);
@@ -501,36 +344,15 @@ export function CampaignsScreen() {
     setPreflight(null);
     setPreflightError(null);
     setPreflightMode("DRY_RUN");
-    setGroupInputQuery("");
-    setGroupQuery("");
-    setGroupOffset(0);
-    setGroupFilters(emptyCampaignTargetFilters());
-    setGroupFiltersOpen(false);
-    setParticipantFilterErrors({});
-    setGroups([]);
-    setGroupPageMeta(null);
-    setKnownGroups({});
-    setGroupsError(null);
+    setAppliedListRows({});
     void loadTargets(selected.id, epoch);
   }
 
   function closeEditor() {
     editorEpochRef.current += 1;
-    groupsRequestRef.current += 1;
-    groupsTargetRef.current = "";
     createKeyRef.current = null;
     setEditor({ kind: "closed" });
-    setGroupInputQuery("");
-    setGroupQuery("");
-    setGroupOffset(0);
-    setGroupFilters(emptyCampaignTargetFilters());
-    setGroupFiltersOpen(false);
-    setParticipantFilterErrors({});
-    setGroups([]);
-    setGroupPageMeta(null);
-    setKnownGroups({});
-    setGroupsLoading(false);
-    setGroupsError(null);
+    setAppliedListRows({});
     setPreflight(null);
     setDiscardConfirmationOpen(false);
   }
@@ -620,31 +442,42 @@ export function CampaignsScreen() {
     setTargetsError(null);
   }
 
-  function changeGroupSearch(value: string) {
-    groupsRequestRef.current += 1;
-    setGroupInputQuery(value);
-    setGroups([]);
-    setGroupsLoading(true);
-    setGroupsError(null);
-  }
-
-  function changeGroupFilters(filters: CampaignTargetFilters) {
-    groupsRequestRef.current += 1;
-    setGroupFilters(filters);
-    setGroupFilterRevision((revision) => revision + 1);
-    setGroupOffset(0);
-    setGroups([]);
-    setGroupsLoading(true);
-    setGroupsError(null);
-    setParticipantFilterErrors({});
-  }
-
-  function changeGroupOffset(offset: number) {
-    groupsRequestRef.current += 1;
-    setGroupOffset(offset);
-    setGroups([]);
-    setGroupsLoading(true);
-    setGroupsError(null);
+  function applySavedGroupList(
+    groupIds: string[],
+    mode: "add" | "replace",
+    list: RuntimeSavedGroupList,
+    listGroups: RuntimeGroupListGroup[],
+  ): { message: string; ok: boolean } {
+    if (list.sessionId !== selectedSessionId || list.archivedAt !== null) {
+      return { message: "This saved list is not available in the campaign session.", ok: false };
+    }
+    const outcome = applyGroupSelectionSnapshot(draftTargetIds, groupIds, mode);
+    if (!outcome.ok) {
+      return {
+        message: `Applying ${list.name} would exceed the 1,000-group campaign target limit. The staged selection was not changed.`,
+        ok: false,
+      };
+    }
+    setAppliedListRows((current) => ({
+      ...current,
+      ...Object.fromEntries(listGroups.map((group) => [group.groupId, group])),
+    }));
+    setDraftTargetIds(outcome.nextIds);
+    setTargetsError(null);
+    if (mode === "replace") {
+      return {
+        message: outcome.nextIds.length
+          ? `Staged selection replaced with ${outcome.nextIds.length} groups from ${list.name}. Save target set to persist.`
+          : `Empty list ${list.name} staged an empty target set. Save target set to persist.`,
+        ok: true,
+      };
+    }
+    return {
+      message: outcome.addedCount
+        ? `${outcome.addedCount} group${outcome.addedCount === 1 ? "" : "s"} added from ${list.name}. Save target set to persist.`
+        : `${list.name} added no new groups; the staged selection was unchanged.`,
+      ok: true,
+    };
   }
 
   function toggleAllPageTargets() {
@@ -753,9 +586,6 @@ export function CampaignsScreen() {
   const targetSelectionSummary = targetsDirty
     ? `${targetDiff.selectedCount} selected · ${targetDiff.addedIds.length} added · ${targetDiff.removedIds.length} removed`
     : `${targetDiff.selectedCount} selected`;
-  const groupTotal = groupPageMeta?.total ?? 0;
-  const groupPageOffset = groupPageMeta?.offset ?? groupOffset;
-  const groupPageLimit = groupPageMeta?.limit ?? TARGET_PAGE_SIZE;
   const footerState = editorTab === "details"
     ? campaign
       ? detailsDirty ? "Unsaved detail changes" : "Details are up to date"
@@ -866,24 +696,14 @@ export function CampaignsScreen() {
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Targets belong to a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {targetsError && <InlineAlert title="Target update">{targetsError}</InlineAlert>}
+                <CampaignSavedListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving} onApply={applySavedGroupList} sessionId={campaign.sessionId} />
                 <section aria-labelledby="target-groups-title" className="campaign-target-section">
                   <div className="campaign-target-section-heading"><div><h3 id="target-groups-title">Target groups</h3><p>Filters narrow available groups; selected targets remain visible.</p></div><div aria-live="polite" className="campaign-target-selection-status" data-dirty={targetsDirty || undefined}><strong>{targetSelectionSummary}</strong>{targetDiff.selectedCount >= 900 && <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"}>{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge>}</div></div>
-                  <CampaignTargetToolbar filters={groupFilters} filtersOpen={groupFiltersOpen} inputQuery={groupInputQuery} loading={groupsLoading} onFiltersChange={changeGroupFilters} onFiltersOpenChange={setGroupFiltersOpen} onParticipantErrorsClear={() => setParticipantFilterErrors({})} onSearchChange={changeGroupSearch} pageItemCount={groups.length} pageOffset={groupPageOffset} participantErrors={participantFilterErrors} total={groupTotal} />
-                  {groupsError && <InlineAlert title="Could not load groups">{groupsError}</InlineAlert>}
-                  <div aria-busy={(groupsLoading || targetsLoading) || undefined} className="campaign-target-table">
-                    <table>
-                      <caption>Groups available to the campaign target selection</caption>
-                      <thead><tr><th className="campaign-target-check" scope="col"><input aria-checked={somePageTargetsSelected && !allPageTargetsSelected ? "mixed" : allPageTargetsSelected} aria-label="Select all groups on this page" checked={allPageTargetsSelected} disabled={!editable || !groupPageIds.length || groupsLoading || targetsLoading} onChange={toggleAllPageTargets} ref={(node) => { if (node) node.indeterminate = somePageTargetsSelected && !allPageTargetsSelected; }} title="Select all groups on this page" type="checkbox" /></th><th scope="col">Group</th><th className="campaign-target-participants" scope="col">Participants</th><th className="campaign-target-capability" scope="col">Capability</th></tr></thead>
-                      <tbody>
-                        {(groupsLoading || targetsLoading) && !targetRows.length ? <tr><td className="campaign-target-table-empty" colSpan={4}>Loading groups…</td></tr> : !targetRows.length ? <tr><td className="campaign-target-table-empty" colSpan={4}>{hasGroupCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."}</td></tr> : targetRows.map((row) => {
-                          const selected = draftTargetIdSet.has(row.groupId);
-                          return <tr data-selected={selected || undefined} key={row.groupId}><td className="campaign-target-check"><input aria-label={`Select ${row.groupName}`} checked={selected} disabled={!editable} onChange={() => toggleTarget(row.groupId)} type="checkbox" /></td><td className="campaign-target-group"><div><strong>{row.groupName}</strong>{!row.isActive && <Badge tone="neutral">Inactive</Badge>}</div><small>{row.groupId}</small></td><td className="campaign-target-participants" title={row.participantsCount === null ? "Participant count is unavailable in the saved target snapshot." : undefined}>{formatParticipants(row.participantsCount)}</td><td className="campaign-target-capability"><GroupCapabilityStatus appearance="badge" capability={row.sendCapability} includeFreshness={false} /></td></tr>;
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  {!groupsLoading && groups.length === 0 && targetRows.length > 0 && <p className="campaign-target-page-note">{hasGroupCriteria ? "No additional synchronized groups match this search or filters. Selected and saved targets remain visible above." : "No additional synchronized groups are available. Selected and saved targets remain visible above."}</p>}
-                  <TablePagination limit={groupPageLimit} loading={groupsLoading} offset={groupPageOffset} onOffsetChange={changeGroupOffset} total={groupTotal} />
+                  <GroupSelectionToolbar filters={groupDirectory.filters} filtersOpen={groupDirectory.filtersOpen} inputQuery={groupDirectory.inputQuery} loading={groupDirectory.loading} onFiltersChange={groupDirectory.setFilters} onFiltersOpenChange={groupDirectory.setFiltersOpen} onParticipantErrorsClear={() => groupDirectory.setParticipantErrors({})} onSearchChange={groupDirectory.setSearch} pageItemCount={groupDirectory.groups.length} pageOffset={groupDirectory.offset} participantErrors={groupDirectory.participantErrors} total={groupDirectory.total} />
+                  {groupDirectory.error && <InlineAlert action={<Button onClick={groupDirectory.retry} size="sm">Retry</Button>} title="Could not load groups">{groupDirectory.error}</InlineAlert>}
+                  <GroupSelectionTable caption="Groups available to the campaign target selection" disabled={!editable || targetsLoading} emptyMessage={groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."} loading={groupDirectory.loading || targetsLoading} onToggle={toggleTarget} onTogglePage={toggleAllPageTargets} pageIds={groupPageIds} rows={targetRows} selectedIds={draftTargetIdSet} unknownParticipantsTitle="Participant count is unavailable in the saved target snapshot." />
+                  {!groupDirectory.loading && groupDirectory.groups.length === 0 && targetRows.length > 0 && <p className="campaign-target-page-note">{groupDirectory.hasCriteria ? "No additional synchronized groups match this search or filters. Selected and saved targets remain visible above." : "No additional synchronized groups are available. Selected and saved targets remain visible above."}</p>}
+                  <TablePagination limit={groupDirectory.pageSize} loading={groupDirectory.loading} offset={groupDirectory.offset} onOffsetChange={groupDirectory.setOffset} total={groupDirectory.total} />
                 </section>
               </>}
             </section>}

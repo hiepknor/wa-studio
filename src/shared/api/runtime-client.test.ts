@@ -496,4 +496,99 @@ describe("RuntimeApi", () => {
       "http://127.0.0.1:3100/api/v1/groups/120363%40g.us/refresh-capability?sessionId=session%20id",
     );
   });
+
+  it("trims saved-list search and uses Runtime pagination", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      data: [], meta: { total: 0, limit: 20, offset: 40 },
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+    await api.listSavedGroupLists({
+      sessionId: "session id",
+      limit: 20,
+      offset: 40,
+      query: "  launch list  ",
+    });
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.url).toBe("http://127.0.0.1:3100/api/v1/group-lists?sessionId=session%20id&limit=20&offset=40&query=launch%20list");
+  });
+
+  it("keeps the caller-owned Group List Idempotency-Key stable across replay", async () => {
+    const saved = {
+      id: "11111111-1111-4111-8111-111111111111",
+      sessionId: "session-id",
+      name: "Launch",
+      description: null,
+      groupCount: 0,
+      revision: 1,
+      archivedAt: null,
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    };
+    const runtimeFetch = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("response lost"))
+      .mockResolvedValueOnce(Response.json(saved, { status: 200 }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+    const key = "22222222-2222-4222-8222-222222222222";
+    const payload = { sessionId: "session-id", name: "Launch", groupIds: [] };
+    await expect(api.createGroupList(payload, key)).rejects.toThrow("response lost");
+    await expect(api.createGroupList(payload, key)).resolves.toEqual(saved);
+    for (const call of runtimeFetch.mock.calls) {
+      const request = call[0] as Request;
+      expect(request.method).toBe("POST");
+      expect(request.headers.get("Idempotency-Key")).toBe(key);
+      await expect(request.clone().json()).resolves.toEqual(payload);
+    }
+  });
+
+  it("uses complete group-list membership replacement and preserves typed errors", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      code: "GROUP_LIST_GROUP_LIMIT_EXCEEDED",
+      message: "Too many groups.",
+      fieldErrors: { groupIds: ["At most 1000 groups."] },
+      details: {},
+    }, { status: 422 }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+    const error = await api.replaceGroupListGroups("list-id", ["one@g.us"])
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({
+      code: "GROUP_LIST_GROUP_LIMIT_EXCEEDED",
+      status: 422,
+      fieldErrors: { groupIds: ["At most 1000 groups."] },
+    });
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.method).toBe("PUT");
+    await expect(request.json()).resolves.toEqual({ groupIds: ["one@g.us"] });
+  });
+
+  it.each([401, 404, 409, 422])(
+    "preserves typed Group List HTTP %s responses",
+    async (status) => {
+      const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+        code: `GROUP_LIST_${status}`,
+        message: "Typed Runtime failure.",
+        fieldErrors: { name: ["Invalid value."] },
+        details: { status },
+      }, { status }));
+      const api = new RuntimeApi(
+        { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+        runtimeFetch,
+      );
+      const error = await api.getGroupList("list-id").catch((caught: unknown) => caught);
+      expect(error).toMatchObject({
+        code: `GROUP_LIST_${status}`,
+        status,
+        fieldErrors: { name: ["Invalid value."] },
+        details: { status },
+      });
+    },
+  );
 });

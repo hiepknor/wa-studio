@@ -146,6 +146,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/group-lists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search active saved group lists in one allowlisted session
+         * @description The trimmed literal search is applied before pagination. Results use updatedAt DESC and list ID ASC ordering; meta.total counts the filtered active dataset.
+         */
+        get: operations["GroupListController_list"];
+        put?: never;
+        /** Create an idempotent saved group list with optional initial membership */
+        post: operations["GroupListController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/group-lists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read active saved group-list metadata */
+        get: operations["GroupListController_get"];
+        put?: never;
+        post?: never;
+        /** Archive a saved group list without changing campaign targets */
+        delete: operations["GroupListController_archive"];
+        options?: never;
+        head?: never;
+        /** Update active saved group-list metadata */
+        patch: operations["GroupListController_update"];
+        trace?: never;
+    };
+    "/api/v1/group-lists/{id}/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the complete bounded saved group-list membership
+         * @description Returns at most 1,000 groups in deterministic normalized group-name and group-ID order.
+         */
+        get: operations["GroupListController_membership"];
+        /** Atomically replace the complete membership of an active saved group list */
+        put: operations["GroupListController_replaceGroups"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/campaigns": {
         parameters: {
             query?: never;
@@ -608,6 +669,68 @@ export interface components {
             /** @description Pagination metadata for the filtered synchronized member dataset */
             meta: components["schemas"]["GroupMemberPageMetaDto"];
         };
+        SavedGroupListDto: {
+            /** Format: uuid */
+            id: string;
+            /** @description Gateway session that owns this reusable list */
+            sessionId: string;
+            name: string;
+            description: string | null;
+            groupCount: number;
+            revision: number;
+            /** Format: date-time */
+            archivedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        SavedGroupListPageMetaDto: {
+            /** @description Total active saved lists matching the current session and search query */
+            total: number;
+            limit: number;
+            offset: number;
+        };
+        SavedGroupListPageDto: {
+            data: components["schemas"]["SavedGroupListDto"][];
+            meta: components["schemas"]["SavedGroupListPageMetaDto"];
+        };
+        CreateGroupListDto: {
+            /** @description Allowlisted Gateway session that owns the list */
+            sessionId: string;
+            name: string;
+            description?: string | null;
+            /**
+             * @description Initial static membership. Inactive and non-ALLOWED groups remain valid list entries.
+             * @default []
+             */
+            groupIds: string[];
+        };
+        UpdateGroupListDto: {
+            name?: string;
+            description?: string | null;
+        };
+        GroupListGroupDto: {
+            /** @example 120363000000000000@g.us */
+            groupId: string;
+            groupName: string;
+            isActive: boolean;
+            participantsCount: number | null;
+            sendCapability: components["schemas"]["GroupSendCapabilityDto"];
+        };
+        GroupListMembershipDto: {
+            list: components["schemas"]["SavedGroupListDto"];
+            data: components["schemas"]["GroupListGroupDto"][];
+        };
+        ReplaceGroupListGroupsDto: {
+            /**
+             * @description Complete static replacement set. Duplicate IDs are rejected.
+             * @example [
+             *       "120363000000000000@g.us"
+             *     ]
+             */
+            groupIds: string[];
+        };
         CreateCampaignDto: {
             /** Format: uuid */
             sessionId: string;
@@ -1059,6 +1182,401 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    GroupListController_list: {
+        parameters: {
+            query: {
+                limit?: number;
+                offset?: number;
+                /** @description Allowlisted Gateway session that owns the lists */
+                sessionId: string;
+                /** @description Trimmed case-insensitive literal substring search on list name and description */
+                query?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedGroupListPageDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    GroupListController_create: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateGroupListDto"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedGroupListDto"];
+                };
+            };
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedGroupListDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    GroupListController_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedGroupListDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    GroupListController_archive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    GroupListController_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateGroupListDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedGroupListDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    GroupListController_membership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupListMembershipDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    GroupListController_replaceGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplaceGroupListGroupsDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupListMembershipDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
         };

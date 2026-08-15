@@ -13,6 +13,8 @@ import {
   type RuntimeCampaignPreflight,
   type RuntimeCampaignTarget,
   type RuntimeGroup,
+  type RuntimeGroupListGroup,
+  type RuntimeSavedGroupList,
   type RuntimeSession,
 } from "@/shared/api/runtime-client";
 import { ToastProvider } from "@/shared/ui/Toast";
@@ -63,6 +65,8 @@ function renderCampaigns(overrides: Partial<RuntimeApi> = {}, initial: RuntimeCa
     listCampaigns: vi.fn().mockResolvedValue({ data: initial, meta: { total: initial.length, limit: 50, offset: 0 } }),
     listCampaignTargets: vi.fn().mockResolvedValue({ data: [deniedTarget] }),
     listGroups: vi.fn().mockResolvedValue({ data: [unknownGroup], meta: { total: 1, limit: 20, offset: 0 } }),
+    listSavedGroupLists: vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 100, offset: 0 } }),
+    getGroupListMembership: vi.fn(),
     getCampaign: vi.fn().mockResolvedValue(campaign),
     createCampaign: vi.fn(),
     updateCampaign: vi.fn(),
@@ -653,5 +657,100 @@ describe("CampaignsScreen", () => {
     resolveReport(report("DRY_RUN", "PASS"));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Campaigns" })).toBeInTheDocument());
     expect(screen.queryByText("GROUP_CAPABILITY")).not.toBeInTheDocument();
+  });
+
+  it("adds a saved-list snapshot to staged targets without persisting until Save target set", async () => {
+    const user = userEvent.setup();
+    const list: RuntimeSavedGroupList = {
+      id: "11111111-1111-4111-8111-111111111111", sessionId: session.id,
+      name: "Launch list", description: "Reusable launch groups", groupCount: 2,
+      revision: 1, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    };
+    const listRows: RuntimeGroupListGroup[] = [
+      { groupId: deniedTarget.groupId, groupName: deniedTarget.groupName, isActive: false, participantsCount: null, sendCapability: deniedTarget.sendCapability },
+      { groupId: unknownGroup.id, groupName: unknownGroup.name, isActive: unknownGroup.isActive, participantsCount: unknownGroup.participantsCount, sendCapability: unknownGroup.sendCapability },
+    ];
+    const replaceCampaignTargets = vi.fn().mockResolvedValue({
+      data: [deniedTarget, { groupId: unknownGroup.id, groupName: unknownGroup.name, enabled: true, sendCapability: unknownGroup.sendCapability }],
+    });
+    const api = renderCampaigns({
+      listSavedGroupLists: vi.fn().mockResolvedValue({ data: [list], meta: { total: 1, limit: 100, offset: 0 } }),
+      getGroupListMembership: vi.fn().mockResolvedValue({ list, data: listRows }),
+      replaceCampaignTargets,
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    const selector = screen.getByRole("combobox", { name: "Group list" });
+    await waitFor(() => expect(selector).toBeEnabled());
+    await user.click(selector);
+    await user.click(screen.getByRole("option", { name: /Launch list/ }));
+    await user.click(screen.getByRole("button", { name: "Add to selection" }));
+    expect(await screen.findByText(/1 group added from Launch list/)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).toBeChecked();
+    expect(replaceCampaignTargets).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("tab", { name: /Preflight/ }));
+    expect(screen.getByRole("button", { name: "Run preflight" })).toBeDisabled();
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await user.click(screen.getByRole("button", { name: "Save target set" }));
+    await waitFor(() => expect(replaceCampaignTargets).toHaveBeenCalledTimes(1));
+    expect(replaceCampaignTargets).toHaveBeenCalledWith(campaign.id, [deniedTarget.groupId, unknownGroup.id]);
+    expect(api.preflightCampaign).not.toHaveBeenCalled();
+  });
+
+  it("requires confirmation and explicitly stages an empty saved-list replacement", async () => {
+    const user = userEvent.setup();
+    const emptyList: RuntimeSavedGroupList = {
+      id: "22222222-2222-4222-8222-222222222222", sessionId: session.id,
+      name: "Empty list", description: null, groupCount: 0, revision: 1,
+      archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    };
+    const replaceCampaignTargets = vi.fn();
+    renderCampaigns({
+      listSavedGroupLists: vi.fn().mockResolvedValue({ data: [emptyList], meta: { total: 1, limit: 100, offset: 0 } }),
+      getGroupListMembership: vi.fn().mockResolvedValue({ list: emptyList, data: [] }),
+      replaceCampaignTargets,
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    const selector = screen.getByRole("combobox", { name: "Group list" });
+    await waitFor(() => expect(selector).toBeEnabled());
+    await user.click(selector);
+    await user.click(screen.getByRole("option", { name: /Empty list/ }));
+    await user.click(screen.getByRole("button", { name: "Replace selection" }));
+    expect(screen.getByText(/This list is empty/)).toBeInTheDocument();
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Replace staged target selection?" });
+    await user.click(within(dialog).getByRole("button", { name: "Replace selection" }));
+    expect(await screen.findByText(/staged an empty target set/)).toBeInTheDocument();
+    expect(screen.getByText(/0 selected · 0 added · 1 removed/)).toBeInTheDocument();
+    expect(replaceCampaignTargets).not.toHaveBeenCalled();
+  });
+
+  it("leaves staged targets unchanged when a saved list resolves to another session", async () => {
+    const user = userEvent.setup();
+    const list: RuntimeSavedGroupList = {
+      id: "33333333-3333-4333-8333-333333333333", sessionId: session.id,
+      name: "Moved list", description: null, groupCount: 1, revision: 1,
+      archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    };
+    renderCampaigns({
+      listSavedGroupLists: vi.fn().mockResolvedValue({ data: [list], meta: { total: 1, limit: 100, offset: 0 } }),
+      getGroupListMembership: vi.fn().mockResolvedValue({ list: { ...list, sessionId: "other-session" }, data: [] }),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    const selector = screen.getByRole("combobox", { name: "Group list" });
+    await waitFor(() => expect(selector).toBeEnabled());
+    await user.click(selector);
+    await user.click(screen.getByRole("option", { name: /Moved list/ }));
+    await user.click(screen.getByRole("button", { name: "Add to selection" }));
+    expect(await screen.findByText("This group list belongs to a different Runtime session.")).toBeInTheDocument();
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
   });
 });

@@ -15,7 +15,7 @@ This boundary lets future web and mobile clients use the same WA Runtime contrac
 
 ## Source of truth
 
-- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime revision `f2eb638ce8e51b74f4ff224850093b59aa11ee6a` (SHA-256 `e77b1058958dfa8238ebc3f71940165eaf5b82fd7ae2a487b183c3990071cdf2`).
+- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime delivery range `f92edef^..798b306` (SHA-256 `ce54abc0b8f1184b99d1d25e1266f0e7b27c66ce4bb72e03669594eebcaf2b4e`).
 - `src/shared/api/generated/runtime.ts` is generated; do not edit it by hand.
 - `src/shared/api/runtime-client.ts` owns URL normalization, authentication headers, transport, and error mapping.
 - Feature modules consume the typed client and must not redefine Runtime DTOs.
@@ -28,7 +28,7 @@ When WA Runtime changes, update the snapshot from a released WA Runtime revision
 src/app                  composition and application shell
 src/features/connection first-run connection and credential validation
 src/features/sessions   session selection, status, and read-model refresh
-src/features/groups     browse, filter, inspect, capability, and full sync
+src/features/groups     browse, filter, inspect, capability, full sync, and reusable static lists
 src/features/campaigns  server-backed browse/filter, draft details, targets, preflight
 src/features/runs       progress, delivery failures, controls (later)
 src/shared/api          generated contract and WA Runtime transport
@@ -85,3 +85,11 @@ Campaign creation owns one UUID idempotency key per create intent. The key survi
 The editor keeps Runtime DTOs authoritative. The transport canonicalizes IMMEDIATE create requests to `scheduledAt: null`; content-only PATCH requests omit scheduling fields. Changing ONCE to IMMEDIATE sends `scheduledAt: null`; changing IMMEDIATE to ONCE sends a timezone-qualified timestamp that Runtime canonicalizes to UTC. Target PUT requests are complete replacement sets, validated for uniqueness and the 1,000-item limit before submission. The UI commits only the canonical response and refreshes the campaign afterward to obtain its new `targetsRevision`.
 
 Preflight evaluates persisted state only. The UI renders Runtime status, counters, stable check codes, and stable issue reasons without recomputing policy. Local edits make a displayed result stale, successful details/target persistence clears it, and returned campaign/target revisions are checked against the current campaign. Editor epochs prevent late responses from a closed editor or a different session from being applied. No campaign-run or message-send operation is exposed by the Studio client in v0.2.0.
+
+## Reusable group-list boundary
+
+Runtime Group Lists are session-scoped static templates, not saved queries or dynamic segments. Groups exposes All groups and Saved lists as two views under the existing single sidebar destination. List create owns one UUID idempotency key per intent; editing loads complete canonical membership, keeps saved and staged IDs separate, and persists metadata plus complete membership without presenting partial success. Archiving a list does not alter any campaign.
+
+`src/features/groups/selection` owns the shared Runtime-backed directory query, filter toolbar, selection table, and ordered set helpers used by both Group List editing and Campaign Targets. Search, filters, pagination, request identity, and page-scoped select-all therefore have one implementation. Selected IDs remain independent of the current response page, and inactive, DENIED, and UNKNOWN groups remain selectable because Runtime preflight owns eligibility policy.
+
+Applying a saved list to a campaign fetches its complete current membership and changes only the editor's staged target IDs. Add performs an ordered union; Replace stages the fetched snapshot after confirmation. Neither action calls campaign target replacement, stores list provenance, or creates a campaign–list binding. `Save target set` remains the only persistence point, and later list edits or archival cannot change an already persisted campaign snapshot.

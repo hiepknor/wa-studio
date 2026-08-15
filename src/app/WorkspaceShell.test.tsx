@@ -150,6 +150,7 @@ describe("WorkspaceShell", () => {
     ).toBeInTheDocument();
     expect(within(statusBar).queryByText(/session:/i)).not.toBeInTheDocument();
     expect(screen.getByText("1 session")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Groups" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Groups" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sessions" })).toHaveAttribute(
       "aria-current",
