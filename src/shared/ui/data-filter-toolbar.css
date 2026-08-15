@@ -26,7 +26,8 @@
 .data-filter-summary-empty { color: var(--dim); font-size: 9px; }
 @media (max-width: 760px) {
   .data-filter-toolbar-row { align-items: stretch; }
-  .data-filter-controls { flex: 1; }
+  .data-filter-controls { flex: 1; flex-wrap: wrap; }
+  .data-filter-controls > .search-field { flex: 1 1 180px; }
   .data-filter-result-summary { align-self: center; }
   .data-filter-panel-body { grid-template-columns: 1fr; }
   .data-filter-panel fieldset + fieldset { border-left: 0; border-top: 1px solid rgb(255 255 255 / 6%); }

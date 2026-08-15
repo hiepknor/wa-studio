@@ -98,6 +98,11 @@ async function openCampaign(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByRole("heading", { name: "Content & schedule" });
 }
 
+async function openSavedListPicker(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Add from saved list" }));
+  return screen.getByRole("dialog", { name: "Add from saved list" });
+}
+
 function report(
   executionMode: "DRY_RUN" | "LIVE",
   status: "PASS" | "WARN" | "BLOCK",
@@ -152,7 +157,7 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     expect(drawerBody).toHaveProperty("scrollTop", 0);
     expect(screen.getAllByText("Saved target set").length).toBeGreaterThan(0);
-    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
     expect(screen.getByText("No preflight report")).toBeInTheDocument();
@@ -288,6 +293,8 @@ describe("CampaignsScreen", () => {
     expect(within(targetTable).getByText("3")).toBeInTheDocument();
     expect(screen.queryByText("Saved targets")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /All groups|Selection/ })).not.toBeInTheDocument();
+    expect(within(targetTable).getByRole("rowheader", { name: "Saved or selected outside current results 1" })).toBeInTheDocument();
+    expect(within(targetTable).getByRole("rowheader", { name: "Current results 1" })).toBeInTheDocument();
 
     const selectAll = screen.getByRole("checkbox", { name: "Select all groups on this page" });
     expect(selectAll).not.toBeChecked();
@@ -301,7 +308,7 @@ describe("CampaignsScreen", () => {
     expect(deniedCheckbox).toBeChecked();
     await user.click(unknownCheckbox);
 
-    expect(screen.getByText("2 selected · 1 added · 0 removed")).toBeInTheDocument();
+    expect(screen.getAllByText("Saved 1 · Staged 2 · +1 / −0").length).toBeGreaterThan(0);
     expect(screen.getByText("Denied room")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Select Denied room" })).toBeChecked();
     expect(screen.getAllByRole("table", { name: "Groups available to the campaign target selection" })).toHaveLength(1);
@@ -682,7 +689,8 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
-    const selector = screen.getByRole("combobox", { name: "Group list" });
+    const picker = await openSavedListPicker(user);
+    const selector = within(picker).getByRole("combobox", { name: "Group list" });
     await waitFor(() => expect(selector).toBeEnabled());
     await user.click(selector);
     await user.click(screen.getByRole("option", { name: /Launch list/ }));
@@ -697,6 +705,37 @@ describe("CampaignsScreen", () => {
     await waitFor(() => expect(replaceCampaignTargets).toHaveBeenCalledTimes(1));
     expect(replaceCampaignTargets).toHaveBeenCalledWith(campaign.id, [deniedTarget.groupId, unknownGroup.id]);
     expect(api.preflightCampaign).not.toHaveBeenCalled();
+  });
+
+  it("loads saved lists lazily and ignores a late response after the picker closes", async () => {
+    const user = userEvent.setup();
+    const latePage = deferred<Awaited<ReturnType<RuntimeApi["listSavedGroupLists"]>>>();
+    const currentList: RuntimeSavedGroupList = {
+      id: "44444444-4444-4444-8444-444444444444", sessionId: session.id,
+      name: "Current list", description: null, groupCount: 1, revision: 1,
+      archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    };
+    const listSavedGroupLists = vi.fn()
+      .mockReturnValueOnce(latePage.promise)
+      .mockResolvedValueOnce({ data: [currentList], meta: { total: 1, limit: 100, offset: 0 } });
+    renderCampaigns({ listSavedGroupLists });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    expect(listSavedGroupLists).not.toHaveBeenCalled();
+    await openSavedListPicker(user);
+    await waitFor(() => expect(listSavedGroupLists).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Close saved lists" }));
+    latePage.resolve({ data: [{ ...currentList, id: "late", name: "Late list" }], meta: { total: 1, limit: 100, offset: 0 } });
+    await Promise.resolve();
+    expect(screen.queryByRole("dialog", { name: "Add from saved list" })).not.toBeInTheDocument();
+    const picker = await openSavedListPicker(user);
+    const selector = within(picker).getByRole("combobox", { name: "Group list" });
+    await waitFor(() => expect(selector).toBeEnabled());
+    await user.click(selector);
+    expect(screen.getByRole("option", { name: /Current list/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Late list/ })).not.toBeInTheDocument();
   });
 
   it("requires confirmation and explicitly stages an empty saved-list replacement", async () => {
@@ -716,17 +755,18 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
-    const selector = screen.getByRole("combobox", { name: "Group list" });
+    const picker = await openSavedListPicker(user);
+    const selector = within(picker).getByRole("combobox", { name: "Group list" });
     await waitFor(() => expect(selector).toBeEnabled());
     await user.click(selector);
     await user.click(screen.getByRole("option", { name: /Empty list/ }));
     await user.click(screen.getByRole("button", { name: "Replace selection" }));
     expect(screen.getByText(/This list is empty/)).toBeInTheDocument();
-    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
     const dialog = screen.getByRole("dialog", { name: "Replace staged target selection?" });
     await user.click(within(dialog).getByRole("button", { name: "Replace selection" }));
     expect(await screen.findByText(/staged an empty target set/)).toBeInTheDocument();
-    expect(screen.getByText(/0 selected · 0 added · 1 removed/)).toBeInTheDocument();
+    expect(screen.getAllByText("Saved 1 · Staged 0 · +0 / −1").length).toBeGreaterThan(0);
     expect(replaceCampaignTargets).not.toHaveBeenCalled();
   });
 
@@ -745,12 +785,29 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
-    const selector = screen.getByRole("combobox", { name: "Group list" });
+    const picker = await openSavedListPicker(user);
+    const selector = within(picker).getByRole("combobox", { name: "Group list" });
     await waitFor(() => expect(selector).toBeEnabled());
     await user.click(selector);
     await user.click(screen.getByRole("option", { name: /Moved list/ }));
     await user.click(screen.getByRole("button", { name: "Add to selection" }));
     expect(await screen.findByText("This group list belongs to a different Runtime session.")).toBeInTheDocument();
-    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
+  });
+
+  it("resets staged target changes to the canonical saved set without persisting", async () => {
+    const user = userEvent.setup();
+    const replaceCampaignTargets = vi.fn();
+    renderCampaigns({ replaceCampaignTargets });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await user.click(await screen.findByRole("checkbox", { name: "Select Unknown room" }));
+    expect(screen.getAllByText("Saved 1 · Staged 2 · +1 / −0").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "Reset to saved" }));
+    expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).not.toBeChecked();
+    expect(screen.getByText("Staged selection reset to the saved target set.")).toBeInTheDocument();
+    expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
+    expect(replaceCampaignTargets).not.toHaveBeenCalled();
   });
 });

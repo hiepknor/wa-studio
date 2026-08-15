@@ -123,8 +123,14 @@ describe("GroupListEditor", () => {
       replaceGroupListGroups,
       archiveGroupList,
     });
-    expect(await screen.findByRole("checkbox", { name: "Select Denied room" })).toBeChecked();
-    await user.click(screen.getByRole("checkbox", { name: "Select Denied room" }));
+    await screen.findByText("1–3 of 3 groups");
+    expect(screen.getByRole("heading", { name: "List details" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Groups" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save list" })).toBeDisabled();
+    const deniedCheckbox = screen.getByRole("checkbox", { name: "Select Denied room" });
+    await waitFor(() => expect(deniedCheckbox).toBeEnabled());
+    expect(deniedCheckbox).toBeChecked();
+    await user.click(deniedCheckbox);
     const name = screen.getByRole("textbox", { name: "Name" });
     await user.clear(name);
     await user.type(name, "Updated list");
@@ -147,6 +153,32 @@ describe("GroupListEditor", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("resets staged metadata and membership to the canonical saved state without a mutation", async () => {
+    const user = userEvent.setup();
+    const denied = member(group("denied@g.us", "Denied room", "DENIED", false));
+    const updateGroupList = vi.fn();
+    const replaceGroupListGroups = vi.fn();
+    renderEditor(savedList, {
+      getGroupListMembership: vi.fn().mockResolvedValue({ list: savedList, data: [denied] }),
+      updateGroupList,
+      replaceGroupListGroups,
+    });
+    await screen.findByText("1–3 of 3 groups");
+    const name = screen.getByRole("textbox", { name: "Name" });
+    const deniedCheckbox = screen.getByRole("checkbox", { name: "Select Denied room" });
+    await user.clear(name);
+    await user.type(name, "Changed name");
+    await user.click(deniedCheckbox);
+    expect(screen.getByText("Saved 1 · Staged 0 · +0 / −1 · Details changed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reset changes" }));
+    expect(name).toHaveValue(savedList.name);
+    expect(deniedCheckbox).toBeChecked();
+    expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save list" })).toBeDisabled();
+    expect(updateGroupList).not.toHaveBeenCalled();
+    expect(replaceGroupListGroups).not.toHaveBeenCalled();
+  });
+
   it("keeps canonical saved membership and explicit staged changes when replacement fails", async () => {
     const user = userEvent.setup();
     const denied = member(group("denied@g.us", "Denied room", "DENIED", false));
@@ -160,17 +192,20 @@ describe("GroupListEditor", () => {
       updateGroupList: vi.fn().mockResolvedValue(metadataSaved),
       replaceGroupListGroups,
     });
-    const deniedCheckbox = await screen.findByRole("checkbox", { name: "Select Denied room" });
+    await screen.findByText("1–3 of 3 groups");
+    const deniedCheckbox = screen.getByRole("checkbox", { name: "Select Denied room" });
+    await waitFor(() => expect(deniedCheckbox).toBeEnabled());
     await user.click(deniedCheckbox);
     const name = screen.getByRole("textbox", { name: "Name" });
     await user.clear(name);
     await user.type(name, "Metadata saved");
     await user.click(screen.getByRole("button", { name: "Save list" }));
-    expect(await screen.findByText("Membership replacement failed.")).toBeInTheDocument();
+    expect(await screen.findByText("Group selection was not saved")).toBeInTheDocument();
+    expect(screen.getByText(/List details were saved, but group membership was not updated/)).toBeInTheDocument();
     await waitFor(() => expect(getGroupListMembership).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("checkbox", { name: "Select Denied room" })).not.toBeChecked();
     expect(screen.getByDisplayValue("Metadata saved")).toBeInTheDocument();
-    expect(screen.getByText("0 selected · Not saved")).toBeInTheDocument();
+    expect(screen.getByText("Saved 1 · Staged 0 · +0 / −1")).toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
   });
 });

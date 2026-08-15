@@ -15,7 +15,11 @@ import { TextAreaField } from "@/shared/ui/TextAreaField";
 import { TextField } from "@/shared/ui/TextField";
 import { GroupSelectionTable, type GroupSelectionRow } from "./selection/GroupSelectionTable";
 import { GroupSelectionToolbar } from "./selection/GroupSelectionToolbar";
-import { MAX_GROUP_SELECTION, sameGroupSelection } from "./selection/group-selection";
+import {
+  groupSelectionDiff,
+  MAX_GROUP_SELECTION,
+  sameGroupSelection,
+} from "./selection/group-selection";
 import { useGroupDirectoryQuery } from "./selection/useGroupDirectoryQuery";
 
 interface GroupListEditorProps {
@@ -59,6 +63,7 @@ export function GroupListEditor({
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorTitle, setErrorTitle] = useState("Group list update");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | undefined>>({});
   const [discardOpen, setDiscardOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -77,6 +82,10 @@ export function GroupListEditor({
     : Boolean(name.trim() || description.trim());
   const membershipDirty = !sameGroupSelection(savedIds, stagedIds);
   const dirty = metadataDirty || membershipDirty;
+  const selectionDiff = useMemo(
+    () => groupSelectionDiff(savedIds, stagedIds),
+    [savedIds, stagedIds],
+  );
   const selectedSet = useMemo(() => new Set(stagedIds), [stagedIds]);
   const savedSet = useMemo(() => new Set(savedIds), [savedIds]);
   const rows = useMemo(() => {
@@ -94,6 +103,10 @@ export function GroupListEditor({
     });
   }, [directory.groups, directory.knownGroups, membershipRows, savedIds, savedSet, selectedSet, stagedIds]);
   const pageIds = useMemo(() => directory.groups.map((group) => group.id), [directory.groups]);
+  const pinnedIds = useMemo(() => {
+    const currentPage = new Set(pageIds);
+    return new Set([...stagedIds, ...savedIds].filter((id) => !currentPage.has(id)));
+  }, [pageIds, savedIds, stagedIds]);
 
   async function loadCanonical(preserveStaged = false, preserveError = false) {
     if (!list) return;
@@ -104,10 +117,12 @@ export function GroupListEditor({
       const membership = await api.getGroupListMembership(list.id);
       if (epoch !== epochRef.current) return;
       if (membership.list.sessionId !== sessionId) {
+        setErrorTitle("Could not load group list");
         setError("This group list belongs to a different Runtime session.");
         return;
       }
       if (membership.list.archivedAt !== null) {
+        setErrorTitle("Could not load group list");
         setError("This group list is archived and can no longer be edited.");
         return;
       }
@@ -119,7 +134,10 @@ export function GroupListEditor({
       if (!preserveStaged) setStagedIds(ids);
       setMembershipRows(Object.fromEntries(membership.data.map((group) => [group.groupId, group])));
     } catch (nextError) {
-      if (epoch === epochRef.current) setError(errorCopy(nextError, "Could not load group list."));
+      if (epoch === epochRef.current) {
+        setErrorTitle("Could not load group list");
+        setError(errorCopy(nextError, "Could not load group list."));
+      }
     } finally {
       if (epoch === epochRef.current) setLoadingMembership(false);
     }
@@ -141,6 +159,7 @@ export function GroupListEditor({
     setStagedIds((current) => {
       if (current.includes(groupId)) return current.filter((id) => id !== groupId);
       if (current.length >= MAX_GROUP_SELECTION) {
+        setErrorTitle("Group limit reached");
         setError("Group lists are limited to 1,000 unique groups.");
         return current;
       }
@@ -159,6 +178,7 @@ export function GroupListEditor({
     const next = [...stagedIds];
     pageIds.forEach((id) => { if (!next.includes(id)) next.push(id); });
     if (next.length > MAX_GROUP_SELECTION) {
+      setErrorTitle("Group limit reached");
       setError("Selecting this page would exceed the 1,000-group limit.");
       return;
     }
@@ -176,6 +196,8 @@ export function GroupListEditor({
     setSaving(true);
     setError(null);
     setFieldErrors({});
+    let metadataCommitted = false;
+    let membershipAttempted = false;
     try {
       let savedList: RuntimeSavedGroupList;
       if (!canonical) {
@@ -194,8 +216,10 @@ export function GroupListEditor({
           });
           if (epoch !== epochRef.current) return;
           setCanonical(savedList);
+          metadataCommitted = true;
         }
         if (membershipDirty) {
+          membershipAttempted = true;
           const membership = await api.replaceGroupListGroups(canonical.id, stagedIds);
           if (epoch !== epochRef.current) return;
           if (membership.list.sessionId !== sessionId) {
@@ -226,7 +250,15 @@ export function GroupListEditor({
           groupIds: nextError.fieldErrors.groupIds?.[0],
         });
       }
-      setError(errorCopy(nextError, "Could not save group list."));
+      if (membershipAttempted) {
+        setErrorTitle("Group selection was not saved");
+        setError(metadataCommitted
+          ? "List details were saved, but group membership was not updated. Runtime keeps the previous saved membership; your staged group changes remain available to retry."
+          : "Group membership was not updated. Runtime keeps the previous saved membership; your staged group changes remain available to retry.");
+      } else {
+        setErrorTitle(canonical && metadataDirty ? "List details were not saved" : "Could not save group list");
+        setError(errorCopy(nextError, "Could not save group list."));
+      }
       if (canonical) await loadCanonical(true, true);
     } finally {
       if (epoch === epochRef.current) setSaving(false);
@@ -243,7 +275,10 @@ export function GroupListEditor({
       await api.archiveGroupList(canonical.id);
       if (epoch === epochRef.current) onArchived(canonical.id);
     } catch (nextError) {
-      if (epoch === epochRef.current) setError(errorCopy(nextError, "Could not archive group list."));
+      if (epoch === epochRef.current) {
+        setErrorTitle("Could not archive group list");
+        setError(errorCopy(nextError, "Could not archive group list."));
+      }
     } finally {
       if (epoch === epochRef.current) setArchiving(false);
     }
@@ -254,9 +289,25 @@ export function GroupListEditor({
     else onClose();
   }
 
+  function resetChanges() {
+    if (!canonical) return;
+    setName(canonical.name);
+    setDescription(canonical.description ?? "");
+    setStagedIds(savedIds);
+    setFieldErrors({});
+    setError(null);
+  }
+
   const status = loadingMembership
     ? "Loading complete membership…"
-    : `${stagedIds.length} selected${membershipDirty ? " · Not saved" : ""}`;
+    : canonical
+      ? `Saved ${selectionDiff.savedCount} · Staged ${selectionDiff.stagedCount} · +${selectionDiff.addedIds.length} / −${selectionDiff.removedIds.length}${metadataDirty ? " · Details changed" : ""}`
+      : `Staged ${selectionDiff.stagedCount} groups`;
+  const capacity = stagedIds.length >= MAX_GROUP_SELECTION
+    ? "Limit reached"
+    : stagedIds.length >= 900
+      ? `${MAX_GROUP_SELECTION - stagedIds.length} remaining`
+      : `${stagedIds.length} / ${MAX_GROUP_SELECTION.toLocaleString()}`;
 
   return (
     <>
@@ -265,25 +316,32 @@ export function GroupListEditor({
         contentKey={editorKey}
         description="Reusable static group IDs for the active Runtime session."
         eyebrow="Group list"
-        footer={<div className="group-list-editor-footer"><div><strong>{canonical ? "Edit group list" : "New group list"}</strong><span>{status}</span></div><div>{canonical && <Button disabled={saving || archiving} onClick={() => setArchiveOpen(true)} variant="ghost">Archive list</Button>}<Button disabled={loadingMembership || saving || archiving} loading={saving} onClick={() => void save()} variant="primary">Save list</Button></div></div>}
+        footer={<div className="group-list-editor-footer">
+          <div className="group-list-editor-footer-danger">{canonical && <Button disabled={saving || archiving} onClick={() => setArchiveOpen(true)} variant="ghost">Archive list</Button>}</div>
+          <div className="group-list-editor-footer-summary"><strong>{canonical ? "Edit group list" : "New group list"}</strong><span>{status}</span></div>
+          <div className="group-list-editor-footer-actions">{canonical && <Button disabled={!dirty || saving || archiving} onClick={resetChanges}>Reset changes</Button>}<Button disabled={loadingMembership || saving || archiving || Boolean(canonical && !dirty)} loading={saving} onClick={() => void save()} variant="primary">Save list</Button></div>
+        </div>}
         onClose={requestClose}
         open
         size="wide"
         title={canonical?.name ?? "New list"}
       >
         <div className="group-list-editor stack stack-lg">
-          {error && <InlineAlert title="Group list update">{error}</InlineAlert>}
-          <section className="group-list-editor-metadata stack stack-md">
-            <TextField description={fieldErrors.name && <span className="campaign-field-error">{fieldErrors.name}</span>} disabled={loadingMembership} label="Name" onChange={(event) => { setName(event.target.value); setFieldErrors((current) => ({ ...current, name: undefined })); }} value={name} />
-            <TextAreaField description={fieldErrors.description && <span className="campaign-field-error">{fieldErrors.description}</span>} disabled={loadingMembership} label="Description" onChange={(event) => { setDescription(event.target.value); setFieldErrors((current) => ({ ...current, description: undefined })); }} rows={3} value={description} />
+          {error && <InlineAlert title={errorTitle}>{error}</InlineAlert>}
+          <section aria-labelledby="group-list-details-title" className="group-list-editor-details stack stack-md">
+            <div className="group-list-editor-section-heading"><h3 id="group-list-details-title">List details</h3><p>Name and describe this reusable static selection.</p></div>
+            <div className="group-list-editor-metadata">
+              <TextField description={fieldErrors.name && <span className="group-list-field-error">{fieldErrors.name}</span>} disabled={loadingMembership} label="Name" onChange={(event) => { setName(event.target.value); setFieldErrors((current) => ({ ...current, name: undefined })); }} value={name} />
+              <TextAreaField description={fieldErrors.description && <span className="group-list-field-error">{fieldErrors.description}</span>} disabled={loadingMembership} label="Description" onChange={(event) => { setDescription(event.target.value); setFieldErrors((current) => ({ ...current, description: undefined })); }} rows={3} value={description} />
+            </div>
           </section>
-          <section aria-labelledby="group-list-selection-title" className="campaign-target-section">
-            <div className="campaign-target-section-heading"><div><h3 id="group-list-selection-title">Group selection</h3><p>Static membership · inactive, denied, and unknown groups remain selectable.</p></div><strong>{stagedIds.length} / {MAX_GROUP_SELECTION}</strong></div>
+          <section aria-labelledby="group-list-selection-title" className="group-selection-section">
+            <div className="group-selection-heading"><div><h3 id="group-list-selection-title">Groups</h3><p>Membership stays fixed until this list is edited. Inactive, denied, and unknown groups remain selectable; campaign preflight evaluates eligibility.</p></div><strong className={stagedIds.length >= 900 ? "group-list-editor-capacity-warning" : undefined}>{capacity}</strong></div>
             {fieldErrors.groupIds && <InlineAlert title="Invalid membership">{fieldErrors.groupIds}</InlineAlert>}
-            <GroupSelectionToolbar filters={directory.filters} filtersOpen={directory.filtersOpen} inputQuery={directory.inputQuery} loading={directory.loading} onFiltersChange={directory.setFilters} onFiltersOpenChange={directory.setFiltersOpen} onParticipantErrorsClear={() => directory.setParticipantErrors({})} onSearchChange={directory.setSearch} pageItemCount={directory.groups.length} pageOffset={directory.offset} participantErrors={directory.participantErrors} total={directory.total} />
+            <GroupSelectionToolbar filterAriaLabel="Group list filters" filterTitle="Filter groups in this list" filters={directory.filters} filtersOpen={directory.filtersOpen} idPrefix="group-list-selection" inputQuery={directory.inputQuery} loading={directory.loading} onFiltersChange={directory.setFilters} onFiltersOpenChange={directory.setFiltersOpen} onParticipantErrorsClear={() => directory.setParticipantErrors({})} onSearchChange={directory.setSearch} pageItemCount={directory.groups.length} pageOffset={directory.offset} participantErrors={directory.participantErrors} searchLabel="Find groups for this list" total={directory.total} />
             {directory.error && <InlineAlert action={<Button onClick={directory.retry} size="sm">Retry</Button>} title="Could not load groups">{directory.error}</InlineAlert>}
-            <GroupSelectionTable disabled={loadingMembership || saving} emptyMessage={directory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."} loading={directory.loading || loadingMembership} onToggle={toggle} onTogglePage={togglePage} pageIds={pageIds} rows={rows} selectedIds={selectedSet} />
-            {!directory.loading && directory.groups.length === 0 && rows.length > 0 && <p className="campaign-target-page-note">Selected and saved groups remain visible above.</p>}
+            <GroupSelectionTable disabled={loadingMembership || saving} emptyMessage={directory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."} loading={directory.loading || loadingMembership} onToggle={toggle} onTogglePage={togglePage} pageIds={pageIds} pinnedIds={pinnedIds} pinnedLabel={canonical ? "Saved or staged outside current results" : "Selected outside current results"} rows={rows} selectedIds={selectedSet} />
+            {!directory.loading && directory.groups.length === 0 && rows.length > 0 && <p className="group-selection-page-note">Saved and staged groups remain visible above.</p>}
             <TablePagination limit={directory.pageSize} loading={directory.loading} offset={directory.offset} onOffsetChange={directory.setOffset} total={directory.total} />
           </section>
         </div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyGroupSelectionSnapshot, sameGroupSelection } from "./group-selection";
+import { applyGroupSelectionSnapshot, groupSelectionDiff, sameGroupSelection } from "./group-selection";
 
 describe("group selection snapshots", () => {
   it("adds multiple snapshots as an ordered deduplicated union", () => {
@@ -28,5 +28,15 @@ describe("group selection snapshots", () => {
   it("compares complete selections independent of response ordering", () => {
     expect(sameGroupSelection(["a", "b"], ["b", "a"])).toBe(true);
     expect(sameGroupSelection(["a"], ["a", "b"])).toBe(false);
+  });
+
+  it("describes the complete saved-to-staged selection diff", () => {
+    expect(groupSelectionDiff(["saved@g.us", "removed@g.us"], ["saved@g.us", "added@g.us"]))
+      .toEqual({
+        addedIds: ["added@g.us"],
+        removedIds: ["removed@g.us"],
+        savedCount: 2,
+        stagedCount: 2,
+      });
   });
 });

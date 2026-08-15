@@ -141,6 +141,7 @@ export function CampaignsScreen() {
   const [targetsLoading, setTargetsLoading] = useState(false);
   const [targetsSaving, setTargetsSaving] = useState(false);
   const [targetsError, setTargetsError] = useState<string | null>(null);
+  const [targetNotice, setTargetNotice] = useState<string | null>(null);
   const [revisionRefreshRequired, setRevisionRefreshRequired] = useState(false);
   const [appliedListRows, setAppliedListRows] = useState<Record<string, RuntimeGroupListGroup>>({});
   const [preflightMode, setPreflightMode] = useState<RuntimeCampaignExecutionMode>("DRY_RUN");
@@ -207,6 +208,10 @@ export function CampaignsScreen() {
     () => groupDirectory.groups.map((group) => group.id),
     [groupDirectory.groups],
   );
+  const pinnedTargetIds = useMemo(() => {
+    const currentPage = new Set(groupPageIds);
+    return new Set(reviewTargetIds.filter((groupId) => !currentPage.has(groupId)));
+  }, [groupPageIds, reviewTargetIds]);
   const targetsDirty = !sameGroupSelection(targetIds, draftTargetIds);
   const reportStale = Boolean(
     preflight
@@ -323,6 +328,7 @@ export function CampaignsScreen() {
     setDetailsError(null);
     setTargets([]);
     setDraftTargetIds([]);
+    setTargetNotice(null);
     setRevisionRefreshRequired(false);
     setAppliedListRows({});
     setPreflightMode("DRY_RUN");
@@ -340,11 +346,13 @@ export function CampaignsScreen() {
     setDetailsError(null);
     setTargets([]);
     setDraftTargetIds([]);
+    setTargetNotice(null);
     setRevisionRefreshRequired(false);
     setPreflight(null);
     setPreflightError(null);
     setPreflightMode("DRY_RUN");
     setAppliedListRows({});
+    setTargetNotice(null);
     void loadTargets(selected.id, epoch);
   }
 
@@ -440,6 +448,7 @@ export function CampaignsScreen() {
       ? current.filter((candidate) => candidate !== groupId)
       : [...current, groupId]);
     setTargetsError(null);
+    setTargetNotice(null);
   }
 
   function applySavedGroupList(
@@ -448,6 +457,7 @@ export function CampaignsScreen() {
     list: RuntimeSavedGroupList,
     listGroups: RuntimeGroupListGroup[],
   ): { message: string; ok: boolean } {
+    setTargetNotice(null);
     if (list.sessionId !== selectedSessionId || list.archivedAt !== null) {
       return { message: "This saved list is not available in the campaign session.", ok: false };
     }
@@ -501,6 +511,14 @@ export function CampaignsScreen() {
       return next;
     });
     setTargetsError(null);
+    setTargetNotice(null);
+  }
+
+  function resetTargetsToSaved() {
+    setDraftTargetIds(targetIds);
+    setAppliedListRows({});
+    setTargetsError(null);
+    setTargetNotice("Staged selection reset to the saved target set.");
   }
 
   async function saveTargets() {
@@ -520,6 +538,7 @@ export function CampaignsScreen() {
       replacementCommitted = true;
       setTargets(canonical.data);
       setDraftTargetIds(canonical.data.map((target) => target.groupId));
+      setTargetNotice(null);
       setPreflight(null);
       setRevisionRefreshRequired(true);
       const refreshed = await api.getCampaign(campaign.id);
@@ -581,11 +600,9 @@ export function CampaignsScreen() {
       : targetsError && targetsDirty
         ? `Changes not saved · ${targetDiff.savedCount} saved targets retained`
         : targetsDirty
-          ? `${targetDiff.addedIds.length} added · ${targetDiff.removedIds.length} removed · Not saved`
+          ? `Saved ${targetDiff.savedCount} · Staged ${targetDiff.selectedCount} · +${targetDiff.addedIds.length} / −${targetDiff.removedIds.length}`
           : "Saved target set";
-  const targetSelectionSummary = targetsDirty
-    ? `${targetDiff.selectedCount} selected · ${targetDiff.addedIds.length} added · ${targetDiff.removedIds.length} removed`
-    : `${targetDiff.selectedCount} selected`;
+  const targetSelectionSummary = `Saved ${targetDiff.savedCount} · Staged ${targetDiff.selectedCount} · +${targetDiff.addedIds.length} / −${targetDiff.removedIds.length}`;
   const footerState = editorTab === "details"
     ? campaign
       ? detailsDirty ? "Unsaved detail changes" : "Details are up to date"
@@ -600,7 +617,7 @@ export function CampaignsScreen() {
       {campaign ? "Save details" : "Create draft"}
     </Button>
   ) : editorTab === "targets" ? (
-    <Button disabled={!campaign || !editable || !targetsDirty || targetsLoading} loading={targetsSaving} onClick={() => void saveTargets()} variant="primary">Save target set</Button>
+    <><Button disabled={!campaign || !editable || !targetsDirty || targetsLoading || targetsSaving} onClick={resetTargetsToSaved} variant="ghost">Reset to saved</Button><Button disabled={!campaign || !editable || !targetsDirty || targetsLoading} loading={targetsSaving} onClick={() => void saveTargets()} variant="primary">Save target set</Button></>
   ) : (
     <Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired} loading={preflightLoading} onClick={() => void runPreflight(preflightMode)} variant="primary">Run preflight</Button>
   );
@@ -692,17 +709,17 @@ export function CampaignsScreen() {
             </section>}
 
             {editorTab === "targets" && <section aria-labelledby="campaign-editor-targets-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-targets-panel" role="tabpanel">
-              <div className="campaign-section-heading"><div><span>Step 2 · Persisted set</span><h3>Audience selection</h3><p>Choose the complete group target set · maximum 1,000.</p></div></div>
+              <div className="campaign-section-heading"><div><span>Step 2 · Persisted set</span><h3>Target groups</h3><p>Build the complete group target set · maximum 1,000.</p></div></div>
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Targets belong to a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {targetsError && <InlineAlert title="Target update">{targetsError}</InlineAlert>}
-                <CampaignSavedListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving} onApply={applySavedGroupList} sessionId={campaign.sessionId} />
-                <section aria-labelledby="target-groups-title" className="campaign-target-section">
-                  <div className="campaign-target-section-heading"><div><h3 id="target-groups-title">Target groups</h3><p>Filters narrow available groups; selected targets remain visible.</p></div><div aria-live="polite" className="campaign-target-selection-status" data-dirty={targetsDirty || undefined}><strong>{targetSelectionSummary}</strong>{targetDiff.selectedCount >= 900 && <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"}>{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge>}</div></div>
-                  <GroupSelectionToolbar filters={groupDirectory.filters} filtersOpen={groupDirectory.filtersOpen} inputQuery={groupDirectory.inputQuery} loading={groupDirectory.loading} onFiltersChange={groupDirectory.setFilters} onFiltersOpenChange={groupDirectory.setFiltersOpen} onParticipantErrorsClear={() => groupDirectory.setParticipantErrors({})} onSearchChange={groupDirectory.setSearch} pageItemCount={groupDirectory.groups.length} pageOffset={groupDirectory.offset} participantErrors={groupDirectory.participantErrors} total={groupDirectory.total} />
+                <section aria-label="Target group selection" className="group-selection-section">
+                  <div className="group-selection-heading"><div><h4>Group selection</h4><p>Filters narrow current results; saved and selected targets remain visible.</p></div><div aria-live="polite" className="group-selection-status" data-dirty={targetsDirty || undefined}><strong>{targetSelectionSummary}</strong>{targetDiff.selectedCount >= 900 && <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"}>{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge>}</div></div>
+                  <GroupSelectionToolbar actions={<CampaignSavedListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving} onApply={applySavedGroupList} onNotice={setTargetNotice} sessionId={campaign.sessionId} />} filterAriaLabel="Target group filters" filterTitle="Filter target groups" filters={groupDirectory.filters} filtersOpen={groupDirectory.filtersOpen} idPrefix="campaign-target" inputQuery={groupDirectory.inputQuery} loading={groupDirectory.loading} onFiltersChange={groupDirectory.setFilters} onFiltersOpenChange={groupDirectory.setFiltersOpen} onParticipantErrorsClear={() => groupDirectory.setParticipantErrors({})} onSearchChange={groupDirectory.setSearch} pageItemCount={groupDirectory.groups.length} pageOffset={groupDirectory.offset} participantErrors={groupDirectory.participantErrors} total={groupDirectory.total} />
+                  {targetNotice && <InlineAlert title="Staged target selection" tone="success">{targetNotice}</InlineAlert>}
                   {groupDirectory.error && <InlineAlert action={<Button onClick={groupDirectory.retry} size="sm">Retry</Button>} title="Could not load groups">{groupDirectory.error}</InlineAlert>}
-                  <GroupSelectionTable caption="Groups available to the campaign target selection" disabled={!editable || targetsLoading} emptyMessage={groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."} loading={groupDirectory.loading || targetsLoading} onToggle={toggleTarget} onTogglePage={toggleAllPageTargets} pageIds={groupPageIds} rows={targetRows} selectedIds={draftTargetIdSet} unknownParticipantsTitle="Participant count is unavailable in the saved target snapshot." />
-                  {!groupDirectory.loading && groupDirectory.groups.length === 0 && targetRows.length > 0 && <p className="campaign-target-page-note">{groupDirectory.hasCriteria ? "No additional synchronized groups match this search or filters. Selected and saved targets remain visible above." : "No additional synchronized groups are available. Selected and saved targets remain visible above."}</p>}
+                  <GroupSelectionTable caption="Groups available to the campaign target selection" disabled={!editable || targetsLoading} emptyMessage={groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."} loading={groupDirectory.loading || targetsLoading} onToggle={toggleTarget} onTogglePage={toggleAllPageTargets} pageIds={groupPageIds} pinnedIds={pinnedTargetIds} rows={targetRows} selectedIds={draftTargetIdSet} unknownParticipantsTitle="Participant count is unavailable in the saved target snapshot." />
+                  {!groupDirectory.loading && groupDirectory.groups.length === 0 && targetRows.length > 0 && <p className="group-selection-page-note">{groupDirectory.hasCriteria ? "No additional synchronized groups match this search or filters. Selected and saved targets remain visible above." : "No additional synchronized groups are available. Selected and saved targets remain visible above."}</p>}
                   <TablePagination limit={groupDirectory.pageSize} loading={groupDirectory.loading} offset={groupDirectory.offset} onOffsetChange={groupDirectory.setOffset} total={groupDirectory.total} />
                 </section>
               </>}

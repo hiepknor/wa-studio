@@ -5,6 +5,7 @@ import { SearchField } from "./SearchField";
 import "./data-filter-toolbar.css";
 
 interface DataFilterToolbarProps {
+  actions?: ReactNode;
   children?: ReactNode | ((closeFilters: () => void) => ReactNode);
   filterCount: number;
   filtersOpen: boolean;
@@ -20,6 +21,7 @@ interface DataFilterToolbarProps {
 }
 
 export function DataFilterToolbar({
+  actions,
   children,
   filterCount,
   filtersOpen,
@@ -71,6 +73,7 @@ export function DataFilterToolbar({
           >
             Filters{filterCount ? ` · ${filterCount}` : ""}
           </Button>
+          {actions}
         </div>
         <span aria-live="polite" className="data-filter-result-summary">
           {resultSummary}

@@ -133,6 +133,10 @@ export function SavedGroupListsPanel({ navigation }: SavedGroupListsPanelProps) 
     setError(null);
   }
 
+  function openCreate() {
+    setEditor({ kind: "create", nonce: Date.now() });
+  }
+
   function saved(list: RuntimeSavedGroupList) {
     setEditor({ kind: "closed" });
     setReloadRevision((revision) => revision + 1);
@@ -157,7 +161,7 @@ export function SavedGroupListsPanel({ navigation }: SavedGroupListsPanelProps) 
 
   return (
     <div aria-labelledby="groups-workspace-saved-tab" className="groups-screen saved-group-lists-screen stack stack-lg" id="groups-workspace-saved-panel" role="tabpanel">
-      <PageHeader actions={<Button disabled={!selectedSessionId} onClick={() => setEditor({ kind: "create", nonce: Date.now() })} variant="primary">New list</Button>} description="Create reusable static group selections for the active Runtime session." title="Groups" titleId="groups-title" />
+      <PageHeader actions={<Button disabled={!selectedSessionId} onClick={openCreate} variant="primary">New list</Button>} description="Create reusable static group selections for the active Runtime session." title="Groups" titleId="groups-title" />
       {navigation}
       {!selectedSessionId && <InlineAlert title="No active session" tone="warning">Select a Gateway session before loading saved lists.</InlineAlert>}
       <div className="data-table-container saved-group-lists-panel">
@@ -174,8 +178,8 @@ export function SavedGroupListsPanel({ navigation }: SavedGroupListsPanelProps) 
               {!selectedSessionId ? <tr><td className="data-table-empty" colSpan={5}>Select a session to view saved lists.</td></tr>
                 : !page && loading ? <tr><td className="data-table-empty" colSpan={5}>Loading saved lists…</td></tr>
                 : !page && error ? <tr><td className="data-table-empty" colSpan={5}>Saved lists are unavailable.</td></tr>
-                : (page?.data.length ?? 0) === 0 ? <tr><td className="data-table-empty" colSpan={5}>{query ? "No saved lists match this search." : "No saved lists yet. Create one to reuse a static group selection."}</td></tr>
-                : page?.data.map((list) => <tr key={list.id}><td className="data-cell-primary"><strong className="data-primary-text">{list.name}</strong></td><td className="saved-group-list-description">{list.description || "—"}</td><td className="data-cell-number">{list.groupCount}</td><td className="data-cell-time">{formatDate(list.updatedAt)}</td><td className="data-cell-action"><Button aria-label={`Edit ${list.name}`} onClick={() => setEditor({ kind: "edit", list })} size="sm" variant="ghost">Edit</Button></td></tr>) }
+                : (page?.data.length ?? 0) === 0 ? <tr><td className="data-table-empty" colSpan={5}>{query ? "No saved lists match this search." : "No saved lists yet. Use New list to create a reusable static group selection."}</td></tr>
+                : page?.data.map((list) => <tr key={list.id}><td className="data-cell-primary"><button className="saved-group-list-name" onClick={() => setEditor({ kind: "edit", list })} type="button">{list.name}</button></td><td className="saved-group-list-description" title={list.description ?? undefined}>{list.description || "—"}</td><td className="data-cell-number">{list.groupCount}</td><td className="data-cell-time">{formatDate(list.updatedAt)}</td><td className="data-cell-action"><Button aria-label={`Edit ${list.name}`} onClick={() => setEditor({ kind: "edit", list })} size="sm" variant="ghost">Edit</Button></td></tr>) }
             </tbody>
           </table>
         </div>

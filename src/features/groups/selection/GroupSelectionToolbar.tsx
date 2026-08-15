@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type {
   RuntimeGroupCapabilityFreshness,
@@ -8,6 +8,7 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
 import { TextField } from "@/shared/ui/TextField";
+import "./group-selection.css";
 
 const MAX_PARTICIPANTS = 2_147_483_647;
 
@@ -105,10 +106,14 @@ export function validateParticipantRange(minimum: string, maximum: string): {
   };
 }
 
-interface GroupSelectionToolbarProps {
+export interface GroupSelectionToolbarProps {
+  actions?: ReactNode;
+  filterAriaLabel?: string;
+  filterTitle?: string;
   filters: GroupSelectionFilters;
   filtersOpen: boolean;
   inputQuery: string;
+  idPrefix?: string;
   loading: boolean;
   onFiltersChange: (filters: GroupSelectionFilters) => void;
   onFiltersOpenChange: (open: boolean) => void;
@@ -117,13 +122,19 @@ interface GroupSelectionToolbarProps {
   pageItemCount: number;
   pageOffset: number;
   participantErrors: ParticipantFilterErrors;
+  searchLabel?: string;
+  searchPlaceholder?: string;
   total: number;
 }
 
 export function GroupSelectionToolbar({
+  actions,
+  filterAriaLabel = "Group filters",
+  filterTitle = "Filter groups",
   filters,
   filtersOpen,
   inputQuery,
+  idPrefix = "group-selection",
   loading,
   onFiltersChange,
   onFiltersOpenChange,
@@ -132,6 +143,8 @@ export function GroupSelectionToolbar({
   pageItemCount,
   pageOffset,
   participantErrors,
+  searchLabel = "Find synchronized groups",
+  searchPlaceholder = "Search group name or ID",
   total,
 }: GroupSelectionToolbarProps) {
   const filterCount = activeGroupSelectionFilterCount(filters);
@@ -141,9 +154,10 @@ export function GroupSelectionToolbar({
 
   return (
     <DataFilterToolbar
+      actions={actions}
       filterCount={filterCount}
       filtersOpen={filtersOpen}
-      idPrefix="campaign-target"
+      idPrefix={idPrefix}
       loading={loading}
       onCloseFilters={() => onFiltersOpenChange(false)}
       onSearchChange={onSearchChange}
@@ -151,38 +165,47 @@ export function GroupSelectionToolbar({
       resultSummary={loading
         ? "Updating results…"
         : `${firstItem}–${lastItem} of ${total}${hasCriteria ? " matches" : " groups"}`}
-      searchLabel="Find synchronized groups"
-      searchPlaceholder="Search group name or ID"
+      searchLabel={searchLabel}
+      searchPlaceholder={searchPlaceholder}
       searchValue={inputQuery}
     >
       {(closeFilters) => filtersOpen && (
-        <CampaignTargetFilterPanel
+        <GroupSelectionFilterPanel
+          ariaLabel={filterAriaLabel}
           filters={filters}
+          idPrefix={idPrefix}
           onChange={onFiltersChange}
           onClose={closeFilters}
           onParticipantErrorsClear={onParticipantErrorsClear}
           participantErrors={participantErrors}
+          title={filterTitle}
         />
       )}
     </DataFilterToolbar>
   );
 }
 
-interface CampaignTargetFilterPanelProps {
+interface GroupSelectionFilterPanelProps {
+  ariaLabel: string;
   filters: GroupSelectionFilters;
+  idPrefix: string;
   onChange: (filters: GroupSelectionFilters) => void;
   onClose: () => void;
   onParticipantErrorsClear: () => void;
   participantErrors: ParticipantFilterErrors;
+  title: string;
 }
 
-function CampaignTargetFilterPanel({
+function GroupSelectionFilterPanel({
+  ariaLabel,
   filters,
+  idPrefix,
   onChange,
   onClose,
   onParticipantErrorsClear,
   participantErrors,
-}: CampaignTargetFilterPanelProps) {
+  title,
+}: GroupSelectionFilterPanelProps) {
   const [minimum, setMinimum] = useState(filters.minParticipants?.toString() ?? "");
   const [maximum, setMaximum] = useState(filters.maxParticipants?.toString() ?? "");
   const [localErrors, setLocalErrors] = useState<ParticipantFilterErrors>({});
@@ -219,13 +242,13 @@ function CampaignTargetFilterPanel({
 
   return (
     <section
-      aria-label="Target group filters"
-      className="data-filter-panel campaign-target-filter-panel"
-      id="campaign-target-filter-panel"
+      aria-label={ariaLabel}
+      className="data-filter-panel group-selection-filter-panel"
+      id={`${idPrefix}-filter-panel`}
     >
       <header className="data-filter-panel-header">
-        <div><strong>Filter target groups</strong><span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span></div>
-        <button aria-label="Close target group filters" className="data-filter-panel-close" onClick={onClose} type="button"><AppIcon name="close" size="xs" /></button>
+        <div><strong>{title}</strong><span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span></div>
+        <button aria-label={`Close ${ariaLabel.toLocaleLowerCase()}`} className="data-filter-panel-close" onClick={onClose} type="button"><AppIcon name="close" size="xs" /></button>
       </header>
       <div className="data-filter-panel-body">
         <fieldset><legend>Capability</legend><div className="data-filter-options">
@@ -234,15 +257,15 @@ function CampaignTargetFilterPanel({
         <fieldset><legend>Capability data</legend><div className="data-filter-options">
           {FRESHNESS_OPTIONS.map((option) => <label key={option.value}><input checked={filters.capabilityFreshness.includes(option.value)} onChange={() => onChange({ ...filters, capabilityFreshness: toggleOrdered(filters.capabilityFreshness, option.value, FRESHNESS_OPTIONS) })} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{option.label}</span></label>)}
         </div></fieldset>
-        <fieldset><legend>Participants</legend><form className="campaign-target-filter-range" noValidate onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) applyParticipantRange(); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); applyParticipantRange(); } }} onSubmit={(event) => { event.preventDefault(); applyParticipantRange(); }}>
-          <TextField aria-invalid={Boolean(minimumError) || undefined} description={minimumError && <span className="campaign-field-error">{minimumError}</span>} inputMode="numeric" label="Minimum" labelHidden max={MAX_PARTICIPANTS} min={0} onChange={(event) => { setMinimum(event.target.value); setRangeDirty(true); setLocalErrors((current) => ({ ...current, minParticipants: undefined })); onParticipantErrorsClear(); }} placeholder="Minimum" size="sm" step={1} type="number" value={minimum} />
-          <span aria-hidden="true" className="campaign-target-filter-range-separator">–</span>
-          <TextField aria-invalid={Boolean(maximumError) || undefined} description={maximumError && <span className="campaign-field-error">{maximumError}</span>} inputMode="numeric" label="Maximum" labelHidden max={MAX_PARTICIPANTS} min={0} onChange={(event) => { setMaximum(event.target.value); setRangeDirty(true); setLocalErrors((current) => ({ ...current, maxParticipants: undefined })); onParticipantErrorsClear(); }} placeholder="Maximum" size="sm" step={1} type="number" value={maximum} />
+        <fieldset><legend>Participants</legend><form className="group-selection-filter-range" noValidate onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) applyParticipantRange(); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); applyParticipantRange(); } }} onSubmit={(event) => { event.preventDefault(); applyParticipantRange(); }}>
+          <TextField aria-invalid={Boolean(minimumError) || undefined} description={minimumError && <span className="group-selection-field-error">{minimumError}</span>} inputMode="numeric" label="Minimum" labelHidden max={MAX_PARTICIPANTS} min={0} onChange={(event) => { setMinimum(event.target.value); setRangeDirty(true); setLocalErrors((current) => ({ ...current, minParticipants: undefined })); onParticipantErrorsClear(); }} placeholder="Minimum" size="sm" step={1} type="number" value={minimum} />
+          <span aria-hidden="true" className="group-selection-filter-range-separator">–</span>
+          <TextField aria-invalid={Boolean(maximumError) || undefined} description={maximumError && <span className="group-selection-field-error">{maximumError}</span>} inputMode="numeric" label="Maximum" labelHidden max={MAX_PARTICIPANTS} min={0} onChange={(event) => { setMaximum(event.target.value); setRangeDirty(true); setLocalErrors((current) => ({ ...current, maxParticipants: undefined })); onParticipantErrorsClear(); }} placeholder="Maximum" size="sm" step={1} type="number" value={maximum} />
           <small>Inclusive range · unknown counts excluded.</small>
         </form></fieldset>
         <fieldset><legend>Group state</legend><div className="data-filter-options data-filter-options-single">
-          <label><input checked={filters.isActive === undefined} name="campaign-target-state-filter" onChange={() => onChange({ ...filters, isActive: undefined })} type="radio" /><span>Active</span></label>
-          <label><input checked={filters.isActive === false} name="campaign-target-state-filter" onChange={() => onChange({ ...filters, isActive: false })} type="radio" /><span>Inactive</span></label>
+          <label><input checked={filters.isActive === undefined} name={`${idPrefix}-state-filter`} onChange={() => onChange({ ...filters, isActive: undefined })} type="radio" /><span>Active</span></label>
+          <label><input checked={filters.isActive === false} name={`${idPrefix}-state-filter`} onChange={() => onChange({ ...filters, isActive: false })} type="radio" /><span>Inactive</span></label>
         </div></fieldset>
       </div>
       <CampaignTargetFilterSummary filters={filters} onChange={onChange} />
@@ -253,10 +276,10 @@ function CampaignTargetFilterPanel({
 function CampaignTargetFilterSummary({
   filters,
   onChange,
-}: Pick<CampaignTargetFilterPanelProps, "filters" | "onChange">) {
+}: Pick<GroupSelectionFilterPanelProps, "filters" | "onChange">) {
   const hasFilters = activeGroupSelectionFilterCount(filters) > 0;
   return (
-    <div aria-label="Selected target group filters" className="data-filter-summary">
+    <div aria-label="Selected group filters" className="data-filter-summary">
       <div className="data-filter-chips">
         {!hasFilters && <span className="data-filter-summary-empty">No filters applied</span>}
         {filters.capabilityStatuses.map((value) => <FilterChip key={value} label={CAPABILITY_OPTIONS.find((option) => option.value === value)?.label ?? value} onRemove={() => onChange({ ...filters, capabilityStatuses: filters.capabilityStatuses.filter((candidate) => candidate !== value) })} />)}

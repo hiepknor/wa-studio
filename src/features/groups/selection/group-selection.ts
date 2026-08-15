@@ -8,6 +8,27 @@ export interface SelectionApplyResult {
   ok: boolean;
 }
 
+export interface GroupSelectionDiff {
+  addedIds: string[];
+  removedIds: string[];
+  savedCount: number;
+  stagedCount: number;
+}
+
+export function groupSelectionDiff(
+  savedIds: readonly string[],
+  stagedIds: readonly string[],
+): GroupSelectionDiff {
+  const saved = new Set(savedIds);
+  const staged = new Set(stagedIds);
+  return {
+    addedIds: [...staged].filter((id) => !saved.has(id)),
+    removedIds: [...saved].filter((id) => !staged.has(id)),
+    savedCount: saved.size,
+    stagedCount: staged.size,
+  };
+}
+
 export function applyGroupSelectionSnapshot(
   currentIds: readonly string[],
   snapshotIds: readonly string[],
