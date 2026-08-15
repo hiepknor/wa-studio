@@ -9,6 +9,7 @@ import { GroupSelectionToolbar } from "@/features/groups/selection/GroupSelectio
 import { useGroupDirectoryQuery } from "@/features/groups/selection/useGroupDirectoryQuery";
 import {
   applyGroupSelectionSnapshot,
+  groupSelectionRowOrder,
   sameGroupSelection,
 } from "@/features/groups/selection/group-selection";
 import {
@@ -179,13 +180,16 @@ export function CampaignsScreen() {
     ...draftTargetIds,
     ...targetIds.filter((groupId) => !draftTargetIdSet.has(groupId)),
   ], [draftTargetIdSet, draftTargetIds, targetIds]);
+  const groupPageIds = useMemo(
+    () => groupDirectory.groups.map((group) => group.id),
+    [groupDirectory.groups],
+  );
+  const targetRowOrder = useMemo(
+    () => groupSelectionRowOrder(reviewTargetIds, groupPageIds),
+    [groupPageIds, reviewTargetIds],
+  );
   const targetRows = useMemo(() => {
-    const reviewIds = new Set(reviewTargetIds);
-    const groupIds = [
-      ...reviewTargetIds,
-      ...groupDirectory.groups.map((group) => group.id).filter((groupId) => !reviewIds.has(groupId)),
-    ];
-    return groupIds.flatMap<GroupSelectionRow>((groupId) => {
+    return targetRowOrder.rowIds.flatMap<GroupSelectionRow>((groupId) => {
       const group = groupDirectory.knownGroups[groupId];
       const applied = appliedListRows[groupId];
       const target = targetById.get(groupId);
@@ -199,15 +203,8 @@ export function CampaignsScreen() {
         sendCapability,
       }];
     });
-  }, [appliedListRows, groupDirectory.groups, groupDirectory.knownGroups, reviewTargetIds, targetById]);
-  const groupPageIds = useMemo(
-    () => groupDirectory.groups.map((group) => group.id),
-    [groupDirectory.groups],
-  );
-  const pinnedTargetIds = useMemo(() => {
-    const currentPage = new Set(groupPageIds);
-    return new Set(reviewTargetIds.filter((groupId) => !currentPage.has(groupId)));
-  }, [groupPageIds, reviewTargetIds]);
+  }, [appliedListRows, groupDirectory.knownGroups, targetById, targetRowOrder]);
+  const pinnedTargetIds = targetRowOrder.pinnedIds;
   const targetsDirty = !sameGroupSelection(targetIds, draftTargetIds);
   const reportStale = Boolean(
     preflight

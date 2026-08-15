@@ -135,7 +135,7 @@
 .group-list-editor-capacity-warning { color: var(--warning); }
 .group-list-editor-metadata {
   display: grid;
-  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 14px;
 }
@@ -156,7 +156,6 @@
 @media (max-width: 760px) {
   .saved-group-lists-toolbar { align-items: stretch; flex-direction: column; }
   .saved-group-lists-toolbar .search-field { width: 100%; }
-  .group-list-editor-metadata { grid-template-columns: 1fr; }
   .group-list-editor-footer { grid-template-columns: 1fr auto; }
   .group-list-editor-footer-summary { grid-column: 1 / -1; grid-row: 1; }
   .group-list-editor-footer-danger { grid-column: 1; grid-row: 2; border-right: 0; padding-right: 0; }

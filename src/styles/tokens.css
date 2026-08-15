@@ -15,6 +15,7 @@
   --accent-soft: rgb(118 103 232 / 15%);
   --focus-border: rgb(166 154 255 / 78%);
   --focus-halo: rgb(118 103 232 / 22%);
+  --focus-ring: 0 0 0 1px var(--focus-border), 0 0 0 3px var(--focus-halo);
   --focus-surface: rgb(118 103 232 / 11%);
   --scrollbar-thumb: rgb(146 152 168 / 28%);
   --scrollbar-thumb-hover: rgb(166 171 187 / 44%);
@@ -26,4 +27,7 @@
   --warning-soft: rgb(227 179 65 / 12%);
   --danger: #f47067;
   --danger-soft: rgb(244 112 103 / 12%);
+  --danger-focus-border: rgb(255 143 135 / 82%);
+  --danger-focus-halo: rgb(244 112 103 / 18%);
+  --danger-focus-ring: 0 0 0 1px var(--danger-focus-border), 0 0 0 3px var(--danger-focus-halo);
 }

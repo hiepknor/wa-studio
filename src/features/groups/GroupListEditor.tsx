@@ -17,6 +17,7 @@ import { GroupSelectionTable, type GroupSelectionRow } from "./selection/GroupSe
 import { GroupSelectionToolbar } from "./selection/GroupSelectionToolbar";
 import {
   groupSelectionDiff,
+  groupSelectionRowOrder,
   MAX_GROUP_SELECTION,
   sameGroupSelection,
 } from "./selection/group-selection";
@@ -87,26 +88,24 @@ export function GroupListEditor({
     [savedIds, stagedIds],
   );
   const selectedSet = useMemo(() => new Set(stagedIds), [stagedIds]);
-  const savedSet = useMemo(() => new Set(savedIds), [savedIds]);
+  const retainedIds = useMemo(() => [
+    ...stagedIds,
+    ...savedIds.filter((id) => !selectedSet.has(id)),
+  ], [savedIds, selectedSet, stagedIds]);
+  const pageIds = useMemo(() => directory.groups.map((group) => group.id), [directory.groups]);
+  const rowOrder = useMemo(
+    () => groupSelectionRowOrder(retainedIds, pageIds),
+    [pageIds, retainedIds],
+  );
   const rows = useMemo(() => {
-    const ids = [
-      ...stagedIds,
-      ...savedIds.filter((id) => !selectedSet.has(id)),
-      ...directory.groups.map((group) => group.id)
-        .filter((id) => !selectedSet.has(id) && !savedSet.has(id)),
-    ];
-    return ids.flatMap<GroupSelectionRow>((id) => {
+    return rowOrder.rowIds.flatMap<GroupSelectionRow>((id) => {
       const membership = membershipRows[id];
       if (membership) return [membership];
       const group = directory.knownGroups[id];
       return group ? [runtimeGroupRow(group)] : [];
     });
-  }, [directory.groups, directory.knownGroups, membershipRows, savedIds, savedSet, selectedSet, stagedIds]);
-  const pageIds = useMemo(() => directory.groups.map((group) => group.id), [directory.groups]);
-  const pinnedIds = useMemo(() => {
-    const currentPage = new Set(pageIds);
-    return new Set([...stagedIds, ...savedIds].filter((id) => !currentPage.has(id)));
-  }, [pageIds, savedIds, stagedIds]);
+  }, [directory.knownGroups, membershipRows, rowOrder]);
+  const pinnedIds = rowOrder.pinnedIds;
 
   async function loadCanonical(preserveStaged = false, preserveError = false) {
     if (!list) return;

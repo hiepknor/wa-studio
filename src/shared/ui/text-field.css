@@ -49,9 +49,9 @@
 .text-field-control input:focus,
 .text-field-control select:focus,
 .text-field-control textarea:focus {
-  border-color: rgb(166 154 255 / 72%);
+  border-color: var(--focus-border);
   background: #0b0d12;
-  box-shadow: 0 0 0 3px rgb(137 123 240 / 12%);
+  box-shadow: var(--focus-ring);
 }
 .text-field-control input:disabled,
 .text-field-control select:disabled,
@@ -70,8 +70,8 @@
 }
 .text-field[data-invalid="true"] .text-field-control input:focus,
 .text-field[data-invalid="true"] .text-field-control textarea:focus {
-  border-color: #ff8f87;
-  box-shadow: 0 0 0 3px rgb(255 126 118 / 12%);
+  border-color: var(--danger-focus-border);
+  box-shadow: var(--danger-focus-ring);
 }
 .text-field-icon {
   position: absolute;

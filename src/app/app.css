@@ -17,9 +17,7 @@ button:disabled { cursor: not-allowed; }
 
 :focus-visible {
   outline: 0;
-  box-shadow:
-    0 0 0 1px var(--focus-border),
-    0 0 0 3px var(--focus-halo);
+  box-shadow: var(--focus-ring);
 }
 
 .stack { display: flex; flex-direction: column; }

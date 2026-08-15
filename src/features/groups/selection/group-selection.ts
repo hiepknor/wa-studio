@@ -15,6 +15,24 @@ export interface GroupSelectionDiff {
   stagedCount: number;
 }
 
+export interface GroupSelectionRowOrder {
+  pinnedIds: Set<string>;
+  rowIds: string[];
+}
+
+export function groupSelectionRowOrder(
+  retainedIds: readonly string[],
+  currentPageIds: readonly string[],
+): GroupSelectionRowOrder {
+  const pageIds = [...new Set(currentPageIds)];
+  const pageSet = new Set(pageIds);
+  const pinned = [...new Set(retainedIds)].filter((id) => !pageSet.has(id));
+  return {
+    pinnedIds: new Set(pinned),
+    rowIds: [...pinned, ...pageIds],
+  };
+}
+
 export function groupSelectionDiff(
   savedIds: readonly string[],
   stagedIds: readonly string[],

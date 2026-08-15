@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { applyGroupSelectionSnapshot, groupSelectionDiff, sameGroupSelection } from "./group-selection";
+import {
+  applyGroupSelectionSnapshot,
+  groupSelectionDiff,
+  groupSelectionRowOrder,
+  sameGroupSelection,
+} from "./group-selection";
 
 describe("group selection snapshots", () => {
   it("adds multiple snapshots as an ordered deduplicated union", () => {
@@ -38,5 +43,20 @@ describe("group selection snapshots", () => {
         savedCount: 2,
         stagedCount: 2,
       });
+  });
+
+  it("keeps current-page server order stable and only pins retained groups outside the page", () => {
+    const order = groupSelectionRowOrder(
+      ["selected-on-page@g.us", "selected-outside@g.us", "selected-on-page@g.us"],
+      ["first@g.us", "selected-on-page@g.us", "last@g.us"],
+    );
+
+    expect(order.rowIds).toEqual([
+      "selected-outside@g.us",
+      "first@g.us",
+      "selected-on-page@g.us",
+      "last@g.us",
+    ]);
+    expect(order.pinnedIds).toEqual(new Set(["selected-outside@g.us"]));
   });
 });
