@@ -105,6 +105,8 @@
 .group-list-description {
   max-width: 320px;
   color: #a9aebb;
+}
+.group-list-description > span {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
