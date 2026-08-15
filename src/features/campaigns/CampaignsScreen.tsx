@@ -30,6 +30,7 @@ import { Drawer } from "@/shared/ui/Drawer";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SelectMenu } from "@/shared/ui/SelectMenu";
+import { StatusIndicator } from "@/shared/ui/StatusIndicator";
 import { Tabs } from "@/shared/ui/Tabs";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import { TextAreaField } from "@/shared/ui/TextAreaField";
@@ -90,6 +91,20 @@ const PREFLIGHT_MODE_OPTIONS = [
   },
 ] as const;
 
+const PREFLIGHT_CHECK_LABELS: Partial<Record<RuntimeCampaignPreflight["checks"][number]["code"], string>> = {
+  CONTENT_VALID: "Campaign content",
+  GROUP_CAPABILITY: "Group capability",
+  LIVE_SEND_ALLOWED: "Live sending policy",
+  SESSION_SENDABLE: "Runtime session",
+  TARGETS_VALID: "Target set",
+};
+
+const PREFLIGHT_ISSUE_LABELS: Partial<Record<RuntimeCampaignPreflight["targetIssues"][number]["reason"], string>> = {
+  TARGET_CAPABILITY_DENIED: "Sending is denied",
+  TARGET_CAPABILITY_STALE: "Capability data is stale",
+  TARGET_CAPABILITY_UNKNOWN: "Capability is unknown",
+};
+
 function formatDate(value: string | null): string {
   if (!value) return "Immediate";
   return new Intl.DateTimeFormat(undefined, {
@@ -113,6 +128,32 @@ function reportTone(status: "PASS" | "WARN" | "BLOCK") {
   if (status === "PASS") return "success" as const;
   if (status === "WARN") return "warning" as const;
   return "danger" as const;
+}
+
+function preflightStatusPresentation(status: RuntimeCampaignPreflight["status"]) {
+  if (status === "PASS") return {
+    description: "Runtime found no blocking policy issues for these persisted revisions.",
+    icon: "check" as const,
+    title: "Ready to continue",
+  };
+  if (status === "WARN") return {
+    description: "Runtime allows this revision set, but the warnings below should be reviewed first.",
+    icon: "triangle-alert" as const,
+    title: "Review warnings",
+  };
+  return {
+    description: "Runtime blocked this revision set. Resolve the blocking checks before continuing.",
+    icon: "circle-alert" as const,
+    title: "Action required",
+  };
+}
+
+function executionModeLabel(mode: RuntimeCampaignExecutionMode): string {
+  return mode === "DRY_RUN" ? "Dry run" : "Live policy";
+}
+
+function preflightCheckStatusLabel(status: RuntimeCampaignPreflight["checks"][number]["status"]): string {
+  return status.charAt(0) + status.slice(1).toLocaleLowerCase();
 }
 
 function runTone(status: RuntimeCampaignRun["status"]) {
@@ -1010,13 +1051,20 @@ export function CampaignsScreen() {
               {campaign && <>
                 {(detailsDirty || targetsDirty) && <InlineAlert title="Save before preflight" tone="warning">Preflight reads persisted Runtime state, not unsaved edits.</InlineAlert>}
                 {revisionRefreshRequired && <InlineAlert title="Revision refresh required" tone="warning">Reopen this campaign before running preflight.</InlineAlert>}
-                <SelectMenu description="Both modes only evaluate policy. Neither creates a run or sends messages." disabled={preflightLoading || Boolean(runMutation)} label="Preflight mode" onChange={changePreflightMode} options={PREFLIGHT_MODE_OPTIONS} value={preflightMode} />
+                <section aria-labelledby="preflight-configuration-title" className="campaign-preflight-setup">
+                  <div className="campaign-preflight-setup-heading">
+                    <span className="campaign-preflight-setup-icon"><AppIcon name="settings" size="sm" /></span>
+                    <div><h4 id="preflight-configuration-title">Review configuration</h4><p>Choose the Runtime policy context for this persisted campaign snapshot.</p></div>
+                  </div>
+                  <div className="campaign-preflight-mode"><SelectMenu description="This evaluates policy only. It does not create a run or send messages." disabled={preflightLoading || Boolean(runMutation)} label="Preflight mode" onChange={changePreflightMode} options={PREFLIGHT_MODE_OPTIONS} value={preflightMode} /></div>
+                  <div className="campaign-preflight-basis" aria-label="Persisted revisions under review"><span>Review basis</span><strong>Campaign r{campaign.revision} · targets r{targetsRevision ?? campaign.targetsRevision}</strong></div>
+                </section>
                 {preflightError && <InlineAlert title="Preflight failed">{preflightError}</InlineAlert>}
                 {preflight && <PreflightReport report={preflight} stale={reportStale} />}
-                {!preflight && !preflightError && <div className="campaign-empty-state"><span className="campaign-empty-state-icon"><AppIcon name="check" size="lg" /></span><strong>No preflight report</strong><p>Choose a policy mode, then run preflight against the saved campaign and target set.</p></div>}
+                {!preflight && !preflightError && <div className="campaign-empty-state campaign-preflight-empty"><span className="campaign-empty-state-icon"><AppIcon name="activity" size="lg" /></span><strong>Ready for evaluation</strong><p>Run preflight to receive Runtime's authoritative readiness decision for the persisted revisions above.</p></div>}
                 {runError && <InlineAlert title="Campaign run update">{runError}</InlineAlert>}
                 {campaign.status === "DRAFT" && preflight && !reportStale && preflight.status !== "BLOCK" && <section className="campaign-launch-panel">
-                  <div><strong>Launch reviewed revisions</strong><p>Campaign r{preflight.campaignRevision} · targets r{preflight.targetsRevision}. Runtime rechecks these preconditions authoritatively.</p></div>
+                  <span className="campaign-launch-icon"><AppIcon name="runs" size="md" /></span><div><strong>{preflight.executionMode === "DRY_RUN" ? "Create a dry run" : "Launch this campaign"}</strong><p>Use campaign r{preflight.campaignRevision} and targets r{preflight.targetsRevision}. Runtime verifies both revisions again.</p></div>
                   {preflight.executionMode === "DRY_RUN"
                     ? <Button disabled={Boolean(runMutation)} loading={runMutation === "launch:DRY_RUN"} onClick={() => void launchRun("DRY_RUN")} variant="primary">Create dry run</Button>
                     : <Button disabled={Boolean(runMutation)} loading={runMutation === "launch:LIVE"} onClick={() => setLiveLaunchConfirmationOpen(true)} variant="primary">Launch live campaign</Button>}
@@ -1100,26 +1148,33 @@ function CampaignRunsPanel({
 }
 
 function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; stale: boolean }) {
+  const presentation = preflightStatusPresentation(report.status);
   return (
-    <div className="preflight-report" data-stale={stale || undefined}>
+    <section aria-label="Preflight result" className="preflight-report" data-status={report.status.toLocaleLowerCase()} data-stale={stale || undefined}>
       {stale && <InlineAlert title="Preflight result is stale" tone="warning">Campaign details or targets changed. Run preflight again.</InlineAlert>}
-      <div className="preflight-summary">
-        <Badge tone={reportTone(report.status)}>{report.status}</Badge>
-        <strong>{report.executionMode}</strong>
-        <span>Policy v{report.policyVersion}</span>
-        <span>{formatDate(report.checkedAt)}</span>
-      </div>
-      <dl className="preflight-metrics">
-        <div><dt>Total</dt><dd>{report.totalTargets}</dd></div>
-        <div><dt>Allowed</dt><dd>{report.allowedTargets}</dd></div>
-        <div><dt>Denied</dt><dd>{report.deniedTargets}</dd></div>
-        <div><dt>Unknown</dt><dd>{report.unknownTargets}</dd></div>
+      <header className="preflight-result-header">
+        <span className="preflight-result-icon"><AppIcon name={presentation.icon} size="lg" /></span>
+        <div className="preflight-result-copy"><span>Runtime decision</span><div><h4>{presentation.title}</h4><Badge tone={reportTone(report.status)}>{report.status}</Badge></div><p>{presentation.description}</p></div>
+      </header>
+      <dl className="preflight-context">
+        <div><dt>Mode</dt><dd>{executionModeLabel(report.executionMode)}</dd></div>
+        <div><dt>Policy</dt><dd>Policy v{report.policyVersion}</dd></div>
+        <div><dt>Checked</dt><dd>{formatDate(report.checkedAt)}</dd></div>
+        <div><dt>Revisions</dt><dd>Campaign r{report.campaignRevision} · targets r{report.targetsRevision}</dd></div>
       </dl>
-      <p className="campaign-revisions">Campaign revision {report.campaignRevision} · target revision {report.targetsRevision}</p>
+      <section aria-labelledby="preflight-target-assessment-title" className="preflight-evidence-panel">
+        <header><div><h4 id="preflight-target-assessment-title">Target assessment</h4><p>Authoritative counters returned by Runtime.</p></div><Badge tone="neutral">{report.totalTargets} total</Badge></header>
+        <dl className="preflight-metrics">
+          <div><dt>Total</dt><dd>{report.totalTargets}</dd></div>
+          <div data-tone="success"><dt>Allowed</dt><dd>{report.allowedTargets}</dd></div>
+          <div data-tone="danger"><dt>Denied</dt><dd>{report.deniedTargets}</dd></div>
+          <div data-tone="warning"><dt>Unknown</dt><dd>{report.unknownTargets}</dd></div>
+        </dl>
+      </section>
       <div className="preflight-columns">
-        <div><h3>Checks</h3><ul>{report.checks.map((check) => <li key={check.code}><Badge tone={reportTone(check.status)}>{check.status}</Badge><span><code>{check.code}</code><small>{check.message}</small></span></li>)}</ul></div>
-        <div><h3>Target issues</h3>{!report.targetIssues.length ? <p>No target issues.</p> : <ul>{report.targetIssues.map((issue) => <li key={`${issue.groupId}-${issue.reason}`}><Badge tone={issue.capability === "DENIED" ? "danger" : "warning"}>{issue.capability}</Badge><span><strong>{issue.groupName}</strong><code>{issue.reason}</code></span></li>)}</ul>}</div>
+        <section className="preflight-evidence-panel"><header><div><h4>Policy checks</h4><p>Each check contributes to Runtime's decision.</p></div><Badge tone="neutral">{report.checks.length}</Badge></header><ul>{report.checks.map((check) => <li key={check.code}><StatusIndicator className="preflight-check-status" glow tone={reportTone(check.status)}>{preflightCheckStatusLabel(check.status)}</StatusIndicator><span><strong>{PREFLIGHT_CHECK_LABELS[check.code] ?? "Runtime policy check"}</strong><code>{check.code}</code><small>{check.message}</small></span></li>)}</ul></section>
+        <section className="preflight-evidence-panel"><header><div><h4>Target issues</h4><p>Groups that require operator attention.</p></div><Badge tone={report.targetIssues.length ? "warning" : "success"}>{report.targetIssues.length}</Badge></header>{!report.targetIssues.length ? <div className="preflight-no-issues"><AppIcon name="check" size="sm" /><span>No target issues reported.</span></div> : <ul>{report.targetIssues.map((issue) => <li key={`${issue.groupId}-${issue.reason}`}><Badge tone={issue.capability === "DENIED" ? "danger" : "warning"}>{issue.capability}</Badge><span><strong>{issue.groupName}</strong><small>{PREFLIGHT_ISSUE_LABELS[issue.reason] ?? "Runtime reported a target issue"}</small><code>{issue.reason}</code></span></li>)}</ul>}</section>
       </div>
-    </div>
+    </section>
   );
 }

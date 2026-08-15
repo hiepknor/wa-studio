@@ -189,7 +189,7 @@ describe("CampaignsScreen", () => {
     expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
-    expect(screen.getByText("No preflight report")).toBeInTheDocument();
+    expect(screen.getByText("Ready for evaluation")).toBeInTheDocument();
     expect(screen.getByText("No preflight result yet")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Preflight mode" })).toHaveTextContent("Dry run");
     expect(screen.getByRole("button", { name: "Run preflight" })).toBeInTheDocument();
@@ -646,7 +646,18 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    expect(screen.getByRole("heading", { name: "Review configuration" })).toBeInTheDocument();
     await runPreflight(user, mode);
+    const result = await screen.findByRole("region", { name: "Preflight result" });
+    expect(within(result).getByRole("heading", {
+      name: status === "PASS" ? "Ready to continue" : status === "WARN" ? "Review warnings" : "Action required",
+    })).toBeInTheDocument();
+    expect(within(result).getByRole("heading", { name: "Target assessment" })).toBeInTheDocument();
+    const checksPanel = within(result).getByRole("heading", { name: "Policy checks" }).closest("section");
+    expect(checksPanel).not.toBeNull();
+    expect(within(checksPanel!).getByText(status === "PASS" ? "Pass" : status === "WARN" ? "Warn" : "Block").closest(".status-indicator")).not.toBeNull();
+    expect(within(result).getByRole("heading", { name: "Target issues" })).toBeInTheDocument();
+    expect(within(result).getByText("Group capability")).toBeInTheDocument();
     expect(await screen.findByText("GROUP_CAPABILITY")).toBeInTheDocument();
     expect(screen.getByText("TARGET_CAPABILITY_DENIED")).toBeInTheDocument();
     expect(screen.getByText("Policy v6")).toBeInTheDocument();
@@ -783,7 +794,7 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("button", { name: "Create dry run" }));
     expect(await screen.findByText(/changed after review/)).toBeInTheDocument();
     expect(createCampaignRun).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("No preflight report")).toBeInTheDocument();
+    expect(screen.getByText("Ready for evaluation")).toBeInTheDocument();
   });
 
   it("reconciles pause and resume with the separate Campaign lifecycle", async () => {

@@ -323,7 +323,14 @@ export function GroupListEditor({
     ? "Loading complete membership…"
     : canonical
       ? `Saved ${selectionDiff.savedCount} · Staged ${selectionDiff.stagedCount} · +${selectionDiff.addedIds.length} / −${selectionDiff.removedIds.length}${metadataDirty ? " · Details changed" : ""}`
-      : `Staged ${selectionDiff.stagedCount} groups`;
+      : name.trim()
+        ? `Staged ${selectionDiff.stagedCount} groups`
+        : "Add a name to save this list";
+  const saveDisabled = loadingMembership
+    || saving
+    || archiving
+    || !name.trim()
+    || Boolean(canonical && !dirty);
   const capacity = stagedIds.length >= MAX_GROUP_SELECTION
     ? "Limit reached"
     : stagedIds.length >= 900
@@ -337,10 +344,10 @@ export function GroupListEditor({
         contentKey={editorKey}
         description="Reusable static group IDs for the active Runtime session."
         eyebrow="Group list"
-        footer={<div className="group-list-editor-footer">
-          <div className="group-list-editor-footer-danger">{canonical && <Button disabled={saving || archiving} onClick={() => setArchiveOpen(true)} variant="ghost">Archive list</Button>}</div>
+        footer={<div className="group-list-editor-footer" data-has-danger={canonical ? "true" : undefined}>
+          {canonical && <div className="group-list-editor-footer-danger"><Button disabled={saving || archiving} onClick={() => setArchiveOpen(true)} variant="ghost">Archive list</Button></div>}
           <div className="group-list-editor-footer-summary"><strong>{canonical ? "Edit group list" : "New group list"}</strong><span>{status}</span></div>
-          <div className="group-list-editor-footer-actions">{canonical && <Button disabled={!dirty || saving || archiving} onClick={resetChanges}>Reset changes</Button>}<Button disabled={loadingMembership || saving || archiving || Boolean(canonical && !dirty)} loading={saving} onClick={() => void save()} variant="primary">Save list</Button></div>
+          <div className="group-list-editor-footer-actions">{canonical && <Button disabled={!dirty || saving || archiving} onClick={resetChanges}>Reset changes</Button>}<Button disabled={saveDisabled} loading={saving} onClick={() => void save()} variant="primary">Save list</Button></div>
         </div>}
         onClose={requestClose}
         open

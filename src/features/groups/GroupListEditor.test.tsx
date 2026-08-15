@@ -77,7 +77,11 @@ describe("GroupListEditor", () => {
       .mockResolvedValueOnce(created);
     const getGroupListMembership = vi.fn().mockResolvedValue({ list: created, data: [] });
     const { onSaved } = renderEditor(null, { createGroupList, getGroupListMembership });
+    expect(screen.getByText("Add a name to save this list")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save list" })).toBeDisabled();
+    expect(document.querySelector(".group-list-editor-footer-danger")).toBeNull();
     await user.type(screen.getByRole("textbox", { name: "Name" }), "Empty list");
+    expect(screen.getByRole("button", { name: "Save list" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Save list" }));
     expect(await screen.findByText("response lost")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save list" }));
