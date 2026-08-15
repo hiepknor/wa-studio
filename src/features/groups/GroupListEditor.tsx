@@ -6,12 +6,19 @@ import {
   type RuntimeGroupListGroup,
   type RuntimeGroupList,
 } from "@/shared/api/runtime-client";
+import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
-import { Drawer } from "@/shared/ui/Drawer";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { TextAreaField } from "@/shared/ui/TextAreaField";
 import { TextField } from "@/shared/ui/TextField";
+import {
+  WorkspaceDrawer,
+  WorkspaceFooter,
+  WorkspacePanel,
+  WorkspaceSectionHeader,
+  WorkspaceSummaryCard,
+} from "@/shared/ui/WorkspaceDrawer";
 import { GroupSelectionPanel } from "./selection/GroupSelectionPanel";
 import type { GroupSelectionRow } from "./selection/GroupSelectionTable";
 import {
@@ -338,30 +345,44 @@ export function GroupListEditor({
 
   return (
     <>
-      <Drawer
-        className="group-list-editor-drawer"
+      <WorkspaceDrawer
         contentKey={editorKey}
         description="Reusable static group IDs for the active Runtime session."
         eyebrow="Group list"
-        footer={<div className="group-list-editor-footer" data-has-danger={canonical ? "true" : undefined}>
-          {canonical && <div className="group-list-editor-footer-danger"><Button disabled={saving || archiving} onClick={() => setArchiveOpen(true)} variant="ghost">Archive list</Button></div>}
-          <div className="group-list-editor-footer-summary"><strong>{canonical ? "Edit group list" : "New group list"}</strong><span>{status}</span></div>
-          <div className="group-list-editor-footer-actions">{canonical && <Button disabled={!dirty || saving || archiving} onClick={resetChanges}>Reset changes</Button>}<Button disabled={saveDisabled} loading={saving} onClick={() => void save()} variant="primary">Save list</Button></div>
-        </div>}
+        footer={<WorkspaceFooter
+          actions={<>{canonical && <Button disabled={!dirty || saving || archiving} onClick={resetChanges}>Reset changes</Button>}<Button disabled={saveDisabled} loading={saving} onClick={() => void save()} variant="primary">Save list</Button></>}
+          description={status}
+          leading={canonical ? <Button disabled={saving || archiving} onClick={() => setArchiveOpen(true)} variant="ghost">Archive list</Button> : undefined}
+          title={canonical ? "Edit group list" : "New group list"}
+        />}
         onClose={requestClose}
         open
         size="wide"
         title={canonical?.name ?? "New list"}
       >
         <div className="group-list-editor stack stack-lg">
+          <WorkspaceSectionHeader description="Define reusable metadata, then stage the complete static group membership." kicker="Reusable selection" title="List configuration & membership" />
           {error && <InlineAlert title={errorTitle}>{error}</InlineAlert>}
-          <section aria-labelledby="group-list-details-title" className="group-list-editor-details stack stack-md">
-            <div className="group-list-editor-section-heading"><h3 id="group-list-details-title">List details</h3><p>Name and describe this reusable static selection.</p></div>
+          <WorkspaceSummaryCard
+            description={canonical ? "Metadata and membership persisted by Runtime." : "Complete the required details and choose groups before saving."}
+            dirty={Boolean(canonical && dirty)}
+            icon="groups"
+            label="List snapshot"
+            metrics={[
+              { label: "Saved", value: selectionDiff.savedCount },
+              { label: "Staged", value: selectionDiff.stagedCount },
+              { label: "Membership", value: canonical ? `r${canonical.membershipRevision}` : "—" },
+            ]}
+            status={!canonical ? <Badge>New draft</Badge> : dirty ? <Badge tone="warning">Unsaved changes</Badge> : <Badge tone="success">Saved</Badge>}
+            title={canonical ? "Persisted group list" : "New group list draft"}
+            titleId="group-list-summary-title"
+          />
+          <WorkspacePanel description="Name and describe this reusable static selection." title="List details" titleId="group-list-details-title">
             <div className="group-list-editor-metadata">
               <TextField disabled={loadingMembership} error={fieldErrors.name} label="Name" onChange={(event) => { setName(event.target.value); setFieldErrors((current) => ({ ...current, name: undefined })); }} value={name} />
               <TextAreaField disabled={loadingMembership} error={fieldErrors.description} label="Description" onChange={(event) => { setDescription(event.target.value); setFieldErrors((current) => ({ ...current, description: undefined })); }} rows={3} value={description} />
             </div>
-          </section>
+          </WorkspacePanel>
           <GroupSelectionPanel
             afterToolbar={directory.error && <InlineAlert action={<Button onClick={directory.retry} size="sm">Retry</Button>} title="Could not load groups">{directory.error}</InlineAlert>}
             beforeToolbar={fieldErrors.groupIds && <InlineAlert title="Invalid membership">{fieldErrors.groupIds}</InlineAlert>}
@@ -375,7 +396,7 @@ export function GroupListEditor({
             toolbar={{ filterAriaLabel: "Group list filters", filterTitle: "Filter groups in this list", filters: directory.filters, filtersOpen: directory.filtersOpen, idPrefix: "group-list-selection", inputQuery: directory.inputQuery, loading: directory.loading, onFiltersChange: directory.setFilters, onFiltersOpenChange: directory.setFiltersOpen, onParticipantErrorsClear: () => directory.setParticipantErrors({}), onSearchChange: directory.setSearch, pageItemCount: directory.groups.length, pageOffset: directory.offset, participantErrors: directory.participantErrors, searchLabel: "Find groups for this list", total: directory.total }}
           />
         </div>
-      </Drawer>
+      </WorkspaceDrawer>
       <ConfirmationDialog body="Unsaved list metadata or group selections will be discarded. Runtime data is not changed." cancelLabel="Keep editing" confirmLabel="Discard changes" confirmVariant="danger" onCancel={() => setDiscardOpen(false)} onConfirm={onClose} open={discardOpen} title="Discard group list changes?" />
       <ConfirmationDialog body="Archive this reusable list? Existing campaign target snapshots are not changed." cancelLabel="Keep list" confirmLabel="Archive list" confirmVariant="danger" onCancel={() => setArchiveOpen(false)} onConfirm={() => void archive()} open={archiveOpen} title="Archive group list?" />
     </>

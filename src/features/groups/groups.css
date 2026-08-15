@@ -128,12 +128,6 @@
 }
 .group-list-name:hover { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
 .group-list-name:focus-visible { border-radius: 3px; outline: 2px solid var(--accent); outline-offset: 3px; }
-.group-list-editor-details {
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--border);
-}
-.group-list-editor-section-heading h3 { margin: 0; color: #e1e3e9; font-size: 12px; }
-.group-list-editor-section-heading p { margin: 4px 0 0; color: var(--dim); font-size: 9px; }
 .group-list-editor-capacity-warning { color: var(--warning); }
 .group-list-editor-metadata {
   display: grid;
@@ -141,36 +135,7 @@
   align-items: start;
   gap: 14px;
 }
-.group-list-editor-footer {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-}
-.group-list-editor-footer[data-has-danger="true"] { grid-template-columns: auto minmax(0, 1fr) auto; }
-.group-list-editor-footer > div { display: flex; align-items: center; gap: 8px; }
-.group-list-editor-footer-summary { min-width: 0; flex-direction: column; align-items: flex-start !important; gap: 3px !important; }
-.group-list-editor-footer-danger { padding-right: 12px; border-right: 1px solid var(--border); }
-.group-list-editor-footer-actions { justify-content: flex-end; }
-.group-list-editor-footer strong { color: #d8dbe3; font-size: 10px; }
-.group-list-editor-footer-summary > span { color: var(--dim); font-family: var(--font-mono); font-size: 8px; }
-
 @media (max-width: 760px) {
   .group-lists-toolbar { align-items: stretch; flex-direction: column; }
   .group-lists-toolbar .search-field { width: 100%; }
-  .group-list-editor-footer { grid-template-columns: 1fr auto; }
-  .group-list-editor-footer[data-has-danger="true"] { grid-template-columns: 1fr auto; }
-  .group-list-editor-footer[data-has-danger="true"] .group-list-editor-footer-summary { grid-column: 1 / -1; grid-row: 1; }
-  .group-list-editor-footer[data-has-danger="true"] .group-list-editor-footer-danger { grid-column: 1; grid-row: 2; border-right: 0; padding-right: 0; }
-  .group-list-editor-footer[data-has-danger="true"] .group-list-editor-footer-actions { grid-column: 2; grid-row: 2; }
-}
-
-@media (max-width: 520px) {
-  .group-list-editor-footer { grid-template-columns: 1fr; }
-  .group-list-editor-footer-summary,
-  .group-list-editor-footer-danger,
-  .group-list-editor-footer-actions { grid-column: 1; grid-row: auto; }
-  .group-list-editor-footer-actions { justify-content: stretch; }
-  .group-list-editor-footer-actions .button { flex: 1; }
 }
