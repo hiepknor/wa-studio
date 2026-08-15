@@ -114,10 +114,6 @@ function reportTone(status: "PASS" | "WARN" | "BLOCK") {
   return "danger" as const;
 }
 
-function fieldDescription(error: string | undefined, hint?: string) {
-  return error ? <span className="campaign-field-error">{error}</span> : hint;
-}
-
 export function CampaignsScreen() {
   const { connected, selectedSessionId } = useRuntimeConnection();
   const toast = useToast();
@@ -704,8 +700,8 @@ export function CampaignsScreen() {
             {editorTab === "details" && <section aria-labelledby="campaign-editor-details-tab" className="campaign-tab-panel stack stack-lg" id="campaign-editor-details-panel" role="tabpanel">
               <div className="campaign-section-heading"><div><span>Step 1 · Required</span><h3>Content &amp; schedule</h3><p>Define the message draft and when Runtime should schedule it.</p></div></div>
               {detailsError && <InlineAlert title="Could not save details">{detailsError}</InlineAlert>}
-              <section aria-labelledby="campaign-content-title" className="campaign-form-section stack stack-md"><h4 id="campaign-content-title">Message draft</h4><TextField description={fieldDescription(formErrors.name)} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} /><TextAreaField description={fieldDescription(formErrors.text, "Plain text sent only by a later run milestone.")} disabled={!editable} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} /></section>
-              <section aria-labelledby="campaign-timing-title" className="campaign-form-section stack stack-md"><div className="campaign-form-section-heading"><h4 id="campaign-timing-title">Delivery timing</h4><span>Managed by Runtime</span></div><SelectMenu description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />{form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</section>
+              <section aria-labelledby="campaign-content-title" className="campaign-form-section stack stack-md"><h4 id="campaign-content-title">Message draft</h4><TextField error={formErrors.name} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} /><TextAreaField description="Plain text sent only by a later run milestone." disabled={!editable} error={formErrors.text} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} /></section>
+              <section aria-labelledby="campaign-timing-title" className="campaign-form-section stack stack-md"><div className="campaign-form-section-heading"><h4 id="campaign-timing-title">Delivery timing</h4><span>Managed by Runtime</span></div><SelectMenu description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />{form.scheduleType === "ONCE" && <TextField description="Stored by Runtime in UTC." disabled={!editable} error={formErrors.scheduledAt} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</section>
             </section>}
 
             {editorTab === "targets" && <section aria-labelledby="campaign-editor-targets-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-targets-panel" role="tabpanel">

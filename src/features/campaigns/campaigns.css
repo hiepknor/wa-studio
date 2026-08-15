@@ -36,8 +36,6 @@
   text-transform: uppercase;
 }
 .campaign-section-heading p { margin: 5px 0 0; color: var(--dim); font-size: 10px; line-height: 1.5; }
-.campaign-field-error { color: #ffaaa4; }
-
 .campaign-form-section { min-width: 0; }
 .campaign-form-section > h4,
 .campaign-form-section-heading h4 { margin: 0; color: #d8dbe2; font-size: 10px; font-weight: 600; }

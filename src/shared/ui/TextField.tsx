@@ -1,11 +1,13 @@
 import { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from "react";
 
 import { AppIcon, type AppIconName } from "./AppIcon";
+import { FieldFrame } from "./FieldFrame";
 import "./text-field.css";
 
-interface TextFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "size"> {
+export interface TextFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "size"> {
   containerClassName?: string;
   description?: ReactNode;
+  error?: ReactNode;
   icon?: AppIconName;
   label: ReactNode;
   labelHidden?: boolean;
@@ -19,37 +21,46 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function T
     className = "",
     containerClassName = "",
     description,
+    error,
     icon,
     id,
     label,
     labelHidden = false,
     monospace = false,
-    size = "md",
+    size = "sm",
     ...props
   },
   ref,
 ) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
-  const descriptionId = description ? `${inputId}-description` : undefined;
-  const describedBy = [ariaDescribedBy, descriptionId].filter(Boolean).join(" ") || undefined;
+  const descriptionId = description && !error ? `${inputId}-description` : undefined;
+  const errorId = error ? `${inputId}-error` : undefined;
+  const describedBy = [ariaDescribedBy, errorId ?? descriptionId].filter(Boolean).join(" ") || undefined;
+  const invalid = Boolean(error) || props["aria-invalid"] === true || props["aria-invalid"] === "true";
 
   return (
-    <div className={`text-field text-field-${size} ${containerClassName}`.trim()}>
-      <label className={labelHidden ? "text-field-label-hidden" : "text-field-label"} htmlFor={inputId}>
-        {label}
-      </label>
-      <div className="text-field-control">
-        {icon && <AppIcon className="text-field-icon" name={icon} size="sm" />}
-        <input
-          {...props}
-          aria-describedby={describedBy}
-          className={`${icon ? "text-field-input-with-icon" : ""} ${monospace ? "text-field-input-mono" : ""} ${className}`.trim()}
-          id={inputId}
-          ref={ref}
-        />
-      </div>
-      {description && <span className="text-field-description" id={descriptionId}>{description}</span>}
-    </div>
+    <FieldFrame
+      containerClassName={containerClassName}
+      description={description}
+      descriptionId={descriptionId}
+      error={error}
+      errorId={errorId}
+      inputId={inputId}
+      invalid={invalid}
+      label={label}
+      labelHidden={labelHidden}
+      size={size}
+    >
+      {icon && <AppIcon className="text-field-icon" name={icon} size="sm" />}
+      <input
+        {...props}
+        aria-describedby={describedBy}
+        aria-invalid={invalid || undefined}
+        className={`${icon ? "text-field-input-with-icon" : ""} ${monospace ? "text-field-input-mono" : ""} ${className}`.trim()}
+        id={inputId}
+        ref={ref}
+      />
+    </FieldFrame>
   );
 });

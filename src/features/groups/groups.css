@@ -132,7 +132,6 @@
 }
 .group-list-editor-section-heading h3 { margin: 0; color: #e1e3e9; font-size: 12px; }
 .group-list-editor-section-heading p { margin: 4px 0 0; color: var(--dim); font-size: 9px; }
-.group-list-field-error { color: #ffaaa4; }
 .group-list-editor-capacity-warning { color: var(--warning); }
 .group-list-editor-metadata {
   display: grid;

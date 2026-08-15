@@ -1,4 +1,15 @@
-.text-field { display: flex; flex-direction: column; gap: 7px; }
+.text-field {
+  --text-field-height: 36px;
+  --text-field-padding-inline: 11px;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+.text-field-md {
+  --text-field-height: 42px;
+  --text-field-padding-inline: 12px;
+}
 .text-field-label { color: #737987; font-size: 9px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
 .text-field-label-hidden {
   position: absolute;
@@ -11,7 +22,7 @@
   white-space: nowrap;
   border: 0;
 }
-.text-field-control { position: relative; }
+.text-field-control { position: relative; min-width: 0; }
 .text-field-control input,
 .text-field-control select,
 .text-field-control textarea {
@@ -22,21 +33,46 @@
   color: var(--foreground);
   font-family: var(--font-ui);
   font-size: 12px;
+  outline: none;
   transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 .text-field-control select { width: 100%; height: 42px; padding: 0 12px; }
-.text-field-control textarea { width: 100%; min-height: 112px; padding: 10px 12px; resize: vertical; line-height: 1.5; }
-.text-field-sm .text-field-control input { height: 36px; padding: 0 11px; }
-.text-field-md .text-field-control input { height: 42px; padding: 0 12px; }
+.text-field-control input { height: var(--text-field-height); padding: 0 var(--text-field-padding-inline); }
+.text-field-control textarea { width: 100%; min-height: 88px; padding: 9px var(--text-field-padding-inline); resize: vertical; line-height: 1.5; }
 .text-field-control input.text-field-input-with-icon { padding-left: 34px; }
-.text-field-control input.text-field-input-mono { font-family: var(--font-mono); }
-.text-field-control input::placeholder { color: var(--dim); }
+.text-field-control .text-field-input-mono { font-family: var(--font-mono); }
+.text-field-control input::placeholder,
+.text-field-control textarea::placeholder { color: var(--dim); opacity: 1; }
 .text-field-control input:hover,
 .text-field-control select:hover,
 .text-field-control textarea:hover { border-color: rgb(255 255 255 / 18%); }
 .text-field-control input:focus,
 .text-field-control select:focus,
-.text-field-control textarea:focus { background: #0b0d12; }
+.text-field-control textarea:focus {
+  border-color: rgb(166 154 255 / 72%);
+  background: #0b0d12;
+  box-shadow: 0 0 0 3px rgb(137 123 240 / 12%);
+}
+.text-field-control input:disabled,
+.text-field-control select:disabled,
+.text-field-control textarea:disabled {
+  border-color: rgb(255 255 255 / 7%);
+  background: #0b0d11;
+  color: #777c89;
+  cursor: not-allowed;
+  opacity: .78;
+}
+.text-field-control input:read-only:not(:disabled),
+.text-field-control textarea:read-only:not(:disabled) { background: #101218; }
+.text-field[data-invalid="true"] .text-field-control input,
+.text-field[data-invalid="true"] .text-field-control textarea {
+  border-color: rgb(255 126 118 / 72%);
+}
+.text-field[data-invalid="true"] .text-field-control input:focus,
+.text-field[data-invalid="true"] .text-field-control textarea:focus {
+  border-color: #ff8f87;
+  box-shadow: 0 0 0 3px rgb(255 126 118 / 12%);
+}
 .text-field-icon {
   position: absolute;
   z-index: 1;
@@ -47,4 +83,7 @@
   transform: translateY(-50%);
 }
 .text-field-control:focus-within .text-field-icon { color: #aaa0ff; }
-.text-field-description { color: var(--dim); font-size: 11px; line-height: 1.45; }
+.text-field-message,
+.text-field-description { min-height: 16px; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.text-field-description { color: var(--dim); }
+.text-field-error { color: #ffaaa4; }

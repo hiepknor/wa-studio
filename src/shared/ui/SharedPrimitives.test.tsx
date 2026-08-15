@@ -23,6 +23,7 @@ describe("shared UI primitives", () => {
     const input = screen.getByRole("textbox", { name: "WA Runtime API key" });
     expect(input).toHaveAccessibleDescription("Never written to disk.");
     expect(input).toHaveClass("text-field-input-mono", "text-field-input-with-icon");
+    expect(input.closest(".text-field")).toHaveClass("text-field-sm");
   });
 
   it("connects shared textarea and select labels to accessible descriptions", () => {
@@ -32,6 +33,23 @@ describe("shared UI primitives", () => {
     </>);
     expect(screen.getByRole("textbox", { name: "Message text" })).toHaveAccessibleDescription("Persisted campaign content.");
     expect(screen.getByRole("combobox", { name: "Schedule" })).toHaveAccessibleDescription("Runtime schedule policy.");
+  });
+
+  it("uses one accessible invalid-state contract for textbox and textarea", () => {
+    render(<>
+      <TextField description="Original hint" error="Name is required." label="Campaign name" />
+      <TextAreaField aria-invalid error="Message is required." label="Message text" />
+    </>);
+
+    const input = screen.getByRole("textbox", { name: "Campaign name" });
+    const textarea = screen.getByRole("textbox", { name: "Message text" });
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription("Name is required.");
+    expect(input.closest(".text-field")).toHaveAttribute("data-invalid", "true");
+    expect(textarea).toHaveAttribute("aria-invalid", "true");
+    expect(textarea).toHaveAccessibleDescription("Message is required.");
+    expect(screen.getAllByRole("alert")).toHaveLength(2);
+    expect(screen.queryByText("Original hint")).not.toBeInTheDocument();
   });
 
   it("uses semantic status text while keeping its dot decorative", () => {

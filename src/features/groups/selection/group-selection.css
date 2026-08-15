@@ -19,9 +19,6 @@
   row-gap: 7px;
 }
 .group-selection-filter-range .text-field-control input {
-  height: 32px;
-  padding-inline: 9px;
-  font-family: var(--font-mono);
   appearance: textfield;
 }
 .group-selection-filter-range .text-field-control input::-webkit-inner-spin-button,
@@ -33,7 +30,6 @@
   font-size: 8px;
   line-height: 1.4;
 }
-.group-selection-field-error { color: #ffaaa4; }
 .group-selection-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
 .group-selection-heading > div { min-width: 0; }
 .group-selection-heading h3,

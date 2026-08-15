@@ -331,8 +331,8 @@ export function GroupListEditor({
           <section aria-labelledby="group-list-details-title" className="group-list-editor-details stack stack-md">
             <div className="group-list-editor-section-heading"><h3 id="group-list-details-title">List details</h3><p>Name and describe this reusable static selection.</p></div>
             <div className="group-list-editor-metadata">
-              <TextField description={fieldErrors.name && <span className="group-list-field-error">{fieldErrors.name}</span>} disabled={loadingMembership} label="Name" onChange={(event) => { setName(event.target.value); setFieldErrors((current) => ({ ...current, name: undefined })); }} value={name} />
-              <TextAreaField description={fieldErrors.description && <span className="group-list-field-error">{fieldErrors.description}</span>} disabled={loadingMembership} label="Description" onChange={(event) => { setDescription(event.target.value); setFieldErrors((current) => ({ ...current, description: undefined })); }} rows={3} value={description} />
+              <TextField disabled={loadingMembership} error={fieldErrors.name} label="Name" onChange={(event) => { setName(event.target.value); setFieldErrors((current) => ({ ...current, name: undefined })); }} value={name} />
+              <TextAreaField disabled={loadingMembership} error={fieldErrors.description} label="Description" onChange={(event) => { setDescription(event.target.value); setFieldErrors((current) => ({ ...current, description: undefined })); }} rows={3} value={description} />
             </div>
           </section>
           <section aria-labelledby="group-list-selection-title" className="group-selection-section">

@@ -364,8 +364,14 @@ describe("CampaignsScreen", () => {
     await user.click(within(panel).getByRole("checkbox", { name: "Unknown" }));
     await user.click(within(panel).getByRole("checkbox", { name: "Current" }));
     await user.click(within(panel).getByRole("radio", { name: "Inactive" }));
-    await user.type(within(panel).getByRole("spinbutton", { name: "Minimum" }), "50");
-    await user.type(within(panel).getByRole("spinbutton", { name: "Maximum" }), "500");
+    const minimum = within(panel).getByRole("spinbutton", { name: "Minimum" });
+    const maximum = within(panel).getByRole("spinbutton", { name: "Maximum" });
+    expect(minimum.closest(".text-field")).toHaveClass("text-field-sm");
+    expect(maximum.closest(".text-field")).toHaveClass("text-field-sm");
+    expect(minimum).toHaveClass("text-field-input-mono");
+    expect(maximum).toHaveClass("text-field-input-mono");
+    await user.type(minimum, "50");
+    await user.type(maximum, "500");
 
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
       sessionId: session.id,
