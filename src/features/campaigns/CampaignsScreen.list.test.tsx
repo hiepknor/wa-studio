@@ -143,7 +143,7 @@ describe("CampaignsScreen server-side list", () => {
     const user = userEvent.setup();
     renderList(listCampaigns);
     await connect(user);
-    expect(await screen.findByText("No campaigns yet. Create a DRAFT to get started.")).toBeInTheDocument();
+    expect(await screen.findByText("No campaigns yet. Create a draft to get started.")).toBeInTheDocument();
     await user.type(screen.getByRole("searchbox", { name: "Search campaigns" }), "missing");
     expect(await screen.findByText("No campaigns match this search or filters.")).toBeInTheDocument();
   });

@@ -115,6 +115,27 @@ export type TargetSetValidation =
   | { ok: true; groupIds: string[] }
   | { code: "CAMPAIGN_TARGET_DUPLICATE" | "CAMPAIGN_TARGET_LIMIT_EXCEEDED"; ok: false };
 
+export interface CampaignTargetDiff {
+  addedIds: string[];
+  removedIds: string[];
+  savedCount: number;
+  selectedCount: number;
+}
+
+export function campaignTargetDiff(
+  savedIds: readonly string[],
+  selectedIds: readonly string[],
+): CampaignTargetDiff {
+  const saved = new Set(savedIds);
+  const selected = new Set(selectedIds);
+  return {
+    addedIds: selectedIds.filter((id) => !saved.has(id)),
+    removedIds: savedIds.filter((id) => !selected.has(id)),
+    savedCount: savedIds.length,
+    selectedCount: selectedIds.length,
+  };
+}
+
 export function validateTargetReplacement(groupIds: readonly string[]): TargetSetValidation {
   if (groupIds.length > 1_000) {
     return { code: "CAMPAIGN_TARGET_LIMIT_EXCEEDED", ok: false };

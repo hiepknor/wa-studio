@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -45,6 +45,12 @@ const unknownGroup: RuntimeGroup = {
   detailsSyncedAt: null, syncedAt: "2026-08-14T00:00:00.000Z",
   sendCapability: { status: "UNKNOWN", reason: "not_checked", checkedAt: null, invalidatedAt: null, revision: 0 },
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
 
 function Harness() {
   const { connect, connected } = useRuntimeConnection();
@@ -101,6 +107,17 @@ function report(
   };
 }
 
+async function runPreflight(
+  user: ReturnType<typeof userEvent.setup>,
+  mode: "DRY_RUN" | "LIVE" = "DRY_RUN",
+) {
+  if (mode === "LIVE") {
+    await user.click(screen.getByRole("combobox", { name: "Preflight mode" }));
+    await user.click(screen.getByRole("option", { name: /Live policy/ }));
+  }
+  await user.click(screen.getByRole("button", { name: "Run preflight" }));
+}
+
 describe("CampaignsScreen", () => {
   it("uses the shared drawer, tabs, fields, badges, and actions in a structured workspace", async () => {
     const user = userEvent.setup();
@@ -125,22 +142,26 @@ describe("CampaignsScreen", () => {
     expect(screen.queryByRole("listbox", { name: "Schedule" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Release" })).toBeInTheDocument();
 
+    const drawerBody = document.querySelector<HTMLElement>(".drawer-body");
+    expect(drawerBody).not.toBeNull();
+    drawerBody!.scrollTop = 120;
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
-    expect(screen.getByText("Target set is up to date")).toBeInTheDocument();
-    expect(screen.getByText("Remaining capacity")).toBeInTheDocument();
+    expect(drawerBody).toHaveProperty("scrollTop", 0);
+    expect(screen.getAllByText("Saved target set").length).toBeGreaterThan(0);
+    expect(screen.getByText("1 of 1,000 selected")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
     expect(screen.getByText("No preflight report")).toBeInTheDocument();
     expect(screen.getByText("No preflight result yet")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "DRY_RUN" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "LIVE" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Preflight mode" })).toHaveTextContent("Dry run");
+    expect(screen.getByRole("button", { name: "Run preflight" })).toBeInTheDocument();
   });
 
   it("renders the campaign list and empty state for the active session", async () => {
     const user = userEvent.setup();
     renderCampaigns({}, []);
     await connect(user);
-    expect(await screen.findByText("No campaigns yet. Create a DRAFT to get started.")).toBeInTheDocument();
+    expect(await screen.findByText("No campaigns yet. Create a draft to get started.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New campaign" })).toBeEnabled();
   });
 
@@ -233,18 +254,120 @@ describe("CampaignsScreen", () => {
     expect(screen.getAllByText("Inactive").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Unknown, current")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: /Unknown room/ }));
-    await user.click(screen.getByRole("button", { name: "Replace targets" }));
+    await user.click(screen.getByRole("button", { name: "Save target set" }));
     expect(await screen.findByText("Every target must belong to the campaign session.")).toBeInTheDocument();
-    expect(within(screen.getByRole("heading", { name: "Persisted canonical targets" }).parentElement!).getByText("Denied room")).toBeInTheDocument();
+    const savedTargets = screen.getByText("Saved targets").closest("details");
+    expect(savedTargets).not.toBeNull();
+    expect(savedTargets).toHaveAttribute("open");
+    expect(within(savedTargets!).getByText("Denied room")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Replace targets" }));
+    await user.click(screen.getByRole("button", { name: "Save target set" }));
     expect(await screen.findByText("Canonical unknown")).toBeInTheDocument();
     expect(replaceCampaignTargets).toHaveBeenLastCalledWith(campaign.id, ["denied@g.us", "unknown@g.us"]);
 
-    await user.click(screen.getByRole("button", { name: "Remove Canonical unknown" }));
-    await user.click(screen.getByRole("button", { name: "Replace targets" }));
-    expect(await screen.findByText("No persisted targets. Saving an empty set clears all targets.")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /Unknown room/ }));
+    await user.click(screen.getByRole("button", { name: "Save target set" }));
+    expect(await screen.findByText("No saved targets. Saving an empty selection clears the complete target set.")).toBeInTheDocument();
     expect(replaceCampaignTargets).toHaveBeenLastCalledWith(campaign.id, []);
+  });
+
+  it("shows staged target additions and removals without mutating the saved audit set", async () => {
+    const user = userEvent.setup();
+    renderCampaigns();
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await screen.findByRole("checkbox", { name: /Unknown room/ });
+
+    await user.click(screen.getByText("Saved targets"));
+    await user.click(screen.getByRole("button", { name: "Remove Denied room from selection" }));
+    await user.click(screen.getByRole("checkbox", { name: /Unknown room/ }));
+
+    expect(screen.getAllByText("1 added · 1 removed · Not saved").length).toBeGreaterThan(0);
+    expect(screen.getByText("Pending removal")).toBeInTheDocument();
+    expect(screen.getByText("Denied room")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restore Denied room to selection" })).toBeEnabled();
+  });
+
+  it("debounces and trims target search, and omits a whitespace-only query", async () => {
+    const user = userEvent.setup();
+    const listGroups = vi.fn().mockResolvedValue({
+      data: [unknownGroup], meta: { total: 1, limit: 50, offset: 0 },
+    });
+    renderCampaigns({ listGroups });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(1));
+
+    const search = screen.getByRole("searchbox", { name: "Find synchronized groups" });
+    await user.type(search, "  room  ");
+    expect(listGroups).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(2));
+    expect(listGroups).toHaveBeenLastCalledWith({
+      sessionId: session.id, limit: 50, offset: 0, query: "room",
+    });
+
+    await user.clear(search);
+    await user.type(search, "   ");
+    await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(3));
+    expect(listGroups).toHaveBeenLastCalledWith({
+      sessionId: session.id, limit: 50, offset: 0,
+    });
+    expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
+  });
+
+  it("ignores a late target-search response from an older query", async () => {
+    const user = userEvent.setup();
+    const oldResult = deferred<Awaited<ReturnType<RuntimeApi["listGroups"]>>>();
+    const newResult = deferred<Awaited<ReturnType<RuntimeApi["listGroups"]>>>();
+    const listGroups = vi.fn()
+      .mockResolvedValueOnce({ data: [unknownGroup], meta: { total: 1, limit: 50, offset: 0 } })
+      .mockReturnValueOnce(oldResult.promise)
+      .mockReturnValueOnce(newResult.promise);
+    renderCampaigns({ listGroups });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(1));
+
+    const search = screen.getByRole("searchbox", { name: "Find synchronized groups" });
+    await user.type(search, "old");
+    await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(2));
+    await user.clear(search);
+    await user.type(search, "new");
+
+    const oldGroup = { ...unknownGroup, id: "old@g.us", name: "Old result" };
+    await act(async () => oldResult.resolve({ data: [oldGroup], meta: { total: 1, limit: 50, offset: 0 } }));
+    expect(screen.queryByText("Old result")).not.toBeInTheDocument();
+
+    await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(3));
+    const newGroup = { ...unknownGroup, id: "new@g.us", name: "New result" };
+    await act(async () => newResult.resolve({ data: [newGroup], meta: { total: 1, limit: 50, offset: 0 } }));
+    expect(await screen.findByText("New result")).toBeInTheDocument();
+  });
+
+  it("invalidates an in-flight group response when the drawer closes", async () => {
+    const user = userEvent.setup();
+    const oldResult = deferred<Awaited<ReturnType<RuntimeApi["listGroups"]>>>();
+    const currentGroup = { ...unknownGroup, id: "current@g.us", name: "Current result" };
+    const listGroups = vi.fn()
+      .mockReturnValueOnce(oldResult.promise)
+      .mockResolvedValueOnce({ data: [currentGroup], meta: { total: 1, limit: 50, offset: 0 } });
+    renderCampaigns({ listGroups });
+    await connect(user);
+    await openCampaign(user);
+    await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    expect(await screen.findByText("Current result")).toBeInTheDocument();
+
+    const oldGroup = { ...unknownGroup, id: "old-close@g.us", name: "Old closed result" };
+    await act(async () => oldResult.resolve({ data: [oldGroup], meta: { total: 1, limit: 50, offset: 0 } }));
+    expect(screen.queryByText("Old closed result")).not.toBeInTheDocument();
+    expect(screen.getByText("Current result")).toBeInTheDocument();
   });
 
   it.each([
@@ -261,7 +384,7 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
-    await user.click(screen.getByRole("button", { name: mode }));
+    await runPreflight(user, mode);
     expect(await screen.findByText("GROUP_CAPABILITY")).toBeInTheDocument();
     expect(screen.getByText("TARGET_CAPABILITY_DENIED")).toBeInTheDocument();
     expect(screen.getByText("Policy v6")).toBeInTheDocument();
@@ -280,14 +403,14 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
-    await user.click(screen.getByRole("button", { name: "DRY_RUN" }));
+    await runPreflight(user);
     await screen.findByText("GROUP_CAPABILITY");
 
     await user.click(screen.getByRole("tab", { name: "Details" }));
     await user.type(screen.getByRole("textbox", { name: "Message text" }), " changed");
     await user.click(screen.getByRole("tab", { name: /Preflight/ }));
     expect(screen.getByText("Preflight result is stale")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "LIVE" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Run preflight" })).toBeDisabled();
     await user.click(screen.getByRole("tab", { name: /Details/ }));
     await user.clear(screen.getByRole("textbox", { name: "Message text" }));
     await user.type(screen.getByRole("textbox", { name: "Message text" }), campaign.text);
@@ -296,7 +419,7 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("checkbox", { name: /Unknown room/ }));
     await user.click(screen.getByRole("tab", { name: /Preflight/ }));
     expect(screen.getByText("Preflight result is stale")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "DRY_RUN" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Run preflight" })).toBeDisabled();
   });
 
   it("ignores a late preflight response after the editor closes", async () => {
@@ -307,7 +430,7 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
-    await user.click(screen.getByRole("button", { name: "DRY_RUN" }));
+    await runPreflight(user);
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
     resolveReport(report("DRY_RUN", "PASS"));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Campaigns" })).toBeInTheDocument());

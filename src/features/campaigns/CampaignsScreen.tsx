@@ -32,6 +32,7 @@ import {
   type CampaignListRequestState,
 } from "./campaign-list-state";
 import {
+  campaignTargetDiff,
   campaignErrorMessage,
   campaignFormFromDto,
   createCampaignPayload,
@@ -65,6 +66,18 @@ const SCHEDULE_OPTIONS = [
     value: "ONCE",
   },
 ] as const;
+const PREFLIGHT_MODE_OPTIONS = [
+  {
+    description: "Evaluate the campaign as a simulation.",
+    label: "Dry run",
+    value: "DRY_RUN",
+  },
+  {
+    description: "Apply live policy without creating a run or sending messages.",
+    label: "Live policy",
+    value: "LIVE",
+  },
+] as const;
 
 function formatDate(value: string | null): string {
   if (!value) return "Immediate";
@@ -79,6 +92,10 @@ function statusTone(status: "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED") {
   if (status === "ACTIVE") return "success" as const;
   if (status === "PAUSED") return "warning" as const;
   return "neutral" as const;
+}
+
+function statusLabel(status: "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED") {
+  return status.charAt(0) + status.slice(1).toLocaleLowerCase();
 }
 
 function reportTone(status: "PASS" | "WARN" | "BLOCK") {
@@ -120,10 +137,14 @@ export function CampaignsScreen() {
   const [targetsLoading, setTargetsLoading] = useState(false);
   const [targetsSaving, setTargetsSaving] = useState(false);
   const [targetsError, setTargetsError] = useState<string | null>(null);
+  const [savedTargetsOpen, setSavedTargetsOpen] = useState(false);
   const [revisionRefreshRequired, setRevisionRefreshRequired] = useState(false);
+  const [groupInputQuery, setGroupInputQuery] = useState("");
   const [groupQuery, setGroupQuery] = useState("");
   const [groups, setGroups] = useState<RuntimeGroup[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
+  const [groupsError, setGroupsError] = useState<string | null>(null);
+  const [preflightMode, setPreflightMode] = useState<RuntimeCampaignExecutionMode>("DRY_RUN");
   const [preflight, setPreflight] = useState<RuntimeCampaignPreflight | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [preflightError, setPreflightError] = useState<string | null>(null);
@@ -131,6 +152,8 @@ export function CampaignsScreen() {
   const editorEpochRef = useRef(0);
   const listRequestRef = useRef(0);
   const listTargetRef = useRef(campaignListRequestKey(listState));
+  const groupsRequestRef = useRef(0);
+  const groupsTargetRef = useRef("");
   const pageKeyRef = useRef("");
   const errorKeyRef = useRef("");
   const listStateRef = useRef(listState);
@@ -139,9 +162,21 @@ export function CampaignsScreen() {
   listStateRef.current = listState;
 
   const campaign = editor.kind === "open" ? editor.campaign : null;
+  const campaignId = campaign?.id ?? null;
   const editable = !campaign || campaign.status === "DRAFT";
   const detailsDirty = campaign ? hasCampaignChanges(campaign, form) : true;
   const targetIds = useMemo(() => targets.map((target) => target.groupId), [targets]);
+  const targetDiff = useMemo(
+    () => campaignTargetDiff(targetIds, draftTargetIds),
+    [draftTargetIds, targetIds],
+  );
+  const normalizedGroupInputQuery = groupInputQuery.trim();
+  const groupSearchTargetKey = editor.kind === "open" && campaignId && selectedSessionId
+    ? `${selectedSessionId}:${campaignId}:${groupQuery}`
+    : "";
+  groupsTargetRef.current = editor.kind === "open" && campaignId && selectedSessionId
+    ? `${selectedSessionId}:${campaignId}:${normalizedGroupInputQuery}`
+    : "";
   const targetsDirty = !sameIds(targetIds, draftTargetIds);
   const reportStale = Boolean(
     preflight
@@ -207,6 +242,13 @@ export function CampaignsScreen() {
     setFiltersOpen(false);
     setListLoading(false);
     setListError(null);
+    groupsRequestRef.current += 1;
+    groupsTargetRef.current = "";
+    setGroupInputQuery("");
+    setGroupQuery("");
+    setGroups([]);
+    setGroupsLoading(false);
+    setGroupsError(null);
     setPreflight(null);
   }, [listState.sessionId, selectedSessionId]);
 
@@ -229,6 +271,8 @@ export function CampaignsScreen() {
   useEffect(() => () => {
     listRequestRef.current += 1;
     listTargetRef.current = "";
+    groupsRequestRef.current += 1;
+    groupsTargetRef.current = "";
   }, []);
 
   async function loadTargets(campaignId: string, epoch: number) {
@@ -247,26 +291,62 @@ export function CampaignsScreen() {
     }
   }
 
-  async function loadGroups(query = "") {
-    if (!selectedSessionId) return;
-    const epoch = editorEpochRef.current;
+  const loadGroups = useCallback(async (
+    sessionId: string,
+    query: string,
+    targetKey: string,
+    epoch: number,
+  ) => {
+    const request = ++groupsRequestRef.current;
     setGroupsLoading(true);
+    setGroupsError(null);
     try {
       const page = await api.listGroups({
-        sessionId: selectedSessionId,
+        sessionId,
         limit: PAGE_SIZE,
         offset: 0,
-        query,
+        ...(query ? { query } : {}),
       });
-      if (epoch === editorEpochRef.current) setGroups(page.data);
+      if (
+        request !== groupsRequestRef.current
+        || epoch !== editorEpochRef.current
+        || targetKey !== groupsTargetRef.current
+      ) return;
+      setGroups(page.data);
     } catch (error) {
-      if (epoch === editorEpochRef.current) {
-        setTargetsError(campaignErrorMessage(error, "Could not load available groups."));
+      if (
+        request === groupsRequestRef.current
+        && epoch === editorEpochRef.current
+        && targetKey === groupsTargetRef.current
+      ) {
+        setGroupsError(campaignErrorMessage(error, "Could not load available groups."));
       }
     } finally {
-      if (epoch === editorEpochRef.current) setGroupsLoading(false);
+      if (
+        request === groupsRequestRef.current
+        && epoch === editorEpochRef.current
+        && targetKey === groupsTargetRef.current
+      ) setGroupsLoading(false);
     }
-  }
+  }, [api]);
+
+  useEffect(() => {
+    if (!campaignId) return;
+    const timeout = window.setTimeout(() => setGroupQuery((current) =>
+      current === normalizedGroupInputQuery ? current : normalizedGroupInputQuery
+    ), 300);
+    return () => window.clearTimeout(timeout);
+  }, [campaignId, groupInputQuery, normalizedGroupInputQuery]);
+
+  useEffect(() => {
+    if (!groupSearchTargetKey || !campaignId || !selectedSessionId) return;
+    void loadGroups(
+      selectedSessionId,
+      groupQuery,
+      groupSearchTargetKey,
+      editorEpochRef.current,
+    );
+  }, [campaignId, groupQuery, groupSearchTargetKey, loadGroups, selectedSessionId]);
 
   function openCreate() {
     editorEpochRef.current += 1;
@@ -278,7 +358,13 @@ export function CampaignsScreen() {
     setDetailsError(null);
     setTargets([]);
     setDraftTargetIds([]);
+    setSavedTargetsOpen(false);
     setRevisionRefreshRequired(false);
+    setGroupInputQuery("");
+    setGroupQuery("");
+    setGroups([]);
+    setGroupsError(null);
+    setPreflightMode("DRY_RUN");
     setPreflight(null);
     setPreflightError(null);
   }
@@ -293,17 +379,29 @@ export function CampaignsScreen() {
     setDetailsError(null);
     setTargets([]);
     setDraftTargetIds([]);
+    setSavedTargetsOpen(false);
     setRevisionRefreshRequired(false);
     setPreflight(null);
     setPreflightError(null);
+    setPreflightMode("DRY_RUN");
+    setGroupInputQuery("");
     setGroupQuery("");
-    void Promise.all([loadTargets(selected.id, epoch), loadGroups()]);
+    setGroups([]);
+    setGroupsError(null);
+    void loadTargets(selected.id, epoch);
   }
 
   function closeEditor() {
     editorEpochRef.current += 1;
+    groupsRequestRef.current += 1;
+    groupsTargetRef.current = "";
     createKeyRef.current = null;
     setEditor({ kind: "closed" });
+    setGroupInputQuery("");
+    setGroupQuery("");
+    setGroups([]);
+    setGroupsLoading(false);
+    setGroupsError(null);
     setPreflight(null);
     setDiscardConfirmationOpen(false);
   }
@@ -352,7 +450,7 @@ export function CampaignsScreen() {
       void loadCampaigns(listStateRef.current);
       if (created) {
         const targetEpoch = editorEpochRef.current;
-        void Promise.all([loadTargets(saved.id, targetEpoch), loadGroups()]);
+        void loadTargets(saved.id, targetEpoch);
         setEditorTab("targets");
       }
       toast.notify({
@@ -411,9 +509,10 @@ export function CampaignsScreen() {
       setForm(campaignFormFromDto(refreshed));
       setRevisionRefreshRequired(false);
       void loadCampaigns(listStateRef.current);
-      toast.notify({ id: `targets-saved-${campaign.id}`, title: "Target set replaced.", tone: "success" });
+      toast.notify({ id: `targets-saved-${campaign.id}`, title: "Target set saved.", tone: "success" });
     } catch (error) {
       if (epoch !== editorEpochRef.current) return;
+      setSavedTargetsOpen(true);
       setTargetsError(replacementCommitted
         ? "Targets were replaced, but the campaign revision could not be refreshed. Reopen the campaign before preflight."
         : campaignErrorMessage(error, "Could not replace campaign targets."));
@@ -457,12 +556,21 @@ export function CampaignsScreen() {
   const hasListCriteria = Boolean(
     listState.query || listState.statuses.length || listState.scheduleTypes.length,
   );
+  const targetChangeState = targetsLoading
+    ? "Loading saved targets…"
+    : targetsSaving
+      ? "Saving complete target set…"
+      : targetsError && targetsDirty
+        ? `Changes not saved · ${targetDiff.savedCount} saved targets retained`
+        : targetsDirty
+          ? `${targetDiff.addedIds.length} added · ${targetDiff.removedIds.length} removed · Not saved`
+          : "Saved target set";
   const footerState = editorTab === "details"
     ? campaign
       ? detailsDirty ? "Unsaved detail changes" : "Details are up to date"
       : "Create the draft to unlock targets and preflight"
     : editorTab === "targets"
-      ? targetsDirty ? `${draftTargetIds.length} targets selected · changes not saved` : "Target set is up to date"
+      ? targetChangeState
       : reportStale ? "Run preflight again after saving changes" : preflight ? `Last result: ${preflight.status}` : "No preflight result yet";
   const editorStep = editorTab === "details" ? 1 : editorTab === "targets" ? 2 : 3;
   const editorStepLabel = editorTab === "details" ? "Details" : editorTab === "targets" ? "Targets" : "Preflight";
@@ -471,9 +579,9 @@ export function CampaignsScreen() {
       {campaign ? "Save details" : "Create draft"}
     </Button>
   ) : editorTab === "targets" ? (
-    <Button disabled={!campaign || !editable || !targetsDirty || targetsLoading} loading={targetsSaving} onClick={() => void saveTargets()} variant="primary">Replace targets</Button>
+    <Button disabled={!campaign || !editable || !targetsDirty || targetsLoading} loading={targetsSaving} onClick={() => void saveTargets()} variant="primary">Save target set</Button>
   ) : (
-    <><Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired} loading={preflightLoading} onClick={() => void runPreflight("DRY_RUN")}>DRY_RUN</Button><Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired} loading={preflightLoading} onClick={() => void runPreflight("LIVE")} variant="primary">LIVE</Button></>
+    <Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired} loading={preflightLoading} onClick={() => void runPreflight(preflightMode)} variant="primary">Run preflight</Button>
   );
 
   return (
@@ -504,10 +612,10 @@ export function CampaignsScreen() {
               {!selectedSessionId ? <tr><td className="data-table-empty" colSpan={5}>Select a session to view campaigns.</td></tr>
                 : !visiblePage && listPending ? <tr><td className="data-table-empty" colSpan={5}>Loading campaigns…</td></tr>
                 : !visiblePage && visibleListError ? <tr><td className="data-table-empty" colSpan={5}>Campaigns are unavailable.</td></tr>
-                : !visiblePage?.data.length ? <tr><td className="data-table-empty" colSpan={5}>{hasListCriteria ? "No campaigns match this search or filters." : "No campaigns yet. Create a DRAFT to get started."}</td></tr>
+                : !visiblePage?.data.length ? <tr><td className="data-table-empty" colSpan={5}>{hasListCriteria ? "No campaigns match this search or filters." : "No campaigns yet. Create a draft to get started."}</td></tr>
                 : visiblePage.data.map((item) => <tr key={item.id}>
                   <td className="data-cell-primary"><div className="stack stack-xs"><strong className="data-primary-text">{item.name}</strong><span className="data-identifier">{item.id}</span></div></td>
-                  <td><Badge tone={statusTone(item.status)}>{item.status}</Badge></td>
+                  <td><Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge></td>
                   <td>{item.scheduleType === "IMMEDIATE" ? "Immediate" : formatDate(item.scheduledAt)}</td>
                   <td>{item.targetCount}</td>
                   <td className="data-cell-action"><Button onClick={() => openCampaign(item)} size="sm" variant="ghost">{item.status === "DRAFT" ? "Edit" : "Review"}</Button></td>
@@ -526,7 +634,7 @@ export function CampaignsScreen() {
 
       <Drawer
         className="campaign-editor-drawer"
-        contentKey={`${campaign?.id ?? "new"}:${editorEpochRef.current}`}
+        contentKey={`${campaign?.id ?? "new"}:${editorEpochRef.current}:${editorTab}`}
         description={campaign
           ? "Edit persisted details, targets, and Runtime readiness in sequence."
           : "Step 1 of 3 · Define content and delivery timing."}
@@ -539,7 +647,7 @@ export function CampaignsScreen() {
       >
         {editor.kind === "open" && (
           <div className="campaign-editor">
-            {campaign && campaign.status !== "DRAFT" && <InlineAlert title="Read-only campaign" tone="warning">Runtime status is {campaign.status}; only DRAFT campaigns are editable.</InlineAlert>}
+            {campaign && campaign.status !== "DRAFT" && <InlineAlert title="Read-only campaign" tone="warning">Runtime status is {statusLabel(campaign.status)}; only draft campaigns are editable.</InlineAlert>}
             <div className="campaign-workspace-navigation">
               <Tabs
                 activeTab={editorTab}
@@ -559,7 +667,7 @@ export function CampaignsScreen() {
               <div className="campaign-section-heading"><div><span>Step 1 · Required</span><h3>Content &amp; schedule</h3><p>Define the message draft and when Runtime should schedule it.</p></div></div>
               {detailsError && <InlineAlert title="Could not save details">{detailsError}</InlineAlert>}
               <section aria-labelledby="campaign-content-title" className="campaign-form-section stack stack-md"><h4 id="campaign-content-title">Message draft</h4><TextField description={fieldDescription(formErrors.name)} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} /><TextAreaField description={fieldDescription(formErrors.text, "Plain text sent only by a later run milestone.")} disabled={!editable} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} /></section>
-              <section aria-labelledby="campaign-timing-title" className="campaign-form-section stack stack-md"><div className="campaign-form-section-heading"><h4 id="campaign-timing-title">Delivery timing</h4><span>Canonicalized by Runtime</span></div><SelectMenu description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />{form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</section>
+              <section aria-labelledby="campaign-timing-title" className="campaign-form-section stack stack-md"><div className="campaign-form-section-heading"><h4 id="campaign-timing-title">Delivery timing</h4><span>Managed by Runtime</span></div><SelectMenu description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />{form.scheduleType === "ONCE" && <TextField description={fieldDescription(formErrors.scheduledAt, "Stored by Runtime in UTC.")} disabled={!editable} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</section>
             </section>}
 
             {editorTab === "targets" && <section aria-labelledby="campaign-editor-targets-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-targets-panel" role="tabpanel">
@@ -567,13 +675,30 @@ export function CampaignsScreen() {
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Targets belong to a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {targetsError && <InlineAlert title="Target update">{targetsError}</InlineAlert>}
-                <dl className="campaign-target-metrics"><div><dt>Selected</dt><dd>{draftTargetIds.length}</dd></div><div><dt>Persisted</dt><dd>{targets.length}</dd></div><div><dt>Remaining capacity</dt><dd>{1000 - draftTargetIds.length}</dd></div></dl>
-                <div className="campaign-workspace-section campaign-target-section"><h3>Available groups</h3><p className="campaign-target-section-copy">Capability is evaluated at preflight.</p><div className="campaign-search-row"><SearchField label="Find synchronized groups" loading={groupsLoading} onChange={setGroupQuery} placeholder="Search group name or ID" value={groupQuery} /><Button disabled={groupsLoading} onClick={() => void loadGroups(groupQuery.trim())} size="sm">Search</Button></div><div aria-busy={groupsLoading || undefined} className="campaign-choice-list">
-                  {groupsLoading ? <p>Loading groups…</p> : !groups.length ? <p>No synchronized groups found.</p> : groups.map((group) => <label className="campaign-choice" key={group.id}><input checked={draftTargetIds.includes(group.id)} disabled={!editable} onChange={() => toggleTarget(group.id)} type="checkbox" /><span><strong>{group.name}</strong><small>{group.id}</small></span><span className="campaign-choice-meta"><GroupCapabilityStatus appearance="badge" capability={group.sendCapability} includeFreshness={false} />{!group.isActive && <Badge tone="neutral">Inactive</Badge>}</span></label>)}
-                </div></div>
-                <div className="campaign-workspace-section campaign-target-section"><h3>Persisted canonical targets</h3><p className="campaign-target-section-copy">Authoritative Runtime response.</p><div aria-busy={targetsLoading || undefined} className="campaign-choice-list">
-                  {targetsLoading ? <p>Loading targets…</p> : !targets.length ? <p>No persisted targets. Saving an empty set clears all targets.</p> : targets.map((target) => <div className="campaign-choice" key={target.groupId}><span><strong>{target.groupName}</strong><small>{target.groupId}</small></span><span className="campaign-choice-meta"><GroupCapabilityStatus appearance="badge" capability={target.sendCapability} includeFreshness={false} />{!target.enabled && <Badge tone="neutral">Inactive</Badge>}</span>{editable && draftTargetIds.includes(target.groupId) && <Button aria-label={`Remove ${target.groupName}`} onClick={() => toggleTarget(target.groupId)} size="sm" variant="ghost">Remove</Button>}</div>)}
-                </div></div>
+                <div aria-live="polite" className="campaign-target-summary" data-dirty={targetsDirty || undefined}>
+                  <div><strong>{targetDiff.selectedCount} of 1,000 selected</strong><span>{targetChangeState}</span></div>
+                  {targetDiff.selectedCount >= 900 && <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"}>{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge>}
+                </div>
+                <section aria-labelledby="available-groups-title" className="campaign-target-section">
+                  <div className="campaign-target-section-heading"><div><h3 id="available-groups-title">Available groups</h3><p>Capability is evaluated at preflight.</p></div><span>{groups.length} shown</span></div>
+                  <SearchField label="Find synchronized groups" loading={groupsLoading} onChange={setGroupInputQuery} placeholder="Search group name or ID" value={groupInputQuery} />
+                  {groupsError && <InlineAlert title="Could not load groups">{groupsError}</InlineAlert>}
+                  <div aria-busy={groupsLoading || undefined} className="campaign-choice-list">
+                    {groupsLoading ? <p>Loading groups…</p> : !groups.length ? <p>No synchronized groups found.</p> : groups.map((group) => {
+                      const selected = draftTargetIds.includes(group.id);
+                      return <label className="campaign-choice" data-selected={selected || undefined} key={group.id}><input checked={selected} disabled={!editable} onChange={() => toggleTarget(group.id)} type="checkbox" /><span><strong>{group.name}</strong><small>{group.id}</small></span><span className="campaign-choice-meta"><GroupCapabilityStatus appearance="badge" capability={group.sendCapability} includeFreshness={false} />{!group.isActive && <Badge tone="neutral">Inactive</Badge>}</span></label>;
+                    })}
+                  </div>
+                </section>
+                <details className="campaign-saved-targets" onToggle={(event) => setSavedTargetsOpen(event.currentTarget.open)} open={savedTargetsOpen}>
+                  <summary><span><strong>Saved targets</strong><small>Authoritative Runtime state</small></span><Badge tone="neutral">{targets.length}</Badge></summary>
+                  <div aria-busy={targetsLoading || undefined} className="campaign-saved-target-list">
+                    {targetsLoading ? <p>Loading saved targets…</p> : !targets.length ? <p>No saved targets. Saving an empty selection clears the complete target set.</p> : targets.map((target) => {
+                      const pendingRemoval = !draftTargetIds.includes(target.groupId);
+                      return <div className="campaign-choice" data-pending-removal={pendingRemoval || undefined} key={target.groupId}><span><strong>{target.groupName}</strong><small>{target.groupId}</small></span><span className="campaign-choice-meta">{pendingRemoval && <Badge tone="warning">Pending removal</Badge>}<GroupCapabilityStatus appearance="badge" capability={target.sendCapability} includeFreshness={false} />{!target.enabled && <Badge tone="neutral">Inactive</Badge>}<Button aria-label={pendingRemoval ? `Restore ${target.groupName} to selection` : `Remove ${target.groupName} from selection`} disabled={!editable} onClick={() => toggleTarget(target.groupId)} size="sm" variant="ghost">{pendingRemoval ? "Restore" : "Remove"}</Button></span></div>;
+                    })}
+                  </div>
+                </details>
               </>}
             </section>}
 
@@ -583,9 +708,10 @@ export function CampaignsScreen() {
               {campaign && <>
                 {(detailsDirty || targetsDirty) && <InlineAlert title="Save before preflight" tone="warning">Preflight reads persisted Runtime state, not unsaved edits.</InlineAlert>}
                 {revisionRefreshRequired && <InlineAlert title="Revision refresh required" tone="warning">Reopen this campaign before running preflight.</InlineAlert>}
+                <SelectMenu description="Both modes only evaluate policy. Neither creates a run or sends messages." disabled={preflightLoading} label="Preflight mode" onChange={setPreflightMode} options={PREFLIGHT_MODE_OPTIONS} value={preflightMode} />
                 {preflightError && <InlineAlert title="Preflight failed">{preflightError}</InlineAlert>}
                 {preflight && <PreflightReport report={preflight} stale={reportStale} />}
-                {!preflight && !preflightError && <div className="campaign-empty-state"><span className="campaign-empty-state-icon"><AppIcon name="check" size="lg" /></span><strong>No preflight report</strong><p>Run DRY_RUN or LIVE to evaluate the persisted campaign and target set. This does not send messages.</p></div>}
+                {!preflight && !preflightError && <div className="campaign-empty-state"><span className="campaign-empty-state-icon"><AppIcon name="check" size="lg" /></span><strong>No preflight report</strong><p>Choose a policy mode, then run preflight against the saved campaign and target set.</p></div>}
               </>}
             </section>}
             </div>

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RuntimeCampaign, RuntimeCampaignPreflight } from "@/shared/api/runtime-client";
 import {
+  campaignTargetDiff,
   campaignErrorMessage,
   createCampaignPayload,
   isPreflightStale,
@@ -80,6 +81,24 @@ describe("campaign scheduling", () => {
 });
 
 describe("campaign target and revision invariants", () => {
+  it("derives staged additions and removals from the authoritative target set", () => {
+    expect(campaignTargetDiff(
+      ["saved@g.us", "removed@g.us"],
+      ["saved@g.us", "added@g.us"],
+    )).toEqual({
+      addedIds: ["added@g.us"],
+      removedIds: ["removed@g.us"],
+      savedCount: 2,
+      selectedCount: 2,
+    });
+    expect(campaignTargetDiff([], [])).toEqual({
+      addedIds: [],
+      removedIds: [],
+      savedCount: 0,
+      selectedCount: 0,
+    });
+  });
+
   it("accepts an empty complete replacement", () => {
     expect(validateTargetReplacement([])).toEqual({ ok: true, groupIds: [] });
   });
