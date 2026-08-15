@@ -74,12 +74,6 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
-function formatDraftSchedule(value: string): string {
-  if (!value) return "Date required";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Date required" : formatDate(date.toISOString());
-}
-
 function statusTone(status: "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED") {
   if (status === "DRAFT") return "neutral" as const;
   if (status === "ACTIVE") return "success" as const;
@@ -145,11 +139,6 @@ export function CampaignsScreen() {
   listStateRef.current = listState;
 
   const campaign = editor.kind === "open" ? editor.campaign : null;
-  const hasRevisionMetadata = Boolean(
-    campaign
-    && Number.isInteger(campaign.revision)
-    && Number.isInteger(campaign.targetsRevision),
-  );
   const editable = !campaign || campaign.status === "DRAFT";
   const detailsDirty = campaign ? hasCampaignChanges(campaign, form) : true;
   const targetIds = useMemo(() => targets.map((target) => target.groupId), [targets]);
@@ -517,7 +506,7 @@ export function CampaignsScreen() {
                 : !visiblePage && visibleListError ? <tr><td className="data-table-empty" colSpan={5}>Campaigns are unavailable.</td></tr>
                 : !visiblePage?.data.length ? <tr><td className="data-table-empty" colSpan={5}>{hasListCriteria ? "No campaigns match this search or filters." : "No campaigns yet. Create a DRAFT to get started."}</td></tr>
                 : visiblePage.data.map((item) => <tr key={item.id}>
-                  <td className="data-cell-primary"><div className="stack stack-xs"><strong className="data-primary-text">{item.name}</strong><span className="data-secondary-text">Revision {item.revision}</span></div></td>
+                  <td className="data-cell-primary"><div className="stack stack-xs"><strong className="data-primary-text">{item.name}</strong><span className="data-identifier">{item.id}</span></div></td>
                   <td><Badge tone={statusTone(item.status)}>{item.status}</Badge></td>
                   <td>{item.scheduleType === "IMMEDIATE" ? "Immediate" : formatDate(item.scheduledAt)}</td>
                   <td>{item.targetCount}</td>
@@ -564,12 +553,6 @@ export function CampaignsScreen() {
                   { badge: preflight?.status, disabled: !campaign, id: "preflight", label: "Preflight", step: 3, warning: reportStale },
                 ]}
               />
-              {campaign && <div aria-label="Campaign metadata" className="campaign-workspace-meta" role="group">
-                <Badge tone={statusTone(campaign.status)}>{campaign.status}</Badge>
-                <span className="campaign-workspace-fact"><span>Schedule</span><strong>{form.scheduleType === "IMMEDIATE" ? "Immediate" : formatDraftSchedule(form.scheduledAt)}</strong></span>
-                <span className="campaign-workspace-fact"><span>Targets</span><strong>{draftTargetIds.length} {draftTargetIds.length === 1 ? "group" : "groups"}</strong></span>
-                {hasRevisionMetadata && <code aria-label={`Campaign revision ${campaign.revision}; target revision ${campaign.targetsRevision}`}>r{campaign.revision} · t{campaign.targetsRevision}</code>}
-              </div>}
             </div>
             <div className="campaign-workspace-content">
             {editorTab === "details" && <section aria-labelledby="campaign-editor-details-tab" className="campaign-tab-panel stack stack-lg" id="campaign-editor-details-panel" role="tabpanel">
