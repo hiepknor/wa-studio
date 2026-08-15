@@ -22,6 +22,7 @@ button:disabled { cursor: not-allowed; }
 
 .stack { display: flex; flex-direction: column; }
 .stack-xs { gap: 6px; }
+.stack-sm { gap: 12px; }
 .stack-md { gap: 18px; }
 .stack-lg { gap: 24px; }
 .muted-copy { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }

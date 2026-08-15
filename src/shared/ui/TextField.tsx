@@ -2,6 +2,7 @@ import { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from "rea
 
 import { AppIcon, type AppIconName } from "./AppIcon";
 import { FieldFrame } from "./FieldFrame";
+import { DEFAULT_FIELD_SIZE, type FieldSize } from "./field-size";
 import "./text-field.css";
 
 export interface TextFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "size"> {
@@ -12,7 +13,7 @@ export interface TextFieldProps extends Omit<InputHTMLAttributes<HTMLInputElemen
   label: ReactNode;
   labelHidden?: boolean;
   monospace?: boolean;
-  size?: "sm" | "md";
+  size?: FieldSize;
 }
 
 export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function TextField(
@@ -27,7 +28,7 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function T
     label,
     labelHidden = false,
     monospace = false,
-    size = "sm",
+    size = DEFAULT_FIELD_SIZE,
     ...props
   },
   ref,

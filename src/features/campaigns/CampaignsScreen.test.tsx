@@ -164,10 +164,20 @@ describe("CampaignsScreen", () => {
     expect(await screen.findByText(campaign.id)).toBeInTheDocument();
     await openCampaign(user);
 
-    expect(screen.queryByLabelText("Campaign metadata")).not.toBeInTheDocument();
-    expect(screen.getByText("Details are up to date")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Persisted details" })).toBeInTheDocument();
+    expect(screen.getByText("Campaign r3 · All changes saved")).toBeInTheDocument();
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+    expect(screen.getByText("7 chars")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Campaign name" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Message text" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset to saved" })).toBeDisabled();
+    await user.type(screen.getByRole("textbox", { name: "Campaign name" }), " updated");
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    expect(screen.getByText("Campaign r3 · Unsaved changes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset to saved" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Reset to saved" }));
+    expect(screen.getByRole("textbox", { name: "Campaign name" })).toHaveValue("Release");
+    expect(screen.getByText("Campaign r3 · All changes saved")).toBeInTheDocument();
     const schedule = screen.getByRole("combobox", { name: "Schedule" });
     await user.click(schedule);
     await user.click(screen.getByRole("option", { name: /Once/ }));
@@ -397,8 +407,8 @@ describe("CampaignsScreen", () => {
     await user.click(within(panel).getByRole("radio", { name: "Inactive" }));
     const minimum = within(panel).getByRole("spinbutton", { name: "Minimum" });
     const maximum = within(panel).getByRole("spinbutton", { name: "Maximum" });
-    expect(minimum.closest(".text-field")).toHaveClass("text-field-sm");
-    expect(maximum.closest(".text-field")).toHaveClass("text-field-sm");
+    expect(minimum.closest(".text-field")).toHaveClass("ui-field-xs");
+    expect(maximum.closest(".text-field")).toHaveClass("ui-field-xs");
     expect(minimum).toHaveClass("text-field-input-mono");
     expect(maximum).toHaveClass("text-field-input-mono");
     await user.type(minimum, "50");
@@ -662,6 +672,10 @@ describe("CampaignsScreen", () => {
     expect(checksPanel).not.toBeNull();
     expect(within(checksPanel!).getByText(status === "PASS" ? "Pass" : status === "WARN" ? "Warn" : "Block").closest(".status-indicator")).not.toBeNull();
     expect(within(result).getByRole("heading", { name: "Target issues" })).toBeInTheDocument();
+    const issuesPanel = within(result).getByRole("heading", { name: "Target issues" }).closest("section");
+    expect(issuesPanel).not.toBeNull();
+    expect(within(issuesPanel!).getByText("DENIED")).toHaveClass("ui-badge-danger");
+    expect(within(issuesPanel!).getByText("Denied room").parentElement).toHaveClass("preflight-evidence-copy");
     expect(within(result).getByText("Group capability")).toBeInTheDocument();
     expect(await screen.findByText("GROUP_CAPABILITY")).toBeInTheDocument();
     expect(screen.getByText("TARGET_CAPABILITY_DENIED")).toBeInTheDocument();

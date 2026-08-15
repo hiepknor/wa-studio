@@ -1,9 +1,14 @@
+// @ts-expect-error Vitest executes this contract test in Node.js.
+import { readFileSync } from "node:fs";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { SelectMenu } from "./SelectMenu";
+
+const selectMenuCss = readFileSync("src/shared/ui/select-menu.css", "utf8");
+const textFieldCss = readFileSync("src/shared/ui/text-field.css", "utf8");
 
 const OPTIONS = [
   { description: "No scheduled timestamp.", label: "Immediate", value: "IMMEDIATE" },
@@ -27,12 +32,25 @@ function ControlledSelectMenu({ onChange = vi.fn() }: { onChange?: (value: strin
 }
 
 describe("SelectMenu", () => {
+  it("derives dropdown height from the shared field control token", () => {
+    expect(textFieldCss).toContain("--field-control-font-size: 10px");
+    expect(textFieldCss).toContain("--field-control-font-size: 12px");
+    expect(textFieldCss).toContain("--field-control-height: 28px");
+    expect(textFieldCss).toContain("--field-control-height: 36px");
+    expect(textFieldCss).toContain("--field-control-height: 42px");
+    expect(textFieldCss).toContain("height: var(--field-control-height)");
+    expect(selectMenuCss).toContain("height: var(--field-control-height)");
+    expect(selectMenuCss).toContain("font-size: var(--field-control-font-size)");
+    expect(selectMenuCss).not.toMatch(/height:\s*(?:36|42)px/);
+  });
+
   it("exposes a labelled combobox and selects an option from the shared listbox", async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
     render(<ControlledSelectMenu onChange={onChange} />);
 
     const trigger = screen.getByRole("combobox", { name: "Schedule" });
+    expect(trigger.closest(".ui-field")).toHaveClass("ui-field-sm");
     expect(trigger).toHaveAccessibleDescription("Runtime schedule policy.");
     expect(trigger).toHaveTextContent("Immediate");
 
@@ -80,5 +98,32 @@ describe("SelectMenu", () => {
 
     await user.click(screen.getByRole("combobox", { name: "Schedule" }));
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("uses the shared field size contract", () => {
+    const { rerender } = render(
+      <SelectMenu
+        label="Schedule"
+        onChange={vi.fn()}
+        options={OPTIONS}
+        size="md"
+        value="IMMEDIATE"
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Schedule" }).closest(".ui-field"))
+      .toHaveClass("ui-field-md");
+
+    rerender(
+      <SelectMenu
+        label="Schedule"
+        onChange={vi.fn()}
+        options={OPTIONS}
+        size="sm"
+        value="IMMEDIATE"
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Schedule" }).closest(".ui-field"))
+      .toHaveClass("ui-field-sm");
   });
 });

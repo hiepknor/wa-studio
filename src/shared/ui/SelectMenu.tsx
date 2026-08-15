@@ -8,6 +8,11 @@ import {
 } from "react";
 
 import { AppIcon } from "./AppIcon";
+import {
+  DEFAULT_FIELD_SIZE,
+  type FieldSize,
+  fieldSizeClassName,
+} from "./field-size";
 import "./select-menu.css";
 import "./text-field.css";
 
@@ -30,6 +35,7 @@ interface SelectMenuProps<T extends string> {
   name?: string;
   onChange: (value: T) => void;
   options: readonly SelectMenuOption<T>[];
+  size?: FieldSize;
   value: T;
 }
 
@@ -52,6 +58,7 @@ export function SelectMenu<T extends string>({
   name,
   onChange,
   options,
+  size = DEFAULT_FIELD_SIZE,
   value,
 }: SelectMenuProps<T>) {
   const generatedId = useId();
@@ -142,7 +149,7 @@ export function SelectMenu<T extends string>({
   }
 
   return (
-    <div className={`text-field select-menu ${containerClassName}`.trim()} ref={rootRef}>
+    <div className={`text-field ${fieldSizeClassName(size)} select-menu ${containerClassName}`.trim()} ref={rootRef}>
       <span className="text-field-label" id={labelId}>{label}</span>
       <div className="select-menu-control">
         <button

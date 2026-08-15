@@ -1,14 +1,22 @@
+.ui-field {
+  --field-control-font-size: 12px;
+  --field-control-height: 36px;
+  --field-control-padding-inline: 11px;
+}
+.ui-field-xs {
+  --field-control-font-size: 10px;
+  --field-control-height: 28px;
+  --field-control-padding-inline: 9px;
+}
+.ui-field-md {
+  --field-control-height: 42px;
+  --field-control-padding-inline: 12px;
+}
 .text-field {
-  --text-field-height: 36px;
-  --text-field-padding-inline: 11px;
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 7px;
-}
-.text-field-md {
-  --text-field-height: 42px;
-  --text-field-padding-inline: 12px;
 }
 .text-field-label { color: #737987; font-size: 9px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
 .text-field-label-hidden {
@@ -32,13 +40,13 @@
   background: #0d0f14;
   color: var(--foreground);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--field-control-font-size);
   outline: none;
   transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
-.text-field-control select { width: 100%; height: 42px; padding: 0 12px; }
-.text-field-control input { height: var(--text-field-height); padding: 0 var(--text-field-padding-inline); }
-.text-field-control textarea { width: 100%; min-height: 88px; padding: 9px var(--text-field-padding-inline); resize: vertical; line-height: 1.5; }
+.text-field-control select,
+.text-field-control input { height: var(--field-control-height); padding: 0 var(--field-control-padding-inline); }
+.text-field-control textarea { width: 100%; min-height: 88px; padding: 9px var(--field-control-padding-inline); resize: vertical; line-height: 1.5; }
 .text-field-control input.text-field-input-with-icon { padding-left: 34px; }
 .text-field-control .text-field-input-mono { font-family: var(--font-mono); }
 .text-field-control input::placeholder,

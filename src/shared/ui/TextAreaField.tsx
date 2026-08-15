@@ -1,6 +1,7 @@
 import { forwardRef, useId, type ReactNode, type TextareaHTMLAttributes } from "react";
 
 import { FieldFrame } from "./FieldFrame";
+import { DEFAULT_FIELD_SIZE, type FieldSize } from "./field-size";
 import "./text-field.css";
 
 export interface TextAreaFieldProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
@@ -10,7 +11,7 @@ export interface TextAreaFieldProps extends TextareaHTMLAttributes<HTMLTextAreaE
   label: ReactNode;
   labelHidden?: boolean;
   monospace?: boolean;
-  size?: "sm" | "md";
+  size?: FieldSize;
 }
 
 export const TextAreaField = forwardRef<HTMLTextAreaElement, TextAreaFieldProps>(
@@ -24,7 +25,7 @@ export const TextAreaField = forwardRef<HTMLTextAreaElement, TextAreaFieldProps>
     label,
     labelHidden = false,
     monospace = false,
-    size = "sm",
+    size = DEFAULT_FIELD_SIZE,
     ...props
   }, ref) {
     const generatedId = useId();

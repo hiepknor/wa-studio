@@ -500,6 +500,13 @@ export function CampaignsScreen() {
     setFormErrors((current) => ({ ...current, [field]: undefined }));
   }
 
+  function resetDetailsToSaved() {
+    if (!campaign) return;
+    setForm(campaignFormFromDto(campaign));
+    setFormErrors({});
+    setDetailsError(null);
+  }
+
   async function saveDetails() {
     if (!selectedSessionId || !editable) return;
     const validation = validateCampaignForm(form);
@@ -913,7 +920,9 @@ export function CampaignsScreen() {
             : `${targetDiff.savedCount} saved target${targetDiff.savedCount === 1 ? "" : "s"} · No unsaved changes`;
   const footerState = editorTab === "details"
     ? campaign
-      ? detailsDirty ? "Unsaved detail changes" : "Details are up to date"
+      ? detailsDirty
+        ? `Campaign r${campaign.revision} · Unsaved changes`
+        : `Campaign r${campaign.revision} · All changes saved`
       : "Create the draft to unlock targets and preflight"
     : editorTab === "targets"
       ? targetChangeState
@@ -921,9 +930,12 @@ export function CampaignsScreen() {
   const editorStep = editorTab === "details" ? 1 : editorTab === "targets" ? 2 : 3;
   const editorStepLabel = editorTab === "details" ? "Details" : editorTab === "targets" ? "Targets" : "Preflight";
   const footerAction = editorTab === "details" ? (
-    <Button disabled={!editable || (Boolean(campaign) && !detailsDirty)} loading={savingDetails} onClick={() => void saveDetails()} variant="primary">
-      {campaign ? "Save details" : "Create draft"}
-    </Button>
+    <>
+      {campaign && <Button disabled={!editable || !detailsDirty || savingDetails} onClick={resetDetailsToSaved} variant="ghost">Reset to saved</Button>}
+      <Button disabled={!editable || savingDetails || (Boolean(campaign) && !detailsDirty)} loading={savingDetails} onClick={() => void saveDetails()} variant="primary">
+        {campaign ? "Save details" : "Create draft"}
+      </Button>
+    </>
   ) : editorTab === "targets" ? (
     <><Button disabled={!campaign || !editable || !targetsDirty || targetsLoading || targetsSaving} onClick={resetTargetsToSaved} variant="ghost">Reset to saved</Button><Button disabled={!campaign || !editable || !targetsDirty || targetsLoading} loading={targetsSaving} onClick={() => void saveTargets()} variant="primary">Save target set</Button></>
   ) : (
@@ -1012,8 +1024,33 @@ export function CampaignsScreen() {
             {editorTab === "details" && <section aria-labelledby="campaign-editor-details-tab" className="campaign-tab-panel stack stack-lg" id="campaign-editor-details-panel" role="tabpanel">
               <div className="campaign-section-heading"><div><span>Step 1 · Required</span><h3>Content &amp; schedule</h3><p>Define the message draft and when Runtime should schedule it.</p></div></div>
               {detailsError && <InlineAlert title="Could not save details">{detailsError}</InlineAlert>}
-              <section aria-labelledby="campaign-content-title" className="campaign-form-section stack stack-md"><h4 id="campaign-content-title">Message draft</h4><TextField error={formErrors.name} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} /><TextAreaField description="Plain text sent only by a later run milestone." disabled={!editable} error={formErrors.text} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} /></section>
-              <section aria-labelledby="campaign-timing-title" className="campaign-form-section stack stack-md"><div className="campaign-form-section-heading"><h4 id="campaign-timing-title">Delivery timing</h4><span>Managed by Runtime</span></div><SelectMenu description="Immediate uses canonical scheduledAt = null." disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />{form.scheduleType === "ONCE" && <TextField description="Stored by Runtime in UTC." disabled={!editable} error={formErrors.scheduledAt} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}</section>
+              <section aria-labelledby="campaign-details-card-title" className="campaign-details-card" data-dirty={Boolean(campaign && detailsDirty) || undefined}>
+                <header>
+                  <span className="campaign-details-card-icon"><AppIcon name="campaigns" size="sm" /></span>
+                  <div className="campaign-details-card-copy">
+                    <span>Campaign configuration</span>
+                    <div><h4 id="campaign-details-card-title">{campaign ? "Persisted details" : "New campaign draft"}</h4>{!campaign ? <Badge>New draft</Badge> : detailsDirty ? <Badge tone="warning">Unsaved changes</Badge> : <Badge tone="success">Saved</Badge>}</div>
+                    <p>{campaign ? "Content and timing stored by Runtime." : "Complete the required fields to create this draft."}</p>
+                  </div>
+                  <dl className="campaign-details-card-metrics">
+                    <div><dt>Revision</dt><dd>{campaign ? `r${campaign.revision}` : "—"}</dd></div>
+                    <div><dt>Schedule</dt><dd>{form.scheduleType === "IMMEDIATE" ? "Immediate" : "Once"}</dd></div>
+                    <div><dt>Message</dt><dd>{form.text.length} chars</dd></div>
+                  </dl>
+                </header>
+                <section aria-labelledby="campaign-content-title" className="campaign-details-section stack stack-md">
+                  <div className="campaign-form-section-heading"><div><h4 id="campaign-content-title">Message content</h4><p>Name this campaign and prepare the plain-text message used by future runs.</p></div></div>
+                  <TextField error={formErrors.name} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} />
+                  <TextAreaField description={<span className="campaign-message-description"><span>Plain-text message used by future campaign runs.</span><span>{form.text.length} characters</span></span>} disabled={!editable} error={formErrors.text} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} />
+                </section>
+                <section aria-labelledby="campaign-timing-title" className="campaign-details-section stack stack-md">
+                  <div className="campaign-form-section-heading"><div><h4 id="campaign-timing-title">Delivery timing</h4><p>Choose when Runtime should make this campaign eligible to run.</p></div><span>Managed by Runtime</span></div>
+                  <div className="campaign-details-timing-grid">
+                    <SelectMenu description={form.scheduleType === "IMMEDIATE" ? "Send when a campaign run begins." : "Send at the scheduled date and time."} disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />
+                    {form.scheduleType === "ONCE" && <TextField description="Displayed in your local time and stored by Runtime in UTC." disabled={!editable} error={formErrors.scheduledAt} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}
+                  </div>
+                </section>
+              </section>
             </section>}
 
             {editorTab === "targets" && <section aria-labelledby="campaign-editor-targets-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-targets-panel" role="tabpanel">
@@ -1191,8 +1228,8 @@ function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; 
         </dl>
       </section>
       <div className="preflight-columns">
-        <section className="preflight-evidence-panel"><header><div><h4>Policy checks</h4><p>Each check contributes to Runtime's decision.</p></div><Badge tone="neutral">{report.checks.length}</Badge></header><ul>{report.checks.map((check) => <li key={check.code}><StatusIndicator className="preflight-check-status" glow tone={reportTone(check.status)}>{preflightCheckStatusLabel(check.status)}</StatusIndicator><span><strong>{PREFLIGHT_CHECK_LABELS[check.code] ?? "Runtime policy check"}</strong><code>{check.code}</code><small>{check.message}</small></span></li>)}</ul></section>
-        <section className="preflight-evidence-panel"><header><div><h4>Target issues</h4><p>Groups that require operator attention.</p></div><Badge tone={report.targetIssues.length ? "warning" : "success"}>{report.targetIssues.length}</Badge></header>{!report.targetIssues.length ? <div className="preflight-no-issues"><AppIcon name="check" size="sm" /><span>No target issues reported.</span></div> : <ul>{report.targetIssues.map((issue) => <li key={`${issue.groupId}-${issue.reason}`}><Badge tone={issue.capability === "DENIED" ? "danger" : "warning"}>{issue.capability}</Badge><span><strong>{issue.groupName}</strong><small>{PREFLIGHT_ISSUE_LABELS[issue.reason] ?? "Runtime reported a target issue"}</small><code>{issue.reason}</code></span></li>)}</ul>}</section>
+        <section className="preflight-evidence-panel"><header><div><h4>Policy checks</h4><p>Each check contributes to Runtime's decision.</p></div><Badge tone="neutral">{report.checks.length}</Badge></header><ul>{report.checks.map((check) => <li key={check.code}><StatusIndicator className="preflight-check-status" glow tone={reportTone(check.status)}>{preflightCheckStatusLabel(check.status)}</StatusIndicator><span className="preflight-evidence-copy"><strong>{PREFLIGHT_CHECK_LABELS[check.code] ?? "Runtime policy check"}</strong><code>{check.code}</code><small>{check.message}</small></span></li>)}</ul></section>
+        <section className="preflight-evidence-panel"><header><div><h4>Target issues</h4><p>Groups that require operator attention.</p></div><Badge tone={report.targetIssues.length ? "warning" : "success"}>{report.targetIssues.length}</Badge></header>{!report.targetIssues.length ? <div className="preflight-no-issues"><AppIcon name="check" size="sm" /><span>No target issues reported.</span></div> : <ul>{report.targetIssues.map((issue) => <li key={`${issue.groupId}-${issue.reason}`}><Badge tone={issue.capability === "DENIED" ? "danger" : "warning"}>{issue.capability}</Badge><span className="preflight-evidence-copy"><strong>{issue.groupName}</strong><small>{PREFLIGHT_ISSUE_LABELS[issue.reason] ?? "Runtime reported a target issue"}</small><code>{issue.reason}</code></span></li>)}</ul>}</section>
       </div>
     </section>
   );

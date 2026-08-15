@@ -26,6 +26,6 @@ describe("SearchField", () => {
     await user.type(search, "release");
     expect(search).toHaveValue("release");
     expect(search).toHaveAttribute("type", "search");
-    expect(search.closest(".text-field")).toHaveClass("text-field-sm");
+    expect(search.closest(".text-field")).toHaveClass("ui-field-sm");
   });
 });

@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
 
+import {
+  DEFAULT_FIELD_SIZE,
+  type FieldSize,
+  fieldSizeClassName,
+} from "./field-size";
+
 interface FieldFrameProps {
   children: ReactNode;
   containerClassName?: string;
@@ -11,7 +17,7 @@ interface FieldFrameProps {
   invalid?: boolean;
   label: ReactNode;
   labelHidden?: boolean;
-  size?: "sm" | "md";
+  size?: FieldSize;
 }
 
 export function FieldFrame({
@@ -25,14 +31,14 @@ export function FieldFrame({
   invalid = false,
   label,
   labelHidden = false,
-  size = "sm",
+  size = DEFAULT_FIELD_SIZE,
 }: FieldFrameProps) {
   const message = error ?? description;
   const messageId = error ? errorId : descriptionId;
 
   return (
     <div
-      className={`text-field text-field-${size} ${containerClassName}`.trim()}
+      className={`text-field ${fieldSizeClassName(size)} ${containerClassName}`.trim()}
       data-invalid={invalid || undefined}
     >
       <label className={labelHidden ? "text-field-label-hidden" : "text-field-label"} htmlFor={inputId}>

@@ -23,7 +23,7 @@ describe("shared UI primitives", () => {
     const input = screen.getByRole("textbox", { name: "WA Runtime API key" });
     expect(input).toHaveAccessibleDescription("Never written to disk.");
     expect(input).toHaveClass("text-field-input-mono", "text-field-input-with-icon");
-    expect(input.closest(".text-field")).toHaveClass("text-field-sm");
+    expect(input.closest(".text-field")).toHaveClass("ui-field", "ui-field-sm");
   });
 
   it("connects shared textarea and select labels to accessible descriptions", () => {
@@ -32,7 +32,24 @@ describe("shared UI primitives", () => {
       <SelectField description="Runtime schedule policy." label="Schedule"><option>Immediate</option></SelectField>
     </>);
     expect(screen.getByRole("textbox", { name: "Message text" })).toHaveAccessibleDescription("Persisted campaign content.");
-    expect(screen.getByRole("combobox", { name: "Schedule" })).toHaveAccessibleDescription("Runtime schedule policy.");
+    const select = screen.getByRole("combobox", { name: "Schedule" });
+    expect(select).toHaveAccessibleDescription("Runtime schedule policy.");
+    expect(select.closest(".text-field")).toHaveClass("ui-field", "ui-field-sm");
+  });
+
+  it("applies the same explicit size contract to native field primitives", () => {
+    render(<>
+      <TextField label="Campaign name" size="md" />
+      <TextAreaField label="Message text" size="md" />
+      <SelectField label="Schedule" size="md"><option>Immediate</option></SelectField>
+    </>);
+
+    expect(screen.getByRole("textbox", { name: "Campaign name" }).closest(".ui-field"))
+      .toHaveClass("ui-field-md");
+    expect(screen.getByRole("textbox", { name: "Message text" }).closest(".ui-field"))
+      .toHaveClass("ui-field-md");
+    expect(screen.getByRole("combobox", { name: "Schedule" }).closest(".ui-field"))
+      .toHaveClass("ui-field-md");
   });
 
   it("uses one accessible invalid-state contract for textbox and textarea", () => {
