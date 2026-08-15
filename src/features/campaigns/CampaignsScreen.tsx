@@ -145,6 +145,11 @@ export function CampaignsScreen() {
   listStateRef.current = listState;
 
   const campaign = editor.kind === "open" ? editor.campaign : null;
+  const hasRevisionMetadata = Boolean(
+    campaign
+    && Number.isInteger(campaign.revision)
+    && Number.isInteger(campaign.targetsRevision),
+  );
   const editable = !campaign || campaign.status === "DRAFT";
   const detailsDirty = campaign ? hasCampaignChanges(campaign, form) : true;
   const targetIds = useMemo(() => targets.map((target) => target.groupId), [targets]);
@@ -559,12 +564,12 @@ export function CampaignsScreen() {
                   { badge: preflight?.status, disabled: !campaign, id: "preflight", label: "Preflight", step: 3, warning: reportStale },
                 ]}
               />
-              {campaign && <dl aria-label="Campaign metadata" className="campaign-workspace-meta">
-                <div><dt>Status</dt><dd><Badge tone={statusTone(campaign.status)}>{campaign.status}</Badge></dd></div>
-                <div><dt>Schedule</dt><dd>{form.scheduleType === "IMMEDIATE" ? "Immediate" : formatDraftSchedule(form.scheduledAt)}</dd></div>
-                <div><dt>Targets</dt><dd>{draftTargetIds.length}</dd></div>
-                <div><dt>Revision</dt><dd>r{campaign.revision} · t{campaign.targetsRevision}</dd></div>
-              </dl>}
+              {campaign && <div aria-label="Campaign metadata" className="campaign-workspace-meta" role="group">
+                <Badge tone={statusTone(campaign.status)}>{campaign.status}</Badge>
+                <span className="campaign-workspace-fact"><span>Schedule</span><strong>{form.scheduleType === "IMMEDIATE" ? "Immediate" : formatDraftSchedule(form.scheduledAt)}</strong></span>
+                <span className="campaign-workspace-fact"><span>Targets</span><strong>{draftTargetIds.length} {draftTargetIds.length === 1 ? "group" : "groups"}</strong></span>
+                {hasRevisionMetadata && <code aria-label={`Campaign revision ${campaign.revision}; target revision ${campaign.targetsRevision}`}>r{campaign.revision} · t{campaign.targetsRevision}</code>}
+              </div>}
             </div>
             <div className="campaign-workspace-content">
             {editorTab === "details" && <section aria-labelledby="campaign-editor-details-tab" className="campaign-tab-panel stack stack-lg" id="campaign-editor-details-panel" role="tabpanel">

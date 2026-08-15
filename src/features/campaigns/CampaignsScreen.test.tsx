@@ -146,6 +146,22 @@ describe("CampaignsScreen", () => {
     expect(screen.getByRole("button", { name: "New campaign" })).toBeEnabled();
   });
 
+  it("omits incomplete revision metadata instead of rendering broken placeholders", async () => {
+    const user = userEvent.setup();
+    const incompleteCampaign = {
+      ...campaign,
+      revision: undefined,
+      targetsRevision: undefined,
+    } as unknown as RuntimeCampaign;
+    renderCampaigns({}, [incompleteCampaign]);
+    await connect(user);
+    await openCampaign(user);
+
+    const metadata = screen.getByLabelText("Campaign metadata");
+    await waitFor(() => expect(within(metadata).getByText("1 group")).toBeInTheDocument());
+    expect(within(metadata).queryByLabelText(/Campaign revision/)).not.toBeInTheDocument();
+  });
+
   it("uses the shared confirmation dialog before discarding drawer edits", async () => {
     const user = userEvent.setup();
     renderCampaigns({}, []);
