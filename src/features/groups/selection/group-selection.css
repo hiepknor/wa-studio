@@ -1,4 +1,4 @@
-.group-selection-section { display: flex; flex-direction: column; gap: 10px; }
+.group-selection-section { container: group-selection / inline-size; display: flex; flex-direction: column; gap: 10px; }
 .group-selection-data {
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 7%);
@@ -91,7 +91,7 @@
 .group-selection-table-empty { height: 92px !important; color: var(--dim); text-align: center; }
 .group-selection-page-note { margin: -2px 0 0; color: var(--dim); font-size: 8px; line-height: 1.45; }
 
-@media (max-width: 600px) {
+@container group-selection (max-width: 520px) {
   .group-selection-heading { align-items: flex-start; flex-direction: column; }
   .group-selection-filter-panel .data-filter-panel-body { grid-template-columns: 1fr; }
   .group-selection-filter-panel .data-filter-panel-body fieldset:nth-child(even) { border-left: 0; }
