@@ -8,7 +8,6 @@ import {
 import { GroupSelectionToolbar } from "@/features/groups/selection/GroupSelectionToolbar";
 import { useGroupDirectoryQuery } from "@/features/groups/selection/useGroupDirectoryQuery";
 import {
-  applyGroupSelectionSnapshot,
   groupSelectionRowOrder,
   sameGroupSelection,
 } from "@/features/groups/selection/group-selection";
@@ -18,8 +17,9 @@ import {
   type RuntimeCampaignExecutionMode,
   type RuntimeCampaignPage,
   type RuntimeCampaignPreflight,
+  type RuntimeCampaignRun,
   type RuntimeCampaignTarget,
-  type RuntimeGroupListGroup,
+  type RuntimeCampaignTargetSource,
   type RuntimeSavedGroupList,
 } from "@/shared/api/runtime-client";
 import { AppIcon } from "@/shared/ui/AppIcon";
@@ -115,6 +115,13 @@ function reportTone(status: "PASS" | "WARN" | "BLOCK") {
   return "danger" as const;
 }
 
+function runTone(status: RuntimeCampaignRun["status"]) {
+  if (status === "COMPLETED" || status === "RUNNING") return "success" as const;
+  if (status === "SCHEDULED" || status === "PAUSED" || status === "PREPARING") return "warning" as const;
+  if (status === "BLOCKED" || status === "PARTIAL_FAILED" || status === "FAILED") return "danger" as const;
+  return "neutral" as const;
+}
+
 export function CampaignsScreen() {
   const { connected, selectedSessionId } = useRuntimeConnection();
   const toast = useToast();
@@ -135,18 +142,29 @@ export function CampaignsScreen() {
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [targets, setTargets] = useState<RuntimeCampaignTarget[]>([]);
   const [draftTargetIds, setDraftTargetIds] = useState<string[]>([]);
+  const [targetsRevision, setTargetsRevision] = useState<number | null>(null);
+  const [targetSource, setTargetSource] = useState<RuntimeCampaignTargetSource | null>(null);
+  const [targetSourceName, setTargetSourceName] = useState<string | null>(null);
   const [targetsLoading, setTargetsLoading] = useState(false);
   const [targetsSaving, setTargetsSaving] = useState(false);
   const [targetsError, setTargetsError] = useState<string | null>(null);
   const [targetNotice, setTargetNotice] = useState<string | null>(null);
   const [revisionRefreshRequired, setRevisionRefreshRequired] = useState(false);
-  const [appliedListRows, setAppliedListRows] = useState<Record<string, RuntimeGroupListGroup>>({});
   const [preflightMode, setPreflightMode] = useState<RuntimeCampaignExecutionMode>("DRY_RUN");
   const [preflight, setPreflight] = useState<RuntimeCampaignPreflight | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [preflightError, setPreflightError] = useState<string | null>(null);
+  const [runs, setRuns] = useState<RuntimeCampaignRun[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [runMutation, setRunMutation] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [liveLaunchConfirmationOpen, setLiveLaunchConfirmationOpen] = useState(false);
   const createKeyRef = useRef<string | null>(null);
+  const launchKeyRef = useRef<{ key: string; mode: RuntimeCampaignExecutionMode } | null>(null);
   const editorEpochRef = useRef(0);
+  const targetRequestRef = useRef(0);
+  const runRequestRef = useRef(0);
+  const targetsRevisionRef = useRef<number | null>(null);
   const listRequestRef = useRef(0);
   const listTargetRef = useRef(campaignListRequestKey(listState));
   const pageKeyRef = useRef("");
@@ -155,6 +173,7 @@ export function CampaignsScreen() {
   const currentListRequestKey = campaignListRequestKey(listState);
   listTargetRef.current = currentListRequestKey;
   listStateRef.current = listState;
+  targetsRevisionRef.current = targetsRevision;
 
   const campaign = editor.kind === "open" ? editor.campaign : null;
   const campaignId = campaign?.id ?? null;
@@ -191,19 +210,18 @@ export function CampaignsScreen() {
   const targetRows = useMemo(() => {
     return targetRowOrder.rowIds.flatMap<GroupSelectionRow>((groupId) => {
       const group = groupDirectory.knownGroups[groupId];
-      const applied = appliedListRows[groupId];
       const target = targetById.get(groupId);
-      const sendCapability = group?.sendCapability ?? applied?.sendCapability ?? target?.sendCapability;
+      const sendCapability = group?.sendCapability ?? target?.sendCapability;
       if (!sendCapability) return [];
       return [{
         groupId,
-        groupName: target?.groupName ?? applied?.groupName ?? group?.name ?? groupId,
-        isActive: group?.isActive ?? applied?.isActive ?? target?.enabled ?? true,
-        participantsCount: group?.participantsCount ?? applied?.participantsCount ?? null,
+        groupName: target?.groupName ?? group?.name ?? groupId,
+        isActive: group?.isActive ?? target?.enabled ?? true,
+        participantsCount: group?.participantsCount ?? null,
         sendCapability,
       }];
     });
-  }, [appliedListRows, groupDirectory.knownGroups, targetById, targetRowOrder]);
+  }, [groupDirectory.knownGroups, targetById, targetRowOrder]);
   const pinnedTargetIds = targetRowOrder.pinnedIds;
   const targetsDirty = !sameGroupSelection(targetIds, draftTargetIds);
   const reportStale = Boolean(
@@ -270,7 +288,14 @@ export function CampaignsScreen() {
     setFiltersOpen(false);
     setListLoading(false);
     setListError(null);
-    setAppliedListRows({});
+    targetRequestRef.current += 1;
+    runRequestRef.current += 1;
+    launchKeyRef.current = null;
+    setTargetsLoading(false);
+    setTargetsSaving(false);
+    setRunsLoading(false);
+    setRunMutation(null);
+    setLiveLaunchConfirmationOpen(false);
     setPreflight(null);
   }, [listState.sessionId, selectedSessionId]);
 
@@ -293,27 +318,65 @@ export function CampaignsScreen() {
   useEffect(() => () => {
     listRequestRef.current += 1;
     listTargetRef.current = "";
+    editorEpochRef.current += 1;
+    targetRequestRef.current += 1;
+    runRequestRef.current += 1;
   }, []);
 
-  async function loadTargets(campaignId: string, epoch: number) {
+  async function loadTargets(campaignId: string, epoch: number, preserveError = false) {
+    const request = ++targetRequestRef.current;
     setTargetsLoading(true);
-    setTargetsError(null);
+    if (!preserveError) setTargetsError(null);
     try {
       const result = await api.listCampaignTargets(campaignId);
-      if (epoch !== editorEpochRef.current) return;
+      if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) return;
       setTargets(result.data);
       setDraftTargetIds(result.data.map((target) => target.groupId));
+      setTargetsRevision(result.targetsRevision);
+      setTargetSource(result.source);
+      setTargetSourceName(null);
     } catch (error) {
-      if (epoch !== editorEpochRef.current) return;
+      if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) return;
       setTargetsError(campaignErrorMessage(error, "Could not load campaign targets."));
     } finally {
-      if (epoch === editorEpochRef.current) setTargetsLoading(false);
+      if (epoch === editorEpochRef.current && request === targetRequestRef.current) setTargetsLoading(false);
+    }
+  }
+
+  async function loadRuns(campaignId: string, epoch: number, refreshCampaign = false) {
+    const request = ++runRequestRef.current;
+    setRunsLoading(true);
+    setRunError(null);
+    try {
+      const page = await api.listCampaignRuns(campaignId, 20, 0);
+      if (epoch !== editorEpochRef.current || request !== runRequestRef.current) return;
+      setRuns(page.data);
+      if (refreshCampaign) {
+        const refreshed = await api.getCampaign(campaignId);
+        if (
+          epoch !== editorEpochRef.current
+          || request !== runRequestRef.current
+          || refreshed.sessionId !== selectedSessionId
+        ) return;
+        setEditor({ campaign: refreshed, kind: "open" });
+        setForm(campaignFormFromDto(refreshed));
+        if (targetsRevisionRef.current !== refreshed.targetsRevision) {
+          void loadTargets(campaignId, epoch);
+        }
+        void loadCampaigns(listStateRef.current);
+      }
+    } catch (error) {
+      if (epoch !== editorEpochRef.current || request !== runRequestRef.current) return;
+      setRunError(campaignErrorMessage(error, "Could not load campaign runs."));
+    } finally {
+      if (epoch === editorEpochRef.current && request === runRequestRef.current) setRunsLoading(false);
     }
   }
 
   function openCreate() {
     editorEpochRef.current += 1;
     createKeyRef.current = null;
+    launchKeyRef.current = null;
     setEditor({ campaign: null, kind: "open" });
     setEditorTab("details");
     setForm(emptyCampaignForm());
@@ -321,9 +384,18 @@ export function CampaignsScreen() {
     setDetailsError(null);
     setTargets([]);
     setDraftTargetIds([]);
+    setTargetsRevision(null);
+    setTargetSource(null);
+    setTargetSourceName(null);
     setTargetNotice(null);
     setRevisionRefreshRequired(false);
-    setAppliedListRows({});
+    setTargetsLoading(false);
+    setTargetsSaving(false);
+    setRuns([]);
+    setRunsLoading(false);
+    setRunMutation(null);
+    setRunError(null);
+    setLiveLaunchConfirmationOpen(false);
     setPreflightMode("DRY_RUN");
     setPreflight(null);
     setPreflightError(null);
@@ -332,6 +404,7 @@ export function CampaignsScreen() {
   function openCampaign(selected: RuntimeCampaign) {
     const epoch = ++editorEpochRef.current;
     createKeyRef.current = null;
+    launchKeyRef.current = null;
     setEditor({ campaign: selected, kind: "open" });
     setEditorTab("details");
     setForm(campaignFormFromDto(selected));
@@ -339,21 +412,42 @@ export function CampaignsScreen() {
     setDetailsError(null);
     setTargets([]);
     setDraftTargetIds([]);
+    setTargetsRevision(selected.targetsRevision);
+    setTargetSource(null);
+    setTargetSourceName(null);
     setTargetNotice(null);
     setRevisionRefreshRequired(false);
+    setTargetsLoading(false);
+    setTargetsSaving(false);
     setPreflight(null);
     setPreflightError(null);
     setPreflightMode("DRY_RUN");
-    setAppliedListRows({});
-    setTargetNotice(null);
+    setRuns([]);
+    setRunsLoading(false);
+    setRunMutation(null);
+    setRunError(null);
+    setLiveLaunchConfirmationOpen(false);
     void loadTargets(selected.id, epoch);
+    void loadRuns(selected.id, epoch);
   }
 
   function closeEditor() {
     editorEpochRef.current += 1;
+    targetRequestRef.current += 1;
+    runRequestRef.current += 1;
     createKeyRef.current = null;
+    launchKeyRef.current = null;
     setEditor({ kind: "closed" });
-    setAppliedListRows({});
+    setTargetsRevision(null);
+    setTargetSource(null);
+    setTargetSourceName(null);
+    setRuns([]);
+    setRunsLoading(false);
+    setRunMutation(null);
+    setRunError(null);
+    setLiveLaunchConfirmationOpen(false);
+    setTargetsLoading(false);
+    setTargetsSaving(false);
     setPreflight(null);
     setDiscardConfirmationOpen(false);
   }
@@ -444,43 +538,84 @@ export function CampaignsScreen() {
     setTargetNotice(null);
   }
 
-  function applySavedGroupList(
-    groupIds: string[],
-    mode: "add" | "replace",
-    list: RuntimeSavedGroupList,
-    listGroups: RuntimeGroupListGroup[],
-  ): { message: string; ok: boolean } {
+  async function applySavedGroupList(list: RuntimeSavedGroupList): Promise<{
+    message: string;
+    ok: boolean;
+    reloadLists?: boolean;
+  }> {
     setTargetNotice(null);
-    if (list.sessionId !== selectedSessionId || list.archivedAt !== null) {
+    if (
+      !campaign
+      || targetsRevision === null
+      || list.sessionId !== campaign.sessionId
+      || list.archivedAt !== null
+    ) {
       return { message: "This saved list is not available in the campaign session.", ok: false };
     }
-    const outcome = applyGroupSelectionSnapshot(draftTargetIds, groupIds, mode);
-    if (!outcome.ok) {
-      return {
-        message: `Applying ${list.name} would exceed the 1,000-group campaign target limit. The staged selection was not changed.`,
-        ok: false,
-      };
-    }
-    setAppliedListRows((current) => ({
-      ...current,
-      ...Object.fromEntries(listGroups.map((group) => [group.groupId, group])),
-    }));
-    setDraftTargetIds(outcome.nextIds);
-    setTargetsError(null);
-    if (mode === "replace") {
-      return {
-        message: outcome.nextIds.length
-          ? `Staged selection replaced with ${outcome.nextIds.length} groups from ${list.name}. Save target set to persist.`
-          : `Empty list ${list.name} staged an empty target set. Save target set to persist.`,
-        ok: true,
-      };
-    }
-    return {
-      message: outcome.addedCount
-        ? `${outcome.addedCount} group${outcome.addedCount === 1 ? "" : "s"} added from ${list.name}. Save target set to persist.`
-        : `${list.name} added no new groups; the staged selection was unchanged.`,
-      ok: true,
+    const epoch = editorEpochRef.current;
+    const request = ++targetRequestRef.current;
+    const identity = {
+      campaignId: campaign.id,
+      campaignRevision: campaign.revision,
+      groupListId: list.id,
+      membershipRevision: list.membershipRevision,
+      sessionId: campaign.sessionId,
+      targetsRevision,
     };
+    setTargetsSaving(true);
+    setTargetsError(null);
+    try {
+      const canonical = await api.applyGroupListToCampaignTargets(campaign.id, {
+        groupListId: list.id,
+        expectedMembershipRevision: list.membershipRevision,
+        expectedTargetsRevision: targetsRevision,
+      });
+      if (
+        epoch !== editorEpochRef.current
+        || request !== targetRequestRef.current
+        || editor.kind !== "open"
+        || editor.campaign?.id !== identity.campaignId
+        || editor.campaign.sessionId !== identity.sessionId
+        || editor.campaign.revision !== identity.campaignRevision
+        || targetsRevisionRef.current !== identity.targetsRevision
+        || canonical.source?.groupListId !== identity.groupListId
+      ) return { message: "The editor changed while the list was applying. Reload targets before continuing.", ok: false };
+      setTargets(canonical.data);
+      setDraftTargetIds(canonical.data.map((target) => target.groupId));
+      setTargetsRevision(canonical.targetsRevision);
+      setTargetSource(canonical.source);
+      setTargetSourceName(list.name);
+      setEditor({ campaign: {
+        ...campaign,
+        targetCount: canonical.data.length,
+        targetsRevision: canonical.targetsRevision,
+      }, kind: "open" });
+      setPreflight(null);
+      setRevisionRefreshRequired(false);
+      setTargetNotice(`${list.name} membership revision ${list.membershipRevision} was applied as the persisted target snapshot.`);
+      void loadCampaigns(listStateRef.current);
+      return { message: "Saved list applied.", ok: true };
+    } catch (error) {
+      if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) {
+        return { message: "The editor changed while the list was applying.", ok: false };
+      }
+      const code = error instanceof RuntimeRequestError ? error.code : null;
+      const message = campaignErrorMessage(error, "Could not apply the saved list.");
+      setTargetsError(message);
+      if (code === "CAMPAIGN_TARGETS_REVISION_CONFLICT") {
+        setTargetsSaving(false);
+        void loadTargets(campaign.id, epoch, true);
+      }
+      return {
+        message,
+        ok: false,
+        reloadLists: code === "CAMPAIGN_TARGET_SOURCE_REVISION_CONFLICT",
+      };
+    } finally {
+      if (epoch === editorEpochRef.current && request === targetRequestRef.current) {
+        setTargetsSaving(false);
+      }
+    }
   }
 
   function toggleAllPageTargets() {
@@ -509,53 +644,69 @@ export function CampaignsScreen() {
 
   function resetTargetsToSaved() {
     setDraftTargetIds(targetIds);
-    setAppliedListRows({});
     setTargetsError(null);
     setTargetNotice("Staged selection reset to the saved target set.");
   }
 
   async function saveTargets() {
-    if (!campaign || !editable) return;
+    if (!campaign || !editable || targetsRevision === null) return;
     const validation = validateTargetReplacement(draftTargetIds);
     if (!validation.ok) {
       setTargetsError(campaignErrorMessage({ code: validation.code }, "Invalid target set."));
       return;
     }
     const epoch = editorEpochRef.current;
-    let replacementCommitted = false;
+    const request = ++targetRequestRef.current;
+    const expectedRevision = targetsRevision;
     setTargetsSaving(true);
     setTargetsError(null);
     try {
-      const canonical = await api.replaceCampaignTargets(campaign.id, validation.groupIds);
-      if (epoch !== editorEpochRef.current) return;
-      replacementCommitted = true;
+      const canonical = await api.replaceCampaignTargets(
+        campaign.id,
+        validation.groupIds,
+        expectedRevision,
+      );
+      if (
+        epoch !== editorEpochRef.current
+        || request !== targetRequestRef.current
+        || targetsRevisionRef.current !== expectedRevision
+      ) return;
       setTargets(canonical.data);
       setDraftTargetIds(canonical.data.map((target) => target.groupId));
+      setTargetsRevision(canonical.targetsRevision);
+      setTargetSource(canonical.source);
+      setTargetSourceName(null);
       setTargetNotice(null);
       setPreflight(null);
-      setRevisionRefreshRequired(true);
-      const refreshed = await api.getCampaign(campaign.id);
-      if (epoch !== editorEpochRef.current || refreshed.sessionId !== selectedSessionId) return;
-      setEditor({ campaign: refreshed, kind: "open" });
-      setForm(campaignFormFromDto(refreshed));
+      setEditor({ campaign: {
+        ...campaign,
+        targetCount: canonical.data.length,
+        targetsRevision: canonical.targetsRevision,
+      }, kind: "open" });
       setRevisionRefreshRequired(false);
       void loadCampaigns(listStateRef.current);
       toast.notify({ id: `targets-saved-${campaign.id}`, title: "Target set saved.", tone: "success" });
     } catch (error) {
-      if (epoch !== editorEpochRef.current) return;
-      setTargetsError(replacementCommitted
-        ? "Targets were replaced, but the campaign revision could not be refreshed. Reopen the campaign before preflight."
-        : campaignErrorMessage(error, "Could not replace campaign targets."));
-      // Keep the last authoritative target list; staged choices remain clearly unsaved.
+      if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) return;
+      setTargetsError(campaignErrorMessage(error, "Could not replace campaign targets."));
+      if (error instanceof RuntimeRequestError && error.code === "CAMPAIGN_TARGETS_REVISION_CONFLICT") {
+        setTargetsSaving(false);
+        void loadTargets(campaign.id, epoch, true);
+      }
     } finally {
-      if (epoch === editorEpochRef.current) setTargetsSaving(false);
+      if (epoch === editorEpochRef.current && request === targetRequestRef.current) {
+        setTargetsSaving(false);
+      }
     }
   }
 
   async function runPreflight(executionMode: RuntimeCampaignExecutionMode) {
-    if (!campaign || detailsDirty || targetsDirty || revisionRefreshRequired) return;
+    if (!campaign || targetsRevision === null || detailsDirty || targetsDirty || revisionRefreshRequired) return;
     const epoch = editorEpochRef.current;
     const campaignId = campaign.id;
+    const campaignRevision = campaign.revision;
+    const expectedTargetsRevision = targetsRevision;
+    launchKeyRef.current = null;
     setPreflightLoading(true);
     setPreflightError(null);
     try {
@@ -565,6 +716,8 @@ export function CampaignsScreen() {
         || editor.kind !== "open"
         || editor.campaign?.id !== campaignId
         || editor.campaign.sessionId !== selectedSessionId
+        || report.campaignRevision !== campaignRevision
+        || report.targetsRevision !== expectedTargetsRevision
       ) return;
       setPreflight(report);
     } catch (error) {
@@ -572,6 +725,133 @@ export function CampaignsScreen() {
       setPreflightError(campaignErrorMessage(error, "Could not run preflight."));
     } finally {
       if (epoch === editorEpochRef.current) setPreflightLoading(false);
+    }
+  }
+
+  function changePreflightMode(executionMode: RuntimeCampaignExecutionMode) {
+    setPreflightMode(executionMode);
+    if (preflight?.executionMode !== executionMode) setPreflight(null);
+    launchKeyRef.current = null;
+    setPreflightError(null);
+  }
+
+  async function refreshCampaignAfterRun(campaignId: string, epoch: number, request: number) {
+    const refreshed = await api.getCampaign(campaignId);
+    if (
+      epoch !== editorEpochRef.current
+      || request !== runRequestRef.current
+      || refreshed.sessionId !== selectedSessionId
+    ) return;
+    setEditor({ campaign: refreshed, kind: "open" });
+    setForm(campaignFormFromDto(refreshed));
+    setPreflight((current) => current && isPreflightStale(current, refreshed) ? null : current);
+    void loadTargets(campaignId, epoch);
+    void loadCampaigns(listStateRef.current);
+  }
+
+  async function launchRun(executionMode: RuntimeCampaignExecutionMode) {
+    if (
+      !campaign
+      || targetsRevision === null
+      || !preflight
+      || reportStale
+      || preflight.status === "BLOCK"
+      || preflight.executionMode !== executionMode
+    ) return;
+    const epoch = editorEpochRef.current;
+    const request = ++runRequestRef.current;
+    const identity = {
+      campaignId: campaign.id,
+      campaignRevision: campaign.revision,
+      sessionId: campaign.sessionId,
+      targetsRevision,
+    };
+    if (!launchKeyRef.current || launchKeyRef.current.mode !== executionMode) {
+      launchKeyRef.current = { key: crypto.randomUUID(), mode: executionMode };
+    }
+    const key = launchKeyRef.current.key;
+    setLiveLaunchConfirmationOpen(false);
+    setRunMutation(`launch:${executionMode}`);
+    setRunError(null);
+    try {
+      const run = await api.createCampaignRun(campaign.id, {
+        executionMode,
+        expectedCampaignRevision: campaign.revision,
+        expectedTargetsRevision: targetsRevision,
+      }, key);
+      if (
+        epoch !== editorEpochRef.current
+        || request !== runRequestRef.current
+        || editor.kind !== "open"
+        || editor.campaign?.id !== identity.campaignId
+        || editor.campaign.sessionId !== identity.sessionId
+        || editor.campaign.revision !== identity.campaignRevision
+        || targetsRevisionRef.current !== identity.targetsRevision
+      ) return;
+      setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+      launchKeyRef.current = null;
+      if (executionMode === "LIVE") {
+        await refreshCampaignAfterRun(campaign.id, epoch, request);
+      }
+      toast.notify({
+        id: `campaign-run-${run.id}`,
+        title: executionMode === "LIVE" ? "Live campaign launched." : "Dry run created.",
+        tone: "success",
+      });
+    } catch (error) {
+      if (epoch !== editorEpochRef.current || request !== runRequestRef.current) return;
+      const code = error instanceof RuntimeRequestError ? error.code : null;
+      setRunError(campaignErrorMessage(error, "Could not create campaign run."));
+      if (code === "CAMPAIGN_RUN_REVISION_CONFLICT") {
+        launchKeyRef.current = null;
+        setPreflight(null);
+        await refreshCampaignAfterRun(campaign.id, epoch, request);
+      } else if (code === "CAMPAIGN_RUN_LAUNCH_CONFLICT") {
+        await refreshCampaignAfterRun(campaign.id, epoch, request);
+        setRunMutation(null);
+        void loadRuns(campaign.id, epoch);
+      }
+    } finally {
+      if (epoch === editorEpochRef.current && request === runRequestRef.current) setRunMutation(null);
+    }
+  }
+
+  async function changeRunState(run: RuntimeCampaignRun, action: "pause" | "resume" | "cancel") {
+    if (!campaign) return;
+    const epoch = editorEpochRef.current;
+    const request = ++runRequestRef.current;
+    const campaignId = campaign.id;
+    setRunMutation(`${action}:${run.id}`);
+    setRunError(null);
+    try {
+      const updated = action === "pause"
+        ? await api.pauseCampaignRun(run.id)
+        : action === "resume"
+          ? await api.resumeCampaignRun(run.id)
+          : await api.cancelCampaignRun(run.id);
+      if (
+        epoch !== editorEpochRef.current
+        || request !== runRequestRef.current
+        || updated.campaignId !== campaignId
+      ) return;
+      setRuns((current) => current.map((item) => item.id === updated.id ? updated : item));
+      await refreshCampaignAfterRun(campaignId, epoch, request);
+    } catch (error) {
+      if (epoch !== editorEpochRef.current || request !== runRequestRef.current) return;
+      setRunError(campaignErrorMessage(error, `Could not ${action} campaign run.`));
+      if (error instanceof RuntimeRequestError && error.code === "CAMPAIGN_RUN_STATE_CONFLICT") {
+        try {
+          const canonical = await api.getCampaignRun(run.id);
+          if (epoch === editorEpochRef.current && request === runRequestRef.current) {
+            setRuns((current) => current.map((item) => item.id === canonical.id ? canonical : item));
+            await refreshCampaignAfterRun(campaignId, epoch, request);
+          }
+        } catch {
+          // Preserve the typed conflict; a manual retry can reload the run list.
+        }
+      }
+    } finally {
+      if (epoch === editorEpochRef.current && request === runRequestRef.current) setRunMutation(null);
     }
   }
 
@@ -612,14 +892,14 @@ export function CampaignsScreen() {
   ) : editorTab === "targets" ? (
     <><Button disabled={!campaign || !editable || !targetsDirty || targetsLoading || targetsSaving} onClick={resetTargetsToSaved} variant="ghost">Reset to saved</Button><Button disabled={!campaign || !editable || !targetsDirty || targetsLoading} loading={targetsSaving} onClick={() => void saveTargets()} variant="primary">Save target set</Button></>
   ) : (
-    <Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired} loading={preflightLoading} onClick={() => void runPreflight(preflightMode)} variant="primary">Run preflight</Button>
+    <Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired || Boolean(runMutation)} loading={preflightLoading} onClick={() => void runPreflight(preflightMode)} variant="primary">Run preflight</Button>
   );
 
   return (
     <div className="campaigns-screen stack stack-lg">
       <PageHeader
         actions={<Button disabled={!selectedSessionId} onClick={openCreate} variant="primary">New campaign</Button>}
-        description="Create draft campaigns, persist group targets, and review Runtime preflight policy."
+        description="Create campaign drafts, materialize target snapshots, review policy, and manage Runtime launch lifecycle."
         title="Campaigns"
         titleId="campaigns-title"
       />
@@ -706,12 +986,20 @@ export function CampaignsScreen() {
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Targets belong to a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {targetsError && <InlineAlert title="Target update">{targetsError}</InlineAlert>}
+                {targetSource && <div className="campaign-target-source">
+                  <div><span>Source</span><strong>{targetSourceName ?? "Saved group list snapshot"}</strong></div>
+                  <div><span>Membership revision</span><strong>{targetSource.membershipRevision}</strong></div>
+                  <div><span>Applied at</span><strong>{formatDate(targetSource.appliedAt)}</strong></div>
+                  <p>This is audit provenance for a materialized snapshot, not a live link.</p>
+                </div>}
+                {targetSource && targetsDirty && <InlineAlert title="Manual changes clear provenance" tone="warning">Saving this manually edited target set will return source null. The saved Group List itself is not changed.</InlineAlert>}
                 <section aria-label="Target group selection" className="group-selection-section">
                   <div className="group-selection-heading"><div><h4>Group selection</h4><p>Filters narrow current results; saved and selected targets remain visible.</p></div><div aria-live="polite" className="group-selection-status" data-dirty={targetsDirty || undefined}><strong>{targetSelectionSummary}</strong>{targetDiff.selectedCount >= 900 && <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"}>{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge>}</div></div>
-                  <GroupSelectionToolbar actions={<CampaignSavedListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving} onApply={applySavedGroupList} onNotice={setTargetNotice} sessionId={campaign.sessionId} />} filterAriaLabel="Target group filters" filterTitle="Filter target groups" filters={groupDirectory.filters} filtersOpen={groupDirectory.filtersOpen} idPrefix="campaign-target" inputQuery={groupDirectory.inputQuery} loading={groupDirectory.loading} onFiltersChange={groupDirectory.setFilters} onFiltersOpenChange={groupDirectory.setFiltersOpen} onParticipantErrorsClear={() => groupDirectory.setParticipantErrors({})} onSearchChange={groupDirectory.setSearch} pageItemCount={groupDirectory.groups.length} pageOffset={groupDirectory.offset} participantErrors={groupDirectory.participantErrors} total={groupDirectory.total} />
-                  {targetNotice && <InlineAlert title="Staged target selection" tone="success">{targetNotice}</InlineAlert>}
+                  <GroupSelectionToolbar actions={<CampaignSavedListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving || targetsDirty} onApply={applySavedGroupList} sessionId={campaign.sessionId} />} filterAriaLabel="Target group filters" filterTitle="Filter target groups" filters={groupDirectory.filters} filtersOpen={groupDirectory.filtersOpen} idPrefix="campaign-target" inputQuery={groupDirectory.inputQuery} loading={groupDirectory.loading} onFiltersChange={groupDirectory.setFilters} onFiltersOpenChange={groupDirectory.setFiltersOpen} onParticipantErrorsClear={() => groupDirectory.setParticipantErrors({})} onSearchChange={groupDirectory.setSearch} pageItemCount={groupDirectory.groups.length} pageOffset={groupDirectory.offset} participantErrors={groupDirectory.participantErrors} total={groupDirectory.total} />
+                  {targetsDirty && <p className="group-selection-page-note">Save or reset manual target changes before applying a saved list.</p>}
+                  {targetNotice && <InlineAlert title="Persisted target snapshot" tone="success">{targetNotice}</InlineAlert>}
                   {groupDirectory.error && <InlineAlert action={<Button onClick={groupDirectory.retry} size="sm">Retry</Button>} title="Could not load groups">{groupDirectory.error}</InlineAlert>}
-                  <GroupSelectionTable caption="Groups available to the campaign target selection" disabled={!editable || targetsLoading} emptyMessage={groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."} loading={groupDirectory.loading || targetsLoading} onToggle={toggleTarget} onTogglePage={toggleAllPageTargets} pageIds={groupPageIds} pinnedIds={pinnedTargetIds} rows={targetRows} selectedIds={draftTargetIdSet} unknownParticipantsTitle="Participant count is unavailable in the saved target snapshot." />
+                  <GroupSelectionTable caption="Groups available to the campaign target selection" disabled={!editable || targetsLoading || targetsSaving} emptyMessage={groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."} loading={groupDirectory.loading || targetsLoading} onToggle={toggleTarget} onTogglePage={toggleAllPageTargets} pageIds={groupPageIds} pinnedIds={pinnedTargetIds} rows={targetRows} selectedIds={draftTargetIdSet} unknownParticipantsTitle="Participant count is unavailable in the saved target snapshot." />
                   {!groupDirectory.loading && groupDirectory.groups.length === 0 && targetRows.length > 0 && <p className="group-selection-page-note">{groupDirectory.hasCriteria ? "No additional synchronized groups match this search or filters. Selected and saved targets remain visible above." : "No additional synchronized groups are available. Selected and saved targets remain visible above."}</p>}
                   <TablePagination limit={groupDirectory.pageSize} loading={groupDirectory.loading} offset={groupDirectory.offset} onOffsetChange={groupDirectory.setOffset} total={groupDirectory.total} />
                 </section>
@@ -719,15 +1007,30 @@ export function CampaignsScreen() {
             </section>}
 
             {editorTab === "preflight" && <section aria-labelledby="campaign-editor-preflight-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-preflight-panel" role="tabpanel">
-              <div className="campaign-section-heading"><div><span>Step 3 · Runtime policy</span><h3>Readiness review</h3><p>Evaluate persisted state without creating a run or sending a message.</p></div></div>
+              <div className="campaign-section-heading"><div><span>Step 3 · Review &amp; launch</span><h3>Readiness review</h3><p>Evaluate persisted revisions, then explicitly create a dry or live run.</p></div></div>
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Preflight requires a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {(detailsDirty || targetsDirty) && <InlineAlert title="Save before preflight" tone="warning">Preflight reads persisted Runtime state, not unsaved edits.</InlineAlert>}
                 {revisionRefreshRequired && <InlineAlert title="Revision refresh required" tone="warning">Reopen this campaign before running preflight.</InlineAlert>}
-                <SelectMenu description="Both modes only evaluate policy. Neither creates a run or sends messages." disabled={preflightLoading} label="Preflight mode" onChange={setPreflightMode} options={PREFLIGHT_MODE_OPTIONS} value={preflightMode} />
+                <SelectMenu description="Both modes only evaluate policy. Neither creates a run or sends messages." disabled={preflightLoading || Boolean(runMutation)} label="Preflight mode" onChange={changePreflightMode} options={PREFLIGHT_MODE_OPTIONS} value={preflightMode} />
                 {preflightError && <InlineAlert title="Preflight failed">{preflightError}</InlineAlert>}
                 {preflight && <PreflightReport report={preflight} stale={reportStale} />}
                 {!preflight && !preflightError && <div className="campaign-empty-state"><span className="campaign-empty-state-icon"><AppIcon name="check" size="lg" /></span><strong>No preflight report</strong><p>Choose a policy mode, then run preflight against the saved campaign and target set.</p></div>}
+                {runError && <InlineAlert title="Campaign run update">{runError}</InlineAlert>}
+                {campaign.status === "DRAFT" && preflight && !reportStale && preflight.status !== "BLOCK" && <section className="campaign-launch-panel">
+                  <div><strong>Launch reviewed revisions</strong><p>Campaign r{preflight.campaignRevision} · targets r{preflight.targetsRevision}. Runtime rechecks these preconditions authoritatively.</p></div>
+                  {preflight.executionMode === "DRY_RUN"
+                    ? <Button disabled={Boolean(runMutation)} loading={runMutation === "launch:DRY_RUN"} onClick={() => void launchRun("DRY_RUN")} variant="primary">Create dry run</Button>
+                    : <Button disabled={Boolean(runMutation)} loading={runMutation === "launch:LIVE"} onClick={() => setLiveLaunchConfirmationOpen(true)} variant="primary">Launch live campaign</Button>}
+                </section>}
+                <CampaignRunsPanel
+                  campaignStatus={campaign.status}
+                  loading={runsLoading}
+                  mutation={runMutation}
+                  onAction={changeRunState}
+                  onReload={() => void loadRuns(campaign.id, editorEpochRef.current, true)}
+                  runs={runs}
+                />
               </>}
             </section>}
             </div>
@@ -744,8 +1047,58 @@ export function CampaignsScreen() {
         open={discardConfirmationOpen}
         title="Discard campaign changes?"
       />
+      <ConfirmationDialog
+        body="Create the single LIVE run for these reviewed campaign and target revisions? Runtime may begin or schedule real message delivery, and the campaign will become read-only."
+        cancelLabel="Keep reviewing"
+        confirmLabel="Launch live campaign"
+        onCancel={() => setLiveLaunchConfirmationOpen(false)}
+        onConfirm={() => void launchRun("LIVE")}
+        open={liveLaunchConfirmationOpen}
+        title="Launch LIVE campaign?"
+      />
     </div>
   );
+}
+
+function CampaignRunsPanel({
+  campaignStatus,
+  loading,
+  mutation,
+  onAction,
+  onReload,
+  runs,
+}: {
+  campaignStatus: RuntimeCampaign["status"];
+  loading: boolean;
+  mutation: string | null;
+  onAction: (run: RuntimeCampaignRun, action: "pause" | "resume" | "cancel") => void;
+  onReload: () => void;
+  runs: RuntimeCampaignRun[];
+}) {
+  const terminal = new Set<RuntimeCampaignRun["status"]>([
+    "COMPLETED",
+    "PARTIAL_FAILED",
+    "CANCELLED",
+    "FAILED",
+  ]);
+  return <section className="campaign-runs-panel stack stack-sm" aria-label="Campaign runs">
+    <header><div><h3>Campaign runs</h3><p>Campaign lifecycle: {statusLabel(campaignStatus)}. Run status remains an independent execution state.</p></div><Button disabled={loading || Boolean(mutation)} loading={loading} onClick={onReload} size="sm" variant="ghost">Reload runs</Button></header>
+    {!loading && !runs.length && <p className="campaign-run-empty">No campaign runs yet.</p>}
+    {runs.map((run) => <article className="campaign-run-card" key={run.id}>
+      <div className="campaign-run-card-main">
+        <div><Badge tone={runTone(run.status)}>{run.status}</Badge><Badge tone="neutral">{run.executionMode}</Badge></div>
+        <strong>{run.totalTargets} target snapshot</strong>
+        <span>{formatDate(run.createdAt)} · {run.id}</span>
+        {run.targetSource && <small>Group List snapshot · membership r{run.targetSource.membershipRevision} · applied {formatDate(run.targetSource.appliedAt)}</small>}
+        {run.statusReason && <small>{run.statusReason}</small>}
+      </div>
+      <div className="campaign-run-card-actions">
+        {(run.status === "RUNNING" || run.status === "SCHEDULED") && <Button disabled={Boolean(mutation)} loading={mutation === `pause:${run.id}`} onClick={() => onAction(run, "pause")} size="sm">Pause</Button>}
+        {(run.status === "PAUSED" || run.status === "BLOCKED") && <Button disabled={Boolean(mutation)} loading={mutation === `resume:${run.id}`} onClick={() => onAction(run, "resume")} size="sm">Resume</Button>}
+        {!terminal.has(run.status) && <Button disabled={Boolean(mutation)} loading={mutation === `cancel:${run.id}`} onClick={() => onAction(run, "cancel")} size="sm" variant="ghost">Cancel</Button>}
+      </div>
+    </article>)}
+  </section>;
 }
 
 function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; stale: boolean }) {

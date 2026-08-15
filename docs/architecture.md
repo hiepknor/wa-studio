@@ -15,7 +15,7 @@ This boundary lets future web and mobile clients use the same WA Runtime contrac
 
 ## Source of truth
 
-- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime delivery range `f92edef^..798b306` (SHA-256 `ce54abc0b8f1184b99d1d25e1266f0e7b27c66ce4bb72e03669594eebcaf2b4e`).
+- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime commits `8173ab8` and `b8d63ff` (SHA-256 `d8de71d177c7e14a3b79a71bd1a9d8cdf4b829e742a3cf9663148a108a874d0b`).
 - `src/shared/api/generated/runtime.ts` is generated; do not edit it by hand.
 - `src/shared/api/runtime-client.ts` owns URL normalization, authentication headers, transport, and error mapping.
 - Feature modules consume the typed client and must not redefine Runtime DTOs.
@@ -30,7 +30,7 @@ src/features/connection first-run connection and credential validation
 src/features/sessions   session selection, status, and read-model refresh
 src/features/groups     browse, filter, inspect, capability, full sync, and reusable static lists
 src/features/campaigns  server-backed browse/filter, draft details, targets, preflight
-src/features/runs       progress, delivery failures, controls (later)
+src/features/campaigns  drafts, target provenance, preflight, and run lifecycle controls
 src/shared/api          generated contract and WA Runtime transport
 src/shared/platform     typed adapters for optional desktop capabilities
 src-tauri/src/windowing native window policy and platform implementations
@@ -82,13 +82,17 @@ The Campaign list is a Runtime-owned projection. Studio sends the trimmed, debou
 
 Campaign creation owns one UUID idempotency key per create intent. The key survives transport failure and response loss; only opening a new create intent allocates a new key. HTTP 201 and HTTP 200 replay are reconciled by campaign ID so the list cannot gain a duplicate row.
 
-The editor keeps Runtime DTOs authoritative. The transport canonicalizes IMMEDIATE create requests to `scheduledAt: null`; content-only PATCH requests omit scheduling fields. Changing ONCE to IMMEDIATE sends `scheduledAt: null`; changing IMMEDIATE to ONCE sends a timezone-qualified timestamp that Runtime canonicalizes to UTC. Target PUT requests are complete replacement sets, validated for uniqueness and the 1,000-item limit before submission. The UI commits only the canonical response and refreshes the campaign afterward to obtain its new `targetsRevision`.
+The editor keeps Runtime DTOs authoritative. The transport canonicalizes IMMEDIATE create requests to `scheduledAt: null`; content-only PATCH requests omit scheduling fields. Changing ONCE to IMMEDIATE sends `scheduledAt: null`; changing IMMEDIATE to ONCE sends a timezone-qualified timestamp that Runtime canonicalizes to UTC. Manual target PUT requests are complete replacement sets, validated for uniqueness and the 1,000-item limit before submission, and carry `expectedTargetsRevision`. Studio commits only canonical `data`, `targetsRevision`, and nullable `source`; a manual replacement clears Group List provenance according to Runtime's response.
 
-Preflight evaluates persisted state only. The UI renders Runtime status, counters, stable check codes, and stable issue reasons without recomputing policy. Local edits make a displayed result stale, successful details/target persistence clears it, and returned campaign/target revisions are checked against the current campaign. Editor epochs prevent late responses from a closed editor or a different session from being applied. No campaign-run or message-send operation is exposed by the Studio client in v0.2.0.
+Preflight evaluates persisted state only. The UI renders Runtime status, counters, policy version, stable check codes, and issue reasons—including stale capability—without recomputing policy, with a safe display fallback for future codes. Local edits make a displayed result stale, successful details/target persistence clears it, and returned campaign/target revisions are checked against the current campaign.
+
+Run creation is a separate, explicit action after review. Studio sends both reviewed campaign and target revisions with an idempotency key retained across transport retry. DRY_RUN can be repeated while the campaign remains DRAFT. LIVE requires confirmation; a successful launch refreshes the campaign into its Runtime-owned read-only lifecycle. Revision and launch conflicts are never retried with newer revisions: Studio reloads campaign, target, and run state and requires review/preflight again. Pause, resume, and cancel reconcile both run state and the coarser campaign lifecycle. Run `targetSource` is immutable audit data and is never resolved through the current Group List.
 
 ## Reusable group-list boundary
 
-Runtime Group Lists are session-scoped static templates, not saved queries or dynamic segments. Groups exposes All groups and Saved lists as two views under the existing single sidebar destination. List create owns one UUID idempotency key per intent; editing loads complete canonical membership, keeps saved and staged IDs separate, and persists metadata plus complete membership without presenting partial success. Archiving a list does not alter any campaign.
+Runtime Group Lists are session-scoped static templates, not saved queries or dynamic segments. Groups exposes All groups and Saved lists as two views under the existing single sidebar destination. List create owns one UUID idempotency key per intent; editing loads complete canonical membership, keeps saved and staged IDs separate, sends aggregate revision for metadata/archive and membership revision for replacement, and never retries a conflict silently. Archiving a list does not alter any campaign.
+
+Applying a Group List to Campaign targets uses Runtime's atomic apply endpoint with `groupListId`, `expectedMembershipRevision`, and `expectedTargetsRevision`. It replaces the materialized campaign target snapshot with the canonical response and records nullable source provenance; it does not fetch/copy membership in Studio and does not create a campaign–list binding. Later list rename, edit, or archive cannot mutate existing campaign targets.
 
 `src/features/groups/selection` owns the shared Runtime-backed directory query, filter toolbar, selection table, and ordered set helpers used by both Group List editing and Campaign Targets. Search, filters, pagination, request identity, and page-scoped select-all therefore have one implementation. Selected IDs remain independent of the current response page, and inactive, DENIED, and UNKNOWN groups remain selectable because Runtime preflight owns eligibility policy.
 

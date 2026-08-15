@@ -206,6 +206,7 @@
             "in": "query",
             "description": "Case-insensitive literal substring search across group name, group ID, and description. Whitespace is trimmed; an empty value disables search.",
             "schema": {
+              "maxLength": 200,
               "type": "string"
             }
           },
@@ -300,6 +301,16 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -346,6 +357,26 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -361,7 +392,7 @@
     },
     "/api/v1/groups/{id}/members": {
       "get": {
-        "description": "Results use deterministic super-admin, admin, normalized display name, and participant ID ordering. resolvedPhoneNumber is nullable and phoneNumber remains a deprecated upstream compatibility value. meta.datasetRevision changes when member enrichment is materialized.",
+        "description": "Results use deterministic super-admin, admin, normalized display name, and participant ID ordering. resolvedPhoneNumber is nullable and phoneNumber remains a deprecated upstream compatibility value. meta.datasetRevision changes after every committed member dataset mutation.",
         "operationId": "GroupController_members",
         "parameters": [
           {
@@ -409,6 +440,7 @@
             "in": "query",
             "description": "Case-insensitive literal substring search across display name, phone number, and participant ID",
             "schema": {
+              "maxLength": 200,
               "type": "string"
             }
           }
@@ -420,6 +452,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GroupMemberListDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
                 }
               }
             }
@@ -468,6 +520,26 @@
                   "example": {
                     "accepted": true
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
                 }
               }
             }
@@ -856,6 +928,16 @@
             "in": "path",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "expectedRevision",
+            "required": false,
+            "in": "query",
+            "description": "Aggregate revision observed before archive. A stale value returns HTTP 409.",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
             }
           }
         ],
@@ -1638,6 +1720,92 @@
         ]
       }
     },
+    "/api/v1/campaigns/{id}/targets/apply-group-list": {
+      "post": {
+        "operationId": "CampaignController_applyGroupListTargets",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyGroupListTargetsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignTargetListDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Atomically replace DRAFT campaign targets from one saved group-list revision",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
     "/api/v1/campaigns/{id}/preflight": {
       "post": {
         "operationId": "CampaignController_preflight",
@@ -1936,6 +2104,36 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -1993,6 +2191,36 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2026,6 +2254,36 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CampaignRunDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
                 }
               }
             }
@@ -2065,6 +2323,36 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2098,6 +2386,36 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CampaignRunDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
                 }
               }
             }
@@ -2553,6 +2871,35 @@
           "activeMode"
         ]
       },
+      "RuntimeErrorDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "CAMPAIGN_NOT_FOUND"
+          },
+          "message": {
+            "type": "string"
+          },
+          "fieldErrors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
       "GroupSendCapabilityDto": {
         "type": "object",
         "properties": {
@@ -2706,35 +3053,6 @@
         "required": [
           "data",
           "meta"
-        ]
-      },
-      "RuntimeErrorDto": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string",
-            "example": "CAMPAIGN_NOT_FOUND"
-          },
-          "message": {
-            "type": "string"
-          },
-          "fieldErrors": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "details": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        },
-        "required": [
-          "code",
-          "message"
         ]
       },
       "GroupDetailDto": {
@@ -2898,7 +3216,7 @@
           "datasetRevision": {
             "type": "number",
             "minimum": 0,
-            "description": "Highest member projection revision in the group; clients may detect enrichment between page reads"
+            "description": "Monotonic group-level member dataset generation. It changes for every committed member insert, update, or delete; zero denotes the legacy projection path."
           }
         },
         "required": [
@@ -2957,6 +3275,11 @@
             "type": "integer",
             "minimum": 1
           },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Revision of the static group-ID membership only; metadata edits do not change it."
+          },
           "archivedAt": {
             "type": "string",
             "format": "date-time",
@@ -2978,6 +3301,7 @@
           "description",
           "groupCount",
           "revision",
+          "membershipRevision",
           "archivedAt",
           "createdAt",
           "updatedAt"
@@ -3056,6 +3380,11 @@
       "UpdateGroupListDto": {
         "type": "object",
         "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Saved-list revision observed by the editor. A stale value returns HTTP 409."
+          },
           "name": {
             "type": "string",
             "maxLength": 120
@@ -3118,6 +3447,17 @@
       "ReplaceGroupListGroupsDto": {
         "type": "object",
         "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "deprecated": true,
+            "description": "Aggregate revision observed by a legacy editor. Prefer expectedMembershipRevision."
+          },
+          "expectedMembershipRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Membership revision represented by the editor. A stale value returns HTTP 409."
+          },
           "groupIds": {
             "maxItems": 1000,
             "uniqueItems": true,
@@ -3286,6 +3626,11 @@
       "UpdateCampaignDto": {
         "type": "object",
         "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Campaign revision observed by the editor. A stale value returns HTTP 409."
+          },
           "name": {
             "type": "string",
             "maxLength": 120
@@ -3332,6 +3677,35 @@
           "sendCapability"
         ]
       },
+      "CampaignTargetSourceDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "GROUP_LIST"
+            ]
+          },
+          "groupListId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "membershipRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "appliedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "groupListId",
+          "membershipRevision",
+          "appliedAt"
+        ]
+      },
       "CampaignTargetListDto": {
         "type": "object",
         "properties": {
@@ -3340,15 +3714,37 @@
             "items": {
               "$ref": "#/components/schemas/CampaignTargetDto"
             }
+          },
+          "targetsRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Canonical target-set revision represented by this complete response."
+          },
+          "source": {
+            "nullable": true,
+            "description": "Latest saved-list source for this materialized target set; null after manual replacement.",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CampaignTargetSourceDto"
+              }
+            ]
           }
         },
         "required": [
-          "data"
+          "data",
+          "targetsRevision",
+          "source"
         ]
       },
       "ReplaceCampaignTargetsDto": {
         "type": "object",
         "properties": {
+          "expectedTargetsRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Target-set revision observed by the editor. A stale value returns HTTP 409."
+          },
           "groupIds": {
             "maxItems": 1000,
             "uniqueItems": true,
@@ -3364,6 +3760,28 @@
         },
         "required": [
           "groupIds"
+        ]
+      },
+      "ApplyGroupListTargetsDto": {
+        "type": "object",
+        "properties": {
+          "groupListId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedMembershipRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Saved-list membership revision to copy. A stale value returns HTTP 409."
+          },
+          "expectedTargetsRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Campaign target revision observed by the editor. A stale value returns HTTP 409."
+          }
+        },
+        "required": [
+          "groupListId"
         ]
       },
       "CampaignPreflightRequestDto": {
@@ -3434,7 +3852,8 @@
             "type": "string",
             "enum": [
               "TARGET_CAPABILITY_DENIED",
-              "TARGET_CAPABILITY_UNKNOWN"
+              "TARGET_CAPABILITY_UNKNOWN",
+              "TARGET_CAPABILITY_STALE"
             ]
           }
         },
@@ -3528,6 +3947,16 @@
               "LIVE"
             ],
             "default": "DRY_RUN"
+          },
+          "expectedCampaignRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Campaign content revision to launch. A stale value returns HTTP 409."
+          },
+          "expectedTargetsRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Campaign target revision to launch. A stale value returns HTTP 409."
           }
         },
         "required": [
@@ -3636,6 +4065,15 @@
           "text": {
             "type": "string"
           },
+          "targetSource": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CampaignTargetSourceDto"
+              }
+            ]
+          },
           "preflight": {
             "nullable": true,
             "type": "object",
@@ -3678,6 +4116,7 @@
           "status",
           "statusReason",
           "text",
+          "targetSource",
           "preflight",
           "totalTargets",
           "progress",

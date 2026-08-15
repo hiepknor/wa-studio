@@ -22,7 +22,11 @@ export type RuntimeCreateCampaign = components["schemas"]["CreateCampaignDto"];
 export type RuntimeUpdateCampaign = components["schemas"]["UpdateCampaignDto"];
 export type RuntimeCampaignTarget = components["schemas"]["CampaignTargetDto"];
 export type RuntimeCampaignTargetList = components["schemas"]["CampaignTargetListDto"];
+export type RuntimeCampaignTargetSource = components["schemas"]["CampaignTargetSourceDto"];
 export type RuntimeCampaignPreflight = components["schemas"]["CampaignPreflightDto"];
+export type RuntimeCampaignRun = components["schemas"]["CampaignRunDto"];
+export type RuntimeCampaignRunPage = components["schemas"]["CampaignRunListDto"];
+export type RuntimeCreateCampaignRun = components["schemas"]["CreateCampaignRunDto"];
 export type RuntimeCampaignExecutionMode =
   components["schemas"]["CampaignPreflightRequestDto"]["executionMode"];
 export type RuntimeError = components["schemas"]["RuntimeErrorDto"];
@@ -421,9 +425,13 @@ export class RuntimeApi {
   async replaceGroupListGroups(
     listId: string,
     groupIds: string[],
+    expectedMembershipRevision?: number,
   ): Promise<RuntimeGroupListMembership> {
     const result = await this.client.PUT("/api/v1/group-lists/{id}/groups", {
-      body: { groupIds },
+      body: {
+        groupIds,
+        ...(expectedMembershipRevision === undefined ? {} : { expectedMembershipRevision }),
+      },
       params: { path: { id: listId } },
     });
     if (!result.response.ok || !result.data) {
@@ -436,9 +444,12 @@ export class RuntimeApi {
     return result.data;
   }
 
-  async archiveGroupList(listId: string): Promise<void> {
+  async archiveGroupList(listId: string, expectedRevision?: number): Promise<void> {
     const result = await this.client.DELETE("/api/v1/group-lists/{id}", {
-      params: { path: { id: listId } },
+      params: {
+        path: { id: listId },
+        query: expectedRevision === undefined ? {} : { expectedRevision },
+      },
     });
     if (!result.response.ok) {
       throw runtimeRequestError(
@@ -551,14 +562,36 @@ export class RuntimeApi {
   async replaceCampaignTargets(
     campaignId: string,
     groupIds: string[],
+    expectedTargetsRevision?: number,
   ): Promise<RuntimeCampaignTargetList> {
     const result = await this.client.PUT("/api/v1/campaigns/{id}/targets", {
-      body: { groupIds },
+      body: {
+        groupIds,
+        ...(expectedTargetsRevision === undefined ? {} : { expectedTargetsRevision }),
+      },
       params: { path: { id: campaignId } },
     });
     if (!result.response.ok || !result.data) {
       throw runtimeRequestError(
         "Could not replace campaign targets",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async applyGroupListToCampaignTargets(
+    campaignId: string,
+    input: components["schemas"]["ApplyGroupListTargetsDto"],
+  ): Promise<RuntimeCampaignTargetList> {
+    const result = await this.client.POST(
+      "/api/v1/campaigns/{id}/targets/apply-group-list",
+      { body: input, params: { path: { id: campaignId } } },
+    );
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not apply group list to campaign targets",
         result.response.status,
         result.error,
       );
@@ -582,6 +615,92 @@ export class RuntimeApi {
       );
     }
     return result.data;
+  }
+
+  async listCampaignRuns(
+    campaignId: string,
+    limit = 20,
+    offset = 0,
+  ): Promise<RuntimeCampaignRunPage> {
+    const result = await this.client.GET("/api/v1/campaigns/{id}/runs", {
+      params: { path: { id: campaignId }, query: { limit, offset } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load campaign runs",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async createCampaignRun(
+    campaignId: string,
+    input: RuntimeCreateCampaignRun,
+    idempotencyKey: string,
+  ): Promise<RuntimeCampaignRun> {
+    const result = await this.client.POST("/api/v1/campaigns/{id}/runs", {
+      body: input,
+      params: {
+        header: { "Idempotency-Key": idempotencyKey },
+        path: { id: campaignId },
+      },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not create campaign run",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async getCampaignRun(runId: string): Promise<RuntimeCampaignRun> {
+    const result = await this.client.GET("/api/v1/campaign-runs/{id}", {
+      params: { path: { id: runId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load campaign run",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  private async changeCampaignRunState(
+    runId: string,
+    action: "pause" | "resume" | "cancel",
+  ): Promise<RuntimeCampaignRun> {
+    const path = action === "pause"
+      ? "/api/v1/campaign-runs/{id}/pause" as const
+      : action === "resume"
+        ? "/api/v1/campaign-runs/{id}/resume" as const
+        : "/api/v1/campaign-runs/{id}/cancel" as const;
+    const result = await this.client.POST(path, { params: { path: { id: runId } } });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        `Could not ${action} campaign run`,
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  pauseCampaignRun(runId: string): Promise<RuntimeCampaignRun> {
+    return this.changeCampaignRunState(runId, "pause");
+  }
+
+  resumeCampaignRun(runId: string): Promise<RuntimeCampaignRun> {
+    return this.changeCampaignRunState(runId, "resume");
+  }
+
+  cancelCampaignRun(runId: string): Promise<RuntimeCampaignRun> {
+    return this.changeCampaignRunState(runId, "cancel");
   }
 }
 

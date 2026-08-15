@@ -11,9 +11,9 @@ import {
   type RuntimeApi,
   type RuntimeCampaign,
   type RuntimeCampaignPreflight,
+  type RuntimeCampaignRun,
   type RuntimeCampaignTarget,
   type RuntimeGroup,
-  type RuntimeGroupListGroup,
   type RuntimeSavedGroupList,
   type RuntimeSession,
 } from "@/shared/api/runtime-client";
@@ -63,10 +63,16 @@ function Harness() {
 function renderCampaigns(overrides: Partial<RuntimeApi> = {}, initial: RuntimeCampaign[] = [campaign]) {
   const api = {
     listCampaigns: vi.fn().mockResolvedValue({ data: initial, meta: { total: initial.length, limit: 50, offset: 0 } }),
-    listCampaignTargets: vi.fn().mockResolvedValue({ data: [deniedTarget] }),
+    listCampaignTargets: vi.fn().mockResolvedValue({ data: [deniedTarget], targetsRevision: 4, source: null }),
     listGroups: vi.fn().mockResolvedValue({ data: [unknownGroup], meta: { total: 1, limit: 20, offset: 0 } }),
     listSavedGroupLists: vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 100, offset: 0 } }),
-    getGroupListMembership: vi.fn(),
+    applyGroupListToCampaignTargets: vi.fn(),
+    listCampaignRuns: vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } }),
+    createCampaignRun: vi.fn(),
+    getCampaignRun: vi.fn(),
+    pauseCampaignRun: vi.fn(),
+    resumeCampaignRun: vi.fn(),
+    cancelCampaignRun: vi.fn(),
     getCampaign: vi.fn().mockResolvedValue(campaign),
     createCampaign: vi.fn(),
     updateCampaign: vi.fn(),
@@ -99,8 +105,8 @@ async function openCampaign(user: ReturnType<typeof userEvent.setup>) {
 }
 
 async function openSavedListPicker(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Add from saved list" }));
-  return screen.getByRole("dialog", { name: "Add from saved list" });
+  await user.click(screen.getByRole("button", { name: "Apply saved list" }));
+  return screen.getByRole("dialog", { name: "Apply saved list" });
 }
 
 function report(
@@ -113,6 +119,29 @@ function report(
     allowedTargets: 5, deniedTargets: 3, unknownTargets: 1,
     checks: [{ code: "GROUP_CAPABILITY", status, message: "Runtime policy result" }],
     targetIssues: [{ groupId: "denied@g.us", groupName: "Denied room", capability: "DENIED", reason: "TARGET_CAPABILITY_DENIED" }],
+  };
+}
+
+function campaignRun(
+  executionMode: "DRY_RUN" | "LIVE",
+  status: RuntimeCampaignRun["status"] = "COMPLETED",
+): RuntimeCampaignRun {
+  return {
+    id: `${executionMode.toLocaleLowerCase()}-run-id`,
+    campaignId: campaign.id,
+    sessionId: session.id,
+    executionMode,
+    status,
+    statusReason: null,
+    text: campaign.text,
+    targetSource: null,
+    preflight: report(executionMode, "PASS"),
+    totalTargets: 1,
+    progress: { total: 1, pending: 0, materialized: 0, processing: 0, dryRunCompleted: executionMode === "DRY_RUN" ? 1 : 0, accepted: 0, sent: 0, delivered: 0, read: 0, failed: 0, unknown: 0, blocked: 0, cancelled: 0 },
+    scheduledAt: "2026-08-14T03:00:00.000Z",
+    startedAt: "2026-08-14T03:00:00.000Z",
+    completedAt: status === "COMPLETED" ? "2026-08-14T03:01:00.000Z" : null,
+    createdAt: "2026-08-14T03:00:00.000Z",
   };
 }
 
@@ -249,12 +278,9 @@ describe("CampaignsScreen", () => {
       .mockResolvedValueOnce({ data: [{
         groupId: unknownGroup.id, groupName: "Canonical unknown", enabled: false,
         sendCapability: unknownGroup.sendCapability,
-      }] })
-      .mockResolvedValueOnce({ data: [] });
-    const getCampaign = vi.fn()
-      .mockResolvedValueOnce({ ...campaign, targetCount: 1, targetsRevision: 5 })
-      .mockResolvedValueOnce({ ...campaign, targetCount: 0, targetsRevision: 6 });
-    renderCampaigns({ getCampaign, replaceCampaignTargets });
+      }], targetsRevision: 5, source: null })
+      .mockResolvedValueOnce({ data: [], targetsRevision: 6, source: null });
+    renderCampaigns({ replaceCampaignTargets });
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
@@ -273,12 +299,12 @@ describe("CampaignsScreen", () => {
 
     await user.click(screen.getByRole("button", { name: "Save target set" }));
     expect(await screen.findByText("Canonical unknown")).toBeInTheDocument();
-    expect(replaceCampaignTargets).toHaveBeenLastCalledWith(campaign.id, ["denied@g.us", "unknown@g.us"]);
+    expect(replaceCampaignTargets).toHaveBeenLastCalledWith(campaign.id, ["denied@g.us", "unknown@g.us"], 4);
 
     await user.click(screen.getByRole("checkbox", { name: "Select Canonical unknown" }));
     await user.click(screen.getByRole("button", { name: "Save target set" }));
     await waitFor(() => expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).not.toBeChecked());
-    expect(replaceCampaignTargets).toHaveBeenLastCalledWith(campaign.id, []);
+    expect(replaceCampaignTargets).toHaveBeenLastCalledWith(campaign.id, [], 5);
   });
 
   it("uses one target table for available and saved groups with participant counts", async () => {
@@ -633,6 +659,219 @@ describe("CampaignsScreen", () => {
     expect(preflightCampaign).toHaveBeenCalledWith(campaign.id, mode);
   });
 
+  it("renders stale capability and unknown future policy codes safely", async () => {
+    const user = userEvent.setup();
+    const next = report("LIVE", "WARN");
+    next.policyVersion = 2;
+    next.checks = [{
+      code: "FUTURE_RUNTIME_CHECK" as RuntimeCampaignPreflight["checks"][number]["code"],
+      status: "WARN",
+      message: "Future policy",
+    }];
+    next.targetIssues = [{
+      groupId: deniedTarget.groupId,
+      groupName: deniedTarget.groupName,
+      capability: "ALLOWED",
+      reason: "TARGET_CAPABILITY_STALE",
+    }];
+    renderCampaigns({ preflightCampaign: vi.fn().mockResolvedValue(next) });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await runPreflight(user, "LIVE");
+    expect(await screen.findByText("TARGET_CAPABILITY_STALE")).toBeInTheDocument();
+    expect(screen.getByText("FUTURE_RUNTIME_CHECK")).toBeInTheDocument();
+    expect(screen.getByText("Policy v2")).toBeInTheDocument();
+  });
+
+  it("retries one dry-run launch intent with the same key and revision preconditions", async () => {
+    const user = userEvent.setup();
+    const created = campaignRun("DRY_RUN");
+    const createCampaignRun = vi.fn()
+      .mockRejectedValueOnce(new TypeError("response lost"))
+      .mockResolvedValueOnce(created);
+    renderCampaigns({
+      createCampaignRun,
+      preflightCampaign: vi.fn().mockResolvedValue(report("DRY_RUN", "PASS")),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await runPreflight(user);
+    await screen.findByText("GROUP_CAPABILITY");
+    await user.click(screen.getByRole("button", { name: "Create dry run" }));
+    expect(await screen.findByText("response lost")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create dry run" }));
+    expect(await screen.findByText("Dry run created.")).toBeInTheDocument();
+    expect(createCampaignRun).toHaveBeenCalledTimes(2);
+    expect(createCampaignRun.mock.calls[0][1]).toEqual({
+      executionMode: "DRY_RUN",
+      expectedCampaignRevision: 3,
+      expectedTargetsRevision: 4,
+    });
+    expect(createCampaignRun.mock.calls[0][2]).toBe(createCampaignRun.mock.calls[1][2]);
+    expect(screen.getByText(/dry_run-run-id/)).toBeInTheDocument();
+  });
+
+  it("allows multiple explicit DRY_RUN intents while the Campaign remains DRAFT", async () => {
+    const user = userEvent.setup();
+    const createCampaignRun = vi.fn()
+      .mockResolvedValueOnce({ ...campaignRun("DRY_RUN"), id: "dry-one" })
+      .mockResolvedValueOnce({ ...campaignRun("DRY_RUN"), id: "dry-two" });
+    renderCampaigns({
+      createCampaignRun,
+      preflightCampaign: vi.fn().mockResolvedValue(report("DRY_RUN", "PASS")),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await runPreflight(user);
+    await screen.findByText("GROUP_CAPABILITY");
+    await user.click(screen.getByRole("button", { name: "Create dry run" }));
+    await waitFor(() => expect(createCampaignRun).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Create dry run" }));
+    await waitFor(() => expect(createCampaignRun).toHaveBeenCalledTimes(2));
+    expect(createCampaignRun.mock.calls[0][2]).not.toBe(createCampaignRun.mock.calls[1][2]);
+    expect(screen.getByText(/dry-one/)).toBeInTheDocument();
+    expect(screen.getByText(/dry-two/)).toBeInTheDocument();
+  });
+
+  it("launches LIVE once, refreshes ACTIVE campaign state, and makes the editor read-only", async () => {
+    const user = userEvent.setup();
+    const liveRun = campaignRun("LIVE", "RUNNING");
+    const createCampaignRun = vi.fn().mockResolvedValue(liveRun);
+    renderCampaigns({
+      createCampaignRun,
+      getCampaign: vi.fn().mockResolvedValue({ ...campaign, status: "ACTIVE" }),
+      preflightCampaign: vi.fn().mockResolvedValue(report("LIVE", "PASS")),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await runPreflight(user, "LIVE");
+    await screen.findByText("GROUP_CAPABILITY");
+    await user.click(screen.getByRole("button", { name: "Launch live campaign" }));
+    const dialog = screen.getByRole("dialog", { name: "Launch LIVE campaign?" });
+    await user.click(within(dialog).getByRole("button", { name: "Launch live campaign" }));
+    expect(await screen.findByText("Live campaign launched.")).toBeInTheDocument();
+    expect(createCampaignRun).toHaveBeenCalledTimes(1);
+    expect(createCampaignRun).toHaveBeenCalledWith(campaign.id, {
+      executionMode: "LIVE",
+      expectedCampaignRevision: 3,
+      expectedTargetsRevision: 4,
+    }, expect.any(String));
+    expect(await screen.findByText(/Runtime status is Active/)).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Details" }));
+    expect(screen.getByRole("textbox", { name: "Campaign name" })).toBeDisabled();
+  });
+
+  it("does not retry a launch revision conflict and requires a new preflight", async () => {
+    const user = userEvent.setup();
+    const createCampaignRun = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "CAMPAIGN_RUN_REVISION_CONFLICT", status: 409,
+    }));
+    renderCampaigns({
+      createCampaignRun,
+      getCampaign: vi.fn().mockResolvedValue({ ...campaign, revision: 4 }),
+      preflightCampaign: vi.fn().mockResolvedValue(report("DRY_RUN", "PASS")),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await runPreflight(user);
+    await screen.findByText("GROUP_CAPABILITY");
+    await user.click(screen.getByRole("button", { name: "Create dry run" }));
+    expect(await screen.findByText(/changed after review/)).toBeInTheDocument();
+    expect(createCampaignRun).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("No preflight report")).toBeInTheDocument();
+  });
+
+  it("reconciles pause and resume with the separate Campaign lifecycle", async () => {
+    const user = userEvent.setup();
+    const running = campaignRun("LIVE", "RUNNING");
+    const paused = { ...running, status: "PAUSED" as const };
+    const resumed = { ...running, status: "RUNNING" as const };
+    const pauseCampaignRun = vi.fn().mockResolvedValue(paused);
+    const resumeCampaignRun = vi.fn().mockResolvedValue(resumed);
+    const getCampaign = vi.fn()
+      .mockResolvedValueOnce({ ...campaign, status: "PAUSED" })
+      .mockResolvedValueOnce({ ...campaign, status: "ACTIVE" });
+    renderCampaigns({
+      getCampaign,
+      listCampaignRuns: vi.fn().mockResolvedValue({ data: [running], meta: { total: 1, limit: 20, offset: 0 } }),
+      pauseCampaignRun,
+      resumeCampaignRun,
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(await screen.findByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(pauseCampaignRun).toHaveBeenCalledWith(running.id));
+    expect(await screen.findByText(/Campaign lifecycle: Paused/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Resume" }));
+    await waitFor(() => expect(resumeCampaignRun).toHaveBeenCalledWith(running.id));
+    expect(await screen.findByText(/Campaign lifecycle: Active/)).toBeInTheDocument();
+  });
+
+  it("keeps Campaign PAUSED and reloads a BLOCKED run when resume preflight conflicts", async () => {
+    const user = userEvent.setup();
+    const paused = campaignRun("LIVE", "PAUSED");
+    const blocked = { ...paused, status: "BLOCKED" as const, preflight: report("LIVE", "BLOCK") };
+    renderCampaigns({
+      getCampaign: vi.fn().mockResolvedValue({ ...campaign, status: "PAUSED" }),
+      getCampaignRun: vi.fn().mockResolvedValue(blocked),
+      listCampaignRuns: vi.fn().mockResolvedValue({ data: [paused], meta: { total: 1, limit: 20, offset: 0 } }),
+      resumeCampaignRun: vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+        code: "CAMPAIGN_RUN_STATE_CONFLICT",
+        details: { preflight: report("LIVE", "BLOCK") },
+        status: 409,
+      })),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+    expect(await screen.findByText(/Campaign lifecycle: Paused/)).toBeInTheDocument();
+    expect(screen.getByText("BLOCKED")).toBeInTheDocument();
+  });
+
+  it("renders an ARCHIVED Campaign after a terminal LIVE cancellation", async () => {
+    const user = userEvent.setup();
+    const running = campaignRun("LIVE", "RUNNING");
+    const cancelled = { ...running, status: "CANCELLED" as const, completedAt: "2026-08-15T01:00:00.000Z" };
+    renderCampaigns({
+      cancelCampaignRun: vi.fn().mockResolvedValue(cancelled),
+      getCampaign: vi.fn().mockResolvedValue({ ...campaign, status: "ARCHIVED" }),
+      listCampaignRuns: vi.fn().mockResolvedValue({ data: [running], meta: { total: 1, limit: 20, offset: 0 } }),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(await screen.findByText(/Campaign lifecycle: Archived/)).toBeInTheDocument();
+    expect(screen.getByText("CANCELLED")).toBeInTheDocument();
+  });
+
+  it("reloads Campaign lifecycle with an asynchronously completed LIVE run", async () => {
+    const user = userEvent.setup();
+    const running = campaignRun("LIVE", "RUNNING");
+    const completed = campaignRun("LIVE", "COMPLETED");
+    const listCampaignRuns = vi.fn()
+      .mockResolvedValueOnce({ data: [running], meta: { total: 1, limit: 20, offset: 0 } })
+      .mockResolvedValueOnce({ data: [completed], meta: { total: 1, limit: 20, offset: 0 } });
+    renderCampaigns({
+      getCampaign: vi.fn().mockResolvedValue({ ...campaign, status: "ARCHIVED" }),
+      listCampaignRuns,
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await screen.findByText("RUNNING");
+    await user.click(screen.getByRole("button", { name: "Reload runs" }));
+    expect(await screen.findByText("COMPLETED")).toBeInTheDocument();
+    expect(screen.getByText(/Campaign lifecycle: Archived/)).toBeInTheDocument();
+  });
+
   it("marks a report stale after local content or target edits and prevents preflight over unsaved state", async () => {
     const user = userEvent.setup();
     renderCampaigns({ preflightCampaign: vi.fn().mockResolvedValue(report("DRY_RUN", "PASS")) });
@@ -672,25 +911,45 @@ describe("CampaignsScreen", () => {
     expect(screen.queryByText("GROUP_CAPABILITY")).not.toBeInTheDocument();
   });
 
-  it("adds a saved-list snapshot to staged targets without persisting until Save target set", async () => {
+  it("ignores a late run launch response after the editor closes", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<RuntimeCampaignRun>();
+    renderCampaigns({
+      createCampaignRun: vi.fn().mockReturnValue(pending.promise),
+      preflightCampaign: vi.fn().mockResolvedValue(report("DRY_RUN", "PASS")),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await runPreflight(user);
+    await screen.findByText("GROUP_CAPABILITY");
+    await user.click(screen.getByRole("button", { name: "Create dry run" }));
+    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await act(async () => pending.resolve(campaignRun("DRY_RUN")));
+    expect(screen.queryByText(/dry_run-run-id/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Dry run created.")).not.toBeInTheDocument();
+  });
+
+  it("atomically applies a saved-list snapshot with list and target revisions", async () => {
     const user = userEvent.setup();
     const list: RuntimeSavedGroupList = {
       id: "11111111-1111-4111-8111-111111111111", sessionId: session.id,
       name: "Launch list", description: "Reusable launch groups", groupCount: 2,
-      revision: 1, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
+      revision: 1, membershipRevision: 7, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
       updatedAt: "2026-08-15T00:00:00.000Z",
     };
-    const listRows: RuntimeGroupListGroup[] = [
-      { groupId: deniedTarget.groupId, groupName: deniedTarget.groupName, isActive: false, participantsCount: null, sendCapability: deniedTarget.sendCapability },
-      { groupId: unknownGroup.id, groupName: unknownGroup.name, isActive: unknownGroup.isActive, participantsCount: unknownGroup.participantsCount, sendCapability: unknownGroup.sendCapability },
-    ];
-    const replaceCampaignTargets = vi.fn().mockResolvedValue({
+    const source = {
+      type: "GROUP_LIST" as const, groupListId: list.id, membershipRevision: 7,
+      appliedAt: "2026-08-15T01:00:00.000Z",
+    };
+    const applyGroupListToCampaignTargets = vi.fn().mockResolvedValue({
       data: [deniedTarget, { groupId: unknownGroup.id, groupName: unknownGroup.name, enabled: true, sendCapability: unknownGroup.sendCapability }],
+      targetsRevision: 5,
+      source,
     });
-    const api = renderCampaigns({
+    renderCampaigns({
       listSavedGroupLists: vi.fn().mockResolvedValue({ data: [list], meta: { total: 1, limit: 100, offset: 0 } }),
-      getGroupListMembership: vi.fn().mockResolvedValue({ list, data: listRows }),
-      replaceCampaignTargets,
+      applyGroupListToCampaignTargets,
     });
     await connect(user);
     await openCampaign(user);
@@ -700,17 +959,49 @@ describe("CampaignsScreen", () => {
     await waitFor(() => expect(selector).toBeEnabled());
     await user.click(selector);
     await user.click(screen.getByRole("option", { name: /Launch list/ }));
-    await user.click(screen.getByRole("button", { name: "Add to selection" }));
-    expect(await screen.findByText(/1 group added from Launch list/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Apply list" }));
+    const dialog = screen.getByRole("dialog", { name: "Apply saved list snapshot?" });
+    await user.click(within(dialog).getByRole("button", { name: "Apply list" }));
+    expect(await screen.findByText(/membership revision 7 was applied/)).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).toBeChecked();
-    expect(replaceCampaignTargets).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("tab", { name: /Preflight/ }));
-    expect(screen.getByRole("button", { name: "Run preflight" })).toBeDisabled();
+    expect(applyGroupListToCampaignTargets).toHaveBeenCalledWith(campaign.id, {
+      groupListId: list.id,
+      expectedMembershipRevision: 7,
+      expectedTargetsRevision: 4,
+    });
+    expect(screen.getByText("Launch list")).toBeInTheDocument();
+    expect(screen.getByText("This is audit provenance for a materialized snapshot, not a live link.")).toBeInTheDocument();
+  });
+
+  it("ignores a late atomic list apply response after the editor closes", async () => {
+    const user = userEvent.setup();
+    const list: RuntimeSavedGroupList = {
+      id: "66666666-6666-4666-8666-666666666666", sessionId: session.id,
+      name: "Late list", description: null, groupCount: 0, revision: 1,
+      membershipRevision: 0, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    };
+    const pending = deferred<Awaited<ReturnType<RuntimeApi["applyGroupListToCampaignTargets"]>>>();
+    renderCampaigns({
+      applyGroupListToCampaignTargets: vi.fn().mockReturnValue(pending.promise),
+      listSavedGroupLists: vi.fn().mockResolvedValue({ data: [list], meta: { total: 1, limit: 100, offset: 0 } }),
+    });
+    await connect(user);
+    await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
-    await user.click(screen.getByRole("button", { name: "Save target set" }));
-    await waitFor(() => expect(replaceCampaignTargets).toHaveBeenCalledTimes(1));
-    expect(replaceCampaignTargets).toHaveBeenCalledWith(campaign.id, [deniedTarget.groupId, unknownGroup.id]);
-    expect(api.preflightCampaign).not.toHaveBeenCalled();
+    const picker = await openSavedListPicker(user);
+    const selector = within(picker).getByRole("combobox", { name: "Group list" });
+    await waitFor(() => expect(selector).toBeEnabled());
+    await user.click(selector);
+    await user.click(screen.getByRole("option", { name: /Late list/ }));
+    await user.click(screen.getByRole("button", { name: "Apply list" }));
+    await user.click(within(screen.getByRole("dialog", { name: "Apply saved list snapshot?" })).getByRole("button", { name: "Apply list" }));
+    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await act(async () => pending.resolve({
+      data: [], targetsRevision: 5,
+      source: { type: "GROUP_LIST", groupListId: list.id, membershipRevision: 0, appliedAt: "2026-08-15T01:00:00.000Z" },
+    }));
+    expect(screen.queryByText(/membership revision 0 was applied/)).not.toBeInTheDocument();
   });
 
   it("loads saved lists lazily and ignores a late response after the picker closes", async () => {
@@ -718,7 +1009,7 @@ describe("CampaignsScreen", () => {
     const latePage = deferred<Awaited<ReturnType<RuntimeApi["listSavedGroupLists"]>>>();
     const currentList: RuntimeSavedGroupList = {
       id: "44444444-4444-4444-8444-444444444444", sessionId: session.id,
-      name: "Current list", description: null, groupCount: 1, revision: 1,
+      name: "Current list", description: null, groupCount: 1, revision: 1, membershipRevision: 1,
       archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
       updatedAt: "2026-08-15T00:00:00.000Z",
     };
@@ -735,7 +1026,7 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("button", { name: "Close saved lists" }));
     latePage.resolve({ data: [{ ...currentList, id: "late", name: "Late list" }], meta: { total: 1, limit: 100, offset: 0 } });
     await Promise.resolve();
-    expect(screen.queryByRole("dialog", { name: "Add from saved list" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Apply saved list" })).not.toBeInTheDocument();
     const picker = await openSavedListPicker(user);
     const selector = within(picker).getByRole("combobox", { name: "Group list" });
     await waitFor(() => expect(selector).toBeEnabled());
@@ -744,19 +1035,21 @@ describe("CampaignsScreen", () => {
     expect(screen.queryByRole("option", { name: /Late list/ })).not.toBeInTheDocument();
   });
 
-  it("requires confirmation and explicitly stages an empty saved-list replacement", async () => {
+  it("requires confirmation and atomically persists an empty saved-list snapshot", async () => {
     const user = userEvent.setup();
     const emptyList: RuntimeSavedGroupList = {
       id: "22222222-2222-4222-8222-222222222222", sessionId: session.id,
-      name: "Empty list", description: null, groupCount: 0, revision: 1,
+      name: "Empty list", description: null, groupCount: 0, revision: 1, membershipRevision: 0,
       archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
       updatedAt: "2026-08-15T00:00:00.000Z",
     };
-    const replaceCampaignTargets = vi.fn();
+    const applyGroupListToCampaignTargets = vi.fn().mockResolvedValue({
+      data: [], targetsRevision: 5,
+      source: { type: "GROUP_LIST", groupListId: emptyList.id, membershipRevision: 0, appliedAt: "2026-08-15T01:00:00.000Z" },
+    });
     renderCampaigns({
       listSavedGroupLists: vi.fn().mockResolvedValue({ data: [emptyList], meta: { total: 1, limit: 100, offset: 0 } }),
-      getGroupListMembership: vi.fn().mockResolvedValue({ list: emptyList, data: [] }),
-      replaceCampaignTargets,
+      applyGroupListToCampaignTargets,
     });
     await connect(user);
     await openCampaign(user);
@@ -766,27 +1059,29 @@ describe("CampaignsScreen", () => {
     await waitFor(() => expect(selector).toBeEnabled());
     await user.click(selector);
     await user.click(screen.getByRole("option", { name: /Empty list/ }));
-    await user.click(screen.getByRole("button", { name: "Replace selection" }));
+    await user.click(screen.getByRole("button", { name: "Apply list" }));
     expect(screen.getByText(/This list is empty/)).toBeInTheDocument();
     expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
-    const dialog = screen.getByRole("dialog", { name: "Replace staged target selection?" });
-    await user.click(within(dialog).getByRole("button", { name: "Replace selection" }));
-    expect(await screen.findByText(/staged an empty target set/)).toBeInTheDocument();
-    expect(screen.getAllByText("Saved 1 · Staged 0 · +0 / −1").length).toBeGreaterThan(0);
-    expect(replaceCampaignTargets).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Apply saved list snapshot?" });
+    await user.click(within(dialog).getByRole("button", { name: "Apply list" }));
+    expect(await screen.findByText(/membership revision 0 was applied/)).toBeInTheDocument();
+    expect(screen.getAllByText("Saved 0 · Staged 0 · +0 / −0").length).toBeGreaterThan(0);
+    expect(applyGroupListToCampaignTargets).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves staged targets unchanged when a saved list resolves to another session", async () => {
+  it("keeps targets unchanged when atomic apply reports a source session mismatch", async () => {
     const user = userEvent.setup();
     const list: RuntimeSavedGroupList = {
       id: "33333333-3333-4333-8333-333333333333", sessionId: session.id,
-      name: "Moved list", description: null, groupCount: 1, revision: 1,
+      name: "Moved list", description: null, groupCount: 1, revision: 1, membershipRevision: 2,
       archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
       updatedAt: "2026-08-15T00:00:00.000Z",
     };
     renderCampaigns({
       listSavedGroupLists: vi.fn().mockResolvedValue({ data: [list], meta: { total: 1, limit: 100, offset: 0 } }),
-      getGroupListMembership: vi.fn().mockResolvedValue({ list: { ...list, sessionId: "other-session" }, data: [] }),
+      applyGroupListToCampaignTargets: vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+        code: "CAMPAIGN_TARGET_SOURCE_SESSION_MISMATCH", status: 409,
+      })),
     });
     await connect(user);
     await openCampaign(user);
@@ -796,9 +1091,94 @@ describe("CampaignsScreen", () => {
     await waitFor(() => expect(selector).toBeEnabled());
     await user.click(selector);
     await user.click(screen.getByRole("option", { name: /Moved list/ }));
-    await user.click(screen.getByRole("button", { name: "Add to selection" }));
-    expect(await screen.findByText("This group list belongs to a different Runtime session.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Apply list" }));
+    const dialog = screen.getByRole("dialog", { name: "Apply saved list snapshot?" });
+    await user.click(within(dialog).getByRole("button", { name: "Apply list" }));
+    expect((await screen.findAllByText(/belongs to a different campaign session/)).length).toBeGreaterThan(0);
     expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
+  });
+
+  it("warns that manual target edits clear canonical source provenance", async () => {
+    const user = userEvent.setup();
+    const source = {
+      type: "GROUP_LIST" as const,
+      groupListId: "11111111-1111-4111-8111-111111111111",
+      membershipRevision: 9,
+      appliedAt: "2026-08-15T01:00:00.000Z",
+    };
+    const replaceCampaignTargets = vi.fn().mockResolvedValue({
+      data: [deniedTarget, { groupId: unknownGroup.id, groupName: unknownGroup.name, enabled: true, sendCapability: unknownGroup.sendCapability }],
+      targetsRevision: 5,
+      source: null,
+    });
+    renderCampaigns({
+      listCampaignTargets: vi.fn().mockResolvedValue({ data: [deniedTarget], targetsRevision: 4, source }),
+      replaceCampaignTargets,
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    expect(await screen.findByText("Saved group list snapshot")).toBeInTheDocument();
+    expect(screen.getByText("9")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Select Unknown room" }));
+    expect(screen.getByText("Manual changes clear provenance")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save target set" }));
+    await waitFor(() => expect(replaceCampaignTargets).toHaveBeenCalledWith(
+      campaign.id,
+      [deniedTarget.groupId, unknownGroup.id],
+      4,
+    ));
+    expect(screen.queryByText("Saved group list snapshot")).not.toBeInTheDocument();
+  });
+
+  it("reloads canonical targets after a target revision conflict without retrying mutation", async () => {
+    const user = userEvent.setup();
+    const listCampaignTargets = vi.fn()
+      .mockResolvedValueOnce({ data: [deniedTarget], targetsRevision: 4, source: null })
+      .mockResolvedValueOnce({ data: [], targetsRevision: 5, source: null });
+    const replaceCampaignTargets = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "CAMPAIGN_TARGETS_REVISION_CONFLICT", status: 409,
+    }));
+    renderCampaigns({ listCampaignTargets, replaceCampaignTargets });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Unknown room" }));
+    await user.click(screen.getByRole("button", { name: "Save target set" }));
+    await waitFor(() => expect(listCampaignTargets).toHaveBeenCalledTimes(2));
+    expect(replaceCampaignTargets).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/canonical target snapshot is being reloaded/)).toBeInTheDocument();
+    expect(screen.getAllByText("Saved 0 · Staged 0 · +0 / −0").length).toBeGreaterThan(0);
+  });
+
+  it("reloads a stale saved-list revision and never retries atomic apply automatically", async () => {
+    const user = userEvent.setup();
+    const list: RuntimeSavedGroupList = {
+      id: "55555555-5555-4555-8555-555555555555", sessionId: session.id,
+      name: "Changing list", description: null, groupCount: 1, revision: 2,
+      membershipRevision: 3, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    };
+    const listSavedGroupLists = vi.fn()
+      .mockResolvedValueOnce({ data: [list], meta: { total: 1, limit: 100, offset: 0 } })
+      .mockResolvedValueOnce({ data: [{ ...list, membershipRevision: 4 }], meta: { total: 1, limit: 100, offset: 0 } });
+    const applyGroupListToCampaignTargets = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "CAMPAIGN_TARGET_SOURCE_REVISION_CONFLICT", status: 409,
+    }));
+    renderCampaigns({ listSavedGroupLists, applyGroupListToCampaignTargets });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    const picker = await openSavedListPicker(user);
+    const selector = within(picker).getByRole("combobox", { name: "Group list" });
+    await waitFor(() => expect(selector).toBeEnabled());
+    await user.click(selector);
+    await user.click(screen.getByRole("option", { name: /Changing list/ }));
+    await user.click(screen.getByRole("button", { name: "Apply list" }));
+    await user.click(within(screen.getByRole("dialog", { name: "Apply saved list snapshot?" })).getByRole("button", { name: "Apply list" }));
+    await waitFor(() => expect(listSavedGroupLists).toHaveBeenCalledTimes(2));
+    expect(applyGroupListToCampaignTargets).toHaveBeenCalledTimes(1);
+    expect((await screen.findAllByText(/membership changed/)).length).toBeGreaterThan(0);
   });
 
   it("resets staged target changes to the canonical saved set without persisting", async () => {

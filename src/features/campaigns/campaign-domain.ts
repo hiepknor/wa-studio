@@ -169,6 +169,26 @@ const ERROR_COPY: Record<string, string> = {
   CAMPAIGN_TARGET_LIMIT_EXCEEDED: "A campaign can contain at most 1,000 unique groups.",
   CAMPAIGN_TARGET_NOT_FOUND: "One or more selected groups no longer exist.",
   CAMPAIGN_TARGET_SESSION_MISMATCH: "Every target must belong to the campaign session.",
+  CAMPAIGN_TARGET_SOURCE_NOT_FOUND:
+    "This saved Group List is archived, unavailable, or outside your current scope. Choose another list.",
+  CAMPAIGN_TARGET_SOURCE_SESSION_MISMATCH:
+    "This saved Group List belongs to a different campaign session and cannot be applied.",
+  CAMPAIGN_TARGET_SOURCE_REVISION_CONFLICT:
+    "The saved Group List membership changed. Its latest revision was reloaded; review it before applying again.",
+  CAMPAIGN_TARGETS_REVISION_CONFLICT:
+    "Campaign targets changed in Runtime. The canonical target snapshot is being reloaded.",
+  CAMPAIGN_RUN_LAUNCH_CONFLICT:
+    "This campaign is no longer launchable or already has a LIVE run. Campaign and run state are being reloaded.",
+  CAMPAIGN_RUN_REVISION_CONFLICT:
+    "Campaign content or targets changed after review. The campaign is being reloaded; run preflight again.",
+  CAMPAIGN_RUN_SCHEDULE_EXPIRED:
+    "This one-time schedule has expired. Return to a DRAFT editor to revise it, or create a new campaign.",
+  CAMPAIGN_RUN_STATE_CONFLICT:
+    "The run changed state in Runtime. Its authoritative state is being reloaded.",
+  GROUP_LIST_REVISION_CONFLICT:
+    "This saved Group List changed in Runtime. Reload and review its latest revision.",
+  GROUP_LIST_ARCHIVED:
+    "This saved Group List is archived and can no longer be applied.",
 };
 
 export function campaignErrorMessage(error: unknown, fallback: string): string {

@@ -33,6 +33,14 @@ interface GroupListEditorProps {
 }
 
 function errorCopy(error: unknown, fallback: string): string {
+  if (error instanceof RuntimeRequestError) {
+    if (error.code === "GROUP_LIST_REVISION_CONFLICT") {
+      return "This list changed in Runtime. The latest saved version was reloaded; review your staged changes before saving again.";
+    }
+    if (error.code === "GROUP_LIST_ARCHIVED") {
+      return "This group list was archived and can no longer be changed.";
+    }
+  }
   return error instanceof Error ? error.message : fallback;
 }
 
@@ -212,6 +220,7 @@ export function GroupListEditor({
           savedList = await api.updateGroupList(canonical.id, {
             name: normalizedName,
             description: description.trim() || null,
+            expectedRevision: canonical.revision,
           });
           if (epoch !== epochRef.current) return;
           setCanonical(savedList);
@@ -219,12 +228,17 @@ export function GroupListEditor({
         }
         if (membershipDirty) {
           membershipAttempted = true;
-          const membership = await api.replaceGroupListGroups(canonical.id, stagedIds);
+          const membership = await api.replaceGroupListGroups(
+            canonical.id,
+            stagedIds,
+            savedList.membershipRevision,
+          );
           if (epoch !== epochRef.current) return;
           if (membership.list.sessionId !== sessionId) {
             throw new Error("This group list belongs to a different Runtime session.");
           }
           savedList = membership.list;
+          setCanonical(membership.list);
           setMembershipRows(Object.fromEntries(membership.data.map((group) => [group.groupId, group])));
           setSavedIds(membership.data.map((group) => group.groupId));
           setStagedIds(membership.data.map((group) => group.groupId));
@@ -271,12 +285,16 @@ export function GroupListEditor({
     setArchiving(true);
     setError(null);
     try {
-      await api.archiveGroupList(canonical.id);
+      await api.archiveGroupList(canonical.id, canonical.revision);
       if (epoch === epochRef.current) onArchived(canonical.id);
     } catch (nextError) {
       if (epoch === epochRef.current) {
         setErrorTitle("Could not archive group list");
         setError(errorCopy(nextError, "Could not archive group list."));
+        if (
+          nextError instanceof RuntimeRequestError
+          && nextError.code === "GROUP_LIST_REVISION_CONFLICT"
+        ) await loadCanonical(true, true);
       }
     } finally {
       if (epoch === epochRef.current) setArchiving(false);

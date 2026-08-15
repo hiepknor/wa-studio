@@ -98,14 +98,14 @@ describe("GroupsWorkspace", () => {
     const oldPage = deferred<Awaited<ReturnType<RuntimeApi["listSavedGroupLists"]>>>();
     const listSavedGroupLists = vi.fn()
       .mockReturnValueOnce(oldPage.promise)
-      .mockResolvedValueOnce({ data: [{ id: "new-list", sessionId: secondary.id, name: "Secondary list", description: null, groupCount: 0, revision: 1, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z", updatedAt: "2026-08-15T00:00:00.000Z" }], meta: { total: 1, limit: 20, offset: 0 } });
+      .mockResolvedValueOnce({ data: [{ id: "new-list", sessionId: secondary.id, name: "Secondary list", description: null, groupCount: 0, revision: 1, membershipRevision: 0, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z", updatedAt: "2026-08-15T00:00:00.000Z" }], meta: { total: 1, limit: 20, offset: 0 } });
     renderWorkspace({ listSavedGroupLists });
     await connect(user);
     await user.click(screen.getByRole("tab", { name: "Saved lists" }));
     await waitFor(() => expect(listSavedGroupLists).toHaveBeenCalledTimes(1));
     await user.click(screen.getByRole("button", { name: "Switch session" }));
     expect(await screen.findByText("Secondary list")).toBeInTheDocument();
-    oldPage.resolve({ data: [{ id: "old-list", sessionId: primary.id, name: "Late primary list", description: null, groupCount: 0, revision: 1, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z", updatedAt: "2026-08-15T00:00:00.000Z" }], meta: { total: 1, limit: 20, offset: 0 } });
+    oldPage.resolve({ data: [{ id: "old-list", sessionId: primary.id, name: "Late primary list", description: null, groupCount: 0, revision: 1, membershipRevision: 0, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z", updatedAt: "2026-08-15T00:00:00.000Z" }], meta: { total: 1, limit: 20, offset: 0 } });
     await Promise.resolve();
     expect(screen.queryByText("Late primary list")).not.toBeInTheDocument();
   });

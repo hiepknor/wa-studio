@@ -19,6 +19,7 @@ const savedList: RuntimeSavedGroupList = {
   description: "Static launch selection",
   groupCount: 1,
   revision: 2,
+  membershipRevision: 1,
   archivedAt: null,
   createdAt: "2026-08-15T00:00:00.000Z",
   updatedAt: "2026-08-15T00:00:00.000Z",
@@ -114,8 +115,9 @@ describe("GroupListEditor", () => {
     const user = userEvent.setup();
     const denied = member(group("denied@g.us", "Denied room", "DENIED", false));
     const updated = { ...savedList, name: "Updated list", revision: 3 };
+    const membershipUpdated = { ...updated, groupCount: 0, revision: 4, membershipRevision: 2 };
     const updateGroupList = vi.fn().mockResolvedValue(updated);
-    const replaceGroupListGroups = vi.fn().mockResolvedValue({ list: updated, data: [] });
+    const replaceGroupListGroups = vi.fn().mockResolvedValue({ list: membershipUpdated, data: [] });
     const archiveGroupList = vi.fn().mockResolvedValue(undefined);
     const { onArchived, onClose, onSaved } = renderEditor(savedList, {
       getGroupListMembership: vi.fn().mockResolvedValue({ list: savedList, data: [denied] }),
@@ -135,15 +137,16 @@ describe("GroupListEditor", () => {
     await user.clear(name);
     await user.type(name, "Updated list");
     await user.click(screen.getByRole("button", { name: "Save list" }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updated));
-    expect(updateGroupList).toHaveBeenCalledWith(savedList.id, { name: "Updated list", description: savedList.description });
-    expect(replaceGroupListGroups).toHaveBeenCalledWith(savedList.id, []);
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(membershipUpdated));
+    expect(updateGroupList).toHaveBeenCalledWith(savedList.id, { name: "Updated list", description: savedList.description, expectedRevision: 2 });
+    expect(replaceGroupListGroups).toHaveBeenCalledWith(savedList.id, [], 1);
 
     await user.click(screen.getByRole("button", { name: "Archive list" }));
     const archiveDialog = screen.getByRole("dialog", { name: "Archive group list?" });
     expect(archiveDialog).toHaveTextContent("Existing campaign target snapshots are not changed.");
     await user.click(archiveDialog.querySelector<HTMLButtonElement>(".button-danger")!);
     await waitFor(() => expect(onArchived).toHaveBeenCalledWith(savedList.id));
+    expect(archiveGroupList).toHaveBeenCalledWith(savedList.id, 4);
 
     await user.type(name, " dirty");
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
@@ -151,6 +154,31 @@ describe("GroupListEditor", () => {
     expect(onClose).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps membershipRevision stable through a metadata-only edit", async () => {
+    const user = userEvent.setup();
+    const metadataSaved = { ...savedList, name: "Renamed list", revision: 3 };
+    const updateGroupList = vi.fn().mockResolvedValue(metadataSaved);
+    const replaceGroupListGroups = vi.fn();
+    const { onSaved } = renderEditor(savedList, {
+      getGroupListMembership: vi.fn().mockResolvedValue({ list: savedList, data: [] }),
+      updateGroupList,
+      replaceGroupListGroups,
+    });
+    await screen.findByText("1–3 of 3 groups");
+    const name = screen.getByRole("textbox", { name: "Name" });
+    await user.clear(name);
+    await user.type(name, "Renamed list");
+    await user.click(screen.getByRole("button", { name: "Save list" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({
+      revision: 3,
+      membershipRevision: savedList.membershipRevision,
+    })));
+    expect(updateGroupList).toHaveBeenCalledWith(savedList.id, expect.objectContaining({
+      expectedRevision: savedList.revision,
+    }));
+    expect(replaceGroupListGroups).not.toHaveBeenCalled();
   });
 
   it("resets staged metadata and membership to the canonical saved state without a mutation", async () => {

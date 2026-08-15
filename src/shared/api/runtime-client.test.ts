@@ -202,7 +202,7 @@ describe("RuntimeApi", () => {
     });
   });
 
-  it("only exposes draft, target, and preflight campaign endpoints for this milestone", async () => {
+  it("uses revision-safe target apply and campaign run lifecycle endpoints", async () => {
     const campaign = {
       id: "campaign-id", sessionId: "session-id", name: "Release", text: "Ship it",
       scheduleType: "IMMEDIATE", scheduledAt: null, status: "DRAFT", targetCount: 1,
@@ -218,29 +218,73 @@ describe("RuntimeApi", () => {
       executionMode: "LIVE", checkedAt: "2026-08-14T00:00:00.000Z", totalTargets: 1,
       allowedTargets: 0, deniedTargets: 0, unknownTargets: 1, checks: [], targetIssues: [],
     } as const;
+    const source = {
+      type: "GROUP_LIST", groupListId: "11111111-1111-4111-8111-111111111111",
+      membershipRevision: 5, appliedAt: "2026-08-14T00:00:00.000Z",
+    } as const;
+    const run = {
+      id: "run-id", campaignId: campaign.id, sessionId: campaign.sessionId,
+      executionMode: "LIVE", status: "RUNNING", statusReason: null, text: campaign.text,
+      targetSource: source, preflight: report, totalTargets: 1,
+      progress: { total: 1, pending: 0, materialized: 0, processing: 1, dryRunCompleted: 0, accepted: 0, sent: 0, delivered: 0, read: 0, failed: 0, unknown: 0, blocked: 0, cancelled: 0 },
+      scheduledAt: "2026-08-14T00:00:00.000Z", startedAt: "2026-08-14T00:00:00.000Z",
+      completedAt: null, createdAt: "2026-08-14T00:00:00.000Z",
+    } as const;
     const runtimeFetch = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ data: [target] }))
-      .mockResolvedValueOnce(Response.json({ data: [target] }))
-      .mockResolvedValueOnce(Response.json(campaign))
-      .mockResolvedValueOnce(Response.json(report));
+      .mockResolvedValueOnce(Response.json({ data: [target], targetsRevision: 2, source }))
+      .mockResolvedValueOnce(Response.json({ data: [target], targetsRevision: 3, source: null }))
+      .mockResolvedValueOnce(Response.json({ data: [target], targetsRevision: 4, source }))
+      .mockResolvedValueOnce(Response.json(report))
+      .mockResolvedValueOnce(Response.json({ data: [run], meta: { total: 1, limit: 20, offset: 0 } }))
+      .mockResolvedValueOnce(Response.json(run, { status: 201 }))
+      .mockResolvedValueOnce(Response.json(run))
+      .mockResolvedValueOnce(Response.json({ ...run, status: "PAUSED" }));
     const api = new RuntimeApi(
       { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
       runtimeFetch,
     );
 
     await api.listCampaignTargets(campaign.id);
-    await api.replaceCampaignTargets(campaign.id, [target.groupId]);
-    await api.updateCampaign(campaign.id, { text: "New text" });
+    await api.replaceCampaignTargets(campaign.id, [target.groupId], 2);
+    await api.applyGroupListToCampaignTargets(campaign.id, {
+      groupListId: source.groupListId,
+      expectedMembershipRevision: 5,
+      expectedTargetsRevision: 3,
+    });
     await api.preflightCampaign(campaign.id, "LIVE");
+    await api.listCampaignRuns(campaign.id);
+    await api.createCampaignRun(campaign.id, {
+      executionMode: "LIVE",
+      expectedCampaignRevision: 1,
+      expectedTargetsRevision: 4,
+    }, "launch-key");
+    await api.getCampaignRun(run.id);
+    await api.pauseCampaignRun(run.id);
 
     const requests = runtimeFetch.mock.calls.map((call) => call[0] as Request);
     expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
       ["GET", "/api/v1/campaigns/campaign-id/targets"],
       ["PUT", "/api/v1/campaigns/campaign-id/targets"],
-      ["PATCH", "/api/v1/campaigns/campaign-id"],
+      ["POST", "/api/v1/campaigns/campaign-id/targets/apply-group-list"],
       ["POST", "/api/v1/campaigns/campaign-id/preflight"],
+      ["GET", "/api/v1/campaigns/campaign-id/runs"],
+      ["POST", "/api/v1/campaigns/campaign-id/runs"],
+      ["GET", "/api/v1/campaign-runs/run-id"],
+      ["POST", "/api/v1/campaign-runs/run-id/pause"],
     ]);
-    expect(requests.some((request) => request.url.includes("/runs") || request.url.includes("message"))).toBe(false);
+    await expect(requests[1].clone().json()).resolves.toEqual({
+      groupIds: [target.groupId], expectedTargetsRevision: 2,
+    });
+    await expect(requests[2].clone().json()).resolves.toEqual({
+      groupListId: source.groupListId,
+      expectedMembershipRevision: 5,
+      expectedTargetsRevision: 3,
+    });
+    expect(requests[5].headers.get("Idempotency-Key")).toBe("launch-key");
+    await expect(requests[5].clone().json()).resolves.toEqual({
+      executionMode: "LIVE", expectedCampaignRevision: 1, expectedTargetsRevision: 4,
+    });
+    expect(requests.some((request) => request.url.includes("message"))).toBe(false);
   });
 
   it("starts a full session sync through the versioned Runtime endpoint", async () => {
@@ -523,6 +567,7 @@ describe("RuntimeApi", () => {
       description: null,
       groupCount: 0,
       revision: 1,
+      membershipRevision: 0,
       archivedAt: null,
       createdAt: "2026-08-15T00:00:00.000Z",
       updatedAt: "2026-08-15T00:00:00.000Z",
@@ -557,7 +602,7 @@ describe("RuntimeApi", () => {
       { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
       runtimeFetch,
     );
-    const error = await api.replaceGroupListGroups("list-id", ["one@g.us"])
+    const error = await api.replaceGroupListGroups("list-id", ["one@g.us"], 7)
       .catch((caught: unknown) => caught);
     expect(error).toMatchObject({
       code: "GROUP_LIST_GROUP_LIMIT_EXCEEDED",
@@ -566,7 +611,9 @@ describe("RuntimeApi", () => {
     });
     const request = runtimeFetch.mock.calls[0][0] as Request;
     expect(request.method).toBe("PUT");
-    await expect(request.json()).resolves.toEqual({ groupIds: ["one@g.us"] });
+    await expect(request.json()).resolves.toEqual({
+      groupIds: ["one@g.us"], expectedMembershipRevision: 7,
+    });
   });
 
   it.each([401, 404, 409, 422])(
