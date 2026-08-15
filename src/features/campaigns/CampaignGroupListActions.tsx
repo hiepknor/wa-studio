@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { RuntimeApi, RuntimeSavedGroupList } from "@/shared/api/runtime-client";
+import type { RuntimeApi, RuntimeGroupList } from "@/shared/api/runtime-client";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { SearchField } from "@/shared/ui/SearchField";
 import { SelectMenu } from "@/shared/ui/SelectMenu";
+import { groupListErrorMessage } from "@/features/groups/group-list-domain";
 
-interface CampaignSavedListActionsProps {
+interface CampaignGroupListActionsProps {
   api: RuntimeApi;
   campaignId: string;
   disabled?: boolean;
-  onApply: (list: RuntimeSavedGroupList) => Promise<{
+  onApply: (list: RuntimeGroupList) => Promise<{
     message: string;
     ok: boolean;
     reloadLists?: boolean;
@@ -20,18 +21,18 @@ interface CampaignSavedListActionsProps {
   sessionId: string;
 }
 
-export function CampaignSavedListActions({
+export function CampaignGroupListActions({
   api,
   campaignId,
   disabled = false,
   onApply,
   sessionId,
-}: CampaignSavedListActionsProps) {
+}: CampaignGroupListActionsProps) {
   const [open, setOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [inputQuery, setInputQuery] = useState("");
   const [query, setQuery] = useState("");
-  const [lists, setLists] = useState<RuntimeSavedGroupList[]>([]);
+  const [lists, setLists] = useState<RuntimeGroupList[]>([]);
   const [total, setTotal] = useState(0);
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -64,7 +65,7 @@ export function CampaignSavedListActions({
     setLoading(true);
     if (!preserveError) setError(null);
     try {
-      const page = await api.listSavedGroupLists({
+      const page = await api.listGroupLists({
         sessionId,
         limit: 100,
         offset: 0,
@@ -81,7 +82,7 @@ export function CampaignSavedListActions({
       setSelectedId((current) => activeLists.some((list) => list.id === current) ? current : "");
     } catch (nextError) {
       if (request === listRequestRef.current && requestContext === contextRef.current) {
-        setError(nextError instanceof Error ? nextError.message : "Could not load saved lists.");
+        setError(groupListErrorMessage(nextError, "Could not load group lists."));
       }
     } finally {
       if (request === listRequestRef.current && requestContext === contextRef.current) setLoading(false);
@@ -180,30 +181,30 @@ export function CampaignSavedListActions({
         label: list.name,
         value: list.id,
       }))
-    : [{ disabled: true, label: loading ? "Loading lists…" : "No saved lists", value: "" }];
+    : [{ disabled: true, label: loading ? "Loading lists…" : "No group lists", value: "" }];
 
   return (
-    <div className="campaign-saved-list-action" ref={rootRef}>
+    <div className="campaign-group-list-action" ref={rootRef}>
       <Button
-        aria-controls="campaign-saved-list-popover"
+        aria-controls="campaign-group-list-popover"
         aria-expanded={open}
         disabled={disabled}
         onClick={() => open ? close(true) : setOpen(true)}
         ref={triggerRef}
         size="sm"
       >
-        Apply saved list
+        Apply group list
       </Button>
       {open && (
-        <section aria-label="Apply saved list" className="campaign-saved-list-popover stack stack-sm" id="campaign-saved-list-popover" role="dialog">
+        <section aria-label="Apply group list" className="campaign-group-list-popover stack stack-sm" id="campaign-group-list-popover" role="dialog">
           <header>
-            <div><strong>Apply saved list</strong><span>Atomically replace the persisted target snapshot.</span></div>
-            <button aria-label="Close saved lists" onClick={() => close(true)} type="button"><AppIcon name="close" size="xs" /></button>
+            <div><strong>Apply group list</strong><span>Atomically replace the persisted target snapshot.</span></div>
+            <button aria-label="Close group lists" onClick={() => close(true)} type="button"><AppIcon name="close" size="xs" /></button>
           </header>
-          <SearchField label="Find saved list" loading={loading} onChange={applying ? () => undefined : changeSearch} placeholder="Search list name or description" value={inputQuery} />
+          <SearchField label="Find group list" loading={loading} onChange={applying ? () => undefined : changeSearch} placeholder="Search list name or description" value={inputQuery} />
           <SelectMenu disabled={applying || loading || !lists.length} label="Group list" onChange={changeList} options={options} value={selectedId} />
           {total > 100 && <small>Showing the first 100 matches. Refine the search to find another list.</small>}
-          {error && <InlineAlert title="Could not apply saved list">{error}</InlineAlert>}
+          {error && <InlineAlert title="Could not apply group list">{error}</InlineAlert>}
           <footer>
             <Button disabled={!selected || applying} loading={applying} onClick={() => setConfirmOpen(true)} size="sm" variant="primary">Apply list</Button>
           </footer>
@@ -218,7 +219,7 @@ export function CampaignSavedListActions({
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => void apply()}
         open={confirmOpen}
-        title="Apply saved list snapshot?"
+        title="Apply group list snapshot?"
       />
     </div>
   );

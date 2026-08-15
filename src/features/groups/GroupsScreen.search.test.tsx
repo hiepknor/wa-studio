@@ -9,7 +9,7 @@ import {
 import type {
   RuntimeApi,
   RuntimeGroup,
-  RuntimeGroupListInput,
+  RuntimeGroupDirectoryInput,
   RuntimeGroupPage,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
@@ -365,7 +365,7 @@ describe("GroupsScreen global search and filters", () => {
     const filtered = new Promise<RuntimeGroupPage>((resolve) => {
       resolveFiltered = resolve;
     });
-    const listGroups = vi.fn((input: RuntimeGroupListInput) => (
+    const listGroups = vi.fn((input: RuntimeGroupDirectoryInput) => (
       input.query ? filtered : Promise.resolve(defaultPage)
     ));
     renderGroups(listGroups);
@@ -404,7 +404,7 @@ describe("GroupsScreen global search and filters", () => {
       data: [group("match@g.us", "Backend match")],
       meta: { total: 3, limit: 20, offset: 0 },
     };
-    const listGroups = vi.fn((input: RuntimeGroupListInput) => {
+    const listGroups = vi.fn((input: RuntimeGroupDirectoryInput) => {
       if (input.query === "needle") return Promise.resolve(filteredPage);
       if (input.offset === 20) return Promise.resolve(secondPage);
       return Promise.resolve({
@@ -436,7 +436,7 @@ describe("GroupsScreen global search and filters", () => {
   it("shows filtered empty results and clamps an out-of-range page", async () => {
     const user = userEvent.setup();
     let pageMoved = false;
-    const listGroups = vi.fn((input: RuntimeGroupListInput) => {
+    const listGroups = vi.fn((input: RuntimeGroupDirectoryInput) => {
       if (input.query === "no result") {
         return Promise.resolve({ data: [], meta: { total: 0, limit: 20, offset: 0 } });
       }
@@ -480,7 +480,7 @@ describe("GroupsScreen global search and filters", () => {
     const firstSession = new Promise<RuntimeGroupPage>((resolve) => {
       resolveFirstSession = resolve;
     });
-    const listGroups = vi.fn((input: RuntimeGroupListInput) => {
+    const listGroups = vi.fn((input: RuntimeGroupDirectoryInput) => {
       if (input.sessionId === secondSession.id) {
         return Promise.resolve({
           data: [group("second-session@g.us", "Second session result", secondSession.id)],

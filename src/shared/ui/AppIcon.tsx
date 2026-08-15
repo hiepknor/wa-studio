@@ -1,9 +1,11 @@
 import {
   Activity,
+  CircleAlert,
   Check,
   ChevronDown,
   Copy,
   CloudDownload,
+  Info,
   KeyRound,
   PanelsTopLeft,
   Play,
@@ -12,6 +14,7 @@ import {
   Send,
   Server,
   Settings2,
+  TriangleAlert,
   UsersRound,
   Unplug,
   X,
@@ -25,10 +28,12 @@ export type AppIconName =
   | "campaigns"
   | "check"
   | "chevron-down"
+  | "circle-alert"
   | "close"
   | "copy"
   | "disconnect"
   | "groups"
+  | "info"
   | "key"
   | "refresh"
   | "runs"
@@ -36,7 +41,8 @@ export type AppIconName =
   | "server"
   | "sessions"
   | "settings"
-  | "sync";
+  | "sync"
+  | "triangle-alert";
 
 export type AppIconSize = "xs" | "sm" | "md" | "lg" | "xl";
 
@@ -51,10 +57,12 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   campaigns: Send,
   check: Check,
   "chevron-down": ChevronDown,
+  "circle-alert": CircleAlert,
   close: X,
   copy: Copy,
   disconnect: Unplug,
   groups: UsersRound,
+  info: Info,
   key: KeyRound,
   refresh: RefreshCw,
   runs: Play,
@@ -63,6 +71,7 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   sessions: PanelsTopLeft,
   settings: Settings2,
   sync: CloudDownload,
+  "triangle-alert": TriangleAlert,
 };
 
 const ICON_SIZES: Record<AppIconSize, number> = {

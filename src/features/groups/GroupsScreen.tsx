@@ -681,7 +681,7 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
     if (reloaded && listTargetRef.current === groupListRequestKey(listState)) {
       toast.notify({
         id: "groups-reload",
-        title: "Groups reloaded.",
+        title: "Groups reloaded",
         tone: "success",
       });
     }
@@ -696,8 +696,8 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
       description: result.warning ?? syncProgressCopy(result.run),
       id: "groups-sync",
       title: result.warning
-        ? "Sync completed with an update warning."
-        : "Sync completed.",
+        ? "Sync completed with an update warning"
+        : "Sync completed",
       tone: result.warning ? "warning" : "success",
     });
   }

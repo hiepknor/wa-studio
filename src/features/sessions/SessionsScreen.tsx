@@ -86,7 +86,7 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
     setSessionsError(null);
     try {
       await refreshSessions();
-      toast.notify({ id: "sessions-reload", title: "Sessions reloaded.", tone: "success" });
+      toast.notify({ id: "sessions-reload", title: "Sessions reloaded", tone: "success" });
     } catch (error) {
       setSessionsError(error instanceof Error ? error.message : "Could not reload sessions.");
     } finally {

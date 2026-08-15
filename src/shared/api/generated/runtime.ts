@@ -832,6 +832,8 @@ export interface components {
             type: "GROUP_LIST";
             /** Format: uuid */
             groupListId: string;
+            /** @description Saved-list name captured when this exact membership revision was applied. */
+            groupListNameSnapshot: string;
             membershipRevision: number;
             /** Format: date-time */
             appliedAt: string;

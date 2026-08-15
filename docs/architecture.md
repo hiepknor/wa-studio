@@ -15,7 +15,7 @@ This boundary lets future web and mobile clients use the same WA Runtime contrac
 
 ## Source of truth
 
-- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime commits `8173ab8` and `b8d63ff` (SHA-256 `d8de71d177c7e14a3b79a71bd1a9d8cdf4b829e742a3cf9663148a108a874d0b`).
+- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime release documentation HEAD `7fb0a9f`, including audience invariants `0cddc89` and OpenWA 0.18 compatibility `48ad3a0` (SHA-256 `4b932b05213252c624b9d0cb359d696d30db9e90d23e1b91421286076ccec760`).
 - `src/shared/api/generated/runtime.ts` is generated; do not edit it by hand.
 - `src/shared/api/runtime-client.ts` owns URL normalization, authentication headers, transport, and error mapping.
 - Feature modules consume the typed client and must not redefine Runtime DTOs.
@@ -90,10 +90,12 @@ Run creation is a separate, explicit action after review. Studio sends both revi
 
 ## Reusable group-list boundary
 
-Runtime Group Lists are session-scoped static templates, not saved queries or dynamic segments. Groups exposes All groups and Saved lists as two views under the existing single sidebar destination. List create owns one UUID idempotency key per intent; editing loads complete canonical membership, keeps saved and staged IDs separate, sends aggregate revision for metadata/archive and membership revision for replacement, and never retries a conflict silently. Archiving a list does not alter any campaign.
+Runtime Group Lists are session-scoped static templates, not saved queries or dynamic segments. Groups exposes All groups and Group lists as two views under the existing single sidebar destination. List create owns one UUID idempotency key per intent; editing loads complete canonical membership, keeps persisted and staged IDs separate, sends aggregate revision for metadata/archive and membership revision for replacement, and never retries a conflict silently. Archiving a list does not alter any campaign.
 
 Applying a Group List to Campaign targets uses Runtime's atomic apply endpoint with `groupListId`, `expectedMembershipRevision`, and `expectedTargetsRevision`. It replaces the materialized campaign target snapshot with the canonical response and records nullable source provenance; it does not fetch/copy membership in Studio and does not create a campaign–list binding. Later list rename, edit, or archive cannot mutate existing campaign targets.
 
+Campaign and run provenance render the required `groupListNameSnapshot` returned by Runtime. Studio never resolves the current Group List merely to reconstruct historical naming. A manual target replacement clears source to `null` and the UI presents the result as a custom selection.
+
 `src/features/groups/selection` owns the shared Runtime-backed directory query, filter toolbar, selection table, and ordered set helpers used by both Group List editing and Campaign Targets. Search, filters, pagination, request identity, and page-scoped select-all therefore have one implementation. Selected IDs remain independent of the current response page, and inactive, DENIED, and UNKNOWN groups remain selectable because Runtime preflight owns eligibility policy.
 
-Applying a saved list to a campaign fetches its complete current membership and changes only the editor's staged target IDs. Add performs an ordered union; Replace stages the fetched snapshot after confirmation. Neither action calls campaign target replacement, stores list provenance, or creates a campaign–list binding. `Save target set` remains the only persistence point, and later list edits or archival cannot change an already persisted campaign snapshot.
+Applying a Group List uses Runtime's atomic endpoint with membership and target revision preconditions. The canonical response replaces the persisted Campaign target snapshot and records provenance without creating a live campaign–list binding. Later Group List edits or archival cannot change an already materialized Campaign snapshot; subsequent manual target replacement clears provenance.

@@ -2,9 +2,9 @@ import { useState } from "react";
 
 import { Tabs } from "@/shared/ui/Tabs";
 import { GroupsScreen } from "./GroupsScreen";
-import { SavedGroupListsPanel } from "./SavedGroupListsPanel";
+import { GroupListsPanel } from "./GroupListsPanel";
 
-type GroupsTab = "all" | "saved";
+type GroupsTab = "all" | "lists";
 
 export function GroupsWorkspace() {
   const [activeTab, setActiveTab] = useState<GroupsTab>("all");
@@ -16,12 +16,12 @@ export function GroupsWorkspace() {
       onChange={setActiveTab}
       tabs={[
         { id: "all", label: "All groups" },
-        { id: "saved", label: "Saved lists" },
+        { id: "lists", label: "Group lists" },
       ]}
     />
   );
 
   return activeTab === "all"
     ? <GroupsScreen navigation={navigation} />
-    : <SavedGroupListsPanel navigation={navigation} />;
+    : <GroupListsPanel navigation={navigation} />;
 }

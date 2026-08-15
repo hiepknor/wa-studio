@@ -4,7 +4,7 @@ import {
   RuntimeRequestError,
   type RuntimeApi,
   type RuntimeGroupListGroup,
-  type RuntimeSavedGroupList,
+  type RuntimeGroupList,
 } from "@/shared/api/runtime-client";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -22,26 +22,19 @@ import {
   sameGroupSelection,
 } from "./selection/group-selection";
 import { useGroupDirectoryQuery } from "./selection/useGroupDirectoryQuery";
+import { groupListErrorMessage } from "./group-list-domain";
 
 interface GroupListEditorProps {
   api: RuntimeApi;
-  list: RuntimeSavedGroupList | null;
+  list: RuntimeGroupList | null;
   onArchived: (listId: string) => void;
   onClose: () => void;
-  onSaved: (list: RuntimeSavedGroupList) => void;
+  onSaved: (list: RuntimeGroupList) => void;
   sessionId: string;
 }
 
 function errorCopy(error: unknown, fallback: string): string {
-  if (error instanceof RuntimeRequestError) {
-    if (error.code === "GROUP_LIST_REVISION_CONFLICT") {
-      return "This list changed in Runtime. The latest saved version was reloaded; review your staged changes before saving again.";
-    }
-    if (error.code === "GROUP_LIST_ARCHIVED") {
-      return "This group list was archived and can no longer be changed.";
-    }
-  }
-  return error instanceof Error ? error.message : fallback;
+  return groupListErrorMessage(error, fallback);
 }
 
 function runtimeGroupRow(group: ReturnType<typeof useGroupDirectoryQuery>["groups"][number]): GroupSelectionRow {
@@ -62,7 +55,7 @@ export function GroupListEditor({
   onSaved,
   sessionId,
 }: GroupListEditorProps) {
-  const [canonical, setCanonical] = useState<RuntimeSavedGroupList | null>(list);
+  const [canonical, setCanonical] = useState<RuntimeGroupList | null>(list);
   const [name, setName] = useState(list?.name ?? "");
   const [description, setDescription] = useState(list?.description ?? "");
   const [savedIds, setSavedIds] = useState<string[]>([]);
@@ -135,10 +128,12 @@ export function GroupListEditor({
       }
       const ids = membership.data.map((group) => group.groupId);
       setCanonical(membership.list);
-      setName(membership.list.name);
-      setDescription(membership.list.description ?? "");
       setSavedIds(ids);
-      if (!preserveStaged) setStagedIds(ids);
+      if (!preserveStaged) {
+        setName(membership.list.name);
+        setDescription(membership.list.description ?? "");
+        setStagedIds(ids);
+      }
       setMembershipRows(Object.fromEntries(membership.data.map((group) => [group.groupId, group])));
     } catch (nextError) {
       if (epoch === epochRef.current) {
@@ -206,7 +201,7 @@ export function GroupListEditor({
     let metadataCommitted = false;
     let membershipAttempted = false;
     try {
-      let savedList: RuntimeSavedGroupList;
+      let savedList: RuntimeGroupList;
       if (!canonical) {
         savedList = await api.createGroupList({
           sessionId,
@@ -265,9 +260,18 @@ export function GroupListEditor({
       }
       if (membershipAttempted) {
         setErrorTitle("Group selection was not saved");
-        setError(metadataCommitted
-          ? "List details were saved, but group membership was not updated. Runtime keeps the previous saved membership; your staged group changes remain available to retry."
-          : "Group membership was not updated. Runtime keeps the previous saved membership; your staged group changes remain available to retry.");
+        if (
+          nextError instanceof RuntimeRequestError
+          && nextError.code === "GROUP_LIST_REVISION_CONFLICT"
+        ) {
+          setError(metadataCommitted
+            ? "List details were saved, but membership changed concurrently. Runtime's canonical membership was reloaded; your staged group changes remain available for review."
+            : "Membership changed concurrently in Runtime. The canonical membership was reloaded; your staged group changes remain available for review.");
+        } else {
+          setError(metadataCommitted
+            ? "List details were saved, but group membership was not updated. Runtime keeps the previous saved membership; your staged group changes remain available to retry."
+            : "Group membership was not updated. Runtime keeps the previous saved membership; your staged group changes remain available to retry.");
+        }
       } else {
         setErrorTitle(canonical && metadataDirty ? "List details were not saved" : "Could not save group list");
         setError(errorCopy(nextError, "Could not save group list."));

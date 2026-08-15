@@ -220,6 +220,7 @@ describe("RuntimeApi", () => {
     } as const;
     const source = {
       type: "GROUP_LIST", groupListId: "11111111-1111-4111-8111-111111111111",
+      groupListNameSnapshot: "Launch groups",
       membershipRevision: 5, appliedAt: "2026-08-14T00:00:00.000Z",
     } as const;
     const run = {
@@ -541,7 +542,7 @@ describe("RuntimeApi", () => {
     );
   });
 
-  it("trims saved-list search and uses Runtime pagination", async () => {
+  it("trims Group List search and uses Runtime pagination", async () => {
     const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       data: [], meta: { total: 0, limit: 20, offset: 40 },
     }));
@@ -549,7 +550,7 @@ describe("RuntimeApi", () => {
       { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
       runtimeFetch,
     );
-    await api.listSavedGroupLists({
+    await api.listGroupLists({
       sessionId: "session id",
       limit: 20,
       offset: 40,

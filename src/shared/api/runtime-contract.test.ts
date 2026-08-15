@@ -7,11 +7,11 @@ type UpdateCampaignDto = components["schemas"]["UpdateCampaignDto"];
 type CampaignListQuery = NonNullable<
   paths["/api/v1/campaigns"]["get"]["parameters"]["query"]
 >;
-type GroupListQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
-type SavedGroupListQuery = paths["/api/v1/group-lists"]["get"]["parameters"]["query"];
+type GroupDirectoryQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
+type GroupListsQuery = paths["/api/v1/group-lists"]["get"]["parameters"]["query"];
 type CreateGroupListDto = components["schemas"]["CreateGroupListDto"];
 type GroupListMembershipDto = components["schemas"]["GroupListMembershipDto"];
-type SavedGroupListDto = components["schemas"]["SavedGroupListDto"];
+type ContractGroupListDto = components["schemas"]["SavedGroupListDto"];
 type ReplaceGroupListGroupsDto = components["schemas"]["ReplaceGroupListGroupsDto"];
 type CampaignTargetListDto = components["schemas"]["CampaignTargetListDto"];
 type ApplyGroupListTargetsDto = components["schemas"]["ApplyGroupListTargetsDto"];
@@ -26,7 +26,7 @@ describe("authoritative WA Runtime contract", () => {
     );
     const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(checksum)
-      .toBe("d8de71d177c7e14a3b79a71bd1a9d8cdf4b829e742a3cf9663148a108a874d0b");
+      .toBe("4b932b05213252c624b9d0cb359d696d30db9e90d23e1b91421286076ccec760");
   });
 
   it("generates nullable scheduledAt for UpdateCampaignDto", () => {
@@ -50,7 +50,7 @@ describe("authoritative WA Runtime contract", () => {
   });
 
   it("generates participant bounds for the authoritative group-list query", () => {
-    const query: GroupListQuery = {
+    const query: GroupDirectoryQuery = {
       sessionId: "session-id",
       minParticipants: 50,
       maxParticipants: 500,
@@ -59,8 +59,8 @@ describe("authoritative WA Runtime contract", () => {
     expect(query.maxParticipants).toBe(500);
   });
 
-  it("generates saved Group List browsing and atomic create membership types", () => {
-    const query: SavedGroupListQuery = {
+  it("generates Group List browsing and atomic create membership types", () => {
+    const query: GroupListsQuery = {
       sessionId: "session-id",
       query: "launch",
       limit: 20,
@@ -79,7 +79,7 @@ describe("authoritative WA Runtime contract", () => {
   });
 
   it("generates revision-safe Group List and Campaign target provenance types", () => {
-    const list = { membershipRevision: 4 } as SavedGroupListDto;
+    const list = { membershipRevision: 4 } as ContractGroupListDto;
     const replacement: ReplaceGroupListGroupsDto = {
       groupIds: ["one@g.us"],
       expectedMembershipRevision: 4,
@@ -89,10 +89,18 @@ describe("authoritative WA Runtime contract", () => {
       expectedMembershipRevision: 4,
       expectedTargetsRevision: 8,
     };
+    const source: NonNullable<CampaignTargetListDto["source"]> = {
+      type: "GROUP_LIST",
+      groupListId: "11111111-1111-4111-8111-111111111111",
+      groupListNameSnapshot: "Launch groups",
+      membershipRevision: 4,
+      appliedAt: "2026-08-15T00:00:00.000Z",
+    };
     const targets = { source: null } as CampaignTargetListDto;
     expect(list.membershipRevision).toBe(4);
     expect(replacement.expectedMembershipRevision).toBe(4);
     expect(apply.expectedTargetsRevision).toBe(8);
+    expect(source.groupListNameSnapshot).toBe("Launch groups");
     expect(targets.source).toBeNull();
   });
 

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,13 +6,14 @@ import type {
   RuntimeApi,
   RuntimeGroup,
   RuntimeGroupListGroup,
-  RuntimeSavedGroupList,
+  RuntimeGroupList,
 } from "@/shared/api/runtime-client";
+import { RuntimeRequestError } from "@/shared/api/runtime-client";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { GroupListEditor } from "./GroupListEditor";
 
 const sessionId = "session-id";
-const savedList: RuntimeSavedGroupList = {
+const savedList: RuntimeGroupList = {
   id: "11111111-1111-4111-8111-111111111111",
   sessionId,
   name: "Launch groups",
@@ -45,7 +46,7 @@ function member(item: RuntimeGroup): RuntimeGroupListGroup {
   };
 }
 
-function renderEditor(list: RuntimeSavedGroupList | null, overrides: Partial<RuntimeApi> = {}) {
+function renderEditor(list: RuntimeGroupList | null, overrides: Partial<RuntimeApi> = {}) {
   const groups = [
     group("allowed@g.us", "Allowed room"),
     group("denied@g.us", "Denied room", "DENIED", false),
@@ -235,5 +236,81 @@ describe("GroupListEditor", () => {
     expect(screen.getByDisplayValue("Metadata saved")).toBeInTheDocument();
     expect(screen.getByText("Saved 1 · Staged 0 · +0 / −1")).toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("reloads a membership revision conflict without retrying and preserves staged selection", async () => {
+    const user = userEvent.setup();
+    const denied = member(group("denied@g.us", "Denied room", "DENIED", false));
+    const concurrent = { ...savedList, revision: 3, membershipRevision: 2 };
+    const getGroupListMembership = vi.fn()
+      .mockResolvedValueOnce({ list: savedList, data: [denied] })
+      .mockResolvedValueOnce({ list: concurrent, data: [denied] });
+    const replaceGroupListGroups = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "GROUP_LIST_REVISION_CONFLICT",
+      status: 409,
+    }));
+    renderEditor(savedList, { getGroupListMembership, replaceGroupListGroups });
+    await screen.findByText("Saved 1 · Staged 1 · +0 / −0");
+    await screen.findByText("1–3 of 3 groups");
+    await waitFor(() => {
+      const checkbox = screen.getByRole("checkbox", { name: "Select Denied room" });
+      expect(checkbox).toBeEnabled();
+      expect(checkbox).toBeChecked();
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Denied room" }));
+    await screen.findByText("Saved 1 · Staged 0 · +0 / −1");
+    await user.click(screen.getByRole("button", { name: "Save list" }));
+
+    expect(await screen.findByText(/Membership changed concurrently/)).toBeInTheDocument();
+    await waitFor(() => expect(getGroupListMembership).toHaveBeenCalledTimes(2));
+    expect(replaceGroupListGroups).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("checkbox", { name: "Select Denied room" })).not.toBeChecked();
+    expect(screen.getByText("Saved 1 · Staged 0 · +0 / −1")).toBeInTheDocument();
+  });
+
+  it("reloads a metadata conflict without retrying and preserves operator input", async () => {
+    const user = userEvent.setup();
+    const concurrent = { ...savedList, name: "Runtime rename", revision: 3 };
+    const getGroupListMembership = vi.fn()
+      .mockResolvedValueOnce({ list: savedList, data: [] })
+      .mockResolvedValueOnce({ list: concurrent, data: [] });
+    const updateGroupList = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "GROUP_LIST_REVISION_CONFLICT",
+      status: 409,
+    }));
+    renderEditor(savedList, { getGroupListMembership, updateGroupList });
+    await screen.findByText("Saved 0 · Staged 0 · +0 / −0");
+    const name = await screen.findByRole("textbox", { name: "Name" });
+    fireEvent.change(name, { target: { value: "Operator rename" } });
+    expect(name).toHaveValue("Operator rename");
+    await user.click(screen.getByRole("button", { name: "Save list" }));
+
+    expect(await screen.findByText(/canonical state was reloaded/)).toBeInTheDocument();
+    await waitFor(() => expect(getGroupListMembership).toHaveBeenCalledTimes(2));
+    expect(updateGroupList).toHaveBeenCalledTimes(1);
+    expect(name).toHaveValue("Operator rename");
+  });
+
+  it("sends the held aggregate revision for archive and does not retry a conflict", async () => {
+    const user = userEvent.setup();
+    const concurrent = { ...savedList, revision: 3 };
+    const getGroupListMembership = vi.fn()
+      .mockResolvedValueOnce({ list: savedList, data: [] })
+      .mockResolvedValueOnce({ list: concurrent, data: [] });
+    const archiveGroupList = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "GROUP_LIST_REVISION_CONFLICT",
+      status: 409,
+    }));
+    const { onArchived } = renderEditor(savedList, { archiveGroupList, getGroupListMembership });
+    await screen.findByText("Saved 0 · Staged 0 · +0 / −0");
+    await user.click(screen.getByRole("button", { name: "Archive list" }));
+    const dialog = screen.getByRole("dialog", { name: "Archive group list?" });
+    await user.click(dialog.querySelector<HTMLButtonElement>(".button-danger")!);
+
+    expect(await screen.findByText(/canonical state was reloaded/)).toBeInTheDocument();
+    await waitFor(() => expect(getGroupListMembership).toHaveBeenCalledTimes(2));
+    expect(archiveGroupList).toHaveBeenCalledOnce();
+    expect(archiveGroupList).toHaveBeenCalledWith(savedList.id, savedList.revision);
+    expect(onArchived).not.toHaveBeenCalled();
   });
 });

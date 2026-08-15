@@ -34,7 +34,7 @@ function Harness() {
 function renderWorkspace(overrides: Partial<RuntimeApi> = {}) {
   const api = {
     listGroups: vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } }),
-    listSavedGroupLists: vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } }),
+    listGroupLists: vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } }),
     ...overrides,
   } as unknown as RuntimeApi;
   render(<ToastProvider><RuntimeConnectionProvider createApi={() => api} probeConnection={vi.fn().mockResolvedValue({ sessionCount: 2, readySessions: 2, sessions: [primary, secondary] })}><Harness /></RuntimeConnectionProvider></ToastProvider>);
@@ -47,62 +47,62 @@ async function connect(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("GroupsWorkspace", () => {
-  it("defaults to All groups, keeps one Groups workspace, and lazy-loads Saved lists", async () => {
+  it("defaults to All groups, keeps one Groups workspace, and lazy-loads Group lists", async () => {
     const user = userEvent.setup();
     const api = renderWorkspace();
     await connect(user);
     expect(screen.getByRole("heading", { name: "Groups" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "All groups" })).toHaveAttribute("aria-selected", "true");
     expect(api.listGroups).toHaveBeenCalledTimes(1);
-    expect(api.listSavedGroupLists).not.toHaveBeenCalled();
+    expect(api.listGroupLists).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Update groups" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Saved lists" }));
-    await waitFor(() => expect(api.listSavedGroupLists).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("tab", { name: "Group lists" }));
+    await waitFor(() => expect(api.listGroupLists).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: "New list" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Update groups" })).not.toBeInTheDocument();
   });
 
-  it("debounces and trims Runtime-backed Saved lists search and omits whitespace", async () => {
+  it("debounces and trims Runtime-backed Group lists search and omits whitespace", async () => {
     const user = userEvent.setup();
-    const listSavedGroupLists = vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } });
-    renderWorkspace({ listSavedGroupLists });
+    const listGroupLists = vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } });
+    renderWorkspace({ listGroupLists });
     await connect(user);
-    await user.click(screen.getByRole("tab", { name: "Saved lists" }));
-    await waitFor(() => expect(listSavedGroupLists).toHaveBeenCalledTimes(1));
-    const search = screen.getByRole("searchbox", { name: "Search saved lists" });
+    await user.click(screen.getByRole("tab", { name: "Group lists" }));
+    await waitFor(() => expect(listGroupLists).toHaveBeenCalledTimes(1));
+    const search = screen.getByRole("searchbox", { name: "Search group lists" });
     await user.type(search, "  launch  ");
-    await waitFor(() => expect(listSavedGroupLists).toHaveBeenLastCalledWith({ sessionId: primary.id, limit: 20, offset: 0, query: "launch" }));
+    await waitFor(() => expect(listGroupLists).toHaveBeenLastCalledWith({ sessionId: primary.id, limit: 20, offset: 0, query: "launch" }));
     await user.clear(search);
     await user.type(search, "   ");
-    await waitFor(() => expect(listSavedGroupLists).toHaveBeenLastCalledWith({ sessionId: primary.id, limit: 20, offset: 0 }));
+    await waitFor(() => expect(listGroupLists).toHaveBeenLastCalledWith({ sessionId: primary.id, limit: 20, offset: 0 }));
   });
 
   it("uses meta.total for pagination", async () => {
     const user = userEvent.setup();
-    const listSavedGroupLists = vi.fn()
+    const listGroupLists = vi.fn()
       .mockResolvedValueOnce({ data: [{ id: "list-1", sessionId: primary.id, name: "One", description: null, groupCount: 2, revision: 1, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z", updatedAt: "2026-08-15T00:00:00.000Z" }], meta: { total: 21, limit: 20, offset: 0 } })
       .mockResolvedValueOnce({ data: [{ id: "list-2", sessionId: primary.id, name: "Twenty one", description: "Last page", groupCount: 1, revision: 1, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z", updatedAt: "2026-08-15T00:00:00.000Z" }], meta: { total: 21, limit: 20, offset: 20 } });
-    renderWorkspace({ listSavedGroupLists });
+    renderWorkspace({ listGroupLists });
     await connect(user);
-    await user.click(screen.getByRole("tab", { name: "Saved lists" }));
+    await user.click(screen.getByRole("tab", { name: "Group lists" }));
     expect(await screen.findByText("One")).toBeInTheDocument();
     expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByText("Twenty one")).toBeInTheDocument();
-    expect(listSavedGroupLists).toHaveBeenLastCalledWith({ sessionId: primary.id, limit: 20, offset: 20 });
+    expect(listGroupLists).toHaveBeenLastCalledWith({ sessionId: primary.id, limit: 20, offset: 20 });
   });
 
-  it("invalidates the old Saved lists request when the session changes", async () => {
+  it("invalidates the old Group lists request when the session changes", async () => {
     const user = userEvent.setup();
-    const oldPage = deferred<Awaited<ReturnType<RuntimeApi["listSavedGroupLists"]>>>();
-    const listSavedGroupLists = vi.fn()
+    const oldPage = deferred<Awaited<ReturnType<RuntimeApi["listGroupLists"]>>>();
+    const listGroupLists = vi.fn()
       .mockReturnValueOnce(oldPage.promise)
       .mockResolvedValueOnce({ data: [{ id: "new-list", sessionId: secondary.id, name: "Secondary list", description: null, groupCount: 0, revision: 1, membershipRevision: 0, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z", updatedAt: "2026-08-15T00:00:00.000Z" }], meta: { total: 1, limit: 20, offset: 0 } });
-    renderWorkspace({ listSavedGroupLists });
+    renderWorkspace({ listGroupLists });
     await connect(user);
-    await user.click(screen.getByRole("tab", { name: "Saved lists" }));
-    await waitFor(() => expect(listSavedGroupLists).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("tab", { name: "Group lists" }));
+    await waitFor(() => expect(listGroupLists).toHaveBeenCalledTimes(1));
     await user.click(screen.getByRole("button", { name: "Switch session" }));
     expect(await screen.findByText("Secondary list")).toBeInTheDocument();
     oldPage.resolve({ data: [{ id: "old-list", sessionId: primary.id, name: "Late primary list", description: null, groupCount: 0, revision: 1, membershipRevision: 0, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z", updatedAt: "2026-08-15T00:00:00.000Z" }], meta: { total: 1, limit: 20, offset: 0 } });

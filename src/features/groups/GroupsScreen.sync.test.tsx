@@ -147,7 +147,7 @@ describe("GroupsScreen Reload and Sync", () => {
     await user.click(within(menu).getByRole("menuitem", { name: /Reload/ }));
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(2));
     expect(requestSessionSync).not.toHaveBeenCalled();
-    expect(await screen.findByText("Groups reloaded.")).toBeInTheDocument();
+    expect(await screen.findByText("Groups reloaded")).toBeInTheDocument();
   });
 
   it("requires confirmation, and Cancel does not create a run", async () => {
@@ -198,7 +198,7 @@ describe("GroupsScreen Reload and Sync", () => {
 
     await waitFor(() => expect(requestSessionSync).toHaveBeenCalledWith(session.id));
     expect(getSessionSyncRun).toHaveBeenCalledWith(session.id, pendingRun.id);
-    expect(await screen.findByText("Sync completed.")).toBeInTheDocument();
+    expect(await screen.findByText("Sync completed")).toBeInTheDocument();
     await waitFor(() => expect(listSessions).toHaveBeenCalledOnce());
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(2));
   });
@@ -242,7 +242,7 @@ describe("GroupsScreen Reload and Sync", () => {
     const menu = await connectAndOpenMenu(user);
     await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
-    expect(await screen.findByText("Sync completed with an update warning."))
+    expect(await screen.findByText("Sync completed with an update warning"))
       .toBeInTheDocument();
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(2));
   });
@@ -260,6 +260,6 @@ describe("GroupsScreen Reload and Sync", () => {
     await user.click(screen.getByRole("button", { name: "Switch session" }));
     resolvePoll({ status: "completed", run: completedRun });
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: secondSession.id })));
-    expect(screen.queryByText("Sync completed.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sync completed")).not.toBeInTheDocument();
   });
 });

@@ -126,7 +126,7 @@ describe("SessionsScreen", () => {
     await waitFor(() => expect(listSessions).toHaveBeenCalledOnce());
     expect(requestSessionSync).not.toHaveBeenCalled();
     expect(search).toHaveValue("Production");
-    expect(await screen.findByText("Sessions reloaded.")).toBeInTheDocument();
+    expect(await screen.findByText("Sessions reloaded")).toBeInTheDocument();
   });
 
   it("does not expose full sync and routes an unsynchronized session to Groups", async () => {

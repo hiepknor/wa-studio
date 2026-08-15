@@ -49,6 +49,7 @@ afterEach(() => vi.useRealTimers());
 
 describe("ToastProvider", () => {
   it("uses shared feedback semantics and supports explicit dismissal", () => {
+    vi.useFakeTimers();
     renderHarness();
 
     fireEvent.click(screen.getByRole("button", { name: "Show success" }));
@@ -57,6 +58,7 @@ describe("ToastProvider", () => {
       .toContainElement(screen.getByText("Saved"));
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    act(() => vi.advanceTimersByTime(120));
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Show error" }));
@@ -80,7 +82,7 @@ describe("ToastProvider", () => {
     const { unmount } = renderHarness();
 
     fireEvent.click(screen.getByRole("button", { name: "Show success" }));
-    act(() => vi.advanceTimersByTime(4_000));
+    act(() => vi.advanceTimersByTime(4_120));
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Show success" }));
@@ -89,14 +91,47 @@ describe("ToastProvider", () => {
     clearTimeoutSpy.mockRestore();
   });
 
-  it("limits the visible notification stack", () => {
+  it("queues notifications beyond the visible stack without discarding them", () => {
+    vi.useFakeTimers();
     renderHarness();
 
     fireEvent.click(screen.getByRole("button", { name: "Fill notifications" }));
 
-    expect(screen.queryByText("One")).not.toBeInTheDocument();
+    expect(screen.getByText("One")).toBeInTheDocument();
     expect(screen.getByText("Two")).toBeInTheDocument();
     expect(screen.getByText("Three")).toBeInTheDocument();
+    expect(screen.queryByText("Four")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Dismiss notification" })[0]);
+    act(() => vi.advanceTimersByTime(120));
+
+    expect(screen.queryByText("One")).not.toBeInTheDocument();
     expect(screen.getByText("Four")).toBeInTheDocument();
+  });
+
+  it("pauses auto-dismiss while the notification is hovered", () => {
+    vi.useFakeTimers();
+    renderHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show success" }));
+    const toast = screen.getByRole("status");
+    act(() => vi.advanceTimersByTime(2_000));
+    fireEvent.mouseEnter(toast);
+    act(() => vi.advanceTimersByTime(4_000));
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+
+    fireEvent.mouseLeave(toast);
+    act(() => vi.advanceTimersByTime(2_120));
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+  });
+
+  it("keeps danger notifications visible until they are dismissed", () => {
+    vi.useFakeTimers();
+    renderHarness();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show error" }));
+    act(() => vi.advanceTimersByTime(60_000));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed");
   });
 });

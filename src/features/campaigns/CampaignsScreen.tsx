@@ -20,7 +20,7 @@ import {
   type RuntimeCampaignRun,
   type RuntimeCampaignTarget,
   type RuntimeCampaignTargetSource,
-  type RuntimeSavedGroupList,
+  type RuntimeGroupList,
 } from "@/shared/api/runtime-client";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
@@ -36,7 +36,7 @@ import { TextAreaField } from "@/shared/ui/TextAreaField";
 import { TextField } from "@/shared/ui/TextField";
 import { useToast } from "@/shared/ui/Toast";
 import { CampaignListToolbar } from "./CampaignListToolbar";
-import { CampaignSavedListActions } from "./CampaignSavedListActions";
+import { CampaignGroupListActions } from "./CampaignGroupListActions";
 import {
   campaignListRequestKey,
   initialCampaignListState,
@@ -144,7 +144,6 @@ export function CampaignsScreen() {
   const [draftTargetIds, setDraftTargetIds] = useState<string[]>([]);
   const [targetsRevision, setTargetsRevision] = useState<number | null>(null);
   const [targetSource, setTargetSource] = useState<RuntimeCampaignTargetSource | null>(null);
-  const [targetSourceName, setTargetSourceName] = useState<string | null>(null);
   const [targetsLoading, setTargetsLoading] = useState(false);
   const [targetsSaving, setTargetsSaving] = useState(false);
   const [targetsError, setTargetsError] = useState<string | null>(null);
@@ -334,7 +333,6 @@ export function CampaignsScreen() {
       setDraftTargetIds(result.data.map((target) => target.groupId));
       setTargetsRevision(result.targetsRevision);
       setTargetSource(result.source);
-      setTargetSourceName(null);
     } catch (error) {
       if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) return;
       setTargetsError(campaignErrorMessage(error, "Could not load campaign targets."));
@@ -386,7 +384,6 @@ export function CampaignsScreen() {
     setDraftTargetIds([]);
     setTargetsRevision(null);
     setTargetSource(null);
-    setTargetSourceName(null);
     setTargetNotice(null);
     setRevisionRefreshRequired(false);
     setTargetsLoading(false);
@@ -414,7 +411,6 @@ export function CampaignsScreen() {
     setDraftTargetIds([]);
     setTargetsRevision(selected.targetsRevision);
     setTargetSource(null);
-    setTargetSourceName(null);
     setTargetNotice(null);
     setRevisionRefreshRequired(false);
     setTargetsLoading(false);
@@ -440,7 +436,6 @@ export function CampaignsScreen() {
     setEditor({ kind: "closed" });
     setTargetsRevision(null);
     setTargetSource(null);
-    setTargetSourceName(null);
     setRuns([]);
     setRunsLoading(false);
     setRunMutation(null);
@@ -501,7 +496,7 @@ export function CampaignsScreen() {
       }
       toast.notify({
         id: `campaign-saved-${saved.id}`,
-        title: created ? "Campaign draft created." : "Campaign details saved.",
+        title: created ? "Campaign draft created" : "Campaign details saved",
         tone: "success",
       });
     } catch (error) {
@@ -538,7 +533,7 @@ export function CampaignsScreen() {
     setTargetNotice(null);
   }
 
-  async function applySavedGroupList(list: RuntimeSavedGroupList): Promise<{
+  async function applyGroupList(list: RuntimeGroupList): Promise<{
     message: string;
     ok: boolean;
     reloadLists?: boolean;
@@ -550,7 +545,7 @@ export function CampaignsScreen() {
       || list.sessionId !== campaign.sessionId
       || list.archivedAt !== null
     ) {
-      return { message: "This saved list is not available in the campaign session.", ok: false };
+      return { message: "This group list is not available in the campaign session.", ok: false };
     }
     const epoch = editorEpochRef.current;
     const request = ++targetRequestRef.current;
@@ -579,12 +574,12 @@ export function CampaignsScreen() {
         || editor.campaign.revision !== identity.campaignRevision
         || targetsRevisionRef.current !== identity.targetsRevision
         || canonical.source?.groupListId !== identity.groupListId
+        || canonical.source.membershipRevision !== identity.membershipRevision
       ) return { message: "The editor changed while the list was applying. Reload targets before continuing.", ok: false };
       setTargets(canonical.data);
       setDraftTargetIds(canonical.data.map((target) => target.groupId));
       setTargetsRevision(canonical.targetsRevision);
       setTargetSource(canonical.source);
-      setTargetSourceName(list.name);
       setEditor({ campaign: {
         ...campaign,
         targetCount: canonical.data.length,
@@ -592,15 +587,15 @@ export function CampaignsScreen() {
       }, kind: "open" });
       setPreflight(null);
       setRevisionRefreshRequired(false);
-      setTargetNotice(`${list.name} membership revision ${list.membershipRevision} was applied as the persisted target snapshot.`);
+      setTargetNotice(`${canonical.source.groupListNameSnapshot} membership revision ${canonical.source.membershipRevision} was applied as the persisted target snapshot.`);
       void loadCampaigns(listStateRef.current);
-      return { message: "Saved list applied.", ok: true };
+      return { message: "Group list applied.", ok: true };
     } catch (error) {
       if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) {
         return { message: "The editor changed while the list was applying.", ok: false };
       }
       const code = error instanceof RuntimeRequestError ? error.code : null;
-      const message = campaignErrorMessage(error, "Could not apply the saved list.");
+      const message = campaignErrorMessage(error, "Could not apply the group list.");
       setTargetsError(message);
       if (code === "CAMPAIGN_TARGETS_REVISION_CONFLICT") {
         setTargetsSaving(false);
@@ -675,7 +670,6 @@ export function CampaignsScreen() {
       setDraftTargetIds(canonical.data.map((target) => target.groupId));
       setTargetsRevision(canonical.targetsRevision);
       setTargetSource(canonical.source);
-      setTargetSourceName(null);
       setTargetNotice(null);
       setPreflight(null);
       setEditor({ campaign: {
@@ -685,7 +679,7 @@ export function CampaignsScreen() {
       }, kind: "open" });
       setRevisionRefreshRequired(false);
       void loadCampaigns(listStateRef.current);
-      toast.notify({ id: `targets-saved-${campaign.id}`, title: "Target set saved.", tone: "success" });
+      toast.notify({ id: `targets-saved-${campaign.id}`, title: "Target set saved", tone: "success" });
     } catch (error) {
       if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) return;
       setTargetsError(campaignErrorMessage(error, "Could not replace campaign targets."));
@@ -795,7 +789,7 @@ export function CampaignsScreen() {
       }
       toast.notify({
         id: `campaign-run-${run.id}`,
-        title: executionMode === "LIVE" ? "Live campaign launched." : "Dry run created.",
+        title: executionMode === "LIVE" ? "Live campaign launched" : "Dry run created",
         tone: "success",
       });
     } catch (error) {
@@ -987,16 +981,20 @@ export function CampaignsScreen() {
               {campaign && <>
                 {targetsError && <InlineAlert title="Target update">{targetsError}</InlineAlert>}
                 {targetSource && <div className="campaign-target-source">
-                  <div><span>Source</span><strong>{targetSourceName ?? "Saved group list snapshot"}</strong></div>
+                  <div><span>Source</span><strong>From saved list: {targetSource.groupListNameSnapshot}</strong></div>
                   <div><span>Membership revision</span><strong>{targetSource.membershipRevision}</strong></div>
                   <div><span>Applied at</span><strong>{formatDate(targetSource.appliedAt)}</strong></div>
                   <p>This is audit provenance for a materialized snapshot, not a live link.</p>
                 </div>}
-                {targetSource && targetsDirty && <InlineAlert title="Manual changes clear provenance" tone="warning">Saving this manually edited target set will return source null. The saved Group List itself is not changed.</InlineAlert>}
+                {!targetSource && !targetsLoading && targetsRevision !== null && <div className="campaign-target-source campaign-target-source-custom">
+                  <div><span>Source</span><strong>Custom selection</strong></div>
+                  <p>{targets.length === 0 ? "This campaign currently has an empty target set." : "Targets were selected manually and are not linked to a group list."}</p>
+                </div>}
+                {targetSource && targetsDirty && <InlineAlert title="Manual changes clear provenance" tone="warning">Saving this manually edited target set will return source null. The group list itself is not changed.</InlineAlert>}
                 <section aria-label="Target group selection" className="group-selection-section">
                   <div className="group-selection-heading"><div><h4>Group selection</h4><p>Filters narrow current results; saved and selected targets remain visible.</p></div><div aria-live="polite" className="group-selection-status" data-dirty={targetsDirty || undefined}><strong>{targetSelectionSummary}</strong>{targetDiff.selectedCount >= 900 && <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"}>{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge>}</div></div>
-                  <GroupSelectionToolbar actions={<CampaignSavedListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving || targetsDirty} onApply={applySavedGroupList} sessionId={campaign.sessionId} />} filterAriaLabel="Target group filters" filterTitle="Filter target groups" filters={groupDirectory.filters} filtersOpen={groupDirectory.filtersOpen} idPrefix="campaign-target" inputQuery={groupDirectory.inputQuery} loading={groupDirectory.loading} onFiltersChange={groupDirectory.setFilters} onFiltersOpenChange={groupDirectory.setFiltersOpen} onParticipantErrorsClear={() => groupDirectory.setParticipantErrors({})} onSearchChange={groupDirectory.setSearch} pageItemCount={groupDirectory.groups.length} pageOffset={groupDirectory.offset} participantErrors={groupDirectory.participantErrors} total={groupDirectory.total} />
-                  {targetsDirty && <p className="group-selection-page-note">Save or reset manual target changes before applying a saved list.</p>}
+                  <GroupSelectionToolbar actions={<CampaignGroupListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving || targetsDirty} onApply={applyGroupList} sessionId={campaign.sessionId} />} filterAriaLabel="Target group filters" filterTitle="Filter target groups" filters={groupDirectory.filters} filtersOpen={groupDirectory.filtersOpen} idPrefix="campaign-target" inputQuery={groupDirectory.inputQuery} loading={groupDirectory.loading} onFiltersChange={groupDirectory.setFilters} onFiltersOpenChange={groupDirectory.setFiltersOpen} onParticipantErrorsClear={() => groupDirectory.setParticipantErrors({})} onSearchChange={groupDirectory.setSearch} pageItemCount={groupDirectory.groups.length} pageOffset={groupDirectory.offset} participantErrors={groupDirectory.participantErrors} total={groupDirectory.total} />
+                  {targetsDirty && <p className="group-selection-page-note">Save or reset manual target changes before applying a group list.</p>}
                   {targetNotice && <InlineAlert title="Persisted target snapshot" tone="success">{targetNotice}</InlineAlert>}
                   {groupDirectory.error && <InlineAlert action={<Button onClick={groupDirectory.retry} size="sm">Retry</Button>} title="Could not load groups">{groupDirectory.error}</InlineAlert>}
                   <GroupSelectionTable caption="Groups available to the campaign target selection" disabled={!editable || targetsLoading || targetsSaving} emptyMessage={groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."} loading={groupDirectory.loading || targetsLoading} onToggle={toggleTarget} onTogglePage={toggleAllPageTargets} pageIds={groupPageIds} pinnedIds={pinnedTargetIds} rows={targetRows} selectedIds={draftTargetIdSet} unknownParticipantsTitle="Participant count is unavailable in the saved target snapshot." />
@@ -1089,7 +1087,7 @@ function CampaignRunsPanel({
         <div><Badge tone={runTone(run.status)}>{run.status}</Badge><Badge tone="neutral">{run.executionMode}</Badge></div>
         <strong>{run.totalTargets} target snapshot</strong>
         <span>{formatDate(run.createdAt)} · {run.id}</span>
-        {run.targetSource && <small>Group List snapshot · membership r{run.targetSource.membershipRevision} · applied {formatDate(run.targetSource.appliedAt)}</small>}
+        {run.targetSource && <small>From saved list: {run.targetSource.groupListNameSnapshot} · membership r{run.targetSource.membershipRevision} · applied {formatDate(run.targetSource.appliedAt)}</small>}
         {run.statusReason && <small>{run.statusReason}</small>}
       </div>
       <div className="campaign-run-card-actions">

@@ -10,8 +10,9 @@ export type RuntimeGroupDetail = components["schemas"]["GroupDetailDto"];
 export type RuntimeGroupPage = components["schemas"]["GroupListDto"];
 export type RuntimeGroupMember = components["schemas"]["GroupMemberDto"];
 export type RuntimeGroupMemberPage = components["schemas"]["GroupMemberListDto"];
-export type RuntimeSavedGroupList = components["schemas"]["SavedGroupListDto"];
-export type RuntimeSavedGroupListPage = components["schemas"]["SavedGroupListPageDto"];
+// Runtime retains legacy schema identifiers; Studio exposes Group List terminology.
+export type RuntimeGroupList = components["schemas"]["SavedGroupListDto"];
+export type RuntimeGroupListPage = components["schemas"]["SavedGroupListPageDto"];
 export type RuntimeCreateGroupList = components["schemas"]["CreateGroupListDto"];
 export type RuntimeUpdateGroupList = components["schemas"]["UpdateGroupListDto"];
 export type RuntimeGroupListGroup = components["schemas"]["GroupListGroupDto"];
@@ -31,15 +32,15 @@ export type RuntimeCampaignExecutionMode =
   components["schemas"]["CampaignPreflightRequestDto"]["executionMode"];
 export type RuntimeError = components["schemas"]["RuntimeErrorDto"];
 
-type RuntimeGroupListQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
+type RuntimeGroupDirectoryQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
 type RuntimeCampaignListQuery = NonNullable<
   paths["/api/v1/campaigns"]["get"]["parameters"]["query"]
 >;
 export type RuntimeGroupCapabilityStatus = NonNullable<
-  RuntimeGroupListQuery["capabilityStatus"]
+  RuntimeGroupDirectoryQuery["capabilityStatus"]
 >[number];
 export type RuntimeGroupCapabilityFreshness = NonNullable<
-  RuntimeGroupListQuery["capabilityFreshness"]
+  RuntimeGroupDirectoryQuery["capabilityFreshness"]
 >[number];
 export type RuntimeCampaignStatus = NonNullable<
   RuntimeCampaignListQuery["status"]
@@ -48,7 +49,7 @@ export type RuntimeCampaignScheduleType = NonNullable<
   RuntimeCampaignListQuery["scheduleType"]
 >[number];
 
-export interface RuntimeGroupListInput {
+export interface RuntimeGroupDirectoryInput {
   sessionId: string;
   limit?: number;
   offset?: number;
@@ -68,7 +69,7 @@ export interface RuntimeGroupMemberListInput {
   query?: string;
 }
 
-export interface RuntimeSavedGroupListInput {
+export interface RuntimeGroupListsInput {
   sessionId: string;
   limit?: number;
   offset?: number;
@@ -252,7 +253,7 @@ export class RuntimeApi {
     isActive,
     minParticipants,
     maxParticipants,
-  }: RuntimeGroupListInput): Promise<RuntimeGroupPage> {
+  }: RuntimeGroupDirectoryInput): Promise<RuntimeGroupPage> {
     const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/groups", {
       params: {
@@ -333,12 +334,12 @@ export class RuntimeApi {
     }
   }
 
-  async listSavedGroupLists({
+  async listGroupLists({
     sessionId,
     limit = 20,
     offset = 0,
     query,
-  }: RuntimeSavedGroupListInput): Promise<RuntimeSavedGroupListPage> {
+  }: RuntimeGroupListsInput): Promise<RuntimeGroupListPage> {
     const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/group-lists", {
       params: { query: {
@@ -350,7 +351,7 @@ export class RuntimeApi {
     });
     if (!result.response.ok || !result.data) {
       throw runtimeRequestError(
-        "Could not load saved group lists",
+        "Could not load group lists",
         result.response.status,
         result.error,
       );
@@ -361,7 +362,7 @@ export class RuntimeApi {
   async createGroupList(
     input: RuntimeCreateGroupList,
     idempotencyKey: string,
-  ): Promise<RuntimeSavedGroupList> {
+  ): Promise<RuntimeGroupList> {
     const result = await this.client.POST("/api/v1/group-lists", {
       body: input,
       params: { header: { "Idempotency-Key": idempotencyKey } },
@@ -376,7 +377,7 @@ export class RuntimeApi {
     return result.data;
   }
 
-  async getGroupList(listId: string): Promise<RuntimeSavedGroupList> {
+  async getGroupList(listId: string): Promise<RuntimeGroupList> {
     const result = await this.client.GET("/api/v1/group-lists/{id}", {
       params: { path: { id: listId } },
     });
@@ -407,7 +408,7 @@ export class RuntimeApi {
   async updateGroupList(
     listId: string,
     input: RuntimeUpdateGroupList,
-  ): Promise<RuntimeSavedGroupList> {
+  ): Promise<RuntimeGroupList> {
     const result = await this.client.PATCH("/api/v1/group-lists/{id}", {
       body: input,
       params: { path: { id: listId } },
