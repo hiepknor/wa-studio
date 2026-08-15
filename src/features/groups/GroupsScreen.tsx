@@ -11,7 +11,6 @@ import type {
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
-import { Drawer } from "@/shared/ui/Drawer";
 import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
@@ -20,6 +19,13 @@ import { Tabs } from "@/shared/ui/Tabs";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import { useToast } from "@/shared/ui/Toast";
 import { UpdateActionTrigger } from "@/shared/ui/UpdateActionTrigger";
+import {
+  WorkspaceDrawer,
+  WorkspaceEmptyState,
+  WorkspacePanel,
+  WorkspaceSectionHeader,
+  WorkspaceSummaryCard,
+} from "@/shared/ui/WorkspaceDrawer";
 import { useSessionSync } from "@/shared/hooks/useSessionSync";
 import { pollCapabilityRefresh } from "./capability-refresh";
 import {
@@ -985,13 +991,36 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
           />
         </div>
 
-        <Drawer
+        <WorkspaceDrawer
           description={
             detail
               ? `${detail.isActive ? "Active" : "Inactive"} · ${detail.participantsCount ?? syncedMemberTotal ?? "Unknown"} participants`
               : undefined
           }
           eyebrow="Group inspector"
+          navigation={detail && (
+            <Tabs
+              activeTab={inspectorTab}
+              ariaLabel="Group inspector sections"
+              idPrefix="group-inspector"
+              onChange={setInspectorTab}
+              tabs={[
+                { id: "overview", label: "Overview" },
+                {
+                  badge:
+                    syncedMemberTotal ??
+                    detail.participantsCount ??
+                    undefined,
+                  id: "members",
+                  label: "Members",
+                  warning:
+                    syncedMemberTotal !== null &&
+                    detail.participantsCount !== null &&
+                    syncedMemberTotal !== detail.participantsCount,
+                },
+              ]}
+            />
+          )}
           onClose={closeDetail}
           open={Boolean(
             selectedGroup && selectedGroup.sessionId === selectedSessionId,
@@ -1000,7 +1029,9 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
           title={detail?.name ?? selectedGroup?.name ?? "Group inspector"}
         >
           {detailLoading && (
-            <div className="groups-detail-state">Loading details…</div>
+            <WorkspaceEmptyState compact icon="refresh" loading title="Loading group details">
+              Runtime is returning the latest synchronized group profile.
+            </WorkspaceEmptyState>
           )}
           {detailError && (
             <InlineAlert title="Could not load group details">
@@ -1009,28 +1040,6 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
           )}
           {detail && (
             <div className="groups-inspector stack stack-lg">
-              <Tabs
-                activeTab={inspectorTab}
-                ariaLabel="Group inspector sections"
-                idPrefix="group-inspector"
-                onChange={setInspectorTab}
-                tabs={[
-                  { id: "overview", label: "Overview" },
-                  {
-                    badge:
-                      syncedMemberTotal ??
-                      detail.participantsCount ??
-                      undefined,
-                    id: "members",
-                    label: "Members",
-                    warning:
-                      syncedMemberTotal !== null &&
-                      detail.participantsCount !== null &&
-                      syncedMemberTotal !== detail.participantsCount,
-                  },
-                ]}
-              />
-
               {inspectorTab === "overview" && (
                 <div
                   aria-labelledby="group-inspector-overview-tab"
@@ -1038,19 +1047,26 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                   id="group-inspector-overview-panel"
                   role="tabpanel"
                 >
-                  <section
-                    aria-labelledby="group-identity-title"
-                    className="groups-inspector-section groups-identity"
+                  <WorkspaceSectionHeader
+                    description="Review synchronized identity, messaging capability, and group configuration."
+                    kicker="Overview"
+                    title="Group profile"
+                  />
+                  <WorkspaceSummaryCard
+                    description={detail.description || "No group description."}
+                    icon="groups"
+                    label="Synchronized group"
+                    metrics={[
+                      { label: "Participants", value: detail.participantsCount ?? syncedMemberTotal ?? "—" },
+                      { label: "Access", value: accessLabel(detail.isAdmin) },
+                      { label: "Synced", value: formatDate(detail.syncedAt) },
+                    ]}
+                    status={<Badge tone={detail.isActive ? "success" : "neutral"}>{detail.isActive ? "Active" : "Inactive"}</Badge>}
+                    title={detail.name}
+                    titleId="group-identity-title"
                   >
-                    <h3 id="group-identity-title">Group identity</h3>
-                    <p className="groups-description">
-                      {detail.description || "No group description."}
-                    </p>
-                    <div className="groups-identity-id">
-                      <div>
-                        <span>Group ID</span>
-                        <code>{detail.id}</code>
-                      </div>
+                    <footer className="workspace-summary-footer groups-identity-footer">
+                      <span>Group ID · <code>{detail.id}</code></span>
                       <Button
                         aria-label={
                           copyState === "copied"
@@ -1064,101 +1080,98 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                       >
                         {copyState === "copied" ? "Copied" : "Copy"}
                       </Button>
-                    </div>
+                    </footer>
                     {copyState === "failed" && (
                       <span className="groups-copy-error" role="alert">
                         Could not copy the group ID.
                       </span>
                     )}
-                  </section>
+                  </WorkspaceSummaryCard>
 
-                  <section
-                    aria-labelledby="group-capability-title"
+                  <WorkspacePanel
+                    action={<GroupCapabilityStatus
+                      appearance="badge"
+                      capability={detail.sendCapability}
+                      includeFreshness={false}
+                    />}
                     className="groups-capability"
+                    description={<span className="groups-capability-description"><span>{capabilityReasonCopy(detail.sendCapability.reason)}</span><code>{detail.sendCapability.reason}</code></span>}
+                    title="Send readiness"
+                    titleId="group-capability-title"
+                    tone="accent"
                   >
-                    <div className="groups-section-heading">
-                      <div className="stack stack-xs">
-                        <h3 id="group-capability-title">Send readiness</h3>
-                        <p>
-                          {capabilityReasonCopy(detail.sendCapability.reason)}
-                        </p>
-                        <code>{detail.sendCapability.reason}</code>
-                      </div>
-                      <GroupCapabilityStatus
-                        appearance="badge"
-                        capability={detail.sendCapability}
-                        includeFreshness={false}
-                      />
-                    </div>
-                    <dl className="groups-capability-meta">
-                      <div>
-                        <dt>Checked</dt>
-                        <dd>{formatDate(detail.sendCapability.checkedAt)}</dd>
-                      </div>
-                      <div>
-                        <dt>Freshness</dt>
-                        <dd>
-                          <Badge
-                            tone={
-                              detailCapabilityIsStale ? "warning" : "success"
-                            }
-                          >
-                            {detailCapabilityIsStale ? "Stale" : "Current"}
-                          </Badge>
-                        </dd>
-                      </div>
-                    </dl>
-                    <Button
-                      icon="refresh"
-                      loading={refreshingCapability}
-                      onClick={() => void refreshCapability()}
-                      size="sm"
-                    >
-                      {refreshingCapability
-                        ? "Refreshing capability…"
-                        : "Refresh capability"}
-                    </Button>
-                    {capabilityRefreshState === "failed" && capabilityError && (
-                      <InlineAlert
-                        className="groups-capability-feedback"
-                        title="Capability refresh failed"
+                    <div className="groups-capability-body stack stack-md">
+                      <dl className="groups-capability-meta">
+                        <div>
+                          <dt>Checked</dt>
+                          <dd>{formatDate(detail.sendCapability.checkedAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Freshness</dt>
+                          <dd>
+                            <Badge
+                              tone={
+                                detailCapabilityIsStale ? "warning" : "success"
+                              }
+                            >
+                              {detailCapabilityIsStale ? "Stale" : "Current"}
+                            </Badge>
+                          </dd>
+                        </div>
+                      </dl>
+                      <Button
+                        icon="refresh"
+                        loading={refreshingCapability}
+                        onClick={() => void refreshCapability()}
+                        size="sm"
                       >
-                        {capabilityError}
-                      </InlineAlert>
-                    )}
-                    {capabilityNotice &&
-                      capabilityRefreshState !== "failed" && (
+                        {refreshingCapability
+                          ? "Refreshing capability…"
+                          : "Refresh capability"}
+                      </Button>
+                      {capabilityRefreshState === "failed" && capabilityError && (
                         <InlineAlert
                           className="groups-capability-feedback"
-                          title={
-                            capabilityRefreshState === "completed"
-                              ? "Capability updated"
-                              : capabilityRefreshState === "timed-out"
-                                ? "Refresh still processing"
-                                : "Refresh requested"
-                          }
-                          tone={
-                            capabilityRefreshState === "completed"
-                              ? "success"
-                              : capabilityRefreshState === "timed-out"
-                                ? "warning"
-                                : "info"
-                          }
+                          title="Capability refresh failed"
                         >
-                          {capabilityRefreshState === "timed-out" &&
-                          capabilityError
-                            ? `${capabilityNotice} Last check: ${capabilityError}`
-                            : capabilityNotice}
+                          {capabilityError}
                         </InlineAlert>
                       )}
-                  </section>
+                      {capabilityNotice &&
+                        capabilityRefreshState !== "failed" && (
+                          <InlineAlert
+                            className="groups-capability-feedback"
+                            title={
+                              capabilityRefreshState === "completed"
+                                ? "Capability updated"
+                                : capabilityRefreshState === "timed-out"
+                                  ? "Refresh still processing"
+                                  : "Refresh requested"
+                            }
+                            tone={
+                              capabilityRefreshState === "completed"
+                                ? "success"
+                                : capabilityRefreshState === "timed-out"
+                                  ? "warning"
+                                  : "info"
+                            }
+                          >
+                            {capabilityRefreshState === "timed-out" &&
+                            capabilityError
+                              ? `${capabilityNotice} Last check: ${capabilityError}`
+                              : capabilityNotice}
+                          </InlineAlert>
+                        )}
+                    </div>
+                  </WorkspacePanel>
 
-                  <section
-                    aria-labelledby="group-configuration-title"
-                    className="groups-inspector-section"
+                  <WorkspacePanel
+                    description="Runtime flags that govern access, posting, and settings changes."
+                    flush
+                    title="Group configuration"
+                    titleId="group-configuration-title"
                   >
-                    <h3 id="group-configuration-title">Group configuration</h3>
-                    <dl className="groups-facts">
+                    <dl className="groups-facts groups-facts-contained">
                       <div>
                         <dt>Session access</dt>
                         <dd>{accessLabel(detail.isAdmin)}</dd>
@@ -1188,7 +1201,7 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                         </dd>
                       </div>
                     </dl>
-                  </section>
+                  </WorkspacePanel>
 
                   <details className="groups-technical" key={detail.id}>
                     <summary>Sync &amp; technical metadata</summary>
@@ -1241,9 +1254,8 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                   id="group-inspector-members-panel"
                   role="tabpanel"
                 >
-                  <div className="groups-section-heading">
-                    <h3 id="group-members-title">Members</h3>
-                    <span>
+                  <WorkspaceSectionHeader
+                    action={<span className="groups-member-count">
                       {memberQuery
                         ? `${memberTotal} matches`
                         : syncedMemberTotal !== null &&
@@ -1251,8 +1263,12 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                             detail.participantsCount !== syncedMemberTotal
                           ? `${syncedMemberTotal} synced of ${detail.participantsCount}`
                           : (syncedMemberTotal ?? "—")}
-                    </span>
-                  </div>
+                    </span>}
+                    description="Search the synchronized member directory and review access roles."
+                    kicker="Directory"
+                    title="Members"
+                    titleId="group-members-title"
+                  />
                   {syncedMemberTotal !== null &&
                     detail.participantsCount !== null &&
                     detail.participantsCount !== syncedMemberTotal && (
@@ -1297,16 +1313,18 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                     </InlineAlert>
                   )}
                   {!memberPage && membersLoading ? (
-                    <p className="groups-detail-state">Loading members…</p>
+                    <WorkspaceEmptyState compact icon="refresh" loading title="Loading members">
+                      Runtime is returning synchronized member records.
+                    </WorkspaceEmptyState>
                   ) : !memberPage && membersError ? null : memberPage?.data
                       .length === 0 && memberQuery ? (
-                    <p className="groups-detail-state">
+                    <WorkspaceEmptyState compact icon="groups" title="No matching members">
                       No synchronized members match this search.
-                    </p>
+                    </WorkspaceEmptyState>
                   ) : memberPage?.data.length === 0 ? (
-                    <p className="groups-detail-state">
+                    <WorkspaceEmptyState compact icon="groups" title="No member records">
                       No member details available.
-                    </p>
+                    </WorkspaceEmptyState>
                   ) : (
                     <ul aria-busy={membersLoading || undefined}>
                       {(memberPage?.data ?? []).map((member) => {
@@ -1380,7 +1398,7 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
               )}
             </div>
           )}
-        </Drawer>
+        </WorkspaceDrawer>
       </>
     </div>
   );
