@@ -25,7 +25,6 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
-import { Drawer } from "@/shared/ui/Drawer";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SelectMenu } from "@/shared/ui/SelectMenu";
@@ -35,6 +34,13 @@ import { TablePagination } from "@/shared/ui/TablePagination";
 import { TextAreaField } from "@/shared/ui/TextAreaField";
 import { TextField } from "@/shared/ui/TextField";
 import { useToast } from "@/shared/ui/Toast";
+import {
+  WorkspaceDrawer,
+  WorkspaceEmptyState,
+  WorkspaceFooter,
+  WorkspaceSectionHeader,
+  WorkspaceSummaryCard,
+} from "@/shared/ui/WorkspaceDrawer";
 import { CampaignListToolbar } from "./CampaignListToolbar";
 import { CampaignGroupListActions } from "./CampaignGroupListActions";
 import {
@@ -990,14 +996,30 @@ export function CampaignsScreen() {
         />
       </div>
 
-      <Drawer
-        className="campaign-editor-drawer"
+      <WorkspaceDrawer
         contentKey={`${campaign?.id ?? "new"}:${editorEpochRef.current}:${editorTab}`}
         description={campaign
           ? "Edit persisted details, targets, and Runtime readiness in sequence."
           : "Step 1 of 3 · Define content and delivery timing."}
         eyebrow="Campaign workspace"
-        footer={editor.kind === "open" && <div className="campaign-workspace-footer"><div className="campaign-workspace-footer-copy"><strong>Step {editorStep} of 3 · {editorStepLabel}</strong><span>{footerState}</span></div><div className="campaign-workspace-footer-actions">{footerAction}</div></div>}
+        footer={editor.kind === "open" && <WorkspaceFooter actions={footerAction} description={footerState} title={`Step ${editorStep} of 3 · ${editorStepLabel}`} />}
+        navigation={editor.kind === "open" && (
+          <Tabs
+            activeTab={editorTab}
+            appearance="steps"
+            ariaLabel="Campaign editor sections"
+            idPrefix="campaign-editor"
+            onChange={setEditorTab}
+            tabs={[
+              { id: "details", label: "Details", step: 1, warning: Boolean(campaign && detailsDirty) },
+              { badge: campaign ? draftTargetIds.length : undefined, disabled: !campaign, id: "targets", label: "Targets", step: 2, warning: Boolean(campaign && targetsDirty) },
+              { badge: preflight?.status, disabled: !campaign, id: "preflight", label: "Preflight", step: 3, warning: reportStale },
+            ]}
+          />
+        )}
+        notice={editor.kind === "open" && campaign && campaign.status !== "DRAFT"
+          ? <InlineAlert title="Read-only campaign" tone="warning">Runtime status is {statusLabel(campaign.status)}; only draft campaigns are editable.</InlineAlert>
+          : undefined}
         onClose={requestCloseEditor}
         open={editor.kind === "open"}
         size="wide"
@@ -1005,74 +1027,58 @@ export function CampaignsScreen() {
       >
         {editor.kind === "open" && (
           <div className="campaign-editor">
-            {campaign && campaign.status !== "DRAFT" && <InlineAlert title="Read-only campaign" tone="warning">Runtime status is {statusLabel(campaign.status)}; only draft campaigns are editable.</InlineAlert>}
-            <div className="campaign-workspace-navigation">
-              <Tabs
-                activeTab={editorTab}
-                appearance="steps"
-                ariaLabel="Campaign editor sections"
-                idPrefix="campaign-editor"
-                onChange={setEditorTab}
-                tabs={[
-                  { id: "details", label: "Details", step: 1, warning: Boolean(campaign && detailsDirty) },
-                  { badge: campaign ? draftTargetIds.length : undefined, disabled: !campaign, id: "targets", label: "Targets", step: 2, warning: Boolean(campaign && targetsDirty) },
-                  { badge: preflight?.status, disabled: !campaign, id: "preflight", label: "Preflight", step: 3, warning: reportStale },
-                ]}
-              />
-            </div>
-            <div className="campaign-workspace-content">
             {editorTab === "details" && <section aria-labelledby="campaign-editor-details-tab" className="campaign-tab-panel stack stack-lg" id="campaign-editor-details-panel" role="tabpanel">
-              <div className="campaign-section-heading"><div><span>Step 1 · Required</span><h3>Content &amp; schedule</h3><p>Define the message draft and when Runtime should schedule it.</p></div></div>
+              <WorkspaceSectionHeader description="Define the message draft and when Runtime should schedule it." kicker="Step 1 · Required" title="Content & schedule" />
               {detailsError && <InlineAlert title="Could not save details">{detailsError}</InlineAlert>}
-              <section aria-labelledby="campaign-details-card-title" className="campaign-details-card" data-dirty={Boolean(campaign && detailsDirty) || undefined}>
-                <header>
-                  <span className="campaign-details-card-icon"><AppIcon name="campaigns" size="sm" /></span>
-                  <div className="campaign-details-card-copy">
-                    <span>Campaign configuration</span>
-                    <div><h4 id="campaign-details-card-title">{campaign ? "Persisted details" : "New campaign draft"}</h4>{!campaign ? <Badge>New draft</Badge> : detailsDirty ? <Badge tone="warning">Unsaved changes</Badge> : <Badge tone="success">Saved</Badge>}</div>
-                    <p>{campaign ? "Content and timing stored by Runtime." : "Complete the required fields to create this draft."}</p>
-                  </div>
-                  <dl className="campaign-details-card-metrics">
-                    <div><dt>Revision</dt><dd>{campaign ? `r${campaign.revision}` : "—"}</dd></div>
-                    <div><dt>Schedule</dt><dd>{form.scheduleType === "IMMEDIATE" ? "Immediate" : "Once"}</dd></div>
-                    <div><dt>Message</dt><dd>{form.text.length} chars</dd></div>
-                  </dl>
-                </header>
-                <section aria-labelledby="campaign-content-title" className="campaign-details-section stack stack-md">
+              <WorkspaceSummaryCard
+                description={campaign ? "Content and timing stored by Runtime." : "Complete the required fields to create this draft."}
+                dirty={Boolean(campaign && detailsDirty)}
+                icon="campaigns"
+                label="Campaign configuration"
+                metrics={[
+                  { label: "Revision", value: campaign ? `r${campaign.revision}` : "—" },
+                  { label: "Schedule", value: form.scheduleType === "IMMEDIATE" ? "Immediate" : "Once" },
+                  { label: "Message", value: `${form.text.length} chars` },
+                ]}
+                status={!campaign ? <Badge>New draft</Badge> : detailsDirty ? <Badge tone="warning">Unsaved changes</Badge> : <Badge tone="success">Saved</Badge>}
+                title={campaign ? "Persisted details" : "New campaign draft"}
+                titleId="campaign-details-card-title"
+              >
+                <section aria-labelledby="campaign-content-title" className="workspace-summary-section stack stack-md">
                   <div className="campaign-form-section-heading"><div><h4 id="campaign-content-title">Message content</h4><p>Name this campaign and prepare the plain-text message used by future runs.</p></div></div>
                   <TextField error={formErrors.name} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} />
                   <TextAreaField description={<span className="campaign-message-description"><span>Plain-text message used by future campaign runs.</span><span>{form.text.length} characters</span></span>} disabled={!editable} error={formErrors.text} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} />
                 </section>
-                <section aria-labelledby="campaign-timing-title" className="campaign-details-section stack stack-md">
+                <section aria-labelledby="campaign-timing-title" className="workspace-summary-section stack stack-md">
                   <div className="campaign-form-section-heading"><div><h4 id="campaign-timing-title">Delivery timing</h4><p>Choose when Runtime should make this campaign eligible to run.</p></div><span>Managed by Runtime</span></div>
                   <div className="campaign-details-timing-grid">
                     <SelectMenu description={form.scheduleType === "IMMEDIATE" ? "Send when a campaign run begins." : "Send at the scheduled date and time."} disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />
                     {form.scheduleType === "ONCE" && <TextField description="Displayed in your local time and stored by Runtime in UTC." disabled={!editable} error={formErrors.scheduledAt} label="Scheduled date and time" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}
                   </div>
                 </section>
-              </section>
+              </WorkspaceSummaryCard>
             </section>}
 
             {editorTab === "targets" && <section aria-labelledby="campaign-editor-targets-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-targets-panel" role="tabpanel">
-              <div className="campaign-section-heading"><div><span>Step 2 · Persisted set</span><h3>Target groups</h3><p>Build the complete group target set · maximum 1,000.</p></div></div>
+              <WorkspaceSectionHeader description="Build the complete group target set · maximum 1,000." kicker="Step 2 · Persisted set" title="Target groups" />
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Targets belong to a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {targetsError && <InlineAlert title="Target update">{targetsError}</InlineAlert>}
-                {!targetsLoading && targetsRevision !== null && <section aria-labelledby="campaign-target-snapshot-title" className="campaign-target-snapshot" data-dirty={targetsDirty || undefined}>
-                  <header>
-                    <span className="campaign-target-snapshot-icon"><AppIcon name="groups" size="sm" /></span>
-                    <div className="campaign-target-snapshot-copy">
-                      <span>Target snapshot</span>
-                      <div><h4 id="campaign-target-snapshot-title">{targetSource ? `From group list: ${targetSource.groupListNameSnapshot}` : "Custom selection"}</h4>{targetsDirty && <Badge tone="warning">Unsaved changes</Badge>}</div>
-                      <p>{targetSource ? "Materialized from a saved list; this is not a live link." : "Maintained directly for this campaign."}</p>
-                    </div>
-                    <dl className="campaign-target-snapshot-metrics">
-                      <div><dt>Saved</dt><dd>{targetDiff.savedCount}</dd></div>
-                      <div><dt>Staged</dt><dd>{targetDiff.selectedCount}</dd></div>
-                      <div><dt>Revision</dt><dd>r{targetsRevision}</dd></div>
-                    </dl>
-                  </header>
-                  <footer>
+                {!targetsLoading && targetsRevision !== null && <WorkspaceSummaryCard
+                  description={targetSource ? "Materialized from a saved list; this is not a live link." : "Maintained directly for this campaign."}
+                  dirty={targetsDirty}
+                  icon="groups"
+                  label="Target snapshot"
+                  metrics={[
+                    { label: "Saved", value: targetDiff.savedCount },
+                    { label: "Staged", value: targetDiff.selectedCount },
+                    { label: "Revision", value: `r${targetsRevision}` },
+                  ]}
+                  status={targetsDirty ? <Badge tone="warning">Unsaved changes</Badge> : undefined}
+                  title={targetSource ? `From group list: ${targetSource.groupListNameSnapshot}` : "Custom selection"}
+                  titleId="campaign-target-snapshot-title"
+                >
+                  <footer className="workspace-summary-footer">
                     <span>{targetSource
                       ? `Membership r${targetSource.membershipRevision} · Applied ${formatDate(targetSource.appliedAt)}`
                       : targets.length === 0
@@ -1081,7 +1087,7 @@ export function CampaignsScreen() {
                     <strong>{targetsDirty ? `+${targetDiff.addedIds.length} added · −${targetDiff.removedIds.length} removed` : "No unsaved changes"}</strong>
                   </footer>
                   {targetSource && targetsDirty && <div className="campaign-target-provenance-warning"><AppIcon name="triangle-alert" size="xs" /><span><strong>Saving creates a custom selection.</strong> The source group list remains unchanged.</span></div>}
-                </section>}
+                </WorkspaceSummaryCard>}
                 <section aria-labelledby="campaign-group-list-action-title" className="campaign-target-source-action">
                   <div><h4 id="campaign-group-list-action-title">Apply a group list</h4><p>Replace the saved target set immediately with a reusable list snapshot.</p>{targetsDirty && <small>Save or reset manual changes before applying a list.</small>}</div>
                   <CampaignGroupListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving || targetsDirty} onApply={applyGroupList} sessionId={campaign.sessionId} />
@@ -1102,7 +1108,7 @@ export function CampaignsScreen() {
             </section>}
 
             {editorTab === "preflight" && <section aria-labelledby="campaign-editor-preflight-tab" className="campaign-tab-panel stack stack-md" id="campaign-editor-preflight-panel" role="tabpanel">
-              <div className="campaign-section-heading"><div><span>Step 3 · Review &amp; launch</span><h3>Readiness review</h3><p>Evaluate persisted revisions, then explicitly create a dry or live run.</p></div></div>
+              <WorkspaceSectionHeader description="Evaluate persisted revisions, then explicitly create a dry or live run." kicker="Step 3 · Review & launch" title="Readiness review" />
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Preflight requires a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {(detailsDirty || targetsDirty) && <InlineAlert title="Save before preflight" tone="warning">Preflight reads persisted Runtime state, not unsaved edits.</InlineAlert>}
@@ -1117,7 +1123,7 @@ export function CampaignsScreen() {
                 </section>
                 {preflightError && <InlineAlert title="Preflight failed">{preflightError}</InlineAlert>}
                 {preflight && <PreflightReport report={preflight} stale={reportStale} />}
-                {!preflight && !preflightError && <div className="campaign-empty-state campaign-preflight-empty"><span className="campaign-empty-state-icon"><AppIcon name="activity" size="lg" /></span><strong>Ready for evaluation</strong><p>Run preflight to receive Runtime's authoritative readiness decision for the persisted revisions above.</p></div>}
+                {!preflight && !preflightError && <WorkspaceEmptyState className="campaign-preflight-empty" icon="activity" title="Ready for evaluation">Run preflight to receive Runtime's authoritative readiness decision for the persisted revisions above.</WorkspaceEmptyState>}
                 {runError && <InlineAlert title="Campaign run update">{runError}</InlineAlert>}
                 {campaign.status === "DRAFT" && preflight && !reportStale && preflight.status !== "BLOCK" && <section className="campaign-launch-panel">
                   <span className="campaign-launch-icon"><AppIcon name="runs" size="md" /></span><div><strong>{preflight.executionMode === "DRY_RUN" ? "Create a dry run" : "Launch this campaign"}</strong><p>Use campaign r{preflight.campaignRevision} and targets r{preflight.targetsRevision}. Runtime verifies both revisions again.</p></div>
@@ -1135,10 +1141,9 @@ export function CampaignsScreen() {
                 />
               </>}
             </section>}
-            </div>
           </div>
         )}
-      </Drawer>
+      </WorkspaceDrawer>
       <ConfirmationDialog
         body="Unsaved campaign details or target selections will be discarded. Persisted Runtime data is not changed."
         cancelLabel="Keep editing"
