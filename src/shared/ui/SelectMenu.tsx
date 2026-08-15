@@ -75,7 +75,9 @@ export function SelectMenu<T extends string>({
   function openListbox() {
     if (disabled) return;
     const triggerRect = triggerRef.current?.getBoundingClientRect();
-    const boundaryRect = rootRef.current?.closest(".drawer-body")?.getBoundingClientRect();
+    const boundaryRect = rootRef.current
+      ?.closest(".modal-dialog-body, .drawer-body")
+      ?.getBoundingClientRect();
     if (triggerRect) {
       const boundaryTop = boundaryRect?.top ?? 0;
       const boundaryBottom = boundaryRect?.bottom ?? window.innerHeight;
