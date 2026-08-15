@@ -2,10 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import {
-  GroupSelectionTable,
   type GroupSelectionRow,
 } from "@/features/groups/selection/GroupSelectionTable";
-import { GroupSelectionToolbar } from "@/features/groups/selection/GroupSelectionToolbar";
+import { GroupSelectionPanel } from "@/features/groups/selection/GroupSelectionPanel";
 import { useGroupDirectoryQuery } from "@/features/groups/selection/useGroupDirectoryQuery";
 import {
   groupSelectionRowOrder,
@@ -908,9 +907,10 @@ export function CampaignsScreen() {
       : targetsError && targetsDirty
         ? `Changes not saved · ${targetDiff.savedCount} saved targets retained`
         : targetsDirty
-          ? `Saved ${targetDiff.savedCount} · Staged ${targetDiff.selectedCount} · +${targetDiff.addedIds.length} / −${targetDiff.removedIds.length}`
-          : "Saved target set";
-  const targetSelectionSummary = `Saved ${targetDiff.savedCount} · Staged ${targetDiff.selectedCount} · +${targetDiff.addedIds.length} / −${targetDiff.removedIds.length}`;
+          ? `${targetDiff.savedCount} saved → ${targetDiff.selectedCount} staged · +${targetDiff.addedIds.length} / −${targetDiff.removedIds.length}`
+          : targetDiff.savedCount === 0
+            ? "Empty target set · No unsaved changes"
+            : `${targetDiff.savedCount} saved target${targetDiff.savedCount === 1 ? "" : "s"} · No unsaved changes`;
   const footerState = editorTab === "details"
     ? campaign
       ? detailsDirty ? "Unsaved detail changes" : "Details are up to date"
@@ -1021,27 +1021,46 @@ export function CampaignsScreen() {
               {!campaign && <InlineAlert title="Create the draft first" tone="info">Targets belong to a persisted campaign.</InlineAlert>}
               {campaign && <>
                 {targetsError && <InlineAlert title="Target update">{targetsError}</InlineAlert>}
-                {targetSource && <div className="campaign-target-source">
-                  <div><span>Source</span><strong>From saved list: {targetSource.groupListNameSnapshot}</strong></div>
-                  <div><span>Membership revision</span><strong>{targetSource.membershipRevision}</strong></div>
-                  <div><span>Applied at</span><strong>{formatDate(targetSource.appliedAt)}</strong></div>
-                  <p>This is audit provenance for a materialized snapshot, not a live link.</p>
-                </div>}
-                {!targetSource && !targetsLoading && targetsRevision !== null && <div className="campaign-target-source campaign-target-source-custom">
-                  <div><span>Source</span><strong>Custom selection</strong></div>
-                  <p>{targets.length === 0 ? "This campaign currently has an empty target set." : "Targets were selected manually and are not linked to a group list."}</p>
-                </div>}
-                {targetSource && targetsDirty && <InlineAlert title="Manual changes clear provenance" tone="warning">Saving this manually edited target set will return source null. The group list itself is not changed.</InlineAlert>}
-                <section aria-label="Target group selection" className="group-selection-section">
-                  <div className="group-selection-heading"><div><h4>Group selection</h4><p>Filters narrow current results; saved and selected targets remain visible.</p></div><div aria-live="polite" className="group-selection-status" data-dirty={targetsDirty || undefined}><strong>{targetSelectionSummary}</strong>{targetDiff.selectedCount >= 900 && <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"}>{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge>}</div></div>
-                  <GroupSelectionToolbar actions={<CampaignGroupListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving || targetsDirty} onApply={applyGroupList} sessionId={campaign.sessionId} />} filterAriaLabel="Target group filters" filterTitle="Filter target groups" filters={groupDirectory.filters} filtersOpen={groupDirectory.filtersOpen} idPrefix="campaign-target" inputQuery={groupDirectory.inputQuery} loading={groupDirectory.loading} onFiltersChange={groupDirectory.setFilters} onFiltersOpenChange={groupDirectory.setFiltersOpen} onParticipantErrorsClear={() => groupDirectory.setParticipantErrors({})} onSearchChange={groupDirectory.setSearch} pageItemCount={groupDirectory.groups.length} pageOffset={groupDirectory.offset} participantErrors={groupDirectory.participantErrors} total={groupDirectory.total} />
-                  {targetsDirty && <p className="group-selection-page-note">Save or reset manual target changes before applying a group list.</p>}
-                  {targetNotice && <InlineAlert title="Persisted target snapshot" tone="success">{targetNotice}</InlineAlert>}
-                  {groupDirectory.error && <InlineAlert action={<Button onClick={groupDirectory.retry} size="sm">Retry</Button>} title="Could not load groups">{groupDirectory.error}</InlineAlert>}
-                  <GroupSelectionTable caption="Groups available to the campaign target selection" disabled={!editable || targetsLoading || targetsSaving} emptyMessage={groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."} loading={groupDirectory.loading || targetsLoading} onToggle={toggleTarget} onTogglePage={toggleAllPageTargets} pageIds={groupPageIds} pinnedIds={pinnedTargetIds} rows={targetRows} selectedIds={draftTargetIdSet} unknownParticipantsTitle="Participant count is unavailable in the saved target snapshot." />
-                  {!groupDirectory.loading && groupDirectory.groups.length === 0 && targetRows.length > 0 && <p className="group-selection-page-note">{groupDirectory.hasCriteria ? "No additional synchronized groups match this search or filters. Selected and saved targets remain visible above." : "No additional synchronized groups are available. Selected and saved targets remain visible above."}</p>}
-                  <TablePagination limit={groupDirectory.pageSize} loading={groupDirectory.loading} offset={groupDirectory.offset} onOffsetChange={groupDirectory.setOffset} total={groupDirectory.total} />
+                {!targetsLoading && targetsRevision !== null && <section aria-labelledby="campaign-target-snapshot-title" className="campaign-target-snapshot" data-dirty={targetsDirty || undefined}>
+                  <header>
+                    <span className="campaign-target-snapshot-icon"><AppIcon name="groups" size="sm" /></span>
+                    <div className="campaign-target-snapshot-copy">
+                      <span>Target snapshot</span>
+                      <div><h4 id="campaign-target-snapshot-title">{targetSource ? `From group list: ${targetSource.groupListNameSnapshot}` : "Custom selection"}</h4>{targetsDirty && <Badge tone="warning">Unsaved changes</Badge>}</div>
+                      <p>{targetSource ? "Materialized from a saved list; this is not a live link." : "Maintained directly for this campaign."}</p>
+                    </div>
+                    <dl className="campaign-target-snapshot-metrics">
+                      <div><dt>Saved</dt><dd>{targetDiff.savedCount}</dd></div>
+                      <div><dt>Staged</dt><dd>{targetDiff.selectedCount}</dd></div>
+                      <div><dt>Revision</dt><dd>r{targetsRevision}</dd></div>
+                    </dl>
+                  </header>
+                  <footer>
+                    <span>{targetSource
+                      ? `Membership r${targetSource.membershipRevision} · Applied ${formatDate(targetSource.appliedAt)}`
+                      : targets.length === 0
+                        ? "No groups are currently persisted."
+                        : "Manual target replacement keeps this snapshot custom."}</span>
+                    <strong>{targetsDirty ? `+${targetDiff.addedIds.length} added · −${targetDiff.removedIds.length} removed` : "No unsaved changes"}</strong>
+                  </footer>
+                  {targetSource && targetsDirty && <div className="campaign-target-provenance-warning"><AppIcon name="triangle-alert" size="xs" /><span><strong>Saving creates a custom selection.</strong> The source group list remains unchanged.</span></div>}
+                </section>}
+                <section aria-labelledby="campaign-group-list-action-title" className="campaign-target-source-action">
+                  <div><h4 id="campaign-group-list-action-title">Apply a group list</h4><p>Replace the saved target set immediately with a reusable list snapshot.</p>{targetsDirty && <small>Save or reset manual changes before applying a list.</small>}</div>
+                  <CampaignGroupListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving || targetsDirty} onApply={applyGroupList} sessionId={campaign.sessionId} />
                 </section>
+                <GroupSelectionPanel
+                  afterToolbar={<>{targetNotice && <InlineAlert title="Persisted target snapshot" tone="success">{targetNotice}</InlineAlert>}{groupDirectory.error && <InlineAlert action={<Button onClick={groupDirectory.retry} size="sm">Retry</Button>} title="Could not load groups">{groupDirectory.error}</InlineAlert>}</>}
+                  description="Search and filter the Runtime directory. Saved and selected groups remain visible."
+                  headingLevel="h4"
+                  pageNote={!groupDirectory.loading && groupDirectory.groups.length === 0 && targetRows.length > 0 ? groupDirectory.hasCriteria ? "No additional synchronized groups match this search or filters. Selected and saved targets remain visible above." : "No additional synchronized groups are available. Selected and saved targets remain visible above." : undefined}
+                  pagination={{ limit: groupDirectory.pageSize, loading: groupDirectory.loading, offset: groupDirectory.offset, onOffsetChange: groupDirectory.setOffset, total: groupDirectory.total }}
+                  summary={targetDiff.selectedCount >= 900 ? <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"}>{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge> : undefined}
+                  table={{ caption: "Groups available to the campaign target selection", disabled: !editable || targetsLoading || targetsSaving, emptyMessage: groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found.", loading: groupDirectory.loading || targetsLoading, onToggle: toggleTarget, onTogglePage: toggleAllPageTargets, pageIds: groupPageIds, pinnedIds: pinnedTargetIds, rows: targetRows, selectedIds: draftTargetIdSet, unknownParticipantsTitle: "Participant count is unavailable in the saved target snapshot." }}
+                  title="Browse groups"
+                  titleId="campaign-target-group-directory-title"
+                  toolbar={{ filterAriaLabel: "Target group filters", filterTitle: "Filter target groups", filters: groupDirectory.filters, filtersOpen: groupDirectory.filtersOpen, idPrefix: "campaign-target", inputQuery: groupDirectory.inputQuery, loading: groupDirectory.loading, onFiltersChange: groupDirectory.setFilters, onFiltersOpenChange: groupDirectory.setFiltersOpen, onParticipantErrorsClear: () => groupDirectory.setParticipantErrors({}), onSearchChange: groupDirectory.setSearch, pageItemCount: groupDirectory.groups.length, pageOffset: groupDirectory.offset, participantErrors: groupDirectory.participantErrors, total: groupDirectory.total }}
+                />
               </>}
             </section>}
 

@@ -5,7 +5,7 @@ import "./group-selection.css";
 
 export interface GroupSelectionRow extends RuntimeGroupListGroup {}
 
-interface GroupSelectionTableProps {
+export interface GroupSelectionTableProps {
   caption?: string;
   disabled?: boolean;
   emptyMessage: string;

@@ -185,8 +185,13 @@ describe("CampaignsScreen", () => {
     drawerBody!.scrollTop = 120;
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     expect(drawerBody).toHaveProperty("scrollTop", 0);
-    expect(screen.getAllByText("Saved target set").length).toBeGreaterThan(0);
-    expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
+    expect(screen.getByText("1 saved target · No unsaved changes")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Custom selection" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Apply a group list" })).toBeInTheDocument();
+    const browseGroups = screen.getByRole("heading", { name: "Browse groups" }).closest("section");
+    expect(browseGroups).not.toBeNull();
+    expect(within(browseGroups!).queryByRole("button", { name: "Apply group list" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply group list" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
     expect(screen.getByText("Ready for evaluation")).toBeInTheDocument();
@@ -334,7 +339,7 @@ describe("CampaignsScreen", () => {
     expect(deniedCheckbox).toBeChecked();
     await user.click(unknownCheckbox);
 
-    expect(screen.getAllByText("Saved 1 · Staged 2 · +1 / −0").length).toBeGreaterThan(0);
+    expect(screen.getByText("1 saved → 2 staged · +1 / −0")).toBeInTheDocument();
     expect(screen.getByText("Denied room")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Select Denied room" })).toBeChecked();
     expect(screen.getAllByRole("table", { name: "Groups available to the campaign target selection" })).toHaveLength(1);
@@ -1006,8 +1011,8 @@ describe("CampaignsScreen", () => {
       expectedMembershipRevision: 7,
       expectedTargetsRevision: 4,
     });
-    expect(screen.getByText("From saved list: Launch list snapshot")).toBeInTheDocument();
-    expect(screen.getByText("This is audit provenance for a materialized snapshot, not a live link.")).toBeInTheDocument();
+    expect(screen.getByText("From group list: Launch list snapshot")).toBeInTheDocument();
+    expect(screen.getByText("Materialized from a saved list; this is not a live link.")).toBeInTheDocument();
   });
 
   it("ignores a late atomic list apply response after the editor closes", async () => {
@@ -1098,11 +1103,11 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("option", { name: /Empty list/ }));
     await user.click(screen.getByRole("button", { name: "Apply list" }));
     expect(screen.getByText(/This list is empty/)).toBeInTheDocument();
-    expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
+    expect(screen.getByText("1 saved target · No unsaved changes")).toBeInTheDocument();
     const dialog = screen.getByRole("dialog", { name: "Apply group list snapshot?" });
     await user.click(within(dialog).getByRole("button", { name: "Apply list" }));
     expect(await screen.findByText(/membership revision 0 was applied/)).toBeInTheDocument();
-    expect(screen.getAllByText("Saved 0 · Staged 0 · +0 / −0").length).toBeGreaterThan(0);
+    expect(screen.getByText("Empty target set · No unsaved changes")).toBeInTheDocument();
     expect(applyGroupListToCampaignTargets).toHaveBeenCalledTimes(1);
   });
 
@@ -1132,7 +1137,7 @@ describe("CampaignsScreen", () => {
     const dialog = screen.getByRole("dialog", { name: "Apply group list snapshot?" });
     await user.click(within(dialog).getByRole("button", { name: "Apply list" }));
     expect((await screen.findAllByText(/belongs to a different campaign session/)).length).toBeGreaterThan(0);
-    expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
+    expect(screen.getByText("1 saved target · No unsaved changes")).toBeInTheDocument();
   });
 
   it("warns that manual target edits clear canonical source provenance", async () => {
@@ -1156,17 +1161,17 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
-    expect(await screen.findByText("From saved list: Original launch list")).toBeInTheDocument();
-    expect(screen.getByText("9")).toBeInTheDocument();
+    expect(await screen.findByText("From group list: Original launch list")).toBeInTheDocument();
+    expect(screen.getByText(/Membership r9/)).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "Select Unknown room" }));
-    expect(screen.getByText("Manual changes clear provenance")).toBeInTheDocument();
+    expect(screen.getByText("Saving creates a custom selection.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save target set" }));
     await waitFor(() => expect(replaceCampaignTargets).toHaveBeenCalledWith(
       campaign.id,
       [deniedTarget.groupId, unknownGroup.id],
       4,
     ));
-    expect(screen.queryByText("From saved list: Original launch list")).not.toBeInTheDocument();
+    expect(screen.queryByText("From group list: Original launch list")).not.toBeInTheDocument();
     expect(screen.getByText("Custom selection")).toBeInTheDocument();
   });
 
@@ -1187,7 +1192,7 @@ describe("CampaignsScreen", () => {
     await waitFor(() => expect(listCampaignTargets).toHaveBeenCalledTimes(2));
     expect(replaceCampaignTargets).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/canonical target snapshot is being reloaded/)).toBeInTheDocument();
-    expect(screen.getAllByText("Saved 0 · Staged 0 · +0 / −0").length).toBeGreaterThan(0);
+    expect(screen.getByText("Empty target set · No unsaved changes")).toBeInTheDocument();
   });
 
   it("reloads a stale Group List revision and never retries atomic apply automatically", async () => {
@@ -1228,11 +1233,11 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     await user.click(await screen.findByRole("checkbox", { name: "Select Unknown room" }));
-    expect(screen.getAllByText("Saved 1 · Staged 2 · +1 / −0").length).toBeGreaterThan(0);
+    expect(screen.getByText("1 saved → 2 staged · +1 / −0")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Reset to saved" }));
     expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).not.toBeChecked();
     expect(screen.getByText("Staged selection reset to the saved target set.")).toBeInTheDocument();
-    expect(screen.getByText("Saved 1 · Staged 1 · +0 / −0")).toBeInTheDocument();
+    expect(screen.getByText("1 saved target · No unsaved changes")).toBeInTheDocument();
     expect(replaceCampaignTargets).not.toHaveBeenCalled();
   });
 });

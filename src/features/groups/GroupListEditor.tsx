@@ -10,11 +10,10 @@ import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { Drawer } from "@/shared/ui/Drawer";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
-import { TablePagination } from "@/shared/ui/TablePagination";
 import { TextAreaField } from "@/shared/ui/TextAreaField";
 import { TextField } from "@/shared/ui/TextField";
-import { GroupSelectionTable, type GroupSelectionRow } from "./selection/GroupSelectionTable";
-import { GroupSelectionToolbar } from "./selection/GroupSelectionToolbar";
+import { GroupSelectionPanel } from "./selection/GroupSelectionPanel";
+import type { GroupSelectionRow } from "./selection/GroupSelectionTable";
 import {
   groupSelectionDiff,
   groupSelectionRowOrder,
@@ -363,15 +362,18 @@ export function GroupListEditor({
               <TextAreaField disabled={loadingMembership} error={fieldErrors.description} label="Description" onChange={(event) => { setDescription(event.target.value); setFieldErrors((current) => ({ ...current, description: undefined })); }} rows={3} value={description} />
             </div>
           </section>
-          <section aria-labelledby="group-list-selection-title" className="group-selection-section">
-            <div className="group-selection-heading"><div><h3 id="group-list-selection-title">Groups</h3><p>Membership stays fixed until this list is edited. Inactive, denied, and unknown groups remain selectable; campaign preflight evaluates eligibility.</p></div><strong className={stagedIds.length >= 900 ? "group-list-editor-capacity-warning" : undefined}>{capacity}</strong></div>
-            {fieldErrors.groupIds && <InlineAlert title="Invalid membership">{fieldErrors.groupIds}</InlineAlert>}
-            <GroupSelectionToolbar filterAriaLabel="Group list filters" filterTitle="Filter groups in this list" filters={directory.filters} filtersOpen={directory.filtersOpen} idPrefix="group-list-selection" inputQuery={directory.inputQuery} loading={directory.loading} onFiltersChange={directory.setFilters} onFiltersOpenChange={directory.setFiltersOpen} onParticipantErrorsClear={() => directory.setParticipantErrors({})} onSearchChange={directory.setSearch} pageItemCount={directory.groups.length} pageOffset={directory.offset} participantErrors={directory.participantErrors} searchLabel="Find groups for this list" total={directory.total} />
-            {directory.error && <InlineAlert action={<Button onClick={directory.retry} size="sm">Retry</Button>} title="Could not load groups">{directory.error}</InlineAlert>}
-            <GroupSelectionTable disabled={loadingMembership || saving} emptyMessage={directory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found."} loading={directory.loading || loadingMembership} onToggle={toggle} onTogglePage={togglePage} pageIds={pageIds} pinnedIds={pinnedIds} pinnedLabel={canonical ? "Saved or staged outside current results" : "Selected outside current results"} rows={rows} selectedIds={selectedSet} />
-            {!directory.loading && directory.groups.length === 0 && rows.length > 0 && <p className="group-selection-page-note">Saved and staged groups remain visible above.</p>}
-            <TablePagination limit={directory.pageSize} loading={directory.loading} offset={directory.offset} onOffsetChange={directory.setOffset} total={directory.total} />
-          </section>
+          <GroupSelectionPanel
+            afterToolbar={directory.error && <InlineAlert action={<Button onClick={directory.retry} size="sm">Retry</Button>} title="Could not load groups">{directory.error}</InlineAlert>}
+            beforeToolbar={fieldErrors.groupIds && <InlineAlert title="Invalid membership">{fieldErrors.groupIds}</InlineAlert>}
+            description="Membership stays fixed until this list is edited. Inactive, denied, and unknown groups remain selectable; campaign preflight evaluates eligibility."
+            pageNote={!directory.loading && directory.groups.length === 0 && rows.length > 0 ? "Saved and staged groups remain visible above." : undefined}
+            pagination={{ limit: directory.pageSize, loading: directory.loading, offset: directory.offset, onOffsetChange: directory.setOffset, total: directory.total }}
+            summary={<strong className={stagedIds.length >= 900 ? "group-list-editor-capacity-warning" : undefined}>{capacity}</strong>}
+            table={{ disabled: loadingMembership || saving, emptyMessage: directory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found.", loading: directory.loading || loadingMembership, onToggle: toggle, onTogglePage: togglePage, pageIds, pinnedIds, pinnedLabel: canonical ? "Saved or staged outside current results" : "Selected outside current results", rows, selectedIds: selectedSet }}
+            title="Groups"
+            titleId="group-list-selection-title"
+            toolbar={{ filterAriaLabel: "Group list filters", filterTitle: "Filter groups in this list", filters: directory.filters, filtersOpen: directory.filtersOpen, idPrefix: "group-list-selection", inputQuery: directory.inputQuery, loading: directory.loading, onFiltersChange: directory.setFilters, onFiltersOpenChange: directory.setFiltersOpen, onParticipantErrorsClear: () => directory.setParticipantErrors({}), onSearchChange: directory.setSearch, pageItemCount: directory.groups.length, pageOffset: directory.offset, participantErrors: directory.participantErrors, searchLabel: "Find groups for this list", total: directory.total }}
+          />
         </div>
       </Drawer>
       <ConfirmationDialog body="Unsaved list metadata or group selections will be discarded. Runtime data is not changed." cancelLabel="Keep editing" confirmLabel="Discard changes" confirmVariant="danger" onCancel={() => setDiscardOpen(false)} onConfirm={onClose} open={discardOpen} title="Discard group list changes?" />
