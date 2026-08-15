@@ -120,7 +120,6 @@ export function GroupListsPanel({ navigation }: GroupListsPanelProps) {
 
   useEffect(() => () => {
     requestRef.current += 1;
-    targetRef.current = "";
   }, []);
 
   function changeSearch(value: string) {

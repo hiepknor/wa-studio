@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -31,13 +32,14 @@ function Harness() {
   return <DrawerProvider><button onClick={() => selectSession(secondary.id)}>Switch session</button><GroupsWorkspace /><DrawerHost /></DrawerProvider>;
 }
 
-function renderWorkspace(overrides: Partial<RuntimeApi> = {}) {
+function renderWorkspace(overrides: Partial<RuntimeApi> = {}, strict = false) {
   const api = {
     listGroups: vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } }),
     listGroupLists: vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } }),
     ...overrides,
   } as unknown as RuntimeApi;
-  render(<ToastProvider><RuntimeConnectionProvider createApi={() => api} probeConnection={vi.fn().mockResolvedValue({ sessionCount: 2, readySessions: 2, sessions: [primary, secondary] })}><Harness /></RuntimeConnectionProvider></ToastProvider>);
+  const workspace = <ToastProvider><RuntimeConnectionProvider createApi={() => api} probeConnection={vi.fn().mockResolvedValue({ sessionCount: 2, readySessions: 2, sessions: [primary, secondary] })}><Harness /></RuntimeConnectionProvider></ToastProvider>;
+  render(strict ? <StrictMode>{workspace}</StrictMode> : workspace);
   return api;
 }
 
@@ -61,6 +63,32 @@ describe("GroupsWorkspace", () => {
     await waitFor(() => expect(api.listGroupLists).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: "New list" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Update groups" })).not.toBeInTheDocument();
+  });
+
+  it("loads the initial Group lists page under StrictMode", async () => {
+    const user = userEvent.setup();
+    const listGroupLists = vi.fn().mockResolvedValue({
+      data: [{
+        id: "strict-list",
+        sessionId: primary.id,
+        name: "Strict list",
+        description: null,
+        groupCount: 2,
+        revision: 1,
+        membershipRevision: 1,
+        archivedAt: null,
+        createdAt: "2026-08-15T00:00:00.000Z",
+        updatedAt: "2026-08-15T00:00:00.000Z",
+      }],
+      meta: { total: 1, limit: 20, offset: 0 },
+    });
+    renderWorkspace({ listGroupLists }, true);
+    await connect(user);
+
+    await user.click(screen.getByRole("tab", { name: "Group lists" }));
+
+    expect(await screen.findByRole("button", { name: "Strict list" })).toBeInTheDocument();
+    expect(screen.queryByText("Loading group lists…")).not.toBeInTheDocument();
   });
 
   it("debounces and trims Runtime-backed Group lists search and omits whitespace", async () => {
