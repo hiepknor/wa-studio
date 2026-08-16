@@ -1,8 +1,6 @@
 import {
-  createContext,
   PropsWithChildren,
   useCallback,
-  useContext,
   useMemo,
   useRef,
   useState,
@@ -13,31 +11,15 @@ import {
   probeRuntimeConnection,
   RuntimeApi,
   type RuntimeConnectionInput,
-  type RuntimeConnectionResult,
-  type RuntimeSession,
 } from "@/shared/api/runtime-client";
+import { RuntimeConnectionContext, type ConnectedRuntime } from "./RuntimeConnectionState";
 
-interface ConnectedRuntime {
-  api: RuntimeApi;
-  profile: RuntimeConnectionInput;
-  sessions: RuntimeSession[];
-}
-
-interface RuntimeConnectionContextValue {
-  connect: (input: RuntimeConnectionInput) => Promise<RuntimeConnectionResult>;
-  connected: ConnectedRuntime | null;
-  disconnect: () => void;
-  refreshSessions: () => Promise<void>;
-  selectedSessionId: string | null;
-  selectSession: (sessionId: string) => void;
-}
+export { useRuntimeConnection } from "./RuntimeConnectionState";
 
 interface RuntimeConnectionProviderProps extends PropsWithChildren {
   createApi?: (profile: RuntimeConnectionInput) => RuntimeApi;
   probeConnection?: typeof probeRuntimeConnection;
 }
-
-const RuntimeConnectionContext = createContext<RuntimeConnectionContextValue | null>(null);
 
 function defaultCreateApi(profile: RuntimeConnectionInput): RuntimeApi {
   return new RuntimeApi(profile);
@@ -107,10 +89,4 @@ export function RuntimeConnectionProvider({
       {children}
     </RuntimeConnectionContext.Provider>
   );
-}
-
-export function useRuntimeConnection(): RuntimeConnectionContextValue {
-  const value = useContext(RuntimeConnectionContext);
-  if (!value) throw new Error("useRuntimeConnection must be used inside RuntimeConnectionProvider");
-  return value;
 }

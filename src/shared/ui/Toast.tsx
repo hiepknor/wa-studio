@@ -1,9 +1,6 @@
 import {
-  createContext,
   type PropsWithChildren,
-  type ReactNode,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -13,7 +10,11 @@ import {
 import { AppIcon, type AppIconName } from "./AppIcon";
 import { Button } from "./Button";
 import { feedbackRole, type FeedbackTone } from "./feedback-tone";
+import { ToastContext, type ToastInput } from "./ToastContext";
 import "./toast.css";
+
+export { useToast } from "./ToastContext";
+export type { ToastInput } from "./ToastContext";
 
 const MAX_VISIBLE_TOASTS = 3;
 const EXIT_DURATION = 120;
@@ -32,26 +33,10 @@ function defaultDuration(tone: FeedbackTone): number {
   return 4_000;
 }
 
-export interface ToastInput {
-  action?: ReactNode;
-  description?: ReactNode;
-  duration?: number;
-  id?: string;
-  title: ReactNode;
-  tone?: FeedbackTone;
-}
-
 interface ToastRecord extends ToastInput {
   id: string;
   revision: number;
 }
-
-interface ToastContextValue {
-  dismiss: (id: string) => void;
-  notify: (toast: ToastInput) => string;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
 
 interface ToastItemProps {
   dismiss: (id: string) => void;
@@ -185,10 +170,4 @@ export function ToastProvider({ children }: PropsWithChildren) {
       </div>
     </ToastContext.Provider>
   );
-}
-
-export function useToast(): ToastContextValue {
-  const value = useContext(ToastContext);
-  if (!value) throw new Error("useToast must be used inside ToastProvider");
-  return value;
 }
