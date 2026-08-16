@@ -78,6 +78,7 @@ describe("GroupListEditor", () => {
     const getGroupListMembership = vi.fn().mockResolvedValue({ list: created, data: [] });
     const { onSaved } = renderEditor(null, { createGroupList, getGroupListMembership });
     expect(screen.getByText("Add a name to save this list")).toBeInTheDocument();
+    expect(screen.getByText("0 / 1,000")).toHaveClass("ui-badge-neutral");
     expect(screen.getByRole("button", { name: "Save list" })).toBeDisabled();
     expect(document.querySelector(".group-list-editor-footer-danger")).toBeNull();
     await user.type(screen.getByRole("textbox", { name: "Name" }), "Empty list");
@@ -133,6 +134,7 @@ describe("GroupListEditor", () => {
     await screen.findByText("1–3 of 3 groups");
     expect(screen.getByRole("heading", { name: "List details" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Groups" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archive list" })).toHaveClass("button-danger");
     expect(screen.getByRole("button", { name: "Save list" })).toBeDisabled();
     const deniedCheckbox = screen.getByRole("checkbox", { name: "Select Denied room" });
     await waitFor(() => expect(deniedCheckbox).toBeEnabled());

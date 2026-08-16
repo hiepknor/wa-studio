@@ -44,7 +44,6 @@
 .group-selection-heading h3,
 .group-selection-heading h4 { margin: 0; color: #d8dbe2; font-size: 10px; font-weight: 600; }
 .group-selection-heading p { margin: 4px 0 0; color: var(--dim); font-size: 8px; }
-.group-selection-heading > strong { flex: 0 0 auto; white-space: nowrap; }
 .group-selection-heading-summary { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; white-space: nowrap; }
 .group-selection-status { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; color: var(--dim); }
 .group-selection-status strong { font-family: var(--font-mono); font-size: 8px; font-weight: 500; }
@@ -92,8 +91,11 @@
 .group-selection-page-note { margin: -2px 0 0; color: var(--dim); font-size: 8px; line-height: 1.45; }
 
 @container group-selection (max-width: 520px) {
-  .group-selection-heading { align-items: flex-start; flex-direction: column; }
   .group-selection-filter-panel .data-filter-panel-body { grid-template-columns: 1fr; }
   .group-selection-filter-panel .data-filter-panel-body fieldset:nth-child(even) { border-left: 0; }
   .group-selection-filter-panel .data-filter-panel-body fieldset + fieldset { border-top: 1px solid rgb(255 255 255 / 6%); }
+}
+
+@container group-selection (max-width: 430px) {
+  .group-selection-heading { align-items: flex-start; flex-direction: column; }
 }

@@ -87,7 +87,6 @@
 }
 .group-list-name:hover { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
 .group-list-name:focus-visible { border-radius: 3px; outline: 2px solid var(--accent); outline-offset: 3px; }
-.group-list-editor-capacity-warning { color: var(--warning); }
 .group-list-editor-metadata {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

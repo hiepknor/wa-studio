@@ -196,18 +196,8 @@
 .campaign-run-card-main > small { color: var(--dim); font-family: var(--font-mono); font-size: 8px; overflow-wrap: anywhere; }
 .campaign-run-card-actions { display: flex; flex: 0 0 auto; gap: 6px; }
 
-@container (min-width: 760px) {
+@container workspace-drawer (min-width: 760px) {
   .preflight-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-}
-
-@container (max-width: 520px) {
-  .campaign-details-timing-grid { grid-template-columns: 1fr; }
-  .campaign-preflight-setup { grid-template-columns: 1fr; }
-  .campaign-preflight-mode { grid-column: auto; grid-row: auto; }
-  .campaign-preflight-basis { padding-left: 0; }
-  .preflight-context { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .preflight-context > div:nth-child(3) { border-left: 0; border-top: 1px solid var(--border); }
-  .preflight-context > div:nth-child(4) { border-top: 1px solid var(--border); }
 }
 
 @container workspace-drawer (max-width: 520px) {

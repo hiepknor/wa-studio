@@ -156,6 +156,25 @@ describe("Drawer", () => {
       .toBeInTheDocument();
   });
 
+  it("moves focus into a docked drawer and closes it with Escape from the workspace", async () => {
+    setViewportWidth(DRAWER_DOCK_MIN_WIDTH);
+    const user = userEvent.setup();
+    render(<DrawerHarness />);
+
+    const trigger = screen.getByRole("button", { name: "Inspect group" });
+    await user.click(trigger);
+
+    expect(await screen.findByRole("complementary", { name: "Release room" }))
+      .toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus());
+
+    trigger.focus();
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
   it("keeps a long Vietnamese and unbroken entity name available in full", async () => {
     const longName = "Nhóm điều phối chiến dịch Đồng hồ cao cấp ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     const user = userEvent.setup();

@@ -48,7 +48,10 @@ describe("WorkspaceDrawer", () => {
           dirty
           icon="groups"
           label="Target snapshot"
-          metrics={[{ label: "Saved", value: 4 }, { label: "Revision", value: "r2" }]}
+          metrics={[
+            { label: "Saved", value: 4 },
+            { label: "Revision", title: "Revision two", value: "r2" },
+          ]}
           status={<Badge tone="warning">Unsaved changes</Badge>}
           title="Custom selection"
           titleId="target-summary"
@@ -64,7 +67,8 @@ describe("WorkspaceDrawer", () => {
 
     expect(screen.getByRole("heading", { name: "Custom selection" }).closest("section"))
       .toHaveAttribute("data-dirty", "true");
-    expect(screen.getByText("r2")).toBeInTheDocument();
+    expect(screen.getByText("4")).toHaveAttribute("title", "4");
+    expect(screen.getByText("r2")).toHaveAttribute("title", "Revision two");
     expect(screen.getByRole("heading", { name: "Configuration" })).toBeInTheDocument();
     expect(screen.getByText("Run the check to continue.")).toBeInTheDocument();
   });

@@ -104,6 +104,20 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
+function formatCompactDate(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  const datePart = new Intl.DateTimeFormat(undefined, {
+    day: "2-digit",
+    month: "short",
+  }).format(date);
+  const timePart = new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+  return `${datePart} · ${timePart}`;
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
@@ -1059,7 +1073,11 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                     metrics={[
                       { label: "Participants", value: detail.participantsCount ?? syncedMemberTotal ?? "—" },
                       { label: "Access", value: accessLabel(detail.isAdmin) },
-                      { label: "Synced", value: formatDate(detail.syncedAt) },
+                      {
+                        label: "Synced",
+                        title: formatDate(detail.syncedAt),
+                        value: formatCompactDate(detail.syncedAt),
+                      },
                     ]}
                     status={<Badge tone={detail.isActive ? "success" : "neutral"}>{detail.isActive ? "Active" : "Inactive"}</Badge>}
                     title={detail.name}

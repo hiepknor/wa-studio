@@ -73,6 +73,7 @@ export function WorkspaceSectionHeader({
 
 export interface WorkspaceSummaryMetric {
   label: ReactNode;
+  title?: string;
   value: ReactNode;
 }
 
@@ -127,7 +128,15 @@ export function WorkspaceSummaryCard({
             {metrics.map((metric, index) => (
               <div key={index}>
                 <dt>{metric.label}</dt>
-                <dd>{metric.value}</dd>
+                <dd
+                  title={metric.title ?? (
+                    typeof metric.value === "string" || typeof metric.value === "number"
+                      ? String(metric.value)
+                      : undefined
+                  )}
+                >
+                  {metric.value}
+                </dd>
               </div>
             ))}
           </dl>

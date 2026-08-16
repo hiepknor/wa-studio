@@ -352,7 +352,7 @@ export function GroupListEditor({
         footer={<WorkspaceFooter
           actions={<>{canonical && <Button disabled={!dirty || saving || archiving} onClick={resetChanges}>Reset changes</Button>}<Button disabled={saveDisabled} loading={saving} onClick={() => void save()} variant="primary">Save list</Button></>}
           description={status}
-          leading={canonical ? <Button disabled={saving || archiving} onClick={() => setArchiveOpen(true)} variant="ghost">Archive list</Button> : undefined}
+          leading={canonical ? <Button disabled={saving || archiving} onClick={() => setArchiveOpen(true)} variant="danger">Archive list</Button> : undefined}
           title={canonical ? "Edit group list" : "New group list"}
         />}
         onClose={requestClose}
@@ -389,7 +389,17 @@ export function GroupListEditor({
             description="Membership stays fixed until this list is edited. Inactive, denied, and unknown groups remain selectable; campaign preflight evaluates eligibility."
             pageNote={!directory.loading && directory.groups.length === 0 && rows.length > 0 ? "Saved and staged groups remain visible above." : undefined}
             pagination={{ limit: directory.pageSize, loading: directory.loading, offset: directory.offset, onOffsetChange: directory.setOffset, total: directory.total }}
-            summary={<strong className={stagedIds.length >= 900 ? "group-list-editor-capacity-warning" : undefined}>{capacity}</strong>}
+            summary={(
+              <Badge
+                tone={stagedIds.length >= MAX_GROUP_SELECTION
+                  ? "danger"
+                  : stagedIds.length >= 900
+                    ? "warning"
+                    : "neutral"}
+              >
+                {capacity}
+              </Badge>
+            )}
             table={{ disabled: loadingMembership || saving, emptyMessage: directory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found.", loading: directory.loading || loadingMembership, onToggle: toggle, onTogglePage: togglePage, pageIds, pinnedIds, pinnedLabel: canonical ? "Saved or staged outside current results" : "Selected outside current results", rows, selectedIds: selectedSet }}
             title="Groups"
             titleId="group-list-selection-title"

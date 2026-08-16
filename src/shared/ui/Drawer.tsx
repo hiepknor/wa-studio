@@ -196,10 +196,24 @@ export function Drawer({
   useEffect(() => () => restoreFocus(), [restoreFocus]);
 
   useEffect(() => {
-    if (!open || !host || mode !== "overlay") return;
+    if (!open || !host) return;
     const frame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
-  }, [host, mode, open]);
+  }, [host, open]);
+
+  useEffect(() => {
+    if (!open || !host || mode !== "docked") return;
+
+    function handleDocumentKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      event.preventDefault();
+      onClose();
+    }
+
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => document.removeEventListener("keydown", handleDocumentKeyDown);
+  }, [host, mode, onClose, open]);
 
   useLayoutEffect(() => {
     if (open && bodyRef.current) bodyRef.current.scrollTop = 0;
