@@ -25,9 +25,9 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
-import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
+import { DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
-import { OverflowMenuTrigger } from "@/shared/ui/OverflowMenuTrigger";
+import { OverflowMenu } from "@/shared/ui/OverflowMenu";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SelectMenu } from "@/shared/ui/SelectMenu";
 import { Tabs } from "@/shared/ui/Tabs";
@@ -189,21 +189,34 @@ function campaignDeleteDisabledReason(
   return null;
 }
 
-function CampaignDeleteMenu({
+function CampaignActionsMenu({
   campaign,
   disabledReason,
   onDelete,
+  onOpen,
 }: {
   campaign: RuntimeCampaign;
   disabledReason: string | null;
   onDelete: (campaign: RuntimeCampaign) => void;
+  onOpen?: (campaign: RuntimeCampaign) => void;
 }) {
+  const openLabel = campaign.status === "DRAFT" ? "Edit campaign" : "Review campaign";
   return (
-    <DropdownMenu
+    <OverflowMenu
       ariaLabel={`Actions for ${campaign.name}`}
-      portal
-      trigger={(triggerProps) => <OverflowMenuTrigger ariaLabel={`More actions for ${campaign.name}`} triggerProps={triggerProps} />}
+      triggerLabel={`More actions for ${campaign.name}`}
     >
+      {onOpen && (
+        <DropdownMenuItem
+          description={campaign.status === "DRAFT"
+            ? "Edit campaign details, targets, and preflight."
+            : "Review campaign details, targets, runs, and preflight."}
+          icon={campaign.status === "DRAFT" ? "edit" : "view"}
+          onSelect={() => onOpen(campaign)}
+        >
+          {openLabel}
+        </DropdownMenuItem>
+      )}
       <DropdownMenuItem
         danger
         description={disabledReason ?? "Remove this campaign from the workspace. Run and delivery history will be retained."}
@@ -213,7 +226,7 @@ function CampaignDeleteMenu({
       >
         Delete campaign
       </DropdownMenuItem>
-    </DropdownMenu>
+    </OverflowMenu>
   );
 }
 
@@ -1181,18 +1194,18 @@ export function CampaignsScreen() {
         <div className="data-table-scroll">
           <table>
             <caption>Campaigns for the active session</caption>
-            <thead><tr><th scope="col">Campaign</th><th scope="col">Status</th><th scope="col">Schedule</th><th scope="col">Targets</th><th className="align-end" scope="col">Action</th></tr></thead>
+            <thead><tr><th scope="col">Campaign</th><th scope="col">Status</th><th scope="col">Schedule</th><th scope="col">Targets</th><th aria-label="Actions" className="data-column-actions" scope="col" /></tr></thead>
             <tbody>
               {!selectedSessionId ? <tr><td className="data-table-empty" colSpan={5}>Select a session to view campaigns.</td></tr>
                 : !visiblePage && listPending ? <tr><td className="data-table-empty" colSpan={5}>Loading campaigns…</td></tr>
                 : !visiblePage && visibleListError ? <tr><td className="data-table-empty" colSpan={5}>Campaigns are unavailable.</td></tr>
                 : !visiblePage?.data.length ? <tr><td className="data-table-empty" colSpan={5}>{hasListCriteria ? "No campaigns match this search or filters." : "No campaigns yet. Create a draft to get started."}</td></tr>
                 : visiblePage.data.map((item) => <tr key={item.id}>
-                  <td className="data-cell-primary"><div className="stack stack-xs"><strong className="data-primary-text">{item.name}</strong><span className="data-identifier">{item.id}</span></div></td>
+                  <td className="data-cell-primary"><div className="stack stack-xs"><button className="data-primary-action" onClick={() => openCampaign(item)} title={`Open ${item.name}`} type="button">{item.name}</button><span className="data-identifier">{item.id}</span></div></td>
                   <td><Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge></td>
                   <td>{item.scheduleType === "IMMEDIATE" ? "Immediate" : formatDate(item.scheduledAt)}</td>
                   <td>{item.targetCount}</td>
-                  <td className="data-cell-action"><div className="data-row-actions"><Button onClick={() => openCampaign(item)} size="sm" variant="ghost">{item.status === "DRAFT" ? "Edit" : "Review"}</Button><CampaignDeleteMenu campaign={item} disabledReason={campaignDeleteDisabledReason(item)} onDelete={requestCampaignDelete} /></div></td>
+                  <td className="data-cell-action"><CampaignActionsMenu campaign={item} disabledReason={campaignDeleteDisabledReason(item)} onDelete={requestCampaignDelete} onOpen={openCampaign} /></td>
                 </tr>)}
             </tbody>
           </table>
@@ -1212,7 +1225,7 @@ export function CampaignsScreen() {
           ? "Edit persisted details, targets, and Runtime readiness in sequence."
           : "Step 1 of 3 · Define content and delivery timing."}
         eyebrow="Campaign workspace"
-        footer={editor.kind === "open" && <WorkspaceFooter actions={footerAction} description={footerState} leading={campaign ? <CampaignDeleteMenu campaign={campaign} disabledReason={detailDeleteReason} onDelete={requestCampaignDelete} /> : undefined} title={`Step ${editorStep} of 3 · ${editorStepLabel}`} />}
+        footer={editor.kind === "open" && <WorkspaceFooter actions={footerAction} description={footerState} leading={campaign ? <CampaignActionsMenu campaign={campaign} disabledReason={detailDeleteReason} onDelete={requestCampaignDelete} /> : undefined} title={`Step ${editorStep} of 3 · ${editorStepLabel}`} />}
         navigation={editor.kind === "open" && (
           <Tabs
             activeTab={editorTab}

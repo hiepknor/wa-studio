@@ -4,9 +4,9 @@ import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import { RuntimeRequestError, type RuntimeGroupList, type RuntimeGroupListPage } from "@/shared/api/runtime-client";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
-import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
+import { DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
-import { OverflowMenuTrigger } from "@/shared/ui/OverflowMenuTrigger";
+import { OverflowMenu } from "@/shared/ui/OverflowMenu";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SearchField } from "@/shared/ui/SearchField";
 import { TablePagination } from "@/shared/ui/TablePagination";
@@ -257,13 +257,13 @@ export function GroupListsPanel({ navigation }: GroupListsPanelProps) {
         <div aria-busy={loading || undefined} className="data-table-scroll">
           <table>
             <caption>Group lists for the active session</caption>
-            <thead><tr><th scope="col">Name</th><th scope="col">Description</th><th className="data-column-number" scope="col">Groups</th><th scope="col">Updated</th><th aria-label="Actions" scope="col" /></tr></thead>
+            <thead><tr><th scope="col">Name</th><th scope="col">Description</th><th className="data-column-number" scope="col">Groups</th><th scope="col">Updated</th><th aria-label="Actions" className="data-column-actions" scope="col" /></tr></thead>
             <tbody>
               {!selectedSessionId ? <tr><td className="data-table-empty" colSpan={5}>Select a session to view group lists.</td></tr>
                 : !page && loading ? <tr><td className="data-table-empty" colSpan={5}>Loading group lists…</td></tr>
                 : !page && error ? <tr><td className="data-table-empty" colSpan={5}>Group lists are unavailable.</td></tr>
                 : (page?.data.length ?? 0) === 0 ? <tr><td className="data-table-empty" colSpan={5}>{query ? "No group lists match this search." : "No group lists yet. Use New list to create a reusable static group selection."}</td></tr>
-                : page?.data.map((list) => <tr key={list.id}><td className="data-cell-primary"><button className="group-list-name" onClick={() => setEditor({ kind: "edit", list })} type="button">{list.name}</button></td><td className="group-list-description" title={list.description ?? undefined}><span>{list.description || "—"}</span></td><td className="data-cell-number">{list.groupCount}</td><td className="data-cell-time">{formatDate(list.updatedAt)}</td><td className="data-cell-action"><div className="data-row-actions"><Button aria-label={`Edit ${list.name}`} onClick={() => setEditor({ kind: "edit", list })} size="sm" variant="ghost">Edit</Button><DropdownMenu ariaLabel={`Actions for ${list.name}`} portal trigger={(triggerProps) => <OverflowMenuTrigger ariaLabel={`More actions for ${list.name}`} triggerProps={triggerProps} />}><DropdownMenuItem danger description="Remove this list from saved lists. Existing campaign targets stay unchanged." icon="trash" onSelect={() => requestDelete(list)}>Delete list</DropdownMenuItem></DropdownMenu></div></td></tr>) }
+                : page?.data.map((list) => <tr key={list.id}><td className="data-cell-primary"><button className="data-primary-action" onClick={() => setEditor({ kind: "edit", list })} title={`Open ${list.name}`} type="button">{list.name}</button></td><td className="group-list-description" title={list.description ?? undefined}><span>{list.description || "—"}</span></td><td className="data-cell-number">{list.groupCount}</td><td className="data-cell-time">{formatDate(list.updatedAt)}</td><td className="data-cell-action"><OverflowMenu ariaLabel={`Actions for ${list.name}`} triggerLabel={`More actions for ${list.name}`}><DropdownMenuItem description="Edit list details and its saved group selection." icon="edit" onSelect={() => setEditor({ kind: "edit", list })}>Edit list</DropdownMenuItem><DropdownMenuItem danger description="Remove this list from saved lists. Existing campaign targets stay unchanged." icon="trash" onSelect={() => requestDelete(list)}>Delete list</DropdownMenuItem></OverflowMenu></td></tr>) }
             </tbody>
           </table>
         </div>

@@ -163,7 +163,14 @@ describe("GroupsWorkspace", () => {
     await user.click(screen.getByRole("tab", { name: "Group lists" }));
     await screen.findByRole("button", { name: savedList.name });
 
-    await user.click(screen.getByRole("button", { name: `More actions for ${savedList.name}` }));
+    expect(screen.getByRole("button", { name: savedList.name })).toHaveClass("data-primary-action");
+    const rowAction = screen.getByRole("button", { name: `More actions for ${savedList.name}` });
+    expect(within(rowAction.closest("td")!).getAllByRole("button")).toHaveLength(1);
+    await user.click(rowAction);
+    expect(screen.getByRole("menuitem", { name: "Edit list" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Edit list" })).toHaveAccessibleDescription(
+      "Edit list details and its saved group selection.",
+    );
     await user.click(screen.getByRole("menuitem", { name: /Delete list/ }));
     const dialog = screen.getByRole("dialog", { name: "Delete group list?" });
     expect(dialog).toHaveTextContent("Campaigns that already applied this list and their current targets will not be changed.");

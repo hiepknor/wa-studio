@@ -101,7 +101,7 @@ async function connect(user: ReturnType<typeof userEvent.setup>) {
 
 async function openCampaign(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText("Release");
-  await user.click(screen.getByRole("button", { name: "Edit" }));
+  await user.click(screen.getByRole("button", { name: "Release" }));
   await screen.findByRole("heading", { name: "Content & schedule" });
 }
 
@@ -1293,7 +1293,14 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await screen.findByText(campaign.name);
 
-    await user.click(screen.getByRole("button", { name: `More actions for ${campaign.name}` }));
+    expect(screen.getByRole("button", { name: campaign.name })).toHaveClass("data-primary-action");
+    const rowAction = screen.getByRole("button", { name: `More actions for ${campaign.name}` });
+    expect(within(rowAction.closest("td")!).getAllByRole("button")).toHaveLength(1);
+    await user.click(rowAction);
+    expect(screen.getByRole("menuitem", { name: "Edit campaign" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Edit campaign" })).toHaveAccessibleDescription(
+      "Edit campaign details, targets, and preflight.",
+    );
     await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
     const dialog = screen.getByRole("dialog", { name: "Delete campaign?" });
     expect(dialog).toHaveTextContent("Run and message delivery history will remain available for audit.");
@@ -1322,6 +1329,8 @@ describe("CampaignsScreen", () => {
 
     const trigger = screen.getByRole("button", { name: `More actions for ${locked.name}` });
     trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Review campaign" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     const item = screen.getByRole("menuitem", { name: /Delete campaign/ });
     expect(item).toHaveFocus();

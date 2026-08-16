@@ -191,9 +191,11 @@ export function DropdownMenuItem({
   icon,
   onSelect,
 }: DropdownMenuItemProps) {
+  const labelId = useId();
   const descriptionId = useId();
   return (
     <button
+      aria-labelledby={labelId}
       aria-describedby={description ? descriptionId : undefined}
       aria-disabled={disabled || undefined}
       className={`menu-item ${description ? "menu-item-rich" : ""} ${danger ? "menu-item-danger" : ""} ${className}`.trim()}
@@ -203,7 +205,7 @@ export function DropdownMenuItem({
     >
       {icon && <AppIcon className="menu-item-icon" name={icon} size="sm" />}
       <span className="menu-item-copy">
-        <span className="menu-item-label">{children}</span>
+        <span className="menu-item-label" id={labelId}>{children}</span>
         {description && <span className="menu-item-description" id={descriptionId}>{description}</span>}
       </span>
     </button>

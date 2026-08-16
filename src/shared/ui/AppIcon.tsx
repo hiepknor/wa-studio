@@ -6,9 +6,11 @@ import {
   Copy,
   CloudDownload,
   Ellipsis,
+  Eye,
   Info,
   KeyRound,
   PanelsTopLeft,
+  PencilLine,
   Play,
   RefreshCw,
   Search,
@@ -34,6 +36,7 @@ export type AppIconName =
   | "close"
   | "copy"
   | "disconnect"
+  | "edit"
   | "groups"
   | "info"
   | "key"
@@ -46,7 +49,8 @@ export type AppIconName =
   | "settings"
   | "sync"
   | "triangle-alert"
-  | "trash";
+  | "trash"
+  | "view";
 
 export type AppIconSize = "xs" | "sm" | "md" | "lg" | "xl";
 
@@ -65,6 +69,7 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   close: X,
   copy: Copy,
   disconnect: Unplug,
+  edit: PencilLine,
   groups: UsersRound,
   info: Info,
   key: KeyRound,
@@ -78,6 +83,7 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   sync: CloudDownload,
   "triangle-alert": TriangleAlert,
   trash: Trash2,
+  view: Eye,
 };
 
 const ICON_SIZES: Record<AppIconSize, number> = {

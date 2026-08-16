@@ -9,9 +9,9 @@ import {
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
-import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
+import { DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
-import { OverflowMenuTrigger } from "@/shared/ui/OverflowMenuTrigger";
+import { OverflowMenu } from "@/shared/ui/OverflowMenu";
 import { TextAreaField } from "@/shared/ui/TextAreaField";
 import { TextField } from "@/shared/ui/TextField";
 import {
@@ -329,10 +329,9 @@ export function GroupListEditor({
           actions={<>{canonical && <Button disabled={!dirty || saving} onClick={resetChanges}>Reset changes</Button>}<Button disabled={saveDisabled} loading={saving} onClick={() => void save()} variant="primary">Save list</Button></>}
           description={status}
           leading={canonical ? (
-            <DropdownMenu
+            <OverflowMenu
               ariaLabel={`Actions for ${canonical.name}`}
-              portal
-              trigger={(triggerProps) => <OverflowMenuTrigger ariaLabel={`More actions for ${canonical.name}`} triggerProps={triggerProps} />}
+              triggerLabel={`More actions for ${canonical.name}`}
             >
               <DropdownMenuItem
                 danger
@@ -342,7 +341,7 @@ export function GroupListEditor({
               >
                 Delete list
               </DropdownMenuItem>
-            </DropdownMenu>
+            </OverflowMenu>
           ) : undefined}
           title={canonical ? "Edit group list" : "New group list"}
         />}

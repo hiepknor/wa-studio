@@ -775,7 +775,7 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
           <DropdownMenu
             ariaLabel="Group data actions"
             disabled={!selectedSessionId}
-            contentClassName="update-action-menu"
+            contentClassName="action-menu"
             trigger={(triggerProps) => (
               <UpdateActionTrigger
                 ariaLabel={
