@@ -3,6 +3,7 @@ import {
   type ReactNode,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -46,6 +47,31 @@ function enabledOptions(container: HTMLDivElement | null): HTMLButtonElement[] {
   ));
 }
 
+const LISTBOX_GAP = 6;
+const LISTBOX_MAX_HEIGHT = 260;
+
+interface VerticalBoundary {
+  bottom: number;
+  top: number;
+}
+
+function clippingBoundary(element: HTMLElement): VerticalBoundary {
+  const boundary = { bottom: window.innerHeight, top: 0 };
+  let ancestor = element.parentElement;
+
+  while (ancestor) {
+    const style = window.getComputedStyle(ancestor);
+    if (/auto|clip|hidden|scroll/.test(`${style.overflow} ${style.overflowY}`)) {
+      const rect = ancestor.getBoundingClientRect();
+      boundary.top = Math.max(boundary.top, rect.top);
+      boundary.bottom = Math.min(boundary.bottom, rect.bottom);
+    }
+    ancestor = ancestor.parentElement;
+  }
+
+  return boundary;
+}
+
 export function SelectMenu<T extends string>({
   "aria-describedby": ariaDescribedBy,
   className = "",
@@ -71,7 +97,10 @@ export function SelectMenu<T extends string>({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listboxRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const [placement, setPlacement] = useState<"down" | "up">("down");
+  const [listboxLayout, setListboxLayout] = useState({
+    maxHeight: LISTBOX_MAX_HEIGHT,
+    placement: "down" as "down" | "up",
+  });
   const selectedOption = options.find((option) => option.value === value);
 
   function close({ restoreFocus = false } = {}) {
@@ -81,20 +110,51 @@ export function SelectMenu<T extends string>({
 
   function openListbox() {
     if (disabled) return;
-    const triggerRect = triggerRef.current?.getBoundingClientRect();
-    const boundaryRect = rootRef.current
-      ?.closest(".modal-dialog-body, .drawer-body")
-      ?.getBoundingClientRect();
-    if (triggerRect) {
-      const boundaryTop = boundaryRect?.top ?? 0;
-      const boundaryBottom = boundaryRect?.bottom ?? window.innerHeight;
-      const estimatedHeight = Math.min(options.length * 46 + 12, 260);
-      const spaceAbove = triggerRect.top - boundaryTop;
-      const spaceBelow = boundaryBottom - triggerRect.bottom;
-      setPlacement(spaceBelow < estimatedHeight && spaceAbove > spaceBelow ? "up" : "down");
-    }
     setOpen(true);
   }
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    function positionListbox() {
+      const root = rootRef.current;
+      const trigger = triggerRef.current;
+      const listbox = listboxRef.current;
+      if (!root || !trigger || !listbox) return;
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const listboxRect = listbox.getBoundingClientRect();
+      const boundary = clippingBoundary(root);
+      const naturalHeight = Math.min(
+        listbox.scrollHeight || listboxRect.height || options.length * 46 + 12,
+        LISTBOX_MAX_HEIGHT,
+      );
+      const spaceAbove = Math.max(0, triggerRect.top - boundary.top - LISTBOX_GAP);
+      const spaceBelow = Math.max(0, boundary.bottom - triggerRect.bottom - LISTBOX_GAP);
+      const placement = naturalHeight <= spaceBelow
+        ? "down"
+        : naturalHeight <= spaceAbove || spaceAbove > spaceBelow
+          ? "up"
+          : "down";
+      const maxHeight = Math.min(
+        LISTBOX_MAX_HEIGHT,
+        placement === "up" ? spaceAbove : spaceBelow,
+      );
+
+      setListboxLayout((current) =>
+        current.placement === placement && current.maxHeight === maxHeight
+          ? current
+          : { maxHeight, placement });
+    }
+
+    positionListbox();
+    window.addEventListener("resize", positionListbox);
+    window.addEventListener("scroll", positionListbox, true);
+    return () => {
+      window.removeEventListener("resize", positionListbox);
+      window.removeEventListener("scroll", positionListbox, true);
+    };
+  }, [open, options.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -175,11 +235,12 @@ export function SelectMenu<T extends string>({
           <div
             aria-labelledby={labelId}
             className="select-menu-listbox"
-            data-placement={placement}
+            data-placement={listboxLayout.placement}
             id={listboxId}
             onKeyDown={handleListboxKeyDown}
             ref={listboxRef}
             role="listbox"
+            style={{ maxHeight: listboxLayout.maxHeight }}
           >
             {options.map((option) => (
               <button

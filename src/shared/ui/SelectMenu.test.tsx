@@ -100,6 +100,46 @@ describe("SelectMenu", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
+  it("opens upward when the rendered options would be clipped by an overflow ancestor", async () => {
+    const user = userEvent.setup();
+    const rect = (top: number, bottom: number) => ({
+      bottom,
+      height: bottom - top,
+      left: 0,
+      right: 320,
+      toJSON: () => ({}),
+      top,
+      width: 320,
+      x: 0,
+      y: top,
+    });
+    const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function getRect(this: HTMLElement) {
+        if (this.classList.contains("select-boundary")) return rect(0, 240);
+        if (this.getAttribute("role") === "combobox") return rect(150, 190);
+        if (this.getAttribute("role") === "listbox") return rect(196, 326);
+        return rect(0, 0);
+      });
+    const scrollHeight = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function getScrollHeight(this: HTMLElement) {
+        return this.getAttribute("role") === "listbox" ? 130 : 0;
+      });
+
+    render(
+      <div className="select-boundary" style={{ overflow: "hidden" }}>
+        <ControlledSelectMenu />
+      </div>,
+    );
+    await user.click(screen.getByRole("combobox", { name: "Schedule" }));
+
+    const listbox = screen.getByRole("listbox", { name: "Schedule" });
+    expect(listbox).toHaveAttribute("data-placement", "up");
+    expect(listbox).toHaveStyle({ maxHeight: "144px" });
+
+    geometry.mockRestore();
+    scrollHeight.mockRestore();
+  });
+
   it("uses the shared field size contract", () => {
     const { rerender } = render(
       <SelectMenu
