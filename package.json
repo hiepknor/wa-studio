@@ -12,6 +12,7 @@
     "contract:generate": "openapi-typescript contracts/wa-runtime/v1/openapi.json -o src/shared/api/generated/runtime.ts",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:e2e": "vitest run src/features/groups/GroupsWorkspace.test.tsx src/features/campaigns/CampaignsScreen.test.tsx -t \"E2E happy path\"",
     "test:watch": "vitest",
     "tauri": "tauri"
   },

@@ -78,6 +78,7 @@ function renderCampaigns(overrides: Partial<RuntimeApi> = {}, initial: RuntimeCa
     updateCampaign: vi.fn(),
     replaceCampaignTargets: vi.fn(),
     preflightCampaign: vi.fn(),
+    deleteCampaign: vi.fn(),
     ...overrides,
   } as unknown as RuntimeApi;
   render(
@@ -670,7 +671,9 @@ describe("CampaignsScreen", () => {
     expect(within(result).getByRole("heading", { name: "Target assessment" })).toBeInTheDocument();
     const checksPanel = within(result).getByRole("heading", { name: "Policy checks" }).closest("section");
     expect(checksPanel).not.toBeNull();
-    expect(within(checksPanel!).getByText(status === "PASS" ? "Pass" : status === "WARN" ? "Warn" : "Block").closest(".status-indicator")).not.toBeNull();
+    expect(within(checksPanel!).getByText(status === "PASS" ? "Pass" : status === "WARN" ? "Warn" : "Block")).toHaveClass(
+      `ui-badge-${status === "PASS" ? "success" : status === "WARN" ? "warning" : "danger"}`,
+    );
     expect(within(result).getByRole("heading", { name: "Target issues" })).toBeInTheDocument();
     const issuesPanel = within(result).getByRole("heading", { name: "Target issues" }).closest("section");
     expect(issuesPanel).not.toBeNull();
@@ -1277,5 +1280,187 @@ describe("CampaignsScreen", () => {
     expect(screen.getByText("Staged selection reset to the saved target set.")).toBeInTheDocument();
     expect(screen.getByText("1 saved target · No unsaved changes")).toBeInTheDocument();
     expect(replaceCampaignTargets).not.toHaveBeenCalled();
+  });
+
+  it("E2E happy path: deletes a campaign from the row only after Runtime returns 204", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<void>();
+    const deleteCampaign = vi.fn().mockReturnValue(pending.promise);
+    const listCampaigns = vi.fn()
+      .mockResolvedValueOnce({ data: [campaign], meta: { total: 1, limit: 50, offset: 0 } })
+      .mockResolvedValue({ data: [], meta: { total: 0, limit: 50, offset: 0 } });
+    renderCampaigns({ deleteCampaign, listCampaigns });
+    await connect(user);
+    await screen.findByText(campaign.name);
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${campaign.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
+    const dialog = screen.getByRole("dialog", { name: "Delete campaign?" });
+    expect(dialog).toHaveTextContent("Run and message delivery history will remain available for audit.");
+    await user.click(screen.getByRole("button", { name: "Delete campaign" }));
+
+    expect(deleteCampaign).toHaveBeenCalledWith(campaign.id, campaign.revision, campaign.targetsRevision);
+    expect(screen.getByRole("button", { name: "Deleting…" })).toBeDisabled();
+    expect(screen.getByText(campaign.name)).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Delete campaign?" })).toBeInTheDocument();
+
+    await act(async () => pending.resolve(undefined));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delete campaign?" })).not.toBeInTheDocument());
+    expect(screen.queryByText(campaign.name)).not.toBeInTheDocument();
+    expect(await screen.findByText("Campaign deleted")).toBeInTheDocument();
+    expect(screen.getByText("Message delivery history was retained.")).toBeInTheDocument();
+  });
+
+  it.each(["ACTIVE", "PAUSED"] as const)("keeps delete visible but disabled for a %s campaign", async (status) => {
+    const user = userEvent.setup();
+    const locked = { ...campaign, id: `campaign-${status}`, name: `${status} campaign`, status };
+    const deleteCampaign = vi.fn();
+    renderCampaigns({ deleteCampaign }, [locked]);
+    await connect(user);
+    await screen.findByText(locked.name);
+
+    const trigger = screen.getByRole("button", { name: `More actions for ${locked.name}` });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    const item = screen.getByRole("menuitem", { name: /Delete campaign/ });
+    expect(item).toHaveFocus();
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveAccessibleDescription("Cancel the active run and archive the campaign before deleting it.");
+    await user.click(item);
+    expect(screen.queryByRole("dialog", { name: "Delete campaign?" })).not.toBeInTheDocument();
+    expect(deleteCampaign).not.toHaveBeenCalled();
+  });
+
+  it("refreshes a campaign revision conflict and requires a new confirmation", async () => {
+    const user = userEvent.setup();
+    const refreshed = { ...campaign, name: "Release updated", revision: 4 };
+    const deleteCampaign = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "CAMPAIGN_REVISION_CONFLICT",
+      status: 409,
+    }));
+    const listCampaigns = vi.fn()
+      .mockResolvedValueOnce({ data: [campaign], meta: { total: 1, limit: 50, offset: 0 } })
+      .mockResolvedValue({ data: [refreshed], meta: { total: 1, limit: 50, offset: 0 } });
+    renderCampaigns({ deleteCampaign, listCampaigns });
+    await connect(user);
+    await screen.findByText(campaign.name);
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${campaign.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
+    await user.click(screen.getByRole("button", { name: "Delete campaign" }));
+
+    expect(await screen.findByText("The campaign changed. Review it before deleting.")).toBeInTheDocument();
+    expect(await screen.findByText(refreshed.name)).toBeInTheDocument();
+    expect(deleteCampaign).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Delete campaign?" })).not.toBeInTheDocument();
+  });
+
+  it("refreshes and explains a campaign delete state conflict", async () => {
+    const user = userEvent.setup();
+    const active = { ...campaign, status: "ACTIVE" as const };
+    const deleteCampaign = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "CAMPAIGN_DELETE_STATE_CONFLICT",
+      status: 409,
+    }));
+    const listCampaigns = vi.fn()
+      .mockResolvedValueOnce({ data: [campaign], meta: { total: 1, limit: 50, offset: 0 } })
+      .mockResolvedValue({ data: [active], meta: { total: 1, limit: 50, offset: 0 } });
+    const api = renderCampaigns({ deleteCampaign, listCampaigns });
+    await connect(user);
+    await screen.findByText(campaign.name);
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${campaign.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
+    await user.click(screen.getByRole("button", { name: "Delete campaign" }));
+
+    expect(await screen.findByText("Cancel the active run and archive the campaign before deleting it.")).toBeInTheDocument();
+    expect(deleteCampaign).toHaveBeenCalledTimes(1);
+    expect(api.getCampaign).toHaveBeenCalledWith(campaign.id);
+    expect(api.listCampaignRuns).toHaveBeenCalledWith(campaign.id, 20, 0);
+  });
+
+  it("refreshes unfinished runs after a delete conflict and links to the run panel", async () => {
+    const user = userEvent.setup();
+    const running = campaignRun("LIVE", "RUNNING");
+    const deleteCampaign = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "CAMPAIGN_DELETE_RUN_CONFLICT",
+      status: 409,
+    }));
+    const listCampaignRuns = vi.fn()
+      .mockResolvedValueOnce({ data: [], meta: { total: 0, limit: 20, offset: 0 } })
+      .mockResolvedValueOnce({ data: [running], meta: { total: 1, limit: 20, offset: 0 } });
+    renderCampaigns({ deleteCampaign, listCampaignRuns });
+    await connect(user);
+    await openCampaign(user);
+
+    const drawer = screen.getByRole("dialog", { name: campaign.name });
+    await user.click(within(drawer).getByRole("button", { name: `More actions for ${campaign.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
+    await user.click(screen.getByRole("button", { name: "Delete campaign" }));
+
+    expect(await screen.findByText("This campaign still has an unfinished run. Cancel it or wait for it to finish.")).toBeInTheDocument();
+    expect(listCampaignRuns).toHaveBeenCalledTimes(2);
+    expect(deleteCampaign).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "View runs" }));
+    expect(screen.getByRole("tab", { name: "Preflight" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("RUNNING")).toBeInTheDocument();
+  });
+
+  it("keeps the campaign and confirmation open after a network failure", async () => {
+    const user = userEvent.setup();
+    const deleteCampaign = vi.fn().mockRejectedValue(new TypeError("network down"));
+    renderCampaigns({ deleteCampaign });
+    await connect(user);
+    await screen.findByText(campaign.name);
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${campaign.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
+    await user.click(screen.getByRole("button", { name: "Delete campaign" }));
+
+    expect(await screen.findByText("The campaign could not be deleted. Check the Runtime connection and try again.")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete campaign?" })).toBeInTheDocument();
+    expect(screen.getByText(campaign.name)).toBeInTheDocument();
+    expect(deleteCampaign).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes a stale campaign when Runtime reports it missing", async () => {
+    const user = userEvent.setup();
+    const deleteCampaign = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "CAMPAIGN_NOT_FOUND",
+      status: 404,
+    }));
+    const listCampaigns = vi.fn()
+      .mockResolvedValueOnce({ data: [campaign], meta: { total: 1, limit: 50, offset: 0 } })
+      .mockResolvedValue({ data: [], meta: { total: 0, limit: 50, offset: 0 } });
+    renderCampaigns({ deleteCampaign, listCampaigns });
+    await connect(user);
+    await screen.findByText(campaign.name);
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${campaign.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
+    await user.click(screen.getByRole("button", { name: "Delete campaign" }));
+
+    expect(await screen.findByText("This item no longer exists or is no longer available.")).toBeInTheDocument();
+    expect(screen.queryByText(campaign.name)).not.toBeInTheDocument();
+  });
+
+  it("closes the Campaign detail drawer after successful deletion", async () => {
+    const user = userEvent.setup();
+    const deleteCampaign = vi.fn().mockResolvedValue(undefined);
+    const listCampaigns = vi.fn()
+      .mockResolvedValueOnce({ data: [campaign], meta: { total: 1, limit: 50, offset: 0 } })
+      .mockResolvedValue({ data: [], meta: { total: 0, limit: 50, offset: 0 } });
+    renderCampaigns({ deleteCampaign, listCampaigns });
+    await connect(user);
+    await openCampaign(user);
+    const drawer = screen.getByRole("dialog", { name: campaign.name });
+
+    await user.click(within(drawer).getByRole("button", { name: `More actions for ${campaign.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
+    await user.click(screen.getByRole("button", { name: "Delete campaign" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: campaign.name })).not.toBeInTheDocument());
+    expect(deleteCampaign).toHaveBeenCalledWith(campaign.id, campaign.revision, campaign.targetsRevision);
   });
 });

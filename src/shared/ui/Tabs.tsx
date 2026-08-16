@@ -2,10 +2,10 @@ import type { KeyboardEvent, ReactNode } from "react";
 import "./tabs.css";
 
 export interface TabItem<T extends string> {
-  badge?: ReactNode;
   disabled?: boolean;
   id: T;
   label: string;
+  meta?: ReactNode;
   step?: number;
   warning?: boolean;
 }
@@ -81,8 +81,8 @@ export function Tabs<T extends string>({
             <span aria-hidden="true" className="tabs-step-index">{tab.step}</span>
           )}
           <span className="tabs-label">{tab.label}</span>
-          {tab.badge !== undefined && (
-            <span className="tabs-badge">{tab.badge}</span>
+          {tab.meta !== undefined && (
+            <span className="tabs-meta">{tab.meta}</span>
           )}
           {tab.warning && (
             <span aria-label="Attention required" className="tabs-warning" />

@@ -1,0 +1,9 @@
+.overflow-menu-trigger {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+}
+.overflow-menu-trigger[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: #d3ceff;
+}

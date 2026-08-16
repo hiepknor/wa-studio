@@ -155,7 +155,7 @@
 .preflight-columns li { display: flex; align-items: center; gap: 9px; padding: 10px 11px; border-bottom: 1px solid var(--border); }
 .preflight-columns li:last-child { border-bottom: 0; }
 .preflight-evidence-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.preflight-check-status { width: 48px; flex: 0 0 48px; flex-direction: column; justify-content: center; font-size: 9px; }
+.preflight-check-status { min-width: 52px; flex: 0 0 auto; justify-content: center; }
 .preflight-columns li strong { color: #d4d7df; font-size: 9px; font-weight: 600; }
 .preflight-columns code { color: #9e95ea; font-size: 8px; overflow-wrap: anywhere; }
 .preflight-columns small { color: var(--dim); font-size: 8px; line-height: 1.45; }

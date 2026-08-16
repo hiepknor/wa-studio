@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
-import type { RuntimeGroupList, RuntimeGroupListPage } from "@/shared/api/runtime-client";
+import { RuntimeRequestError, type RuntimeGroupList, type RuntimeGroupListPage } from "@/shared/api/runtime-client";
 import { Button } from "@/shared/ui/Button";
+import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
+import { OverflowMenuTrigger } from "@/shared/ui/OverflowMenuTrigger";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SearchField } from "@/shared/ui/SearchField";
 import { TablePagination } from "@/shared/ui/TablePagination";
@@ -45,8 +48,12 @@ export function GroupListsPanel({ navigation }: GroupListsPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState>({ kind: "closed" });
+  const [deleteIntent, setDeleteIntent] = useState<RuntimeGroupList | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [reloadRevision, setReloadRevision] = useState(0);
   const requestRef = useRef(0);
+  const deleteRequestRef = useRef(0);
   const sessionRef = useRef(selectedSessionId);
   const sessionIsCurrent = sessionRef.current === selectedSessionId;
   const normalizedInput = inputQuery.trim();
@@ -103,6 +110,10 @@ export function GroupListsPanel({ navigation }: GroupListsPanelProps) {
     setLoading(false);
     setError(null);
     setEditor({ kind: "closed" });
+    deleteRequestRef.current += 1;
+    setDeleteIntent(null);
+    setDeleting(false);
+    setDeleteError(null);
   }, [selectedSessionId]);
 
   useEffect(() => {
@@ -120,6 +131,7 @@ export function GroupListsPanel({ navigation }: GroupListsPanelProps) {
 
   useEffect(() => () => {
     requestRef.current += 1;
+    deleteRequestRef.current += 1;
   }, []);
 
   function changeSearch(value: string) {
@@ -146,15 +158,84 @@ export function GroupListsPanel({ navigation }: GroupListsPanelProps) {
     toast.notify({ id: `group-list-saved-${list.id}`, title: "Group list saved", tone: "success" });
   }
 
-  function archived(listId: string) {
-    setEditor({ kind: "closed" });
-    setReloadRevision((revision) => revision + 1);
-    toast.notify({
-      description: "Existing campaign target snapshots were not changed.",
-      id: `group-list-archived-${listId}`,
-      title: "Group list archived",
-      tone: "success",
+  function removeFromPage(listId: string) {
+    setPage((current) => {
+      if (!current) return current;
+      const data = current.data.filter((list) => list.id !== listId);
+      const removed = data.length !== current.data.length;
+      return {
+        data,
+        meta: { ...current.meta, total: Math.max(0, current.meta.total - (removed ? 1 : 0)) },
+      };
     });
+  }
+
+  function requestDelete(list: RuntimeGroupList) {
+    setDeleteIntent(list);
+    setDeleteError(null);
+  }
+
+  async function deleteList() {
+    if (!deleteIntent || deleting) return;
+    const snapshot = deleteIntent;
+    const request = ++deleteRequestRef.current;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.archiveGroupList(snapshot.id, snapshot.revision);
+      if (request !== deleteRequestRef.current) return;
+      setDeleteIntent(null);
+      setEditor((current) => current.kind === "edit" && current.list.id === snapshot.id
+        ? { kind: "closed" }
+        : current);
+      removeFromPage(snapshot.id);
+      setReloadRevision((revision) => revision + 1);
+      toast.notify({
+        description: "Existing campaigns were not changed.",
+        id: `group-list-deleted-${snapshot.id}`,
+        title: "Group list deleted",
+        tone: "success",
+      });
+    } catch (nextError) {
+      if (request !== deleteRequestRef.current) return;
+      const code = nextError instanceof RuntimeRequestError ? nextError.code : null;
+      if (code === "GROUP_LIST_NOT_FOUND" || (nextError instanceof RuntimeRequestError && nextError.status === 404)) {
+        setDeleteIntent(null);
+        setEditor((current) => current.kind === "edit" && current.list.id === snapshot.id
+          ? { kind: "closed" }
+          : current);
+        removeFromPage(snapshot.id);
+        setReloadRevision((revision) => revision + 1);
+        toast.notify({
+          description: "This item no longer exists or is no longer available.",
+          id: `group-list-unavailable-${snapshot.id}`,
+          title: "Group list unavailable",
+          tone: "warning",
+        });
+      } else if (code === "GROUP_LIST_REVISION_CONFLICT") {
+        setDeleteIntent(null);
+        setEditor((current) => current.kind === "edit" && current.list.id === snapshot.id
+          ? { kind: "closed" }
+          : current);
+        setReloadRevision((revision) => revision + 1);
+        toast.notify({
+          description: "The group list changed. Review it before deleting.",
+          id: `group-list-delete-conflict-${snapshot.id}`,
+          title: "Delete not confirmed",
+          tone: "warning",
+        });
+      } else {
+        setDeleteError("The group list could not be deleted. Check the Runtime connection and try again.");
+      }
+    } finally {
+      if (request === deleteRequestRef.current) setDeleting(false);
+    }
+  }
+
+  function cancelDelete() {
+    if (deleting) return;
+    setDeleteIntent(null);
+    setDeleteError(null);
   }
 
   const total = page?.meta.total ?? 0;
@@ -182,13 +263,25 @@ export function GroupListsPanel({ navigation }: GroupListsPanelProps) {
                 : !page && loading ? <tr><td className="data-table-empty" colSpan={5}>Loading group lists…</td></tr>
                 : !page && error ? <tr><td className="data-table-empty" colSpan={5}>Group lists are unavailable.</td></tr>
                 : (page?.data.length ?? 0) === 0 ? <tr><td className="data-table-empty" colSpan={5}>{query ? "No group lists match this search." : "No group lists yet. Use New list to create a reusable static group selection."}</td></tr>
-                : page?.data.map((list) => <tr key={list.id}><td className="data-cell-primary"><button className="group-list-name" onClick={() => setEditor({ kind: "edit", list })} type="button">{list.name}</button></td><td className="group-list-description" title={list.description ?? undefined}><span>{list.description || "—"}</span></td><td className="data-cell-number">{list.groupCount}</td><td className="data-cell-time">{formatDate(list.updatedAt)}</td><td className="data-cell-action"><Button aria-label={`Edit ${list.name}`} onClick={() => setEditor({ kind: "edit", list })} size="sm" variant="ghost">Edit</Button></td></tr>) }
+                : page?.data.map((list) => <tr key={list.id}><td className="data-cell-primary"><button className="group-list-name" onClick={() => setEditor({ kind: "edit", list })} type="button">{list.name}</button></td><td className="group-list-description" title={list.description ?? undefined}><span>{list.description || "—"}</span></td><td className="data-cell-number">{list.groupCount}</td><td className="data-cell-time">{formatDate(list.updatedAt)}</td><td className="data-cell-action"><div className="data-row-actions"><Button aria-label={`Edit ${list.name}`} onClick={() => setEditor({ kind: "edit", list })} size="sm" variant="ghost">Edit</Button><DropdownMenu ariaLabel={`Actions for ${list.name}`} portal trigger={(triggerProps) => <OverflowMenuTrigger ariaLabel={`More actions for ${list.name}`} triggerProps={triggerProps} />}><DropdownMenuItem danger description="Remove this list from saved lists. Existing campaign targets stay unchanged." icon="trash" onSelect={() => requestDelete(list)}>Delete list</DropdownMenuItem></DropdownMenu></div></td></tr>) }
             </tbody>
           </table>
         </div>
         <TablePagination limit={page?.meta.limit ?? PAGE_SIZE} loading={loading} offset={pageOffset} onOffsetChange={changeOffset} total={total} />
       </div>
-      {editor.kind !== "closed" && selectedSessionId && <GroupListEditor api={api} key={editor.kind === "create" ? `create:${editor.nonce}` : editor.list.id} list={editor.kind === "edit" ? editor.list : null} onArchived={archived} onClose={() => setEditor({ kind: "closed" })} onSaved={saved} sessionId={selectedSessionId} />}
+      {editor.kind !== "closed" && selectedSessionId && <GroupListEditor api={api} key={editor.kind === "create" ? `create:${editor.nonce}` : editor.list.id} list={editor.kind === "edit" ? editor.list : null} onClose={() => setEditor({ kind: "closed" })} onRequestDelete={requestDelete} onSaved={saved} sessionId={selectedSessionId} />}
+      <ConfirmationDialog
+        body={<><p>Group list “{deleteIntent?.name}” will be removed from saved lists. Campaigns that already applied this list and their current targets will not be changed.</p>{deleteError && <InlineAlert title="Could not delete group list">{deleteError}</InlineAlert>}</>}
+        busy={deleting}
+        busyLabel="Deleting…"
+        cancelLabel="Cancel"
+        confirmLabel="Delete list"
+        confirmVariant="danger"
+        onCancel={cancelDelete}
+        onConfirm={() => void deleteList()}
+        open={Boolean(deleteIntent)}
+        title="Delete group list?"
+      />
     </div>
   );
 }

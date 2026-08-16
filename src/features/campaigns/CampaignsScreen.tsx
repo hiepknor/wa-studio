@@ -25,10 +25,11 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
+import { OverflowMenuTrigger } from "@/shared/ui/OverflowMenuTrigger";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SelectMenu } from "@/shared/ui/SelectMenu";
-import { StatusIndicator } from "@/shared/ui/StatusIndicator";
 import { Tabs } from "@/shared/ui/Tabs";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import { TextAreaField } from "@/shared/ui/TextAreaField";
@@ -71,6 +72,13 @@ type EditorState =
 type CampaignEditorTab = "details" | "targets" | "preflight";
 
 const PAGE_SIZE = 50;
+const NON_TERMINAL_RUN_STATUSES = new Set<RuntimeCampaignRun["status"]>([
+  "PREPARING",
+  "BLOCKED",
+  "SCHEDULED",
+  "RUNNING",
+  "PAUSED",
+]);
 const SCHEDULE_OPTIONS = [
   {
     description: "No scheduled timestamp.",
@@ -168,6 +176,47 @@ function runTone(status: RuntimeCampaignRun["status"]) {
   return "neutral" as const;
 }
 
+function campaignDeleteDisabledReason(
+  campaign: RuntimeCampaign,
+  knownRuns: readonly RuntimeCampaignRun[] = [],
+): string | null {
+  if (knownRuns.some((run) => NON_TERMINAL_RUN_STATUSES.has(run.status))) {
+    return "This campaign still has an unfinished run.";
+  }
+  if (campaign.status === "ACTIVE" || campaign.status === "PAUSED") {
+    return "Cancel the active run and archive the campaign before deleting it.";
+  }
+  return null;
+}
+
+function CampaignDeleteMenu({
+  campaign,
+  disabledReason,
+  onDelete,
+}: {
+  campaign: RuntimeCampaign;
+  disabledReason: string | null;
+  onDelete: (campaign: RuntimeCampaign) => void;
+}) {
+  return (
+    <DropdownMenu
+      ariaLabel={`Actions for ${campaign.name}`}
+      portal
+      trigger={(triggerProps) => <OverflowMenuTrigger ariaLabel={`More actions for ${campaign.name}`} triggerProps={triggerProps} />}
+    >
+      <DropdownMenuItem
+        danger
+        description={disabledReason ?? "Remove this campaign from the workspace. Run and delivery history will be retained."}
+        disabled={Boolean(disabledReason)}
+        icon="trash"
+        onSelect={() => onDelete(campaign)}
+      >
+        Delete campaign
+      </DropdownMenuItem>
+    </DropdownMenu>
+  );
+}
+
 export function CampaignsScreen() {
   const { connected, selectedSessionId } = useRuntimeConnection();
   const toast = useToast();
@@ -204,6 +253,9 @@ export function CampaignsScreen() {
   const [runMutation, setRunMutation] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [liveLaunchConfirmationOpen, setLiveLaunchConfirmationOpen] = useState(false);
+  const [deleteIntent, setDeleteIntent] = useState<RuntimeCampaign | null>(null);
+  const [deletingCampaign, setDeletingCampaign] = useState(false);
+  const [campaignDeleteError, setCampaignDeleteError] = useState<string | null>(null);
   const createKeyRef = useRef<string | null>(null);
   const launchKeyRef = useRef<{ key: string; mode: RuntimeCampaignExecutionMode } | null>(null);
   const editorEpochRef = useRef(0);
@@ -211,6 +263,7 @@ export function CampaignsScreen() {
   const runRequestRef = useRef(0);
   const targetsRevisionRef = useRef<number | null>(null);
   const listRequestRef = useRef(0);
+  const deleteRequestRef = useRef(0);
   const listTargetRef = useRef(campaignListRequestKey(listState));
   const pageKeyRef = useRef("");
   const errorKeyRef = useRef("");
@@ -341,6 +394,10 @@ export function CampaignsScreen() {
     setRunsLoading(false);
     setRunMutation(null);
     setLiveLaunchConfirmationOpen(false);
+    deleteRequestRef.current += 1;
+    setDeleteIntent(null);
+    setDeletingCampaign(false);
+    setCampaignDeleteError(null);
     setPreflight(null);
   }, [listState.sessionId, selectedSessionId]);
 
@@ -366,6 +423,7 @@ export function CampaignsScreen() {
     editorEpochRef.current += 1;
     targetRequestRef.current += 1;
     runRequestRef.current += 1;
+    deleteRequestRef.current += 1;
   }, []);
 
   async function loadTargets(campaignId: string, epoch: number, preserveError = false) {
@@ -442,6 +500,9 @@ export function CampaignsScreen() {
     setPreflightMode("DRY_RUN");
     setPreflight(null);
     setPreflightError(null);
+    setDeleteIntent(null);
+    setDeletingCampaign(false);
+    setCampaignDeleteError(null);
   }
 
   function openCampaign(selected: RuntimeCampaign) {
@@ -469,6 +530,9 @@ export function CampaignsScreen() {
     setRunMutation(null);
     setRunError(null);
     setLiveLaunchConfirmationOpen(false);
+    setDeleteIntent(null);
+    setDeletingCampaign(false);
+    setCampaignDeleteError(null);
     void loadTargets(selected.id, epoch);
     void loadRuns(selected.id, epoch);
   }
@@ -491,6 +555,148 @@ export function CampaignsScreen() {
     setTargetsSaving(false);
     setPreflight(null);
     setDiscardConfirmationOpen(false);
+    setDeleteIntent(null);
+    setDeletingCampaign(false);
+    setCampaignDeleteError(null);
+  }
+
+  function removeCampaignFromPage(campaignId: string) {
+    setCampaignPage((current) => {
+      if (!current) return current;
+      const data = current.data.filter((item) => item.id !== campaignId);
+      const removed = data.length !== current.data.length;
+      return {
+        data,
+        meta: { ...current.meta, total: Math.max(0, current.meta.total - (removed ? 1 : 0)) },
+      };
+    });
+  }
+
+  function requestCampaignDelete(snapshot: RuntimeCampaign) {
+    const knownRuns = campaign?.id === snapshot.id ? runs : [];
+    if (campaignDeleteDisabledReason(snapshot, knownRuns)) return;
+    setDeleteIntent(snapshot);
+    setCampaignDeleteError(null);
+  }
+
+  async function refreshCampaignDeleteContext(campaignId: string): Promise<RuntimeCampaign | null> {
+    const detailOpen = editor.kind === "open" && editor.campaign?.id === campaignId;
+    const epoch = editorEpochRef.current;
+    const request = ++runRequestRef.current;
+    if (detailOpen) setRunsLoading(true);
+    try {
+      const [refreshed, runPage] = await Promise.all([
+        api.getCampaign(campaignId),
+        api.listCampaignRuns(campaignId, 20, 0),
+      ]);
+      if (
+        epoch !== editorEpochRef.current
+        || request !== runRequestRef.current
+        || refreshed.sessionId !== selectedSessionId
+      ) return null;
+      if (detailOpen && editor.kind === "open" && editor.campaign?.id === campaignId) {
+        setEditor({ campaign: refreshed, kind: "open" });
+        setForm(campaignFormFromDto(refreshed));
+        setRuns(runPage.data);
+        setPreflight((current) => current && isPreflightStale(current, refreshed) ? null : current);
+        if (targetsRevisionRef.current !== refreshed.targetsRevision) {
+          void loadTargets(campaignId, epoch);
+        }
+      }
+      void loadCampaigns(listStateRef.current);
+      return refreshed;
+    } catch {
+      if (epoch === editorEpochRef.current) void loadCampaigns(listStateRef.current);
+      return null;
+    } finally {
+      if (detailOpen && epoch === editorEpochRef.current && request === runRequestRef.current) {
+        setRunsLoading(false);
+      }
+    }
+  }
+
+  async function deleteCampaign() {
+    if (!deleteIntent || deletingCampaign) return;
+    const snapshot = deleteIntent;
+    const knownRuns = campaign?.id === snapshot.id ? runs : [];
+    if (campaignDeleteDisabledReason(snapshot, knownRuns)) return;
+    const request = ++deleteRequestRef.current;
+    setDeletingCampaign(true);
+    setCampaignDeleteError(null);
+    try {
+      await api.deleteCampaign(snapshot.id, snapshot.revision, snapshot.targetsRevision);
+      if (request !== deleteRequestRef.current) return;
+      setDeleteIntent(null);
+      if (campaign?.id === snapshot.id) closeEditor();
+      removeCampaignFromPage(snapshot.id);
+      void loadCampaigns(listStateRef.current);
+      toast.notify({
+        description: "Message delivery history was retained.",
+        id: `campaign-deleted-${snapshot.id}`,
+        title: "Campaign deleted",
+        tone: "success",
+      });
+    } catch (error) {
+      if (request !== deleteRequestRef.current) return;
+      const requestError = error instanceof RuntimeRequestError ? error : null;
+      const code = requestError?.code;
+      if (code === "CAMPAIGN_NOT_FOUND" || requestError?.status === 404) {
+        setDeleteIntent(null);
+        if (campaign?.id === snapshot.id) closeEditor();
+        removeCampaignFromPage(snapshot.id);
+        void loadCampaigns(listStateRef.current);
+        toast.notify({
+          description: "This item no longer exists or is no longer available.",
+          id: `campaign-unavailable-${snapshot.id}`,
+          title: "Campaign unavailable",
+          tone: "warning",
+        });
+      } else if (code === "CAMPAIGN_REVISION_CONFLICT") {
+        setDeleteIntent(null);
+        await refreshCampaignDeleteContext(snapshot.id);
+        toast.notify({
+          description: "The campaign changed. Review it before deleting.",
+          id: `campaign-delete-revision-${snapshot.id}`,
+          title: "Delete not confirmed",
+          tone: "warning",
+        });
+      } else if (code === "CAMPAIGN_DELETE_STATE_CONFLICT") {
+        setDeleteIntent(null);
+        await refreshCampaignDeleteContext(snapshot.id);
+        toast.notify({
+          description: "Cancel the active run and archive the campaign before deleting it.",
+          id: `campaign-delete-state-${snapshot.id}`,
+          title: "Campaign cannot be deleted",
+          tone: "warning",
+        });
+      } else if (code === "CAMPAIGN_DELETE_RUN_CONFLICT") {
+        setDeleteIntent(null);
+        const refreshed = await refreshCampaignDeleteContext(snapshot.id);
+        const detailWasOpen = campaign?.id === snapshot.id;
+        toast.notify({
+          action: refreshed
+            ? <Button onClick={() => {
+                if (!detailWasOpen) openCampaign(refreshed);
+                setEditorTab("preflight");
+              }} size="sm">View runs</Button>
+            : undefined,
+          description: "This campaign still has an unfinished run. Cancel it or wait for it to finish.",
+          id: `campaign-delete-run-${snapshot.id}`,
+          title: "Campaign cannot be deleted",
+          tone: "warning",
+        });
+      } else {
+        setCampaignDeleteError("The campaign could not be deleted. Check the Runtime connection and try again.");
+      }
+    } finally {
+      if (request === deleteRequestRef.current) setDeletingCampaign(false);
+    }
+  }
+
+  function cancelCampaignDelete() {
+    if (deletingCampaign) return;
+    setDeleteIntent(null);
+    setCampaignDeleteError(null);
   }
 
   function requestCloseEditor() {
@@ -935,6 +1141,10 @@ export function CampaignsScreen() {
       : reportStale ? "Run preflight again after saving changes" : preflight ? `Last result: ${preflight.status}` : "No preflight result yet";
   const editorStep = editorTab === "details" ? 1 : editorTab === "targets" ? 2 : 3;
   const editorStepLabel = editorTab === "details" ? "Details" : editorTab === "targets" ? "Targets" : "Preflight";
+  const detailDeleteReason = campaign ? campaignDeleteDisabledReason(campaign, runs) : null;
+  const deleteIntentDisabledReason = deleteIntent
+    ? campaignDeleteDisabledReason(deleteIntent, campaign?.id === deleteIntent.id ? runs : [])
+    : null;
   const footerAction = editorTab === "details" ? (
     <>
       {campaign && <Button disabled={!editable || !detailsDirty || savingDetails} onClick={resetDetailsToSaved} variant="ghost">Reset to saved</Button>}
@@ -982,7 +1192,7 @@ export function CampaignsScreen() {
                   <td><Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge></td>
                   <td>{item.scheduleType === "IMMEDIATE" ? "Immediate" : formatDate(item.scheduledAt)}</td>
                   <td>{item.targetCount}</td>
-                  <td className="data-cell-action"><Button onClick={() => openCampaign(item)} size="sm" variant="ghost">{item.status === "DRAFT" ? "Edit" : "Review"}</Button></td>
+                  <td className="data-cell-action"><div className="data-row-actions"><Button onClick={() => openCampaign(item)} size="sm" variant="ghost">{item.status === "DRAFT" ? "Edit" : "Review"}</Button><CampaignDeleteMenu campaign={item} disabledReason={campaignDeleteDisabledReason(item)} onDelete={requestCampaignDelete} /></div></td>
                 </tr>)}
             </tbody>
           </table>
@@ -1002,7 +1212,7 @@ export function CampaignsScreen() {
           ? "Edit persisted details, targets, and Runtime readiness in sequence."
           : "Step 1 of 3 · Define content and delivery timing."}
         eyebrow="Campaign workspace"
-        footer={editor.kind === "open" && <WorkspaceFooter actions={footerAction} description={footerState} title={`Step ${editorStep} of 3 · ${editorStepLabel}`} />}
+        footer={editor.kind === "open" && <WorkspaceFooter actions={footerAction} description={footerState} leading={campaign ? <CampaignDeleteMenu campaign={campaign} disabledReason={detailDeleteReason} onDelete={requestCampaignDelete} /> : undefined} title={`Step ${editorStep} of 3 · ${editorStepLabel}`} />}
         navigation={editor.kind === "open" && (
           <Tabs
             activeTab={editorTab}
@@ -1012,8 +1222,8 @@ export function CampaignsScreen() {
             onChange={setEditorTab}
             tabs={[
               { id: "details", label: "Details", step: 1, warning: Boolean(campaign && detailsDirty) },
-              { badge: campaign ? draftTargetIds.length : undefined, disabled: !campaign, id: "targets", label: "Targets", step: 2, warning: Boolean(campaign && targetsDirty) },
-              { badge: preflight?.status, disabled: !campaign, id: "preflight", label: "Preflight", step: 3, warning: reportStale },
+              { disabled: !campaign, id: "targets", label: "Targets", meta: campaign ? draftTargetIds.length : undefined, step: 2, warning: Boolean(campaign && targetsDirty) },
+              { disabled: !campaign, id: "preflight", label: "Preflight", meta: preflight?.status, step: 3, warning: reportStale },
             ]}
           />
         )}
@@ -1163,6 +1373,19 @@ export function CampaignsScreen() {
         open={liveLaunchConfirmationOpen}
         title="Launch LIVE campaign?"
       />
+      <ConfirmationDialog
+        body={<><p>Campaign “{deleteIntent?.name}” will be removed from the workspace. Run and message delivery history will remain available for audit. You cannot undo this action in WA Studio.</p>{campaignDeleteError && <InlineAlert title="Could not delete campaign">{campaignDeleteError}</InlineAlert>}</>}
+        busy={deletingCampaign}
+        busyLabel="Deleting…"
+        cancelLabel="Cancel"
+        confirmDisabled={Boolean(deleteIntentDisabledReason)}
+        confirmLabel="Delete campaign"
+        confirmVariant="danger"
+        onCancel={cancelCampaignDelete}
+        onConfirm={() => void deleteCampaign()}
+        open={Boolean(deleteIntent)}
+        title="Delete campaign?"
+      />
     </div>
   );
 }
@@ -1233,7 +1456,7 @@ function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; 
         </dl>
       </section>
       <div className="preflight-columns">
-        <section className="preflight-evidence-panel"><header><div><h4>Policy checks</h4><p>Each check contributes to Runtime's decision.</p></div><Badge tone="neutral">{report.checks.length}</Badge></header><ul>{report.checks.map((check) => <li key={check.code}><StatusIndicator className="preflight-check-status" glow tone={reportTone(check.status)}>{preflightCheckStatusLabel(check.status)}</StatusIndicator><span className="preflight-evidence-copy"><strong>{PREFLIGHT_CHECK_LABELS[check.code] ?? "Runtime policy check"}</strong><code>{check.code}</code><small>{check.message}</small></span></li>)}</ul></section>
+        <section className="preflight-evidence-panel"><header><div><h4>Policy checks</h4><p>Each check contributes to Runtime's decision.</p></div><Badge tone="neutral">{report.checks.length}</Badge></header><ul>{report.checks.map((check) => <li key={check.code}><Badge className="preflight-check-status" tone={reportTone(check.status)}>{preflightCheckStatusLabel(check.status)}</Badge><span className="preflight-evidence-copy"><strong>{PREFLIGHT_CHECK_LABELS[check.code] ?? "Runtime policy check"}</strong><code>{check.code}</code><small>{check.message}</small></span></li>)}</ul></section>
         <section className="preflight-evidence-panel"><header><div><h4>Target issues</h4><p>Groups that require operator attention.</p></div><Badge tone={report.targetIssues.length ? "warning" : "success"}>{report.targetIssues.length}</Badge></header>{!report.targetIssues.length ? <div className="preflight-no-issues"><AppIcon name="check" size="sm" /><span>No target issues reported.</span></div> : <ul>{report.targetIssues.map((issue) => <li key={`${issue.groupId}-${issue.reason}`}><Badge tone={issue.capability === "DENIED" ? "danger" : "warning"}>{issue.capability}</Badge><span className="preflight-evidence-copy"><strong>{issue.groupName}</strong><small>{PREFLIGHT_ISSUE_LABELS[issue.reason] ?? "Runtime reported a target issue"}</small><code>{issue.reason}</code></span></li>)}</ul>}</section>
       </div>
     </section>

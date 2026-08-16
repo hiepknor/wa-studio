@@ -178,7 +178,10 @@ export interface paths {
         get: operations["GroupListController_get"];
         put?: never;
         post?: never;
-        /** Archive a saved group list without changing campaign targets */
+        /**
+         * Idempotently archive a saved group list without changing campaign targets
+         * @description A repeated DELETE succeeds after the list has reached the archived state.
+         */
         delete: operations["GroupListController_archive"];
         options?: never;
         head?: never;
@@ -239,7 +242,11 @@ export interface paths {
         get: operations["CampaignController_get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a quiescent campaign from the active workspace
+         * @description Creates a durable tombstone without deleting immutable run, delivery, or message-job audit data.
+         */
+        delete: operations["CampaignController_delete"];
         options?: never;
         head?: never;
         /** Update an editable campaign draft */
@@ -1004,6 +1011,42 @@ export interface components {
              * @default true
              */
             dryRun: boolean;
+        };
+        HealthLiveDto: {
+            /** @enum {string} */
+            status: "ok";
+            /** @enum {string} */
+            service: "wa-runtime";
+            /** @example 0.1.0 */
+            version: string;
+        };
+        HealthDependenciesDto: {
+            /** @enum {boolean} */
+            postgres: true;
+            /** @enum {boolean} */
+            redis: true;
+        };
+        RuntimeProcessHealthDto: {
+            /** @enum {string} */
+            worker: "healthy" | "degraded";
+            /** @enum {string} */
+            scheduler: "healthy" | "degraded";
+        };
+        HealthReadyDto: {
+            /** @enum {string} */
+            status: "ready";
+            dependencies: components["schemas"]["HealthDependenciesDto"];
+            processes: components["schemas"]["RuntimeProcessHealthDto"];
+            liveSendsEnabled: boolean;
+            /** @example 0.18.0 */
+            openwaRelease: string;
+            allowedSessionCount: number;
+        };
+        HealthNotReadyDto: {
+            /** @enum {string} */
+            status: "not_ready";
+            /** @enum {string} */
+            reason: "Runtime dependency unavailable";
         };
         InboundMessageDto: {
             /** Format: uuid */
@@ -1880,6 +1923,62 @@ export interface operations {
             };
         };
     };
+    CampaignController_delete: {
+        parameters: {
+            query: {
+                /** @description Campaign content revision observed before deletion. A stale value returns HTTP 409. */
+                expectedRevision: number;
+                /** @description Campaign target-set revision observed before deletion. A stale value returns HTTP 409. */
+                expectedTargetsRevision: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
     CampaignController_update: {
         parameters: {
             query?: never;
@@ -2559,7 +2658,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["HealthLiveDto"];
+                };
             };
         };
     };
@@ -2576,7 +2677,17 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["HealthReadyDto"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthNotReadyDto"];
+                };
             };
         };
     };

@@ -44,11 +44,12 @@
   outline: 1px solid var(--focus-border);
   outline-offset: 3px;
 }
-.tabs-badge {
+.tabs-meta {
   color: #858b98;
   font-family: var(--font-mono);
   font-size: 8px;
   font-weight: 500;
+  text-transform: uppercase;
 }
 .tabs-warning {
   width: 5px;

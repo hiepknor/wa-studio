@@ -9,7 +9,9 @@ import {
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
+import { OverflowMenuTrigger } from "@/shared/ui/OverflowMenuTrigger";
 import { TextAreaField } from "@/shared/ui/TextAreaField";
 import { TextField } from "@/shared/ui/TextField";
 import {
@@ -33,8 +35,8 @@ import { groupListErrorMessage } from "./group-list-domain";
 interface GroupListEditorProps {
   api: RuntimeApi;
   list: RuntimeGroupList | null;
-  onArchived: (listId: string) => void;
   onClose: () => void;
+  onRequestDelete: (list: RuntimeGroupList) => void;
   onSaved: (list: RuntimeGroupList) => void;
   sessionId: string;
 }
@@ -56,8 +58,8 @@ function runtimeGroupRow(group: ReturnType<typeof useGroupDirectoryQuery>["group
 export function GroupListEditor({
   api,
   list,
-  onArchived,
   onClose,
+  onRequestDelete,
   onSaved,
   sessionId,
 }: GroupListEditorProps) {
@@ -69,12 +71,10 @@ export function GroupListEditor({
   const [membershipRows, setMembershipRows] = useState<Record<string, RuntimeGroupListGroup>>({});
   const [loadingMembership, setLoadingMembership] = useState(Boolean(list));
   const [saving, setSaving] = useState(false);
-  const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorTitle, setErrorTitle] = useState("Group list update");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | undefined>>({});
   const [discardOpen, setDiscardOpen] = useState(false);
-  const [archiveOpen, setArchiveOpen] = useState(false);
   const epochRef = useRef(0);
   const createKeyRef = useRef(crypto.randomUUID());
   const editorKey = list?.id ?? createKeyRef.current;
@@ -288,29 +288,6 @@ export function GroupListEditor({
     }
   }
 
-  async function archive() {
-    if (!canonical) return;
-    const epoch = epochRef.current;
-    setArchiveOpen(false);
-    setArchiving(true);
-    setError(null);
-    try {
-      await api.archiveGroupList(canonical.id, canonical.revision);
-      if (epoch === epochRef.current) onArchived(canonical.id);
-    } catch (nextError) {
-      if (epoch === epochRef.current) {
-        setErrorTitle("Could not archive group list");
-        setError(errorCopy(nextError, "Could not archive group list."));
-        if (
-          nextError instanceof RuntimeRequestError
-          && nextError.code === "GROUP_LIST_REVISION_CONFLICT"
-        ) await loadCanonical(true, true);
-      }
-    } finally {
-      if (epoch === epochRef.current) setArchiving(false);
-    }
-  }
-
   function requestClose() {
     if (dirty) setDiscardOpen(true);
     else onClose();
@@ -334,7 +311,6 @@ export function GroupListEditor({
         : "Add a name to save this list";
   const saveDisabled = loadingMembership
     || saving
-    || archiving
     || !name.trim()
     || Boolean(canonical && !dirty);
   const capacity = stagedIds.length >= MAX_GROUP_SELECTION
@@ -350,9 +326,24 @@ export function GroupListEditor({
         description="Reusable static group IDs for the active Runtime session."
         eyebrow="Group list"
         footer={<WorkspaceFooter
-          actions={<>{canonical && <Button disabled={!dirty || saving || archiving} onClick={resetChanges}>Reset changes</Button>}<Button disabled={saveDisabled} loading={saving} onClick={() => void save()} variant="primary">Save list</Button></>}
+          actions={<>{canonical && <Button disabled={!dirty || saving} onClick={resetChanges}>Reset changes</Button>}<Button disabled={saveDisabled} loading={saving} onClick={() => void save()} variant="primary">Save list</Button></>}
           description={status}
-          leading={canonical ? <Button disabled={saving || archiving} onClick={() => setArchiveOpen(true)} variant="danger">Archive list</Button> : undefined}
+          leading={canonical ? (
+            <DropdownMenu
+              ariaLabel={`Actions for ${canonical.name}`}
+              portal
+              trigger={(triggerProps) => <OverflowMenuTrigger ariaLabel={`More actions for ${canonical.name}`} triggerProps={triggerProps} />}
+            >
+              <DropdownMenuItem
+                danger
+                description="Remove this list from saved lists. Existing campaign targets stay unchanged."
+                icon="trash"
+                onSelect={() => onRequestDelete(canonical)}
+              >
+                Delete list
+              </DropdownMenuItem>
+            </DropdownMenu>
+          ) : undefined}
           title={canonical ? "Edit group list" : "New group list"}
         />}
         onClose={requestClose}
@@ -408,7 +399,6 @@ export function GroupListEditor({
         </div>
       </WorkspaceDrawer>
       <ConfirmationDialog body="Unsaved list metadata or group selections will be discarded. Runtime data is not changed." cancelLabel="Keep editing" confirmLabel="Discard changes" confirmVariant="danger" onCancel={() => setDiscardOpen(false)} onConfirm={onClose} open={discardOpen} title="Discard group list changes?" />
-      <ConfirmationDialog body="Archive this reusable list? Existing campaign target snapshots are not changed." cancelLabel="Keep list" confirmLabel="Archive list" confirmVariant="danger" onCancel={() => setArchiveOpen(false)} onConfirm={() => void archive()} open={archiveOpen} title="Archive group list?" />
     </>
   );
 }

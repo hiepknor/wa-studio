@@ -445,11 +445,11 @@ export class RuntimeApi {
     return result.data;
   }
 
-  async archiveGroupList(listId: string, expectedRevision?: number): Promise<void> {
+  async archiveGroupList(listId: string, expectedRevision: number): Promise<void> {
     const result = await this.client.DELETE("/api/v1/group-lists/{id}", {
       params: {
         path: { id: listId },
-        query: expectedRevision === undefined ? {} : { expectedRevision },
+        query: { expectedRevision },
       },
     });
     if (!result.response.ok) {
@@ -544,6 +544,26 @@ export class RuntimeApi {
       );
     }
     return result.data;
+  }
+
+  async deleteCampaign(
+    campaignId: string,
+    expectedRevision: number,
+    expectedTargetsRevision: number,
+  ): Promise<void> {
+    const result = await this.client.DELETE("/api/v1/campaigns/{id}", {
+      params: {
+        path: { id: campaignId },
+        query: { expectedRevision, expectedTargetsRevision },
+      },
+    });
+    if (!result.response.ok) {
+      throw runtimeRequestError(
+        "Could not delete campaign",
+        result.response.status,
+        result.error,
+      );
+    }
   }
 
   async listCampaignTargets(campaignId: string): Promise<RuntimeCampaignTargetList> {

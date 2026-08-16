@@ -202,6 +202,24 @@ describe("RuntimeApi", () => {
     });
   });
 
+  it("deletes a campaign with both displayed revisions", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await expect(api.deleteCampaign("campaign id", 7, 11)).resolves.toBeUndefined();
+
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.method).toBe("DELETE");
+    expect(request.url).toBe(
+      "http://127.0.0.1:3100/api/v1/campaigns/campaign%20id?expectedRevision=7&expectedTargetsRevision=11",
+    );
+  });
+
   it("uses revision-safe target apply and campaign run lifecycle endpoints", async () => {
     const campaign = {
       id: "campaign-id", sessionId: "session-id", name: "Release", text: "Ship it",
@@ -615,6 +633,24 @@ describe("RuntimeApi", () => {
     await expect(request.json()).resolves.toEqual({
       groupIds: ["one@g.us"], expectedMembershipRevision: 7,
     });
+  });
+
+  it("archives a Group List with the displayed aggregate revision", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await expect(api.archiveGroupList("list id", 9)).resolves.toBeUndefined();
+
+    const request = runtimeFetch.mock.calls[0][0] as Request;
+    expect(request.method).toBe("DELETE");
+    expect(request.url).toBe(
+      "http://127.0.0.1:3100/api/v1/group-lists/list%20id?expectedRevision=9",
+    );
   });
 
   it.each([401, 404, 409, 422])(

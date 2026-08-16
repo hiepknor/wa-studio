@@ -58,14 +58,13 @@ function renderEditor(list: RuntimeGroupList | null, overrides: Partial<RuntimeA
     createGroupList: vi.fn(),
     updateGroupList: vi.fn(),
     replaceGroupListGroups: vi.fn(),
-    archiveGroupList: vi.fn(),
     ...overrides,
   } as unknown as RuntimeApi;
   const onSaved = vi.fn();
-  const onArchived = vi.fn();
+  const onRequestDelete = vi.fn();
   const onClose = vi.fn();
-  render(<DrawerProvider><GroupListEditor api={api} list={list} onArchived={onArchived} onClose={onClose} onSaved={onSaved} sessionId={sessionId} /><DrawerHost /></DrawerProvider>);
-  return { api, onArchived, onClose, onSaved };
+  render(<DrawerProvider><GroupListEditor api={api} list={list} onClose={onClose} onRequestDelete={onRequestDelete} onSaved={onSaved} sessionId={sessionId} /><DrawerHost /></DrawerProvider>);
+  return { api, onClose, onRequestDelete, onSaved };
 }
 
 describe("GroupListEditor", () => {
@@ -117,24 +116,22 @@ describe("GroupListEditor", () => {
     }), expect.any(String));
   });
 
-  it("restores complete membership, saves metadata and replacement, and confirms archive/dirty close", async () => {
+  it("restores complete membership, saves changes, requests deletion with the latest snapshot, and confirms dirty close", async () => {
     const user = userEvent.setup();
     const denied = member(group("denied@g.us", "Denied room", "DENIED", false));
     const updated = { ...savedList, name: "Updated list", revision: 3 };
     const membershipUpdated = { ...updated, groupCount: 0, revision: 4, membershipRevision: 2 };
     const updateGroupList = vi.fn().mockResolvedValue(updated);
     const replaceGroupListGroups = vi.fn().mockResolvedValue({ list: membershipUpdated, data: [] });
-    const archiveGroupList = vi.fn().mockResolvedValue(undefined);
-    const { onArchived, onClose, onSaved } = renderEditor(savedList, {
+    const { onClose, onRequestDelete, onSaved } = renderEditor(savedList, {
       getGroupListMembership: vi.fn().mockResolvedValue({ list: savedList, data: [denied] }),
       updateGroupList,
       replaceGroupListGroups,
-      archiveGroupList,
     });
     await screen.findByText("1–3 of 3 groups");
     expect(screen.getByRole("heading", { name: "List details" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Groups" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Archive list" })).toHaveClass("button-danger");
+    expect(screen.getByRole("button", { name: `More actions for ${savedList.name}` })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save list" })).toBeDisabled();
     const deniedCheckbox = screen.getByRole("checkbox", { name: "Select Denied room" });
     await waitFor(() => expect(deniedCheckbox).toBeEnabled());
@@ -148,12 +145,9 @@ describe("GroupListEditor", () => {
     expect(updateGroupList).toHaveBeenCalledWith(savedList.id, { name: "Updated list", description: savedList.description, expectedRevision: 2 });
     expect(replaceGroupListGroups).toHaveBeenCalledWith(savedList.id, [], 1);
 
-    await user.click(screen.getByRole("button", { name: "Archive list" }));
-    const archiveDialog = screen.getByRole("dialog", { name: "Archive group list?" });
-    expect(archiveDialog).toHaveTextContent("Existing campaign target snapshots are not changed.");
-    await user.click(archiveDialog.querySelector<HTMLButtonElement>(".button-danger")!);
-    await waitFor(() => expect(onArchived).toHaveBeenCalledWith(savedList.id));
-    expect(archiveGroupList).toHaveBeenCalledWith(savedList.id, 4);
+    await user.click(screen.getByRole("button", { name: "More actions for Updated list" }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete list/ }));
+    expect(onRequestDelete).toHaveBeenCalledWith(membershipUpdated);
 
     await user.type(name, " dirty");
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
@@ -297,26 +291,14 @@ describe("GroupListEditor", () => {
     expect(name).toHaveValue("Operator rename");
   });
 
-  it("sends the held aggregate revision for archive and does not retry a conflict", async () => {
+  it("uses the refreshed aggregate revision when requesting deletion", async () => {
     const user = userEvent.setup();
     const concurrent = { ...savedList, revision: 3 };
-    const getGroupListMembership = vi.fn()
-      .mockResolvedValueOnce({ list: savedList, data: [] })
-      .mockResolvedValueOnce({ list: concurrent, data: [] });
-    const archiveGroupList = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
-      code: "GROUP_LIST_REVISION_CONFLICT",
-      status: 409,
-    }));
-    const { onArchived } = renderEditor(savedList, { archiveGroupList, getGroupListMembership });
+    const getGroupListMembership = vi.fn().mockResolvedValue({ list: concurrent, data: [] });
+    const { onRequestDelete } = renderEditor(savedList, { getGroupListMembership });
     await screen.findByText("Saved 0 · Staged 0 · +0 / −0");
-    await user.click(screen.getByRole("button", { name: "Archive list" }));
-    const dialog = screen.getByRole("dialog", { name: "Archive group list?" });
-    await user.click(dialog.querySelector<HTMLButtonElement>(".button-danger")!);
-
-    expect(await screen.findByText(/canonical state was reloaded/)).toBeInTheDocument();
-    await waitFor(() => expect(getGroupListMembership).toHaveBeenCalledTimes(2));
-    expect(archiveGroupList).toHaveBeenCalledOnce();
-    expect(archiveGroupList).toHaveBeenCalledWith(savedList.id, savedList.revision);
-    expect(onArchived).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: `More actions for ${savedList.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete list/ }));
+    expect(onRequestDelete).toHaveBeenCalledWith(concurrent);
   });
 });

@@ -17,6 +17,12 @@ type CampaignTargetListDto = components["schemas"]["CampaignTargetListDto"];
 type ApplyGroupListTargetsDto = components["schemas"]["ApplyGroupListTargetsDto"];
 type CreateCampaignRunDto = components["schemas"]["CreateCampaignRunDto"];
 type CampaignRunDto = components["schemas"]["CampaignRunDto"];
+type GroupListDeleteQuery = NonNullable<
+  paths["/api/v1/group-lists/{id}"]["delete"]["parameters"]["query"]
+>;
+type CampaignDeleteQuery = NonNullable<
+  paths["/api/v1/campaigns/{id}"]["delete"]["parameters"]["query"]
+>;
 
 describe("authoritative WA Runtime contract", () => {
   it("keeps the canonical snapshot at the pinned SHA-256", async () => {
@@ -26,7 +32,7 @@ describe("authoritative WA Runtime contract", () => {
     );
     const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(checksum)
-      .toBe("4b932b05213252c624b9d0cb359d696d30db9e90d23e1b91421286076ccec760");
+      .toBe("39b6b5ac71937d75da32084e307c0af4b8548d317daed7bd73a482759a08e3db");
   });
 
   it("generates nullable scheduledAt for UpdateCampaignDto", () => {
@@ -113,5 +119,23 @@ describe("authoritative WA Runtime contract", () => {
     const run = { targetSource: null } as CampaignRunDto;
     expect(create).toMatchObject({ expectedCampaignRevision: 3, expectedTargetsRevision: 8 });
     expect(run.targetSource).toBeNull();
+  });
+
+  it("generates both revision-safe DELETE operations", () => {
+    const groupListDelete: GroupListDeleteQuery = { expectedRevision: 9 };
+    const campaignDelete: CampaignDeleteQuery = {
+      expectedRevision: 7,
+      expectedTargetsRevision: 11,
+    };
+    const contract = JSON.parse(openapiSnapshot) as {
+      paths: Record<string, { delete?: { operationId?: string } }>;
+    };
+
+    expect(groupListDelete.expectedRevision).toBe(9);
+    expect(campaignDelete).toEqual({ expectedRevision: 7, expectedTargetsRevision: 11 });
+    expect(contract.paths["/api/v1/group-lists/{id}"].delete?.operationId)
+      .toBe("GroupListController_archive");
+    expect(contract.paths["/api/v1/campaigns/{id}"].delete?.operationId)
+      .toBe("CampaignController_delete");
   });
 });

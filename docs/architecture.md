@@ -15,7 +15,7 @@ This boundary lets future web and mobile clients use the same WA Runtime contrac
 
 ## Source of truth
 
-- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime release documentation HEAD `7fb0a9f`, including audience invariants `0cddc89` and OpenWA 0.18 compatibility `48ad3a0` (SHA-256 `4b932b05213252c624b9d0cb359d696d30db9e90d23e1b91421286076ccec760`).
+- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime HEAD `5642851bd0a12b58512e616abffc5b17366466be` (OpenAPI `1.0.0`, SHA-256 `39b6b5ac71937d75da32084e307c0af4b8548d317daed7bd73a482759a08e3db`).
 - `src/shared/api/generated/runtime.ts` is generated; do not edit it by hand.
 - `src/shared/api/runtime-client.ts` owns URL normalization, authentication headers, transport, and error mapping.
 - Feature modules consume the typed client and must not redefine Runtime DTOs.
@@ -88,9 +88,11 @@ Preflight evaluates persisted state only. The UI renders Runtime status, counter
 
 Run creation is a separate, explicit action after review. Studio sends both reviewed campaign and target revisions with an idempotency key retained across transport retry. DRY_RUN can be repeated while the campaign remains DRAFT. LIVE requires confirmation; a successful launch refreshes the campaign into its Runtime-owned read-only lifecycle. Revision and launch conflicts are never retried with newer revisions: Studio reloads campaign, target, and run state and requires review/preflight again. Pause, resume, and cancel reconcile both run state and the coarser campaign lifecycle. Run `targetSource` is immutable audit data and is never resolved through the current Group List.
 
+Campaign deletion is a revision-safe removal from the active workspace, not audit erasure. Studio sends the displayed campaign and target revisions, waits for Runtime HTTP 204 before removing the row, and preserves current list criteria while refreshing the authoritative page. Only DRAFT and ARCHIVED snapshots can enter confirmation locally; Runtime remains authoritative for lifecycle and unfinished-run conflicts. Revision conflicts refresh without automatic retry and require a new operator confirmation. Runtime retains run, delivery, and message-job history.
+
 ## Reusable group-list boundary
 
-Runtime Group Lists are session-scoped static templates, not saved queries or dynamic segments. Groups exposes All groups and Group lists as two views under the existing single sidebar destination. List create owns one UUID idempotency key per intent; editing loads complete canonical membership, keeps persisted and staged IDs separate, sends aggregate revision for metadata/archive and membership revision for replacement, and never retries a conflict silently. Archiving a list does not alter any campaign.
+Runtime Group Lists are session-scoped static templates, not saved queries or dynamic segments. Groups exposes All groups and Group lists as two views under the existing single sidebar destination. List create owns one UUID idempotency key per intent; editing loads complete canonical membership, keeps persisted and staged IDs separate, sends aggregate revision for metadata/delete and membership revision for replacement, and never retries a conflict silently. Product copy describes deletion from saved lists; Runtime implements it as an idempotent archive. Studio waits for HTTP 204 before removing the item, and deleting a list does not alter any campaign target snapshot.
 
 Applying a Group List to Campaign targets uses Runtime's atomic apply endpoint with `groupListId`, `expectedMembershipRevision`, and `expectedTargetsRevision`. It replaces the materialized campaign target snapshot with the canonical response and records nullable source provenance; it does not fetch/copy membership in Studio and does not create a campaign–list binding. Later list rename, edit, or archive cannot mutate existing campaign targets.
 

@@ -17,7 +17,7 @@ function Harness() {
       onChange={setActiveTab}
       tabs={[
         { id: "overview", label: "Overview" },
-        { badge: 30, id: "members", label: "Members", warning: true },
+        { id: "members", label: "Members", meta: 30, warning: true },
       ]}
     />
   );

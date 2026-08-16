@@ -1022,7 +1022,7 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
               tabs={[
                 { id: "overview", label: "Overview" },
                 {
-                  badge:
+                  meta:
                     syncedMemberTotal ??
                     detail.participantsCount ??
                     undefined,
@@ -1108,7 +1108,6 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
 
                   <WorkspacePanel
                     action={<GroupCapabilityStatus
-                      appearance="badge"
                       capability={detail.sendCapability}
                       includeFreshness={false}
                     />}

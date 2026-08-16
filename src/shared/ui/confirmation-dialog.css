@@ -27,7 +27,9 @@
 }
 .confirmation-dialog-content { padding: 20px; }
 .confirmation-dialog h2 { margin: 0; color: #eceef2; font-size: 15px; }
-.confirmation-dialog p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.confirmation-dialog-body { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.confirmation-dialog-body > p { margin: 0; }
+.confirmation-dialog-body > * + * { margin-top: 12px; }
 .confirmation-dialog-footer {
   display: flex;
   justify-content: flex-end;
@@ -35,4 +37,9 @@
   padding: 12px;
   border-top: 1px solid var(--border);
   background: rgb(255 255 255 / 1.5%);
+}
+@media (max-width: 480px) {
+  .confirmation-dialog-layer { padding: 12px; }
+  .confirmation-dialog-footer { flex-direction: column-reverse; }
+  .confirmation-dialog-footer .button { width: 100%; }
 }

@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Copy,
   CloudDownload,
+  Ellipsis,
   Info,
   KeyRound,
   PanelsTopLeft,
@@ -15,6 +16,7 @@ import {
   Server,
   Settings2,
   TriangleAlert,
+  Trash2,
   UsersRound,
   Unplug,
   X,
@@ -35,6 +37,7 @@ export type AppIconName =
   | "groups"
   | "info"
   | "key"
+  | "more"
   | "refresh"
   | "runs"
   | "search"
@@ -42,7 +45,8 @@ export type AppIconName =
   | "sessions"
   | "settings"
   | "sync"
-  | "triangle-alert";
+  | "triangle-alert"
+  | "trash";
 
 export type AppIconSize = "xs" | "sm" | "md" | "lg" | "xl";
 
@@ -64,6 +68,7 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   groups: UsersRound,
   info: Info,
   key: KeyRound,
+  more: Ellipsis,
   refresh: RefreshCw,
   runs: Play,
   search: Search,
@@ -72,6 +77,7 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   settings: Settings2,
   sync: CloudDownload,
   "triangle-alert": TriangleAlert,
+  trash: Trash2,
 };
 
 const ICON_SIZES: Record<AppIconSize, number> = {

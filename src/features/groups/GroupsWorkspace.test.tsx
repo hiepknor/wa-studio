@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -7,7 +7,7 @@ import {
   RuntimeConnectionProvider,
   useRuntimeConnection,
 } from "@/app/RuntimeConnectionContext";
-import type { RuntimeApi, RuntimeSession } from "@/shared/api/runtime-client";
+import { RuntimeRequestError, type RuntimeApi, type RuntimeGroupList, type RuntimeSession } from "@/shared/api/runtime-client";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ToastProvider } from "@/shared/ui/Toast";
 import { GroupsWorkspace } from "./GroupsWorkspace";
@@ -19,6 +19,18 @@ const primary: RuntimeSession = {
   gatewayUpdatedAt: "2026-08-15T00:00:00.000Z", syncedAt: "2026-08-15T00:00:00.000Z",
 };
 const secondary = { ...primary, id: "secondary-session", name: "Secondary" };
+const savedList: RuntimeGroupList = {
+  id: "11111111-1111-4111-8111-111111111111",
+  sessionId: primary.id,
+  name: "Launch groups",
+  description: "Static launch selection",
+  groupCount: 2,
+  revision: 4,
+  membershipRevision: 2,
+  archivedAt: null,
+  createdAt: "2026-08-15T00:00:00.000Z",
+  updatedAt: "2026-08-15T00:00:00.000Z",
+};
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -36,6 +48,7 @@ function renderWorkspace(overrides: Partial<RuntimeApi> = {}, strict = false) {
   const api = {
     listGroups: vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } }),
     listGroupLists: vi.fn().mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } }),
+    archiveGroupList: vi.fn(),
     ...overrides,
   } as unknown as RuntimeApi;
   const workspace = <ToastProvider><RuntimeConnectionProvider createApi={() => api} probeConnection={vi.fn().mockResolvedValue({ sessionCount: 2, readySessions: 2, sessions: [primary, secondary] })}><Harness /></RuntimeConnectionProvider></ToastProvider>;
@@ -136,5 +149,128 @@ describe("GroupsWorkspace", () => {
     oldPage.resolve({ data: [{ id: "old-list", sessionId: primary.id, name: "Late primary list", description: null, groupCount: 0, revision: 1, membershipRevision: 0, archivedAt: null, createdAt: "2026-08-15T00:00:00.000Z", updatedAt: "2026-08-15T00:00:00.000Z" }], meta: { total: 1, limit: 20, offset: 0 } });
     await Promise.resolve();
     expect(screen.queryByText("Late primary list")).not.toBeInTheDocument();
+  });
+
+  it("E2E happy path: deletes a Group List from the row only after Runtime returns 204", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<void>();
+    const archiveGroupList = vi.fn().mockReturnValue(pending.promise);
+    const listGroupLists = vi.fn()
+      .mockResolvedValueOnce({ data: [savedList], meta: { total: 1, limit: 20, offset: 0 } })
+      .mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } });
+    renderWorkspace({ archiveGroupList, listGroupLists });
+    await connect(user);
+    await user.click(screen.getByRole("tab", { name: "Group lists" }));
+    await screen.findByRole("button", { name: savedList.name });
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${savedList.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete list/ }));
+    const dialog = screen.getByRole("dialog", { name: "Delete group list?" });
+    expect(dialog).toHaveTextContent("Campaigns that already applied this list and their current targets will not be changed.");
+    await user.click(screen.getByRole("button", { name: "Delete list" }));
+
+    expect(archiveGroupList).toHaveBeenCalledWith(savedList.id, savedList.revision);
+    expect(screen.getByRole("button", { name: "Deleting…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: savedList.name })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Delete group list?" })).toBeInTheDocument();
+
+    pending.resolve(undefined);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delete group list?" })).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: savedList.name })).not.toBeInTheDocument();
+    expect(await screen.findByText("Group list deleted")).toBeInTheDocument();
+    expect(screen.getByText("Existing campaigns were not changed.")).toBeInTheDocument();
+  });
+
+  it("refreshes a Group List revision conflict without retrying deletion", async () => {
+    const user = userEvent.setup();
+    const refreshed = { ...savedList, name: "Launch groups updated", revision: 5 };
+    const archiveGroupList = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "GROUP_LIST_REVISION_CONFLICT",
+      status: 409,
+    }));
+    const listGroupLists = vi.fn()
+      .mockResolvedValueOnce({ data: [savedList], meta: { total: 1, limit: 20, offset: 0 } })
+      .mockResolvedValue({ data: [refreshed], meta: { total: 1, limit: 20, offset: 0 } });
+    renderWorkspace({ archiveGroupList, listGroupLists });
+    await connect(user);
+    await user.click(screen.getByRole("tab", { name: "Group lists" }));
+    await screen.findByRole("button", { name: savedList.name });
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${savedList.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete list/ }));
+    await user.click(screen.getByRole("button", { name: "Delete list" }));
+
+    expect(await screen.findByText("The group list changed. Review it before deleting.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: refreshed.name })).toBeInTheDocument();
+    expect(archiveGroupList).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Delete group list?" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the Group List and dialog available after a network failure", async () => {
+    const user = userEvent.setup();
+    const archiveGroupList = vi.fn().mockRejectedValue(new TypeError("network down"));
+    renderWorkspace({
+      archiveGroupList,
+      listGroupLists: vi.fn().mockResolvedValue({ data: [savedList], meta: { total: 1, limit: 20, offset: 0 } }),
+    });
+    await connect(user);
+    await user.click(screen.getByRole("tab", { name: "Group lists" }));
+    await screen.findByRole("button", { name: savedList.name });
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${savedList.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete list/ }));
+    await user.click(screen.getByRole("button", { name: "Delete list" }));
+
+    expect(await screen.findByText("The group list could not be deleted. Check the Runtime connection and try again.")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete group list?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: savedList.name })).toBeInTheDocument();
+    expect(archiveGroupList).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes a stale Group List when Runtime reports it missing", async () => {
+    const user = userEvent.setup();
+    const archiveGroupList = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
+      code: "GROUP_LIST_NOT_FOUND",
+      status: 404,
+    }));
+    const listGroupLists = vi.fn()
+      .mockResolvedValueOnce({ data: [savedList], meta: { total: 1, limit: 20, offset: 0 } })
+      .mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } });
+    renderWorkspace({ archiveGroupList, listGroupLists });
+    await connect(user);
+    await user.click(screen.getByRole("tab", { name: "Group lists" }));
+    await screen.findByRole("button", { name: savedList.name });
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${savedList.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete list/ }));
+    await user.click(screen.getByRole("button", { name: "Delete list" }));
+
+    expect(await screen.findByText("This item no longer exists or is no longer available.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: savedList.name })).not.toBeInTheDocument();
+  });
+
+  it("closes the Group List detail drawer after successful deletion", async () => {
+    const user = userEvent.setup();
+    const archiveGroupList = vi.fn().mockResolvedValue(undefined);
+    const listGroupLists = vi.fn()
+      .mockResolvedValueOnce({ data: [savedList], meta: { total: 1, limit: 20, offset: 0 } })
+      .mockResolvedValue({ data: [], meta: { total: 0, limit: 20, offset: 0 } });
+    renderWorkspace({
+      archiveGroupList,
+      getGroupListMembership: vi.fn().mockResolvedValue({ list: savedList, data: [] }),
+      listGroupLists,
+    });
+    await connect(user);
+    await user.click(screen.getByRole("tab", { name: "Group lists" }));
+    await user.click(await screen.findByRole("button", { name: savedList.name }));
+    const drawer = screen.getByRole("dialog", { name: savedList.name });
+
+    await user.click(within(drawer).getByRole("button", { name: `More actions for ${savedList.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete list/ }));
+    await user.click(screen.getByRole("button", { name: "Delete list" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: savedList.name })).not.toBeInTheDocument());
+    expect(archiveGroupList).toHaveBeenCalledWith(savedList.id, savedList.revision);
   });
 });
