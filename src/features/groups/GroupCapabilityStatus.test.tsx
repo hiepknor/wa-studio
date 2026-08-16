@@ -50,10 +50,9 @@ describe("GroupCapabilityStatus", () => {
     }).stale).toBe(true);
   });
 
-  it("can keep freshness visually separate while retaining an accessible stale label", () => {
+  it("uses the shared badge while retaining an accessible stale label", () => {
     render(
       <GroupCapabilityStatus
-        appearance="badge"
         capability={{
           ...currentCapability,
           invalidatedAt: "2026-08-13T03:00:00.000Z",

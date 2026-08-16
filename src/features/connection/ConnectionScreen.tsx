@@ -125,10 +125,10 @@ export function ConnectionScreen({
                 <InlineAlert
                   className="connection-status"
                   indicator
-                  title="Checking connection"
+                  title="Connecting to WA Runtime"
                   tone="warning"
                 >
-                  Verifying WA Runtime readiness…
+                  Verifying credentials and Runtime readiness…
                 </InlineAlert>
               )}
               {state.status === "failed" && (
@@ -151,14 +151,14 @@ export function ConnectionScreen({
             <footer className="card-footer">
               <span className="connection-shortcut" aria-hidden="true">↵ enter</span>
               <Button
-                aria-label={isChecking ? "Checking WA Runtime connection" : "Test connection"}
+                aria-label={isChecking ? "Connecting to WA Runtime" : "Connect to Runtime"}
                 className="connection-submit-button"
                 loading={isChecking}
                 size="lg"
                 type="submit"
                 variant="primary"
               >
-                Test connection
+                {isChecking ? "Connecting…" : "Connect to Runtime"}
               </Button>
             </footer>
           </article>

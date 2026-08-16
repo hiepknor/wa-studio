@@ -1,11 +1,11 @@
 import type { HTMLAttributes, ReactNode } from "react";
 
-import type { StatusTone } from "./StatusIndicator";
+import type { FeedbackTone } from "./feedback-tone";
 import "./badge.css";
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   children: ReactNode;
-  tone?: StatusTone;
+  tone?: FeedbackTone;
 }
 
 export function Badge({ children, className = "", tone = "neutral", ...props }: BadgeProps) {

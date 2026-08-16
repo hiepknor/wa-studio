@@ -243,6 +243,7 @@ select:focus-visible {
 .workspace-toolbar {
   position: relative;
   z-index: 30;
+  isolation: isolate;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -257,7 +258,7 @@ select:focus-visible {
 .workspace-breadcrumb { color: #717684; font-family: inherit; font-size: 9px; letter-spacing: .06em; }
 .workspace-current-page { overflow: hidden; font-size: 13px; font-weight: 600; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-toolbar-actions { display: flex; align-items: flex-end; gap: 8px; }
-.workspace-session-switcher { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.workspace-session-switcher { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 4px; }
 .workspace-session-label { color: #747987; font-family: inherit; font-size: 9px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
 .workspace-session-trigger {
   position: relative;
@@ -285,9 +286,10 @@ select:focus-visible {
 .workspace-session-value > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-session-placeholder { color: var(--dim); }
 .workspace-session-state, .workspace-session-option-status {
-  font-size: 9px;
-  text-transform: lowercase;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
+.workspace-session-state { margin-left: auto; }
 .workspace-session-chevron {
   position: absolute;
   top: 50%;
@@ -309,9 +311,8 @@ select:focus-visible {
   overflow-y: auto;
   border: 1px solid rgb(255 255 255 / 10%);
   border-radius: 9px;
-  background: rgb(25 26 33 / 94%);
+  background: #191a21;
   box-shadow: 0 18px 48px rgb(0 0 0 / 44%);
-  backdrop-filter: blur(24px);
   animation: dropdown-enter 90ms ease-out;
 }
 .workspace-session-options-label {
@@ -371,6 +372,7 @@ select:focus-visible {
 }
 .status-bar > span { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-bar > span:last-child { margin-left: auto; }
+.status-bar-connection > span:last-child { overflow: hidden; text-overflow: ellipsis; }
 
 .menu { position: relative; }
 .menu-content {

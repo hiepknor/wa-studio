@@ -207,7 +207,7 @@ describe("GroupsScreen capability refresh", () => {
     await user.click(screen.getByRole("button", { name: "Connect" }));
 
     const listStatus = await screen.findByLabelText("Allowed, stale");
-    expect(listStatus).toHaveClass("status-tone-warning");
+    expect(listStatus).toHaveClass("ui-badge-warning");
     expect(listStatus).toHaveTextContent("Allowed · stale");
     expect(screen.getByText("847").closest("td")).toHaveClass(
       "data-cell-number",

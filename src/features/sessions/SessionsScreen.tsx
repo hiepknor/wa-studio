@@ -8,7 +8,7 @@ import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
-import { StatusIndicator, type StatusTone } from "@/shared/ui/StatusIndicator";
+import type { FeedbackTone } from "@/shared/ui/feedback-tone";
 import { useToast } from "@/shared/ui/Toast";
 import "./sessions.css";
 
@@ -16,7 +16,7 @@ const STATUS_OPTIONS = ["ready", "initializing", "authenticating", "disconnected
 type EngineFilter = "loaded" | "not-loaded";
 type WorkspaceFilter = "selected" | "not-selected";
 
-function statusTone(status: string): StatusTone {
+function statusTone(status: string): FeedbackTone {
   if (status === "ready") return "success";
   if (status === "failed" || status === "disconnected") return "danger";
   if (status === "initializing" || status === "authenticating") return "warning";
@@ -166,7 +166,7 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
                 : !filteredSessions.length ? <tr><td className="data-table-empty" colSpan={5}>No sessions match this search or filters.</td></tr>
                 : filteredSessions.map((session: RuntimeSession) => <tr data-selected={session.id === selectedSessionId || undefined} key={session.id}>
                   <td className="data-cell-primary"><div className="stack stack-xs"><strong className="data-primary-text" title={session.name}>{session.name}</strong><span className="data-secondary-text" title={`Session ID: ${session.id}`}>{whatsappIdentity(session)}</span></div></td>
-                  <td className="data-cell-status"><StatusIndicator glow tone={statusTone(session.status)}>{statusLabel(session.status)}</StatusIndicator></td>
+                  <td className="data-cell-status"><Badge tone={statusTone(session.status)}>{statusLabel(session.status)}</Badge></td>
                   <td className="data-cell-status"><Badge tone={session.engineLoaded ? "success" : "warning"}>{session.engineLoaded ? "Loaded" : "Not loaded"}</Badge></td>
                   <td className="data-cell-time" title={session.syncedAt ? formatDate(session.syncedAt) : undefined}>{formatDate(session.syncedAt)}</td>
                   <td className="data-cell-action">

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { Badge } from "./Badge";
 import { InlineAlert } from "./InlineAlert";
 import { PageHeader } from "./PageHeader";
-import { StatusIndicator } from "./StatusIndicator";
+import { StatusDot } from "./StatusDot";
 import { TextField } from "./TextField";
 import { SelectField } from "./SelectField";
 import { TextAreaField } from "./TextAreaField";
@@ -69,12 +69,8 @@ describe("shared UI primitives", () => {
     expect(screen.queryByText("Original hint")).not.toBeInTheDocument();
   });
 
-  it("uses semantic status text while keeping its dot decorative", () => {
-    const { container } = render(
-      <StatusIndicator tone="success">Operational</StatusIndicator>,
-    );
-
-    expect(screen.getByText("Operational")).toBeInTheDocument();
+  it("keeps standalone status dots decorative", () => {
+    const { container } = render(<StatusDot tone="success" />);
     expect(container.querySelector(".status-dot")).toHaveAttribute("aria-hidden", "true");
   });
 

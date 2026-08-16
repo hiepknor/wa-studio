@@ -143,11 +143,13 @@ describe("WorkspaceShell", () => {
     expect(
       screen.getByRole("combobox", { name: "Active session" }),
     ).toHaveTextContent(/dev-session.*ready/);
-    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("WA Runtime connection")).getByText("Connected"))
+      .toHaveClass("ui-badge-success");
+    expect(within(screen.getByRole("combobox", { name: "Active session" })).getByText("ready"))
+      .toHaveClass("ui-badge-success");
     const statusBar = screen.getByLabelText("Workspace status");
-    expect(
-      within(statusBar).getByText("Connected to http://127.0.0.1:3100"),
-    ).toBeInTheDocument();
+    expect(within(statusBar).getByText("Connected")).toHaveClass("ui-badge-success");
+    expect(within(statusBar).getByText("to http://127.0.0.1:3100")).toBeInTheDocument();
     expect(within(statusBar).queryByText(/session:/i)).not.toBeInTheDocument();
     expect(screen.getByText("1 session")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Groups" })).toHaveLength(1);
@@ -281,7 +283,8 @@ describe("WorkspaceShell", () => {
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
 
     expect(sessionCombobox).toHaveTextContent(/standby-session.*disconnected/);
-    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("WA Runtime connection")).getByText("Connected"))
+      .toHaveClass("ui-badge-success");
     expect(screen.getByText("2 sessions")).toBeInTheDocument();
 
     await user.click(sessionCombobox);

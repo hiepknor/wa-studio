@@ -10,6 +10,7 @@
   font-size: 10px;
   font-weight: 550;
   line-height: 1;
+  text-transform: uppercase;
 }
 
 .ui-badge-success { border-color: rgb(86 211 100 / 17%); background: var(--ok-soft); color: #83df8d; }

@@ -17,7 +17,7 @@ async function submitConnection() {
     "https://wa-runtime.example.com",
   );
   await user.type(screen.getByLabelText("WA Runtime API key"), "development-key");
-  await user.click(screen.getByRole("button", { name: "Test connection" }));
+  await user.click(screen.getByRole("button", { name: "Connect to Runtime" }));
 }
 
 describe("ConnectionScreen", () => {
@@ -41,10 +41,10 @@ describe("ConnectionScreen", () => {
 
     await submitConnection();
 
-    expect(screen.getByRole("button", { name: "Checking WA Runtime connection" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Connecting to WA Runtime" })).toBeDisabled();
     expect(screen.getByLabelText("WA Runtime base URL")).toBeDisabled();
     expect(screen.getByLabelText("WA Runtime API key")).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("Verifying WA Runtime readiness");
+    expect(screen.getByRole("status")).toHaveTextContent("Connecting to WA Runtime");
   });
 
   it("submits with the keyboard and announces a readiness failure", async () => {

@@ -1,7 +1,7 @@
 import type { HTMLAttributes, ReactNode } from "react";
 
 import { feedbackRole, type FeedbackTone } from "./feedback-tone";
-import { StatusDot } from "./StatusIndicator";
+import { StatusDot } from "./StatusDot";
 import "./inline-alert.css";
 
 interface InlineAlertProps extends Omit<HTMLAttributes<HTMLDivElement>, "title"> {

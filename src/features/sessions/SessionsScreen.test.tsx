@@ -85,6 +85,8 @@ describe("SessionsScreen", () => {
     expect(identity).toHaveClass("data-secondary-text");
     expect(identity).toHaveAttribute("title", "Session ID: ready-id");
     expect(screen.getByText("failed-id")).toHaveClass("data-secondary-text");
+    expect(screen.getByText("Ready")).toHaveClass("ui-badge-success");
+    expect(screen.getByText("Failed")).toHaveClass("ui-badge-danger");
   });
 
   it("uses the shared search and filter interaction without an empty-table reset action", async () => {

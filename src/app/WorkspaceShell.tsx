@@ -11,11 +11,11 @@ import { SessionsScreen } from "@/features/sessions/SessionsScreen";
 import { GroupsWorkspace } from "@/features/groups/GroupsWorkspace";
 import { CampaignsScreen } from "@/features/campaigns/CampaignsScreen";
 import { AppIcon, type AppIconName } from "@/shared/ui/AppIcon";
+import { Badge } from "@/shared/ui/Badge";
 import { BrandMark } from "@/shared/ui/BrandMark";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
-import { StatusDot, StatusIndicator } from "@/shared/ui/StatusIndicator";
 
 const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
   activity: "activity",
@@ -111,7 +111,7 @@ export function WorkspaceShell() {
           <div className="workspace-runtime-copy">
             <span className="workspace-runtime-label">WA Runtime</span>
             <div className="workspace-runtime-state">
-              <StatusIndicator glow tone="success">Connected</StatusIndicator>
+              <Badge tone="success">Connected</Badge>
               <span aria-hidden="true" className="workspace-runtime-divider">·</span>
               <span className="workspace-runtime-meta">{sessionCountLabel}</span>
             </div>
@@ -153,7 +153,7 @@ export function WorkspaceShell() {
         </div>
 
         <footer aria-label="Workspace status" className="status-bar">
-          <span><StatusDot glow tone="success" />Connected to {connected.profile.baseUrl}</span>
+          <span className="status-bar-connection"><Badge tone="success">Connected</Badge><span>to {connected.profile.baseUrl}</span></span>
           <span>Last sync: {formatSyncTime(selectedSession?.syncedAt)}</span>
         </footer>
         </div>

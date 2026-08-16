@@ -2,7 +2,8 @@ import { KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 
 import type { RuntimeSession } from "@/shared/api/runtime-client";
 import { AppIcon } from "@/shared/ui/AppIcon";
-import { StatusIndicator, type StatusTone } from "@/shared/ui/StatusIndicator";
+import { Badge } from "@/shared/ui/Badge";
+import type { FeedbackTone } from "@/shared/ui/feedback-tone";
 
 interface SessionSwitcherProps {
   onSelect: (sessionId: string) => void;
@@ -14,7 +15,7 @@ function nextIndex(current: number, direction: 1 | -1, length: number) {
   return (current + direction + length) % length;
 }
 
-function sessionTone(status: string): StatusTone {
+function sessionTone(status: string): FeedbackTone {
   if (status === "ready") return "success";
   if (status === "failed" || status === "disconnected") return "danger";
   if (status === "initializing" || status === "authenticating") return "warning";
@@ -132,12 +133,12 @@ export function SessionSwitcher({
         {selectedSession ? (
           <span className="workspace-session-value">
             <span>{selectedSession.name}</span>
-            <StatusIndicator
+            <Badge
               className="workspace-session-state"
               tone={sessionTone(selectedSession.status)}
             >
               {selectedSession.status}
-            </StatusIndicator>
+            </Badge>
           </span>
         ) : (
           <span className="workspace-session-placeholder">No session</span>
@@ -168,12 +169,12 @@ export function SessionSwitcher({
                   <strong>{session.name}</strong>
                   <small>{session.pushName ?? session.phone ?? "No profile"}</small>
                 </span>
-                <StatusIndicator
+                <Badge
                   className="workspace-session-option-status"
                   tone={sessionTone(session.status)}
                 >
                   {session.status}
-                </StatusIndicator>
+                </Badge>
                 <span aria-hidden="true" className="workspace-session-check">
                   {selected && <AppIcon name="check" size="sm" />}
                 </span>
