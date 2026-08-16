@@ -18,6 +18,8 @@
 .groups-copy-error { display: block; padding: 8px 12px; border-top: 1px solid var(--border); color: var(--danger); font-size: 9px; }
 .groups-facts { margin: 0; border-top: 1px solid var(--border); }
 .groups-facts-contained { border-top: 0; }
+.groups-facts-contained > div { padding: 0 12px; }
+.groups-facts-contained > div:last-child { border-bottom: 0; }
 .groups-facts > div {
   min-height: 36px;
   display: grid;
@@ -49,18 +51,6 @@
 .groups-members li > .ui-badge { flex: 0 0 auto; }
 .groups-member-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--dim); font-family: var(--font-mono); font-size: 8px; }
 .groups-member-pagination > div { display: flex; gap: 6px; }
-.groups-technical { border-top: 1px solid var(--border); }
-.groups-technical summary {
-  padding: 12px 0;
-  color: #9ca1ae;
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 550;
-  list-style-position: inside;
-}
-.groups-technical[open] summary { color: #c8cbd4; }
-.groups-technical .groups-facts { border-top: 0; }
-
 .group-lists-panel { min-width: 0; }
 .group-lists-toolbar {
   min-height: 54px;

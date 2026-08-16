@@ -21,6 +21,7 @@ import { useToast } from "@/shared/ui/Toast";
 import { UpdateActionTrigger } from "@/shared/ui/UpdateActionTrigger";
 import {
   WorkspaceDrawer,
+  WorkspaceDisclosurePanel,
   WorkspaceEmptyState,
   WorkspacePanel,
   WorkspaceSectionHeader,
@@ -1054,7 +1055,6 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                   />
                   <WorkspaceSummaryCard
                     description={detail.description || "No group description."}
-                    icon="groups"
                     label="Synchronized group"
                     metrics={[
                       { label: "Participants", value: detail.participantsCount ?? syncedMemberTotal ?? "—" },
@@ -1203,9 +1203,14 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                     </dl>
                   </WorkspacePanel>
 
-                  <details className="groups-technical" key={detail.id}>
-                    <summary>Sync &amp; technical metadata</summary>
-                    <dl className="groups-facts">
+                  <WorkspaceDisclosurePanel
+                    description="Synchronization history and Runtime identifiers."
+                    flush
+                    key={detail.id}
+                    title="Sync & technical metadata"
+                    titleId="group-technical-metadata-title"
+                  >
+                    <dl className="groups-facts groups-facts-contained">
                       <div>
                         <dt>Record synced</dt>
                         <dd>{formatDate(detail.syncedAt)}</dd>
@@ -1243,7 +1248,7 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                         <dd>{detail.sessionId}</dd>
                       </div>
                     </dl>
-                  </details>
+                  </WorkspaceDisclosurePanel>
                 </div>
               )}
 

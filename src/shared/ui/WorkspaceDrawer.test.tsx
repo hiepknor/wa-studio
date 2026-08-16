@@ -1,10 +1,11 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { Badge } from "./Badge";
 import { DrawerHost, DrawerProvider } from "./Drawer";
 import {
   WorkspaceDrawer,
+  WorkspaceDisclosurePanel,
   WorkspaceEmptyState,
   WorkspaceFooter,
   WorkspacePanel,
@@ -66,5 +67,27 @@ describe("WorkspaceDrawer", () => {
     expect(screen.getByText("r2")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Configuration" })).toBeInTheDocument();
     expect(screen.getByText("Run the check to continue.")).toBeInTheDocument();
+  });
+
+  it("renders a collapsible panel with the shared panel language", () => {
+    render(
+      <WorkspaceDisclosurePanel
+        description="Synchronization history and Runtime identifiers."
+        title="Technical metadata"
+        titleId="technical-metadata-title"
+      >
+        Metadata content
+      </WorkspaceDisclosurePanel>,
+    );
+
+    const disclosure = screen
+      .getByRole("heading", { name: "Technical metadata" })
+      .closest("details");
+    expect(disclosure).not.toHaveAttribute("open");
+
+    fireEvent.click(screen.getByText("Technical metadata").closest("summary")!);
+
+    expect(disclosure).toHaveAttribute("open");
+    expect(screen.getByText("Metadata content")).toBeInTheDocument();
   });
 });

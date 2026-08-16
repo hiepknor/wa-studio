@@ -81,7 +81,7 @@ interface WorkspaceSummaryCardProps {
   className?: string;
   description?: ReactNode;
   dirty?: boolean;
-  icon: AppIconName;
+  icon?: AppIconName;
   label: ReactNode;
   metrics?: WorkspaceSummaryMetric[];
   status?: ReactNode;
@@ -106,11 +106,14 @@ export function WorkspaceSummaryCard({
       aria-labelledby={titleId}
       className={`workspace-summary-card ${className}`.trim()}
       data-dirty={dirty || undefined}
+      data-has-icon={Boolean(icon) || undefined}
     >
       <header>
-        <span className="workspace-summary-icon">
-          <AppIcon name={icon} size="sm" />
-        </span>
+        {icon && (
+          <span className="workspace-summary-icon">
+            <AppIcon name={icon} size="sm" />
+          </span>
+        )}
         <div className="workspace-summary-copy">
           <span>{label}</span>
           <div>
@@ -173,6 +176,41 @@ export function WorkspacePanel({
         {children}
       </div>
     </section>
+  );
+}
+
+interface WorkspaceDisclosurePanelProps {
+  children: ReactNode;
+  className?: string;
+  description?: ReactNode;
+  flush?: boolean;
+  title: ReactNode;
+  titleId: string;
+}
+
+export function WorkspaceDisclosurePanel({
+  children,
+  className = "",
+  description,
+  flush = false,
+  title,
+  titleId,
+}: WorkspaceDisclosurePanelProps) {
+  return (
+    <details
+      className={`workspace-panel workspace-disclosure ${className}`.trim()}
+    >
+      <summary className="workspace-panel-header">
+        <div>
+          <h4 id={titleId}>{title}</h4>
+          {description && <p>{description}</p>}
+        </div>
+        <span aria-hidden="true" className="workspace-disclosure-indicator" />
+      </summary>
+      <div className="workspace-panel-body" data-flush={flush || undefined}>
+        {children}
+      </div>
+    </details>
   );
 }
 
