@@ -1,0 +1,140 @@
+name: wa-runtime
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-runtime: &runtime
+  build: .
+  image: ${WA_RUNTIME_IMAGE:-wa-runtime:local}
+  restart: unless-stopped
+  env_file: .env
+  logging: *default-logging
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks:
+    - runtime-internal
+    - wa-dev-network
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: ${WA_RUNTIME_DB_NAME:-wa_runtime}
+      POSTGRES_USER: ${WA_RUNTIME_DB_USER:-wa_runtime}
+      POSTGRES_PASSWORD: ${WA_RUNTIME_DB_PASSWORD:-wa_runtime}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      runtime-internal:
+        aliases:
+          - wa-runtime-postgres
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      runtime-internal:
+        aliases:
+          - wa-runtime-redis
+
+  migrate:
+    <<: *runtime
+    restart: "no"
+    command: ["node", "dist/scripts/migrate.js"]
+
+  api:
+    <<: *runtime
+    command: ["node", "dist/src/entrypoints/api.js"]
+    networks:
+      runtime-internal:
+      wa-dev-network:
+        aliases:
+          - wa-runtime-api
+    ports:
+      - "127.0.0.1:3100:3100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    <<: *runtime
+    command: ["node", "dist/src/entrypoints/worker.js"]
+    healthcheck:
+      test: ["CMD", "node", "dist/scripts/process-healthcheck.js", "worker"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    <<: *runtime
+    command: ["node", "dist/src/entrypoints/scheduler.js"]
+    healthcheck:
+      test: ["CMD", "node", "dist/scripts/process-healthcheck.js", "scheduler"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+    name: wa-runtime_postgres-data
+  redis-data:
+    name: wa-runtime_redis-data
+
+networks:
+  runtime-internal:
+    driver: bridge
+  wa-dev-network:
+    external: true
+    name: ${OPENWA_DOCKER_NETWORK:-wa-dev-network}
