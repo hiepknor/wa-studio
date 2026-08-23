@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Match product tag to Studio version
+        run: |
+          expected="v$(node -p "require('./apps/studio/package.json').version")"
+          test "$GITHUB_REF_NAME" = "$expected"
+      - run: npm run contract:check
+      - run: npm run check:runtime
+      - run: npm run test:integration
+      - run: npm -w @wa/studio run check:frontend
+
+  event-inbox-image:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/wa-event-inbox" >> "$GITHUB_ENV"
+      - name: Build and publish immutable Event Inbox image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/runtime/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Record deployable digest
+        run: printf '%s@%s\n' "$IMAGE_NAME" '${{ steps.image.outputs.digest }}' > event-inbox-image.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: event-inbox-image-${{ github.ref_name }}
+          path: event-inbox-image.txt
+          if-no-files-found: error
+
+  desktop:
+    needs: verify
+    runs-on: macos-14
+    timeout-minutes: 90
+    env:
+      WA_STUDIO_UPDATER_ENDPOINT: ${{ secrets.WA_STUDIO_UPDATER_ENDPOINT }}
+      WA_STUDIO_UPDATER_PUBLIC_KEY: ${{ secrets.WA_STUDIO_UPDATER_PUBLIC_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: Install App Store Connect private key
+        env:
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          test -n "$APPLE_API_PRIVATE_KEY"
+          install -m 600 /dev/null "$APPLE_API_KEY_PATH"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$APPLE_API_KEY_PATH"
+      - run: npm ci
+      - run: npm -w @wa/studio run check:native
+      - run: npm run check:release
+      - run: npm run build:desktop:signed-update
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wa-studio-${{ github.ref_name }}-macos
+          path: apps/studio/src-tauri/target/release/bundle/**
+          if-no-files-found: error

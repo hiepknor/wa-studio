@@ -2,6 +2,9 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const workspaceRoot = resolve(import.meta.dirname, "../..");
+const studioRoot = resolve(workspaceRoot, "apps/studio");
+
 const commonRequired = [
   "WA_STUDIO_UPDATER_ENDPOINT",
   "WA_STUDIO_UPDATER_PUBLIC_KEY",
@@ -63,13 +66,20 @@ export function releasePreflightErrors(environment, platform = process.platform)
 }
 
 function run(command, args) {
-  const result = spawnSync(command, args, { env: process.env, stdio: "inherit" });
+  const result = spawnSync(command, args, {
+    cwd: workspaceRoot,
+    env: process.env,
+    stdio: "inherit",
+  });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
 function assertMacReleaseArtifact() {
-  const targetRoot = resolve(process.env.CARGO_TARGET_DIR ?? "src-tauri/target");
+  const targetRoot = resolve(
+    studioRoot,
+    process.env.CARGO_TARGET_DIR ?? "src-tauri/target",
+  );
   const app = resolve(targetRoot, "release/bundle/macos/WA Studio.app");
   run("codesign", ["--verify", "--deep", "--strict", app]);
   const signature = spawnSync("codesign", ["-dv", "--verbose=4", app], {
@@ -96,14 +106,16 @@ function main() {
     return;
   }
 
-  run("npm", ["run", "runtime:sidecar:prepare"]);
+  run("npm", ["run", "sidecar:prepare"]);
   run("npm", [
-    "exec",
+    "-w",
+    "@wa/studio",
+    "run",
     "tauri",
     "--",
     "build",
     "--config",
-    "src-tauri/tauri.updater.conf.json",
+    resolve(studioRoot, "src-tauri/tauri.updater.conf.json"),
   ]);
   if (process.platform === "darwin") assertMacReleaseArtifact();
 }

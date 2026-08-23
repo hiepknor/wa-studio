@@ -30,7 +30,8 @@
       "binaries/wa-runtime"
     ],
     "resources": {
-      "resources/runtime-migrations/": "runtime-migrations/"
+      "resources/runtime-migrations/": "runtime-migrations/",
+      "../../../dist/release-manifest.json": "release-manifest.json"
     },
     "icon": [
       "icons/32x32.png",

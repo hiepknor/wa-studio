@@ -9,7 +9,7 @@
     "check": "npm run check:frontend && npm run check:native && npm run check:release",
     "check:frontend": "npm run test && npm run build",
     "check:native": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings",
-    "check:release": "node scripts/test-build-updater-release.mjs",
+    "check:release": "npm --prefix ../.. run check:release",
     "contract:generate": "npm --prefix ../.. run contract:generate",
     "preview": "vite preview",
     "test": "vitest run",
@@ -21,7 +21,7 @@
     "managed-runtime:e2e:event-inbox": "npm --prefix ../.. run test:managed-runtime:event-inbox",
     "tauri:dev": "npm --prefix ../.. run dev",
     "tauri:build": "npm --prefix ../.. run build:desktop",
-    "tauri:build:signed-update": "node scripts/build-updater-release.mjs",
+    "tauri:build:signed-update": "npm --prefix ../.. run build:desktop:signed-update",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run contract:check
+      - run: npm run check:runtime
+      - run: npm run test:integration
+      - run: npm -w @wa/studio run check:frontend
+      - run: docker build -f services/runtime/Dockerfile -t wa-event-inbox:ci .
+      - run: git diff --check
+
+  desktop:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm -w @wa/studio run check:native
+      - run: npm run check:release
+      - run: npm run build:desktop -- --debug
+      - name: Start isolated Event Inbox PostgreSQL
+        run: |
+          brew install postgresql@17
+          brew services start postgresql@17
+          for attempt in {1..60}; do
+            "$(brew --prefix postgresql@17)/bin/pg_isready" && exit 0
+            sleep 1
+          done
+          exit 1
+      - name: Run packaged managed Runtime E2E
+        run: |
+          export DATABASE_URL="postgresql://$(whoami)@127.0.0.1:5432/postgres"
+          export WA_STUDIO_APP_BINARY="$PWD/apps/studio/src-tauri/target/debug/bundle/macos/WA Studio.app/Contents/MacOS/wa-studio"
+          npm run test:managed-runtime:event-inbox

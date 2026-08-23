@@ -2,7 +2,10 @@
 
 ## Boundary
 
-WA Studio is the first management client for WA Runtime. It does not call OpenWA, PostgreSQL, Redis, or workers directly. WA Runtime owns business rules, authorization, preflight, campaign execution, delivery state, and Gateway compatibility.
+WA Studio and WA Runtime are versioned and built from one monorepo, but remain separate architectural
+components. Studio does not call OpenWA, PostgreSQL, queues, or workers directly. WA Runtime owns
+business rules, authorization, preflight, campaign execution, delivery state, and Gateway
+compatibility. OpenWA remains an external deployment pinned to 0.22.0.
 
 ```text
 WA Studio desktop
@@ -13,6 +16,21 @@ WA Studio desktop
 ```
 
 This boundary lets future web and mobile clients use the same WA Runtime contract without moving orchestration logic into a UI.
+
+## Monorepo ownership
+
+```text
+apps/studio               desktop UI and native process supervisor
+services/runtime          API, worker, scheduler, Event Inbox, migrations
+packages/runtime-contract generated public API snapshot and TypeScript types
+tooling                    sidecar packaging, lifecycle E2E, release orchestration
+release/components.json   coordinated component and external dependency versions
+```
+
+The monorepo has one npm lockfile and one root command surface. Runtime is compiled into a Tauri
+sidecar; no build or development path may depend on a sibling repository. Repository unification does
+not collapse trust boundaries: Studio UI receives no OpenWA secret, Runtime listens on loopback in
+the desktop-managed profile, and the native supervisor remains the lifecycle authority.
 
 ## Source of truth
 
@@ -26,22 +44,21 @@ When WA Runtime changes, run `npm run contract:generate` from the monorepo root,
 ## Feature slices
 
 ```text
-src/app                  composition and application shell
-src/features/connection first-run connection and credential validation
-src/features/sessions   session selection, status, and read-model refresh
-src/features/groups     browse, filter, inspect, capability, full sync, and reusable static lists
-src/features/campaigns  server-backed browse/filter, draft details, targets, preflight
-src/features/campaigns  drafts, target provenance, preflight, and run lifecycle controls
-src/shared/api          generated contract and WA Runtime transport
-src/shared/platform     typed adapters for optional desktop capabilities
-src-tauri/src/windowing native window policy and platform implementations
+apps/studio/src/app                  composition and application shell
+apps/studio/src/features/connection first-run connection and credential validation
+apps/studio/src/features/sessions   session selection, status, and read-model refresh
+apps/studio/src/features/groups     browse, inspect, sync, and reusable static lists
+apps/studio/src/features/campaigns  drafts, targets, preflight, and run lifecycle
+apps/studio/src/shared/api          Runtime transport using the shared contract package
+apps/studio/src/shared/platform     typed adapters for optional desktop capabilities
+apps/studio/src-tauri/src/windowing native window policy and platform implementations
 ```
 
 Keep state near its feature. WA Runtime data is server state; only UI preferences and connection profiles belong locally. Introduce a shared state library only when multiple completed slices prove the need.
 
 ## Native window experience
 
-The frontend expresses window intent as `normal`, `maximized`, or `immersive`; it never selects an operating-system fullscreen API. `src-tauri/src/windowing` owns the state machine, native menu, shortcut, capability discovery, rollback, and platform policy. `src/shared/platform/windowing.ts` is the only frontend adapter for that contract.
+The frontend expresses window intent as `normal`, `maximized`, or `immersive`; it never selects an operating-system fullscreen API. `apps/studio/src-tauri/src/windowing` owns the state machine, native menu, shortcut, capability discovery, rollback, and platform policy. `apps/studio/src/shared/platform/windowing.ts` is the only frontend adapter for that contract.
 
 On macOS, immersive mode uses Simple Fullscreen on the current Space. Native Space fullscreen is disabled for the main `NSWindow`, so the green title-bar control remains Zoom/Maximize and `Control-Command-F` enters or exits immersive mode without the cross-Space snapshot animation. On Windows, the same intent falls back to Tauri fullscreen and uses `F11`; Windows-specific DWM, Snap Layout, and per-monitor DPI work stays isolated behind the same Rust facade.
 
@@ -103,6 +120,6 @@ Applying a Group List to Campaign targets uses Runtime's atomic apply endpoint w
 
 Campaign and run provenance render the required `groupListNameSnapshot` returned by Runtime. Studio never resolves the current Group List merely to reconstruct historical naming. A manual target replacement clears source to `null` and the UI presents the result as a custom selection.
 
-`src/features/groups/selection` owns the shared Runtime-backed directory query, filter toolbar, selection table, and ordered set helpers used by both Group List editing and Campaign Targets. Search, filters, pagination, request identity, and page-scoped select-all therefore have one implementation. Selected IDs remain independent of the current response page, and inactive, DENIED, and UNKNOWN groups remain selectable because Runtime preflight owns eligibility policy.
+`apps/studio/src/features/groups/selection` owns the shared Runtime-backed directory query, filter toolbar, selection table, and ordered set helpers used by both Group List editing and Campaign Targets. Search, filters, pagination, request identity, and page-scoped select-all therefore have one implementation. Selected IDs remain independent of the current response page, and inactive, DENIED, and UNKNOWN groups remain selectable because Runtime preflight owns eligibility policy.
 
 Applying a Group List uses Runtime's atomic endpoint with membership and target revision preconditions. The canonical response replaces the persisted Campaign target snapshot and records provenance without creating a live campaign–list binding. Later Group List edits or archival cannot change an already materialized Campaign snapshot; subsequent manual target replacement clears provenance.

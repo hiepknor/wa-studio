@@ -176,9 +176,7 @@ async function main() {
 }
 
 function eventInboxTestProfile() {
-  if (!process.env.DATABASE_URL) {
-    throw new Error("Runtime development DATABASE_URL is required for the isolated Event Inbox database.");
-  }
+  requiredTestDatabaseUrl();
   return {
     runtimeApiKey: testRuntimeApiKey,
     openwaApiKey: testOpenWaApiKey,
@@ -214,9 +212,6 @@ function developmentProfile() {
 }
 
 function externalDatabaseEnvironment() {
-  if (!process.env.DATABASE_URL) {
-    throw new Error("Runtime development environment is missing DATABASE_URL.");
-  }
   const databaseUrl = localDevelopmentDatabaseUrl();
   databaseUrl.pathname = "/wa_runtime_desktop_e2e";
   return { WA_DESKTOP_DATABASE_URL: databaseUrl.toString() };
@@ -444,9 +439,16 @@ function runRuntimeEntrypoint(name, environment) {
 }
 
 function localDevelopmentDatabaseUrl() {
-  const databaseUrl = new URL(process.env.DATABASE_URL);
-  databaseUrl.hostname = "127.0.0.1";
-  databaseUrl.port = "5433";
+  return new URL(requiredTestDatabaseUrl());
+}
+
+function requiredTestDatabaseUrl() {
+  const databaseUrl = process.env.WA_RUNTIME_E2E_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error(
+      "WA_RUNTIME_E2E_DATABASE_URL or DATABASE_URL is required for packaged Runtime E2E.",
+    );
+  }
   return databaseUrl;
 }
 

@@ -12,6 +12,15 @@ scope. The OpenWA API key is never persisted by Event Inbox.
 
 ## Required environment
 
+Build the image from the monorepo root so npm uses the shared workspace lockfile:
+
+~~~bash
+docker build -f services/runtime/Dockerfile -t registry.example/wa-event-inbox:<version> .
+~~~
+
+Release CI publishes the same Dockerfile and records its immutable digest. Production Compose must
+reference that digest rather than a mutable tag.
+
 Create a mode-0600 event-inbox.env with immutable image digests and independent secrets:
 
 ~~~dotenv

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "product": "wa-studio",
+  "studioVersion": "0.2.0",
+  "runtimeVersion": "0.1.0",
+  "runtimeContractVersion": "v1",
+  "openwaReleaseTag": "0.22.0"
+}
