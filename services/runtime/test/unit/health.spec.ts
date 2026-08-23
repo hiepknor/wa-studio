@@ -9,6 +9,7 @@ vi.mock('../../src/core/config/runtime-config', () => ({
     ALLOW_LIVE_SENDS: false,
     OPENWA_RELEASE_TAG: '0.22.0',
     OPENWA_ALLOWED_SESSION_IDS: ['00000000-0000-4000-8000-000000000001'],
+    RUNTIME_INSTANCE_ID: 'test-instance',
   }),
 }));
 
@@ -89,5 +90,25 @@ describe('HealthController readiness', () => {
 
     await expect(controller.ready()).rejects.toBeInstanceOf(ServiceUnavailableException);
     expect(queues.readiness).not.toHaveBeenCalled();
+  });
+
+  it('uses strict background health for the operational endpoint', async () => {
+    const database = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+    const queues = {
+      readiness: vi.fn().mockResolvedValue({ backend: 'postgres', ready: true }),
+      runtimeProcessHealth: vi.fn().mockResolvedValue({ worker: 'healthy', scheduler: 'degraded' }),
+    };
+    const response = { status: vi.fn().mockReturnThis() };
+    const controller = new HealthController(
+      database as unknown as DatabaseService,
+      queues as unknown as QueueService,
+    );
+
+    await expect(controller.operational(response as never)).resolves.toMatchObject({
+      status: 'degraded',
+      instanceId: 'test-instance',
+      reason: 'background_process_degraded',
+    });
+    expect(response.status).toHaveBeenCalledWith(503);
   });
 });

@@ -24,7 +24,10 @@ describe('HTTP readiness', () => {
   });
 
   beforeEach(async () => {
-    await redis.del(runtimeHeartbeatKey('worker'), runtimeHeartbeatKey('scheduler'));
+    await redis.del(
+      runtimeHeartbeatKey('default', 'worker'),
+      runtimeHeartbeatKey('default', 'scheduler'),
+    );
   });
 
   afterAll(async () => {
@@ -44,8 +47,8 @@ describe('HTTP readiness', () => {
   });
 
   it('reports fresh background heartbeats as healthy', async () => {
-    await redis.set(runtimeHeartbeatKey('worker'), new Date().toISOString(), 'EX', 60);
-    await redis.set(runtimeHeartbeatKey('scheduler'), new Date().toISOString(), 'EX', 60);
+    await redis.set(runtimeHeartbeatKey('default', 'worker'), new Date().toISOString(), 'EX', 60);
+    await redis.set(runtimeHeartbeatKey('default', 'scheduler'), new Date().toISOString(), 'EX', 60);
 
     const response = await fetch(`${baseUrl}/health/ready`);
 
@@ -53,6 +56,29 @@ describe('HTTP readiness', () => {
     await expect(response.json()).resolves.toMatchObject({
       status: 'ready',
       dependencies: { postgres: true, redis: true },
+      processes: { worker: 'healthy', scheduler: 'healthy' },
+    });
+  });
+
+  it('requires current-instance background health for operational status', async () => {
+    const headers = { 'X-Runtime-Key': process.env.RUNTIME_API_KEY! };
+    const degraded = await fetch(`${baseUrl}/health/operational`, { headers });
+    expect(degraded.status).toBe(503);
+    await expect(degraded.json()).resolves.toMatchObject({
+      status: 'degraded',
+      instanceId: 'default',
+      reason: 'background_process_degraded',
+    });
+
+    await redis.set(runtimeHeartbeatKey('default', 'worker'), new Date().toISOString(), 'EX', 60);
+    await redis.set(runtimeHeartbeatKey('default', 'scheduler'), new Date().toISOString(), 'EX', 60);
+    const operational = await fetch(`${baseUrl}/health/operational`, { headers });
+    expect(operational.status).toBe(200);
+    await expect(operational.json()).resolves.toMatchObject({
+      status: 'operational',
+      service: 'wa-runtime',
+      version: '0.1.0',
+      instanceId: 'default',
       processes: { worker: 'healthy', scheduler: 'healthy' },
     });
   });

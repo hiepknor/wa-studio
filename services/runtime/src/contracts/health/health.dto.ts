@@ -65,3 +65,28 @@ export class HealthNotReadyDto {
   @ApiProperty({ enum: ['Runtime dependency unavailable'] })
   reason!: 'Runtime dependency unavailable';
 }
+
+export class HealthOperationalDto {
+  @ApiProperty({ enum: ['operational', 'degraded'] })
+  status!: 'operational' | 'degraded';
+
+  @ApiProperty({ enum: ['wa-runtime'] })
+  service!: 'wa-runtime';
+
+  @ApiProperty({ example: '0.1.0' })
+  version!: string;
+
+  @ApiProperty({ example: 'desktop-generation-1' })
+  instanceId!: string;
+
+  @ApiProperty({ type: HealthDependenciesDto, nullable: true })
+  dependencies!: HealthDependenciesDto | null;
+
+  @ApiProperty({ type: RuntimeProcessHealthDto })
+  processes!: RuntimeProcessHealthDto;
+
+  @ApiPropertyOptional({
+    enum: ['dependency_unavailable', 'background_process_degraded'],
+  })
+  reason?: 'dependency_unavailable' | 'background_process_degraded';
+}

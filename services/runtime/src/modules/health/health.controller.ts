@@ -1,7 +1,13 @@
-import { Controller, Get, Inject, Logger, ServiceUnavailableException } from '@nestjs/common';
-import { ApiOkResponse, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Inject, Logger, Res, ServiceUnavailableException } from '@nestjs/common';
+import { ApiOkResponse, ApiSecurity, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { Public } from '../../core/auth/public.decorator';
-import { HealthLiveDto, HealthNotReadyDto, HealthReadyDto } from '../../contracts/health/health.dto';
+import {
+  HealthLiveDto,
+  HealthNotReadyDto,
+  HealthOperationalDto,
+  HealthReadyDto,
+} from '../../contracts/health/health.dto';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { DatabaseService } from '../../core/database/database.service';
@@ -57,5 +63,50 @@ export class HealthController {
       openwaRelease: this.config.OPENWA_RELEASE_TAG,
       allowedSessionCount: this.config.OPENWA_ALLOWED_SESSION_IDS.length,
     };
+  }
+
+  @Get('operational')
+  @ApiSecurity('runtime-key')
+  @ApiOkResponse({ type: HealthOperationalDto })
+  @ApiServiceUnavailableResponse({ type: HealthOperationalDto })
+  async operational(@Res({ passthrough: true }) response: Response): Promise<HealthOperationalDto> {
+    const base = {
+      service: RUNTIME_SERVICE,
+      version: RUNTIME_VERSION,
+      instanceId: this.config.RUNTIME_INSTANCE_ID,
+    } as const;
+    let dependencies: HealthOperationalDto['dependencies'];
+    let processes: RuntimeProcessHealth;
+    try {
+      await this.database.query('SELECT 1');
+      const queue = await this.queues.readiness();
+      dependencies = {
+        postgres: true,
+        queue,
+        ...(queue.backend === 'redis' ? { redis: true as const } : {}),
+      };
+      processes = await this.queues.runtimeProcessHealth();
+    } catch (error) {
+      this.logger.error({ event: 'runtime.operational.failed', error });
+      response.status(503);
+      return {
+        ...base,
+        status: 'degraded',
+        dependencies: null,
+        processes: { worker: 'degraded', scheduler: 'degraded' },
+        reason: 'dependency_unavailable',
+      };
+    }
+    if (processes.worker !== 'healthy' || processes.scheduler !== 'healthy') {
+      response.status(503);
+      return {
+        ...base,
+        status: 'degraded',
+        dependencies,
+        processes,
+        reason: 'background_process_degraded',
+      };
+    }
+    return { ...base, status: 'operational', dependencies, processes };
   }
 }

@@ -11,6 +11,9 @@ const schema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     RUNTIME_PROFILE: z.enum(['server', 'desktop-managed']).default('server'),
+    RUNTIME_INSTANCE_ID: z.string().trim().min(1).max(128)
+      .regex(/^[A-Za-z0-9._:-]+$/u)
+      .default('default'),
     RUNTIME_BIND_HOST: z.string().trim().min(1).optional(),
     QUEUE_BACKEND: z.enum(['redis', 'postgres']).default('redis'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3100),
@@ -39,6 +42,7 @@ const schema = z
       .transform(value => value.split(',').map(item => item.trim()).filter(Boolean))
       .pipe(z.array(z.uuid()).min(1)),
     ALLOW_LIVE_SENDS: booleanFromEnv(false),
+    CAMPAIGN_LIVE_PREFLIGHT_TTL_SECONDS: z.coerce.number().int().min(30).max(900).default(120),
     OUTBOUND_MIN_DELAY_MS: z.coerce.number().int().min(0).max(60_000).default(3000),
     OUTBOUND_MAX_DELAY_MS: z.coerce.number().int().min(0).max(60_000).default(7000),
     MESSAGE_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(1),

@@ -4,6 +4,7 @@ import { runtimeHeartbeatKey, type RuntimeProcessName } from '../src/core/queue/
 async function main(): Promise<void> {
   const processName = process.argv[2] as RuntimeProcessName | undefined;
   const redisUrl = process.env.REDIS_URL;
+  const instanceId = process.env.RUNTIME_INSTANCE_ID ?? 'default';
   if (!redisUrl || !processName || !['worker', 'scheduler'].includes(processName)) {
     process.exitCode = 1;
     return;
@@ -16,7 +17,7 @@ async function main(): Promise<void> {
   });
   try {
     await redis.connect();
-    const heartbeat = await redis.get(runtimeHeartbeatKey(processName));
+    const heartbeat = await redis.get(runtimeHeartbeatKey(instanceId, processName));
     process.exitCode = heartbeat ? 0 : 1;
   } catch {
     process.exitCode = 1;

@@ -8,7 +8,7 @@ export interface RuntimeReleaseManifest {
   version: string;
   contractVersion: typeof RUNTIME_CONTRACT_VERSION;
   profiles: readonly ['server', 'desktop-managed'];
-  roles: readonly ['api', 'worker', 'scheduler', 'migrate'];
+  roles: readonly ['api', 'worker', 'scheduler', 'desktop', 'migrate'];
   databaseBackends: readonly ['postgres'];
   queueBackends: readonly ['redis', 'postgres'];
 }
@@ -20,7 +20,7 @@ export function runtimeReleaseManifest(): RuntimeReleaseManifest {
     version: RUNTIME_VERSION,
     contractVersion: RUNTIME_CONTRACT_VERSION,
     profiles: ['server', 'desktop-managed'],
-    roles: ['api', 'worker', 'scheduler', 'migrate'],
+    roles: ['api', 'worker', 'scheduler', 'desktop', 'migrate'],
     databaseBackends: ['postgres'],
     queueBackends: ['redis', 'postgres'],
   };

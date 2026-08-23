@@ -38,7 +38,7 @@ vi.mock('bullmq', () => ({
 }));
 
 vi.mock('../../src/core/config/runtime-config', () => ({
-  runtimeConfig: () => ({ REDIS_URL: 'redis://redis.test:6379' }),
+  runtimeConfig: () => ({ REDIS_URL: 'redis://redis.test:6379', RUNTIME_INSTANCE_ID: 'test-instance' }),
 }));
 
 describe('QueueService Redis connection logging', () => {

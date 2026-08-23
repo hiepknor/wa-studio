@@ -54,7 +54,7 @@ export interface QueueTransport {
     payload: unknown,
     options: RuntimeQueuePublishOptions,
   ): Promise<void>;
-  publishHeartbeat(processName: RuntimeProcessName): Promise<void>;
+  publishHeartbeat(instanceId: string, processName: RuntimeProcessName): Promise<void>;
   publishSchedulerTickState(state: SchedulerTickState): Promise<void>;
   startWorker<T>(
     queue: RuntimeQueueName,
@@ -63,6 +63,6 @@ export interface QueueTransport {
     onError: (error: Error) => void,
   ): RuntimeQueueWorker;
   readiness(): Promise<QueueReadiness>;
-  runtimeProcessHealth(): Promise<RuntimeProcessHealth>;
+  runtimeProcessHealth(instanceId: string): Promise<RuntimeProcessHealth>;
   close(): Promise<void>;
 }

@@ -73,12 +73,12 @@ export class PostgresQueueTransport implements QueueTransport {
     );
   }
 
-  async publishHeartbeat(processName: RuntimeProcessName): Promise<void> {
+  async publishHeartbeat(instanceId: string, processName: RuntimeProcessName): Promise<void> {
     await this.database.query(
-      `INSERT INTO runtime_process_heartbeats (process_name, heartbeat_at)
-       VALUES ($1, now())
-       ON CONFLICT (process_name) DO UPDATE SET heartbeat_at = EXCLUDED.heartbeat_at`,
-      [processName],
+      `INSERT INTO runtime_process_heartbeats (instance_id, process_name, heartbeat_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (instance_id, process_name) DO UPDATE SET heartbeat_at = EXCLUDED.heartbeat_at`,
+      [instanceId, processName],
     );
   }
 
@@ -123,12 +123,13 @@ export class PostgresQueueTransport implements QueueTransport {
     return { backend: 'postgres', ready: true };
   }
 
-  async runtimeProcessHealth(): Promise<RuntimeProcessHealth> {
+  async runtimeProcessHealth(instanceId: string): Promise<RuntimeProcessHealth> {
     const result = await this.database.query<{ process_name: RuntimeProcessName }>(
       `SELECT process_name
        FROM runtime_process_heartbeats
-       WHERE heartbeat_at > now() - ($1 * interval '1 second')`,
-      [RUNTIME_HEARTBEAT_TTL_SECONDS],
+       WHERE instance_id = $1
+         AND heartbeat_at > now() - ($2 * interval '1 second')`,
+      [instanceId, RUNTIME_HEARTBEAT_TTL_SECONDS],
     );
     const healthy = new Set(result.rows.map(row => row.process_name));
     return {

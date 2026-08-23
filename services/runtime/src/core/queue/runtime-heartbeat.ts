@@ -15,8 +15,8 @@ export interface SchedulerTickState {
   nextRunAt: string | null;
 }
 
-export const runtimeHeartbeatKey = (processName: RuntimeProcessName): string =>
-  `wa-runtime:heartbeat:${processName}`;
+export const runtimeHeartbeatKey = (instanceId: string, processName: RuntimeProcessName): string =>
+  `wa-runtime:heartbeat:${instanceId}:${processName}`;
 
 export const schedulerTickStateKey = (tick: string): string =>
   `wa-runtime:scheduler-tick:${tick}`;

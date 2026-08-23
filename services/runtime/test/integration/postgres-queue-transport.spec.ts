@@ -139,13 +139,16 @@ describe('PostgresQueueTransport', () => {
       lastDurationMs: 1, nextRunAt: null,
     };
 
-    await transport.publishHeartbeat('worker');
-    await transport.publishHeartbeat('scheduler');
+    await transport.publishHeartbeat('integration-instance', 'worker');
+    await transport.publishHeartbeat('integration-instance', 'scheduler');
     await transport.publishSchedulerTickState(state);
 
     await expect(transport.readiness()).resolves.toEqual({ backend: 'postgres', ready: true });
-    await expect(transport.runtimeProcessHealth()).resolves.toEqual({
+    await expect(transport.runtimeProcessHealth('integration-instance')).resolves.toEqual({
       worker: 'healthy', scheduler: 'healthy',
+    });
+    await expect(transport.runtimeProcessHealth('another-instance')).resolves.toEqual({
+      worker: 'degraded', scheduler: 'degraded',
     });
     const telemetry = await pool.query(
       'SELECT state FROM runtime_scheduler_tick_states WHERE name = $1',

@@ -3,7 +3,7 @@ import { runtimeHeartbeatKey, schedulerTickStateKey } from '../../src/core/queue
 
 describe('WA Runtime Redis keys', () => {
   it('uses the WA Runtime namespace for heartbeat and scheduler state', () => {
-    expect(runtimeHeartbeatKey('worker')).toBe('wa-runtime:heartbeat:worker');
+    expect(runtimeHeartbeatKey('instance-a', 'worker')).toBe('wa-runtime:heartbeat:instance-a:worker');
     expect(schedulerTickStateKey('messages')).toBe('wa-runtime:scheduler-tick:messages');
   });
 });

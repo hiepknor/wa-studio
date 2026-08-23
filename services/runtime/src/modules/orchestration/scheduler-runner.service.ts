@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { withCorrelationContext } from '../../core/observability/correlation-context';
+import { terminationSignal } from '../../core/process/termination-signal';
 import { RUNTIME_HEARTBEAT_INTERVAL_MS } from '../../core/queue/runtime-heartbeat';
 import { QueueService } from '../../core/queue/queue.service';
 import { CampaignDispatchTick } from './campaign-dispatch.tick';
@@ -23,6 +24,10 @@ import { ContactMessageObservationTick } from '../contacts/contact-message-obser
 @Injectable()
 export class SchedulerRunnerService {
   private readonly logger = new Logger(SchedulerRunnerService.name);
+  private ticks: IsolatedSchedulerTick[] = [];
+  private heartbeat: NodeJS.Timeout | undefined;
+  private listenerStarted = false;
+  private started = false;
   constructor(
     private readonly messages: MessageDispatchTick,
     private readonly webhooks: WebhookDispatchTick,
@@ -43,12 +48,28 @@ export class SchedulerRunnerService {
   ) {}
 
   async run(): Promise<void> {
+    const termination = terminationSignal();
+    try {
+      await this.start();
+      const leadershipFailure = await Promise.race([
+        termination.promise.then(() => null),
+        this.waitForFailure(),
+      ]);
+      if (leadershipFailure) throw leadershipFailure;
+    } finally {
+      termination.dispose();
+      await this.stop();
+    }
+  }
+
+  async start(): Promise<void> {
+    if (this.started) return;
     await this.leadership.acquire();
     this.logger.log({ event: 'scheduler.leadership.acquired' });
     const gatewayTick = this.tick(
       'gateway', this.config.GATEWAY_SYNC_POLL_INTERVAL_MS, 60_000, () => this.gateway.run(),
     );
-    const ticks = [
+    this.ticks = [
       this.tick('messages', 1_000, 30_000, () => this.messages.run()),
       this.tick('webhooks', 1_000, 30_000, () => this.webhooks.run()),
       gatewayTick,
@@ -92,42 +113,45 @@ export class SchedulerRunnerService {
         () => this.webhookRegistrations.run(),
       ),
     ];
-    let resolveStop: (() => void) | undefined;
-    const stopped = new Promise<void>(resolve => { resolveStop = resolve; });
-    const stop = () => resolveStop?.();
-    process.once('SIGTERM', stop);
-    process.once('SIGINT', stop);
-    let heartbeat: NodeJS.Timeout | undefined;
-    let listenerStarted = false;
+    this.started = true;
     try {
-      heartbeat = setInterval(() => void this.publishHeartbeat(), RUNTIME_HEARTBEAT_INTERVAL_MS);
-      heartbeat.unref();
+      this.heartbeat = setInterval(() => void this.publishHeartbeat(), RUNTIME_HEARTBEAT_INTERVAL_MS);
+      this.heartbeat.unref();
       await this.publishHeartbeat();
-      for (const tick of ticks) tick.start();
+      for (const tick of this.ticks) tick.start();
       await this.gatewayListener.start(() => gatewayTick.execute());
-      listenerStarted = true;
-
-      const leadershipFailure = await Promise.race([
-        stopped.then(() => null),
-        this.leadership.waitForLoss(),
-      ]);
-      if (leadershipFailure) throw leadershipFailure;
-    } finally {
-      const cleanup = await Promise.allSettled([
-        ...(listenerStarted ? [this.gatewayListener.stop()] : []),
-        ...ticks.map(tick => tick.stop()),
-      ]);
-      for (const result of cleanup) {
-        if (result.status === 'rejected') {
-          this.logger.error({ event: 'scheduler.shutdown.failed', error: result.reason });
-        }
-      }
-      if (heartbeat) clearInterval(heartbeat);
-      process.removeListener('SIGTERM', stop);
-      process.removeListener('SIGINT', stop);
-      await this.leadership.release();
-      this.logger.log({ event: 'scheduler.leadership.released' });
+      this.listenerStarted = true;
+    } catch (error) {
+      await this.stop();
+      throw error;
     }
+  }
+
+  waitForFailure(): Promise<Error> {
+    if (!this.started) throw new Error('Scheduler is not running');
+    return this.leadership.waitForLoss();
+  }
+
+  async stop(): Promise<void> {
+    if (!this.started) return;
+    this.started = false;
+    const ticks = this.ticks;
+    this.ticks = [];
+    const listenerStarted = this.listenerStarted;
+    this.listenerStarted = false;
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
+    const cleanup = await Promise.allSettled([
+      ...(listenerStarted ? [this.gatewayListener.stop()] : []),
+      ...ticks.map(tick => tick.stop()),
+    ]);
+    for (const result of cleanup) {
+      if (result.status === 'rejected') {
+        this.logger.error({ event: 'scheduler.shutdown.failed', error: result.reason });
+      }
+    }
+    await this.leadership.release();
+    this.logger.log({ event: 'scheduler.leadership.released' });
   }
 
   private tick(

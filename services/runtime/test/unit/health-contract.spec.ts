@@ -32,4 +32,23 @@ describe('health OpenAPI contract', () => {
       ready: { enum: [true] },
     });
   });
+
+  it('publishes the instance-scoped operational gate used by the desktop supervisor', () => {
+    const operation = contract.paths['/api/v1/health/operational']?.get;
+    expect(operation?.responses['200']?.content?.['application/json']?.schema)
+      .toEqual({ $ref: '#/components/schemas/HealthOperationalDto' });
+    expect(operation?.responses['503']?.content?.['application/json']?.schema)
+      .toEqual({ $ref: '#/components/schemas/HealthOperationalDto' });
+
+    const operational = contract.components.schemas.HealthOperationalDto!;
+    expect(operational.required).toEqual([
+      'status', 'service', 'version', 'instanceId', 'dependencies', 'processes',
+    ]);
+    expect(operational.properties).toMatchObject({
+      status: { enum: ['operational', 'degraded'] },
+      instanceId: { type: 'string' },
+      dependencies: { nullable: true },
+      reason: { enum: ['dependency_unavailable', 'background_process_degraded'] },
+    });
+  });
 });

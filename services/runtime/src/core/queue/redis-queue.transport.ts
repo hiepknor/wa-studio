@@ -67,11 +67,11 @@ export class RedisQueueTransport implements QueueTransport {
     await this.queue(queue).add(jobName, payload, options);
   }
 
-  async publishHeartbeat(processName: RuntimeProcessName): Promise<void> {
+  async publishHeartbeat(instanceId: string, processName: RuntimeProcessName): Promise<void> {
     await this.ensureHealthConnection();
     const value = new Date().toISOString();
     await this.healthConnection.set(
-      runtimeHeartbeatKey(processName),
+      runtimeHeartbeatKey(instanceId, processName),
       value,
       'EX',
       RUNTIME_HEARTBEAT_TTL_SECONDS,
@@ -119,11 +119,11 @@ export class RedisQueueTransport implements QueueTransport {
     return { backend: 'redis', ready: true };
   }
 
-  async runtimeProcessHealth(): Promise<RuntimeProcessHealth> {
+  async runtimeProcessHealth(instanceId: string): Promise<RuntimeProcessHealth> {
     await this.ensureHealthConnection();
     const [worker, scheduler] = await this.healthConnection.mget(
-      runtimeHeartbeatKey('worker'),
-      runtimeHeartbeatKey('scheduler'),
+      runtimeHeartbeatKey(instanceId, 'worker'),
+      runtimeHeartbeatKey(instanceId, 'scheduler'),
     );
     return {
       worker: worker ? 'healthy' : 'degraded',

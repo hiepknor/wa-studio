@@ -1,4 +1,6 @@
 import { Inject, Injectable, OnApplicationShutdown } from '@nestjs/common';
+import { runtimeConfig, type RuntimeConfig } from '../config/runtime-config';
+import { RUNTIME_CONFIG } from '../config/runtime-config.module';
 import { RedisQueueTransport } from './redis-queue.transport';
 import {
   QUEUE_TRANSPORT,
@@ -19,6 +21,8 @@ export class QueueService implements OnApplicationShutdown {
   constructor(
     @Inject(QUEUE_TRANSPORT)
     private readonly transport: QueueTransport = new RedisQueueTransport(),
+    @Inject(RUNTIME_CONFIG)
+    private readonly config: RuntimeConfig = runtimeConfig(),
   ) {}
 
   publish(
@@ -40,7 +44,7 @@ export class QueueService implements OnApplicationShutdown {
   }
 
   async publishHeartbeat(processName: RuntimeProcessName): Promise<void> {
-    await this.transport.publishHeartbeat(processName);
+    await this.transport.publishHeartbeat(this.config.RUNTIME_INSTANCE_ID, processName);
   }
 
   async publishSchedulerTickState(state: SchedulerTickState): Promise<void> {
@@ -52,7 +56,7 @@ export class QueueService implements OnApplicationShutdown {
   }
 
   async runtimeProcessHealth(): Promise<RuntimeProcessHealth> {
-    return this.transport.runtimeProcessHealth();
+    return this.transport.runtimeProcessHealth(this.config.RUNTIME_INSTANCE_ID);
   }
 
   async onApplicationShutdown(): Promise<void> {

@@ -1,14 +1,16 @@
 import 'reflect-metadata';
+import { loadRuntimeConfigEnvelope } from '../core/config/runtime-config-envelope';
 import { migrateRuntimeDatabase } from '../core/database/runtime-migrations';
 import { startParentProcessWatchdog } from '../core/process/parent-process-watchdog';
 import { runtimeReleaseManifest } from '../core/release/runtime-release';
 
-export type RuntimeCommand = 'api' | 'worker' | 'scheduler' | 'migrate' | 'manifest';
+export type RuntimeCommand = 'api' | 'worker' | 'scheduler' | 'desktop' | 'migrate' | 'manifest';
 
 const runtimeCommands = new Set<RuntimeCommand>([
   'api',
   'worker',
   'scheduler',
+  'desktop',
   'migrate',
   'manifest',
 ]);
@@ -23,7 +25,8 @@ export function parseRuntimeCommand(argument: string | undefined): RuntimeComman
 }
 
 export async function runRuntimeCommand(command: RuntimeCommand): Promise<void> {
-  if (command === 'api' || command === 'worker' || command === 'scheduler') {
+  if (command === 'desktop' || command === 'migrate') await loadRuntimeConfigEnvelope();
+  if (command === 'api' || command === 'worker' || command === 'scheduler' || command === 'desktop') {
     startParentProcessWatchdog();
   }
   switch (command) {
@@ -35,6 +38,9 @@ export async function runRuntimeCommand(command: RuntimeCommand): Promise<void> 
       return;
     case 'scheduler':
       await import('./scheduler').then(module => module.runScheduler());
+      return;
+    case 'desktop':
+      await import('./desktop').then(module => module.runDesktop());
       return;
     case 'migrate': {
       const result = await migrateRuntimeDatabase();

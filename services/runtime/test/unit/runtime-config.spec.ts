@@ -25,6 +25,7 @@ describe('runtime worker concurrency configuration', () => {
       RUNTIME_INBOX_RETENTION_DAYS: 30,
       RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: false,
       RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: false,
+      CAMPAIGN_LIVE_PREFLIGHT_TTL_SECONDS: 120,
     });
   });
 
@@ -55,7 +56,22 @@ describe('runtime deployment profile', () => {
     const config = parseRuntimeConfig(validEnvironment());
 
     expect(config.RUNTIME_PROFILE).toBe('server');
+    expect(config.RUNTIME_INSTANCE_ID).toBe('default');
     expect(config.RUNTIME_BIND_HOST).toBe('0.0.0.0');
+  });
+
+  it('accepts a bounded supervisor generation as the Runtime instance ID', () => {
+    expect(parseRuntimeConfig({
+      ...validEnvironment(),
+      RUNTIME_INSTANCE_ID: 'desktop:7-8f33c6c2',
+    }).RUNTIME_INSTANCE_ID).toBe('desktop:7-8f33c6c2');
+  });
+
+  it.each(['', 'contains spaces', 'contains/slash'])('rejects invalid Runtime instance ID %j', instanceId => {
+    expect(() => parseRuntimeConfig({
+      ...validEnvironment(),
+      RUNTIME_INSTANCE_ID: instanceId,
+    })).toThrow();
   });
 
   it('binds the managed desktop profile to IPv4 loopback by default', () => {

@@ -93,7 +93,10 @@ describe('Redis loss recovery', () => {
     await queues.publishHeartbeat('worker');
     await queues.publishSchedulerTickState(state);
 
-    const values = await redis.mget(runtimeHeartbeatKey('worker'), schedulerTickStateKey('messages'));
+    const values = await redis.mget(
+      runtimeHeartbeatKey('default', 'worker'),
+      schedulerTickStateKey('messages'),
+    );
     expect(values.every(Boolean)).toBe(true);
   });
 });
