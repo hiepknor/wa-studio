@@ -439,7 +439,14 @@ function runRuntimeEntrypoint(name, environment) {
 }
 
 function localDevelopmentDatabaseUrl() {
-  return new URL(requiredTestDatabaseUrl());
+  const explicitlyConfigured = process.env.WA_RUNTIME_E2E_DATABASE_URL;
+  const databaseUrl = new URL(requiredTestDatabaseUrl());
+  if (!explicitlyConfigured
+    && ["postgres", "wa-runtime-postgres"].includes(databaseUrl.hostname)) {
+    databaseUrl.hostname = "127.0.0.1";
+    databaseUrl.port = process.env.WA_RUNTIME_E2E_DOCKER_POSTGRES_PORT ?? "5433";
+  }
+  return databaseUrl;
 }
 
 function requiredTestDatabaseUrl() {
