@@ -1,0 +1,21 @@
+{
+  "name": "wa-studio-workspace",
+  "private": true,
+  "workspaces": [
+    "apps/studio",
+    "services/runtime",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "check": "npm run check:runtime && npm run check:studio",
+    "check:runtime": "npm -w @wa/runtime run check",
+    "check:runtime:all": "npm -w @wa/runtime run check:all",
+    "check:studio": "npm -w @wa/studio run check",
+    "contract:check": "npm -w @wa/runtime run contract:check",
+    "test:integration": "npm -w @wa/runtime run test:integration",
+    "codegraph:sync": "codegraph sync"
+  }
+}

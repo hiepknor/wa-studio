@@ -1,5 +1,5 @@
 {
-  "name": "wa-runtime",
+  "name": "@wa/runtime",
   "version": "0.1.0",
   "private": true,
   "description": "Durable control plane between WA Studio and OpenWA",
