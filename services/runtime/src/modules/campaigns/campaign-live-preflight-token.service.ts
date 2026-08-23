@@ -75,7 +75,9 @@ export class CampaignLivePreflightTokenService {
     }
     const supplied = Buffer.from(signature, 'base64url');
     const calculated = Buffer.from(this.sign(payload), 'base64url');
-    if (supplied.length !== calculated.length || !timingSafeEqual(supplied, calculated)) {
+    if (signature !== supplied.toString('base64url')
+      || supplied.length !== calculated.length
+      || !timingSafeEqual(supplied, calculated)) {
       throw new InvalidCampaignLivePreflightTokenError('INVALID');
     }
     let claims: CampaignLivePreflightClaims;
