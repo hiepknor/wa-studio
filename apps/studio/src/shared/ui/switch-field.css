@@ -1,0 +1,91 @@
+.switch-field {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.switch-field:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.switch-field input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.switch-field-control {
+  width: 34px;
+  height: 19px;
+  display: flex;
+  flex: 0 0 34px;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: #282b34;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.switch-field-control > span {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #b0b4bf;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
+  transition: transform 140ms ease, background 120ms ease;
+}
+
+.switch-field input:checked + .switch-field-control {
+  border-color: rgb(143 130 245 / 70%);
+  background: var(--accent);
+}
+
+.switch-field input:checked + .switch-field-control > span {
+  background: #fff;
+  transform: translateX(15px);
+}
+
+.switch-field input:focus-visible + .switch-field-control {
+  box-shadow: var(--focus-ring);
+}
+
+.switch-field-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.switch-field-copy strong {
+  color: #d9dbe2;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.switch-field-copy small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.switch-field.is-disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.switch-field.is-disabled:hover {
+  border-color: var(--border);
+  background: var(--surface);
+}
