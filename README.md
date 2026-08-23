@@ -5,6 +5,18 @@ PostgreSQL instance. Studio talks to the bundled Runtime over loopback; Runtime 
 durable state, and the OpenWA integration. OpenWA remains an external, release-pinned gateway and is
 not modified by this repository.
 
+## Canonical names
+
+| Name | Meaning | Stable identifier |
+| --- | --- | --- |
+| WA Studio | operator-facing desktop product and this monorepo's release product | `wa-studio` |
+| WA Runtime | UI-independent business engine, sidecar, service and public API contract | `wa-runtime` |
+| OpenWA | external, release-pinned WhatsApp gateway | upstream `0.22.0` release |
+
+The project is therefore not renamed wholesale to WA Runtime: Studio is the shipped desktop
+product, while Runtime is the reusable engine inside and behind it. The release gate enforces these
+names together with npm package names, the sidecar name, and the preserved Tauri identifier.
+
 ## Repository layout
 
 ```text
@@ -73,7 +85,8 @@ This test uses an OpenWA stub; it does not require or mutate the production Open
 Runtime controller or DTO, run `npm run contract:generate`, review both generated files, and commit
 them with the producer and consumer changes.
 
-`release/components.json` pins the Studio, Runtime, Runtime contract, and OpenWA versions. Run
+`release/components.json` schema v2 pins the `wa-studio` product, `wa-runtime` service, Studio,
+Runtime, Runtime contract, and OpenWA versions. Run
 `npm run release:manifest:check` to reject version drift, or `npm run release:manifest` to create the
 manifest bundled into the desktop app.
 

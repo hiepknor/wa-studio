@@ -17,6 +17,18 @@ WA Studio desktop
 
 This boundary lets future web and mobile clients use the same WA Runtime contract without moving orchestration logic into a UI.
 
+## Component identity
+
+The monorepo and desktop release remain **WA Studio** (`wa-studio`). **WA Runtime** (`wa-runtime`)
+is the client-independent engine: API contract, sidecar process, business services, workers,
+scheduler, and durable state ownership. OpenWA is neither component; it remains an external pinned
+gateway. “Runtime” in UI copy always refers to the engine, never to the desktop product.
+
+These names are checked at release time against the Studio and Runtime npm packages, Runtime source
+manifest, Cargo package, Tauri product name, sidecar declaration, and the immutable Tauri identifier
+`dev.hiepknor.wastudio`. Existing application data paths and installation identity are not renamed.
+See [ADR 018](../services/runtime/docs/adr/018-studio-runtime-component-identity.md).
+
 ## Monorepo ownership
 
 ```text
@@ -108,7 +120,7 @@ The editor keeps Runtime DTOs authoritative. The transport canonicalizes IMMEDIA
 
 Preflight evaluates persisted state only. The UI renders Runtime status, counters, policy version, stable check codes, and issue reasons—including stale capability—without recomputing policy, with a safe display fallback for future codes. Local edits make a displayed result stale, successful details/target persistence clears it, and returned campaign/target revisions are checked against the current campaign.
 
-Run creation is a separate, explicit action after review. Studio sends both reviewed campaign and target revisions with an idempotency key retained across transport retry. DRY_RUN can be repeated while the campaign remains DRAFT. LIVE requires confirmation; a successful launch refreshes the campaign into its Runtime-owned read-only lifecycle. Revision and launch conflicts are never retried with newer revisions: Studio reloads campaign, target, and run state and requires review/preflight again. Pause, resume, and cancel reconcile both run state and the coarser campaign lifecycle. Run `targetSource` is immutable audit data and is never resolved through the current Group List.
+Run creation is a separate, explicit action after review. Studio sends both reviewed campaign and target revisions with an idempotency key retained across transport retry. LIVE also returns the signed, short-lived proof from the displayed passing preflight, so confirmation is bound to that campaign/session/revision snapshot. DRY_RUN can be repeated while the campaign remains DRAFT. LIVE requires confirmation; a successful launch refreshes the campaign into its Runtime-owned read-only lifecycle. Revision, proof, and launch conflicts are never retried with newer state: Studio reloads campaign, target, and run state and requires review/preflight again. Pause, resume, and cancel reconcile both run state and the coarser campaign lifecycle. Run `targetSource` is immutable audit data and is never resolved through the current Group List.
 
 Campaign deletion is a revision-safe removal from the active workspace, not audit erasure. Studio sends the displayed campaign and target revisions, waits for Runtime HTTP 204 before removing the row, and preserves current list criteria while refreshing the authoritative page. Only DRAFT and ARCHIVED snapshots can enter confirmation locally; Runtime remains authoritative for lifecycle and unfinished-run conflicts. Revision conflicts refresh without automatic retry and require a new operator confirmation. Runtime retains run, delivery, and message-job history.
 

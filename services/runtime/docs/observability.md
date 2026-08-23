@@ -48,6 +48,32 @@ docker compose exec -T redis redis-cli get wa-runtime:scheduler-tick:messages
 Set `LOG_LEVEL` to `verbose`, `debug`, `log`, `warn`, `error` or `fatal`. Production defaults to
 `log`; other environments default to `debug`.
 
+## Desktop supervisor logs and diagnostics
+
+The WA Studio native supervisor also emits newline-delimited JSON. Its canonical envelope contains
+`timestampMs`, `level`, `service: "wa-studio"`,
+`component: "managed-runtime-supervisor"`, `event`, and a non-sensitive `details` object. Runtime
+lines that already identify `service: "wa-runtime"` pass through unchanged; unstructured child
+output is suppressed and rate-limited to the first occurrence and every hundredth occurrence per
+role/stream, represented only by aggregate count and byte length. Do not add database URLs, filesystem
+paths, API keys, tokens, passphrases, message content, or raw child output to supervisor events.
+
+Lifecycle events include `managed_runtime.phase_changed`, `managed_runtime.restart_scheduled`,
+`managed_runtime.stale_termination_ignored`, `managed_runtime.process_error`, and initialization or
+cleanup failures. Protection events include `managed_postgres.backup_created`,
+`managed_postgres.backup_restored`, `managed_postgres.integrity_check_succeeded`,
+`managed_postgres.data_quarantined`, and orphan-process recovery. Backup events expose only the
+archive file name and safety class, never its absolute path.
+
+Settings reads a separate native diagnostics snapshot. It exposes component identifiers, Runtime
+phase/version, supervisor generation, managed-PostgreSQL running state, retained recovery-point
+count, and timestamps/freshness for the newest recovery point and integrity check. It exposes no
+transport credential, database URL, secret-store value, or local path. Recovery freshness is
+`fresh` through 24 hours, then `due`; integrity freshness is `fresh` through seven days, then `due`;
+absence is `missing`. Treat `degraded`, missing protection, or three restart schedules inside the
+five-minute supervisor budget as an operator-visible incident. A due signal requires maintenance at
+the next safe opportunity and must not silently broaden the restart budget.
+
 ## Health checks
 
 ```text

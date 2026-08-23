@@ -18,6 +18,20 @@ execution and PostgreSQL on the trusted desktop. The public VPS retains OpenWA `
 bounded Event Inbox described in [its deployment guide](../deploy/event-inbox/README.md). The server topology
 below remains a development and controlled rollback profile; it is not the steady-state target.
 
+Desktop-managed PostgreSQL uses the layered recovery policy in
+[ADR 017](adr/017-desktop-disaster-recovery.md): verified rolling and manual device-encrypted
+backups, maintenance safety points, passphrase-encrypted portable archives, and quarantine-first
+recovery from degraded startup. Follow the
+[desktop disaster-recovery runbook](runbooks/desktop-disaster-recovery.md) before device or storage
+maintenance. Keep `WA_DESKTOP_BACKUP_ROOT` outside `WA_DESKTOP_POSTGRES_ROOT` in developer and E2E
+overrides.
+
+Component identity and release naming follow
+[ADR 018](adr/018-studio-runtime-component-identity.md): WA Studio is the desktop/release product,
+WA Runtime is its reusable engine and public service contract, and existing Tauri identity/data
+paths remain stable. Settings exposes a secret-free protection snapshot; investigate `missing`
+immediately and schedule maintenance when backup or integrity freshness becomes `due`.
+
 Set `WA_RUNTIME_DB_PASSWORD` to an independently generated staging/production secret and use the
 same URL-encoded credential in `DATABASE_URL`. The Compose defaults are development-only.
 
@@ -388,6 +402,7 @@ Live sending requires all of the following:
 - production UUID as the only allowlisted session;
 - valid current group capability;
 - preflight without blocking checks;
+- LIVE confirmation within the signed preflight proof lifetime;
 - tested webhook acknowledgements and delivery reconciliation;
 - acceptable outbound delay configuration;
 - explicit `ALLOW_LIVE_SENDS=true` deployment approval;

@@ -16,8 +16,9 @@ Milestone 3 is complete. The Runtime currently provides:
 - PostgreSQL-coordinated per-session outbound pacing and bounded PostgreSQL retention;
 - correlated, redacted JSON logs across API, scheduler and worker.
 
-Live delivery is disabled by default and requires both a `LIVE` run and
-`ALLOW_LIVE_SENDS=true`. Develop against `dev-session` with this switch kept off.
+Live delivery is disabled by default. A new `LIVE` run requires a recent passing signed preflight,
+explicit campaign/target revisions, and `ALLOW_LIVE_SENDS=true`. Develop against `dev-session` with
+this switch kept off.
 
 ## Architecture
 
@@ -98,6 +99,7 @@ The exact lifecycle and state meanings are documented in
 
 - [Architecture](docs/architecture.md) — boundaries, components, data ownership and flows.
 - [ADR 002](docs/adr/002-rename-to-wa-runtime.md) — product rename and operational compatibility identifiers.
+- [ADR 016](docs/adr/016-reviewed-live-launch-proof.md) — signed revision-bound LIVE review proof and replay semantics.
 - [Campaign lifecycle](docs/campaign-lifecycle.md) — capabilities, preflight, runs and deliveries.
 - [Development](docs/development.md) — local OpenWA, configuration, tests and contract generation.
 - [Operations](docs/operations.md) — production safety, deploy, recovery, backup and upgrade.

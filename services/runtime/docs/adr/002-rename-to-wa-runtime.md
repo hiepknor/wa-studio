@@ -4,6 +4,9 @@
 - Date: 2026-08-12
 - Amended: 2026-08-13 — establish a fully normalized target namespace and bounded compatibility exit
 - Completed: 2026-08-13 — compatibility exit criteria accepted; legacy runtime identifiers removed
+- Superseded in part: 2026-08-23 — [ADR 018](018-studio-runtime-component-identity.md) keeps the
+  desktop product/repository release as WA Studio while preserving the completed WA Runtime service
+  namespace
 - Owners: WA Runtime maintainers
 
 ## Context
@@ -28,7 +31,9 @@ repository.
 
 ## Decision
 
-The product and repository are named **WA Runtime** and `wa-runtime` respectively.
+At the time of this decision, the product and repository were named **WA Runtime** and `wa-runtime`
+respectively. ADR 018 now limits that name to the reusable engine, service, public contract, and its
+operational namespaces; the desktop product and monorepo release are WA Studio.
 
 The architecture boundary is:
 
