@@ -27,8 +27,23 @@ function validateComponents() {
     "utf8",
   );
 
-  assert.equal(components.schemaVersion, 1);
+  assert.equal(components.schemaVersion, 2);
   assert.equal(components.product, "wa-studio");
+  assert.equal(components.runtimeService, "wa-runtime");
+  assert.equal(studioPackage.name, "@wa/studio");
+  assert.equal(runtimePackage.name, "@wa/runtime");
+  assert.equal(contractPackage.name, "@wa/runtime-contract");
+  assert.equal(tauri.productName, "WA Studio");
+  assert.equal(tauri.identifier, "dev.hiepknor.wastudio");
+  assert(tauri.bundle.externalBin.includes("binaries/wa-runtime"));
+  assert.equal(
+    components.product,
+    captured(cargo, /^name = "([^"\n]+)"/mu, "Cargo package name"),
+  );
+  assert.equal(
+    components.runtimeService,
+    captured(runtimeRelease, /RUNTIME_SERVICE = '([^']+)'/u, "Runtime service name"),
+  );
   assert.equal(components.studioVersion, studioPackage.version);
   assert.equal(components.studioVersion, tauri.version);
   assert.equal(

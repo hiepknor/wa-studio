@@ -1,6 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "product": "wa-studio",
+  "runtimeService": "wa-runtime",
   "studioVersion": "0.2.0",
   "runtimeVersion": "0.1.0",
   "runtimeContractVersion": "v1",
