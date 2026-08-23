@@ -44,7 +44,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Resolve image name
-        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/wa-event-inbox" >> "$GITHUB_ENV"
+        id: registry
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/wa-event-inbox" >> "$GITHUB_OUTPUT"
       - name: Build and publish immutable Event Inbox image
         id: image
         uses: docker/build-push-action@v6
@@ -53,12 +54,12 @@ jobs:
           file: services/runtime/Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+            ${{ steps.registry.outputs.image }}:${{ github.ref_name }}
+            ${{ steps.registry.outputs.image }}:sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Record deployable digest
-        run: printf '%s@%s\n' "$IMAGE_NAME" '${{ steps.image.outputs.digest }}' > event-inbox-image.txt
+        run: printf '%s@%s\n' '${{ steps.registry.outputs.image }}' '${{ steps.image.outputs.digest }}' > event-inbox-image.txt
       - uses: actions/upload-artifact@v4
         with:
           name: event-inbox-image-${{ github.ref_name }}
