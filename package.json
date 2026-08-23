@@ -9,6 +9,9 @@
   "engines": {
     "node": ">=24"
   },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "4.62.4"
+  },
   "scripts": {
     "check": "npm run contract:check && npm run check:runtime && npm run check:studio",
     "check:runtime": "npm -w @wa/runtime run check",
