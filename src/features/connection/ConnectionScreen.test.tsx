@@ -13,20 +13,22 @@ function renderScreen(
 async function submitConnection() {
   const user = userEvent.setup();
   await user.type(
-    screen.getByLabelText("WA Runtime base URL"),
+    screen.getByLabelText("External Runtime base URL"),
     "https://wa-runtime.example.com",
   );
-  await user.type(screen.getByLabelText("WA Runtime API key"), "development-key");
-  await user.click(screen.getByRole("button", { name: "Connect to Runtime" }));
+  await user.type(screen.getByLabelText("External Runtime API key"), "development-key");
+  await user.click(screen.getByRole("button", { name: "Attach external Runtime" }));
 }
 
 describe("ConnectionScreen", () => {
-  it("shows the Runtime endpoint as a hint instead of a prefilled configuration", () => {
+  it("identifies direct Runtime attachment as a developer fallback", () => {
     renderScreen(vi.fn());
 
-    expect(screen.getByLabelText("WA Runtime base URL"))
+    expect(screen.getByRole("heading", { name: "Attach an external Runtime" })).toBeInTheDocument();
+    expect(screen.getByText("Developer mode")).toBeInTheDocument();
+    expect(screen.getByLabelText("External Runtime base URL"))
       .toHaveValue("");
-    expect(screen.getByPlaceholderText("https://wa-runtime.example.com"))
+    expect(screen.getByPlaceholderText("http://127.0.0.1:34100"))
       .toBeInTheDocument();
   });
 
@@ -41,10 +43,10 @@ describe("ConnectionScreen", () => {
 
     await submitConnection();
 
-    expect(screen.getByRole("button", { name: "Connecting to WA Runtime" })).toBeDisabled();
-    expect(screen.getByLabelText("WA Runtime base URL")).toBeDisabled();
-    expect(screen.getByLabelText("WA Runtime API key")).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("Connecting to WA Runtime");
+    expect(screen.getByRole("button", { name: "Attaching external Runtime" })).toBeDisabled();
+    expect(screen.getByLabelText("External Runtime base URL")).toBeDisabled();
+    expect(screen.getByLabelText("External Runtime API key")).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Attaching external Runtime");
   });
 
   it("submits with the keyboard and announces a readiness failure", async () => {
@@ -55,10 +57,10 @@ describe("ConnectionScreen", () => {
     renderScreen(probeConnection);
 
     await user.type(
-      screen.getByLabelText("WA Runtime base URL"),
+      screen.getByLabelText("External Runtime base URL"),
       "https://wa-runtime.example.com",
     );
-    const apiKeyField = screen.getByLabelText("WA Runtime API key");
+    const apiKeyField = screen.getByLabelText("External Runtime API key");
     await user.type(apiKeyField, "development-key{Enter}");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(

@@ -6,14 +6,22 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "check": "npm run check:frontend && npm run check:native",
+    "check": "npm run check:frontend && npm run check:native && npm run check:release",
     "check:frontend": "npm run contract:generate && npm run test && npm run build",
     "check:native": "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings",
+    "check:release": "node scripts/test-build-updater-release.mjs",
     "contract:generate": "openapi-typescript contracts/wa-runtime/v1/openapi.json -o src/shared/api/generated/runtime.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "vitest run src/features/groups/GroupsWorkspace.test.tsx src/features/campaigns/CampaignsScreen.test.tsx -t \"E2E happy path\"",
     "test:watch": "vitest",
+    "runtime:sidecar:prepare": "node scripts/prepare-runtime-sidecar.mjs",
+    "managed-runtime:e2e": "node scripts/run-managed-runtime-e2e.mjs",
+    "managed-runtime:e2e:external-db": "node scripts/run-managed-runtime-e2e.mjs --external-postgres",
+    "managed-runtime:e2e:event-inbox": "node scripts/run-managed-runtime-e2e.mjs --with-event-inbox --one-shot",
+    "tauri:dev": "npm run runtime:sidecar:prepare && tauri dev",
+    "tauri:build": "npm run runtime:sidecar:prepare && tauri build",
+    "tauri:build:signed-update": "node scripts/build-updater-release.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -32,7 +32,7 @@ describe("authoritative WA Runtime contract", () => {
     );
     const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(checksum)
-      .toBe("39b6b5ac71937d75da32084e307c0af4b8548d317daed7bd73a482759a08e3db");
+      .toBe("3c2548daa0234839fd97329f0877eca0ec4c6baf0019ec51ba74e48dce3bae9c");
   });
 
   it("generates nullable scheduledAt for UpdateCampaignDto", () => {

@@ -25,6 +25,7 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DateTime } from "@/shared/ui/DateTime";
 import { DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { OverflowMenu } from "@/shared/ui/OverflowMenu";
@@ -117,14 +118,6 @@ const PREFLIGHT_ISSUE_LABELS: Partial<Record<RuntimeCampaignPreflight["targetIss
   TARGET_CAPABILITY_STALE: "Capability data is stale",
   TARGET_CAPABILITY_UNKNOWN: "Capability is unknown",
 };
-
-function formatDate(value: string | null): string {
-  if (!value) return "Immediate";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
 
 function statusTone(status: "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED") {
   if (status === "DRAFT") return "neutral" as const;
@@ -1203,7 +1196,7 @@ export function CampaignsScreen() {
                 : visiblePage.data.map((item) => <tr key={item.id}>
                   <td className="data-cell-primary"><div className="stack stack-xs"><button className="data-primary-action" onClick={() => openCampaign(item)} title={`Open ${item.name}`} type="button">{item.name}</button><span className="data-identifier">{item.id}</span></div></td>
                   <td><Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge></td>
-                  <td>{item.scheduleType === "IMMEDIATE" ? "Immediate" : formatDate(item.scheduledAt)}</td>
+                  <td>{item.scheduleType === "IMMEDIATE" ? "Immediate" : <DateTime value={item.scheduledAt} />}</td>
                   <td>{item.targetCount}</td>
                   <td className="data-cell-action"><CampaignActionsMenu campaign={item} disabledReason={campaignDeleteDisabledReason(item)} onDelete={requestCampaignDelete} onOpen={openCampaign} /></td>
                 </tr>)}
@@ -1303,7 +1296,7 @@ export function CampaignsScreen() {
                 >
                   <footer className="workspace-summary-footer">
                     <span>{targetSource
-                      ? `Membership r${targetSource.membershipRevision} · Applied ${formatDate(targetSource.appliedAt)}`
+                      ? <>Membership r{targetSource.membershipRevision} · Applied <DateTime value={targetSource.appliedAt} /></>
                       : targets.length === 0
                         ? "No groups are currently persisted."
                         : "Manual target replacement keeps this snapshot custom."}</span>
@@ -1431,8 +1424,8 @@ function CampaignRunsPanel({
       <div className="campaign-run-card-main">
         <div><Badge tone={runTone(run.status)}>{run.status}</Badge><Badge tone="neutral">{run.executionMode}</Badge></div>
         <strong>{run.totalTargets} target snapshot</strong>
-        <span>{formatDate(run.createdAt)} · {run.id}</span>
-        {run.targetSource && <small>From saved list: {run.targetSource.groupListNameSnapshot} · membership r{run.targetSource.membershipRevision} · applied {formatDate(run.targetSource.appliedAt)}</small>}
+        <span><DateTime value={run.createdAt} /> · {run.id}</span>
+        {run.targetSource && <small>From saved list: {run.targetSource.groupListNameSnapshot} · membership r{run.targetSource.membershipRevision} · applied <DateTime value={run.targetSource.appliedAt} /></small>}
         {run.statusReason && <small>{run.statusReason}</small>}
       </div>
       <div className="campaign-run-card-actions">
@@ -1456,7 +1449,7 @@ function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; 
       <dl className="preflight-context">
         <div><dt>Mode</dt><dd>{executionModeLabel(report.executionMode)}</dd></div>
         <div><dt>Policy</dt><dd>Policy v{report.policyVersion}</dd></div>
-        <div><dt>Checked</dt><dd>{formatDate(report.checkedAt)}</dd></div>
+        <div><dt>Checked</dt><dd><DateTime value={report.checkedAt} /></dd></div>
         <div><dt>Revisions</dt><dd>Campaign r{report.campaignRevision} · targets r{report.targetsRevision}</dd></div>
       </dl>
       <section aria-labelledby="preflight-target-assessment-title" className="preflight-evidence-panel">

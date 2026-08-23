@@ -1020,11 +1020,21 @@ export interface components {
             /** @example 0.1.0 */
             version: string;
         };
+        HealthQueueDependencyDto: {
+            /** @enum {string} */
+            backend: "redis" | "postgres";
+            /** @enum {boolean} */
+            ready: true;
+        };
         HealthDependenciesDto: {
             /** @enum {boolean} */
             postgres: true;
-            /** @enum {boolean} */
-            redis: true;
+            queue: components["schemas"]["HealthQueueDependencyDto"];
+            /**
+             * @description Present for the legacy Redis queue backend.
+             * @enum {boolean}
+             */
+            redis?: true;
         };
         RuntimeProcessHealthDto: {
             /** @enum {string} */
@@ -1038,7 +1048,7 @@ export interface components {
             dependencies: components["schemas"]["HealthDependenciesDto"];
             processes: components["schemas"]["RuntimeProcessHealthDto"];
             liveSendsEnabled: boolean;
-            /** @example 0.18.0 */
+            /** @example 0.22.0 */
             openwaRelease: string;
             allowedSessionCount: number;
         };

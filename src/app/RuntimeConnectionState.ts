@@ -6,6 +6,20 @@ import type {
   RuntimeConnectionResult,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
+import type {
+  ManagedRuntimeProvisioningInput,
+  ManagedRuntimeSnapshot,
+} from "@/shared/native/managed-runtime";
+
+export type ManagedConnectionFlow =
+  | "booting"
+  | "configure"
+  | "validating"
+  | "starting"
+  | "attaching"
+  | "connected"
+  | "error"
+  | "manual";
 
 export interface ConnectedRuntime {
   api: RuntimeApi;
@@ -15,8 +29,12 @@ export interface ConnectedRuntime {
 
 export interface RuntimeConnectionContextValue {
   connect: (input: RuntimeConnectionInput) => Promise<RuntimeConnectionResult>;
+  configureManagedRuntime: (input: ManagedRuntimeProvisioningInput) => Promise<void>;
   connected: ConnectedRuntime | null;
   disconnect: () => void;
+  managedConnectionFlow: ManagedConnectionFlow;
+  managedConnectionError: string | null;
+  managedRuntime: ManagedRuntimeSnapshot;
   refreshSessions: () => Promise<void>;
   selectedSessionId: string | null;
   selectSession: (sessionId: string) => void;

@@ -4409,6 +4409,28 @@
           "version"
         ]
       },
+      "HealthQueueDependencyDto": {
+        "type": "object",
+        "properties": {
+          "backend": {
+            "type": "string",
+            "enum": [
+              "redis",
+              "postgres"
+            ]
+          },
+          "ready": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "backend",
+          "ready"
+        ]
+      },
       "HealthDependenciesDto": {
         "type": "object",
         "properties": {
@@ -4418,16 +4440,20 @@
               true
             ]
           },
+          "queue": {
+            "$ref": "#/components/schemas/HealthQueueDependencyDto"
+          },
           "redis": {
             "type": "boolean",
             "enum": [
               true
-            ]
+            ],
+            "description": "Present for the legacy Redis queue backend."
           }
         },
         "required": [
           "postgres",
-          "redis"
+          "queue"
         ]
       },
       "RuntimeProcessHealthDto": {
@@ -4473,7 +4499,7 @@
           },
           "openwaRelease": {
             "type": "string",
-            "example": "0.18.0"
+            "example": "0.22.0"
           },
           "allowedSessionCount": {
             "type": "number",

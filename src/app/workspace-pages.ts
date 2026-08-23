@@ -36,7 +36,7 @@ export const WORKSPACE_SECTIONS: readonly WorkspaceSectionDefinition[] = [
     label: "System",
     pages: [
       { available: true, id: "sessions", label: "Sessions" },
-      { available: false, id: "settings", label: "Settings" },
+      { available: true, id: "settings", label: "Settings" },
     ],
   },
 ];

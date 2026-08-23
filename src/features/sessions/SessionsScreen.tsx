@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import type { RuntimeSession } from "@/shared/api/runtime-client";
+import { sessionIdentityLabel } from "@/shared/presentation/session";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
+import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import type { FeedbackTone } from "@/shared/ui/feedback-tone";
@@ -25,19 +27,6 @@ function statusTone(status: string): FeedbackTone {
 
 function statusLabel(status: string): string {
   return status.replace(/(^|[-_])(\w)/g, (_, __, letter: string) => ` ${letter.toUpperCase()}`).trim();
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "Not synced";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function whatsappIdentity(session: RuntimeSession): string {
-  const parts = [session.pushName?.trim(), session.phone?.trim()].filter(Boolean);
-  return parts.length ? parts.join(" · ") : session.id;
 }
 
 function toggleValue<T>(values: readonly T[], value: T): T[] {
@@ -165,10 +154,10 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
               {!connected.sessions.length ? <tr><td className="data-table-empty" colSpan={5}>No allowlisted sessions are available from WA Runtime.</td></tr>
                 : !filteredSessions.length ? <tr><td className="data-table-empty" colSpan={5}>No sessions match this search or filters.</td></tr>
                 : filteredSessions.map((session: RuntimeSession) => <tr data-selected={session.id === selectedSessionId || undefined} key={session.id}>
-                  <td className="data-cell-primary"><div className="stack stack-xs"><strong className="data-primary-text" title={session.name}>{session.name}</strong><span className="data-secondary-text" title={`Session ID: ${session.id}`}>{whatsappIdentity(session)}</span></div></td>
+                  <td className="data-cell-primary"><div className="stack stack-xs"><strong className="data-primary-text" title={session.name}>{session.name}</strong><span className="data-secondary-text" title={`Session ID: ${session.id}`}>{sessionIdentityLabel(session)}</span></div></td>
                   <td className="data-cell-status"><Badge tone={statusTone(session.status)}>{statusLabel(session.status)}</Badge></td>
                   <td className="data-cell-status"><Badge tone={session.engineLoaded ? "success" : "warning"}>{session.engineLoaded ? "Loaded" : "Not loaded"}</Badge></td>
-                  <td className="data-cell-time" title={session.syncedAt ? formatDate(session.syncedAt) : undefined}>{formatDate(session.syncedAt)}</td>
+                  <td className="data-cell-time"><DateTime fallback="Not synced" value={session.syncedAt} /></td>
                   <td className="data-cell-action">
                     {!session.syncedAt && onOpenGroups ? (
                       <Button onClick={() => { selectSession(session.id); onOpenGroups(); }} size="sm" variant="ghost">Open Groups</Button>

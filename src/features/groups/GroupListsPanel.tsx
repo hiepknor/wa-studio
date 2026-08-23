@@ -4,6 +4,7 @@ import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import { RuntimeRequestError, type RuntimeGroupList, type RuntimeGroupListPage } from "@/shared/api/runtime-client";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DateTime } from "@/shared/ui/DateTime";
 import { DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { OverflowMenu } from "@/shared/ui/OverflowMenu";
@@ -24,13 +25,6 @@ type EditorState =
   | { kind: "closed" }
   | { kind: "create"; nonce: number }
   | { kind: "edit"; list: RuntimeGroupList };
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
 
 function listKey(sessionId: string | null, query: string, offset: number): string {
   return `${sessionId ?? ""}\u0000${query}\u0000${offset}`;
@@ -263,7 +257,7 @@ export function GroupListsPanel({ navigation }: GroupListsPanelProps) {
                 : !page && loading ? <tr><td className="data-table-empty" colSpan={5}>Loading group lists…</td></tr>
                 : !page && error ? <tr><td className="data-table-empty" colSpan={5}>Group lists are unavailable.</td></tr>
                 : (page?.data.length ?? 0) === 0 ? <tr><td className="data-table-empty" colSpan={5}>{query ? "No group lists match this search." : "No group lists yet. Use New list to create a reusable static group selection."}</td></tr>
-                : page?.data.map((list) => <tr key={list.id}><td className="data-cell-primary"><button className="data-primary-action" onClick={() => setEditor({ kind: "edit", list })} title={`Open ${list.name}`} type="button">{list.name}</button></td><td className="group-list-description" title={list.description ?? undefined}><span>{list.description || "—"}</span></td><td className="data-cell-number">{list.groupCount}</td><td className="data-cell-time">{formatDate(list.updatedAt)}</td><td className="data-cell-action"><OverflowMenu ariaLabel={`Actions for ${list.name}`} triggerLabel={`More actions for ${list.name}`}><DropdownMenuItem description="Edit list details and its saved group selection." icon="edit" onSelect={() => setEditor({ kind: "edit", list })}>Edit list</DropdownMenuItem><DropdownMenuItem danger description="Remove this list from saved lists. Existing campaign targets stay unchanged." icon="trash" onSelect={() => requestDelete(list)}>Delete list</DropdownMenuItem></OverflowMenu></td></tr>) }
+                : page?.data.map((list) => <tr key={list.id}><td className="data-cell-primary"><button className="data-primary-action" onClick={() => setEditor({ kind: "edit", list })} title={`Open ${list.name}`} type="button">{list.name}</button></td><td className="group-list-description" title={list.description ?? undefined}><span>{list.description || "—"}</span></td><td className="data-cell-number">{list.groupCount}</td><td className="data-cell-time"><DateTime value={list.updatedAt} /></td><td className="data-cell-action"><OverflowMenu ariaLabel={`Actions for ${list.name}`} triggerLabel={`More actions for ${list.name}`}><DropdownMenuItem description="Edit list details and its saved group selection." icon="edit" onSelect={() => setEditor({ kind: "edit", list })}>Edit list</DropdownMenuItem><DropdownMenuItem danger description="Remove this list from saved lists. Existing campaign targets stay unchanged." icon="trash" onSelect={() => requestDelete(list)}>Delete list</DropdownMenuItem></OverflowMenu></td></tr>) }
             </tbody>
           </table>
         </div>

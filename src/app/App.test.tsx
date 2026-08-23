@@ -4,11 +4,13 @@ import { describe, expect, it } from "vitest";
 import { App } from "./App";
 
 describe("App", () => {
-  it("renders the connection screen", () => {
+  it("starts by discovering the bundled local Runtime", () => {
     render(<App />);
 
     expect(
-      screen.getByRole("heading", { name: "Connect to WA Runtime" }),
+      screen.getByRole("heading", { name: "Preparing your workspace" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Preparing local workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Inspecting the bundled Runtime");
   });
 });

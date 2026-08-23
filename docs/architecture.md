@@ -6,16 +6,17 @@ WA Studio is the first management client for WA Runtime. It does not call OpenWA
 
 ```text
 WA Studio desktop
-  -> WA Runtime API v1
-      -> PostgreSQL / Redis / workers
-      -> OpenWA Gateway
+  -> loopback WA Runtime API v1 / worker / scheduler
+      -> managed PostgreSQL queue and business state
+      -> OpenWA Gateway 0.22.0
+      <- durable Event Inbox claim / lease / receipt ACK
 ```
 
 This boundary lets future web and mobile clients use the same WA Runtime contract without moving orchestration logic into a UI.
 
 ## Source of truth
 
-- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime HEAD `5642851bd0a12b58512e616abffc5b17366466be` (OpenAPI `1.0.0`, SHA-256 `39b6b5ac71937d75da32084e307c0af4b8548d317daed7bd73a482759a08e3db`).
+- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime HEAD `82643397742fc687d555a8e6510e0367c080fa8d` (OpenAPI `1.0.0`, SHA-256 `3c2548daa0234839fd97329f0877eca0ec4c6baf0019ec51ba74e48dce3bae9c`).
 - `src/shared/api/generated/runtime.ts` is generated; do not edit it by hand.
 - `src/shared/api/runtime-client.ts` owns URL normalization, authentication headers, transport, and error mapping.
 - Feature modules consume the typed client and must not redefine Runtime DTOs.
@@ -54,19 +55,23 @@ WA Studio owns its semantic React controls and CSS. The interface follows a Warp
 
 ## Security
 
-The first slice holds `X-Runtime-Key` only in process memory. It is never placed in source control, local storage, logs, or a Vite environment variable. Before persistent connection profiles are added, store secrets in the OS-backed Tauri Stronghold integration. Production WA Runtime URLs must use HTTPS; plain HTTP is reserved for local development.
+The native supervisor stores the Runtime key, OpenWA API key, derived webhook secret, Event Inbox
+device token, callback and session scope in the protected local secret file under schema v2. Secrets never cross the
+Tauri command response into React, source control, logs, local storage, or Vite environment variables.
+Legacy schema-v1 relay records are not read or migrated.
 
 Tauri HTTP permissions and its custom-header feature are intentionally explicit. The build permits
-the local development origins and `https://wa-runtime-staging.onio.cc`. Add the exact production WA
-Runtime origin only when that endpoint is settled. Arbitrary user-entered origins remain blocked by
-the native layer.
+the local development origins and the production Event Inbox at `https://wa-events.onio.cc`.
+WA Runtime remains bound to loopback; arbitrary user-entered origins remain blocked by the native
+layer.
 
 ## Initial workflow
 
-1. Normalize the WA Runtime origin entered by the operator.
-2. Call `GET /api/v1/health/ready` to verify service dependencies.
-3. Call authenticated `GET /api/v1/sessions` to validate credentials and display readiness.
-4. Continue to session/group management only after both checks pass.
+1. Normalize the OpenWA origin and verify release 0.22.0.
+2. Read `/.well-known/wa-studio` from that origin.
+3. Pair a stable desktop device with the discovered Event Inbox using the supplied OpenWA API key.
+4. Persist the returned token, signing secret, callback and authorized session scope atomically in the protected local secret file.
+5. Start managed PostgreSQL and Runtime, then reconcile the supported OpenWA webhook registration.
 
 ## Desktop workspace state
 

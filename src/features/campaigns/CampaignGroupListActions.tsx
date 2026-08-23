@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RuntimeApi, RuntimeGroupList } from "@/shared/api/runtime-client";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
+import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { ModalDialog } from "@/shared/ui/ModalDialog";
 import { SearchField } from "@/shared/ui/SearchField";
@@ -10,14 +11,6 @@ import { TablePagination } from "@/shared/ui/TablePagination";
 import { groupListErrorMessage } from "@/features/groups/group-list-domain";
 
 const LIST_PAGE_SIZE = 5;
-
-function formatUpdatedAt(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(value));
-}
 
 interface CampaignGroupListActionsProps {
   api: RuntimeApi;
@@ -265,7 +258,7 @@ export function CampaignGroupListActions({
                     <button aria-checked={checked} className="campaign-group-list-picker-row" data-selected={checked || undefined} key={list.id} onClick={() => changeList(list)} role="radio" type="button">
                       <span className="campaign-group-list-picker-radio">{checked && <AppIcon name="check" size="xs" />}</span>
                       <span className="campaign-group-list-picker-copy"><strong>{list.name}</strong><small>{list.description || "No description"}</small></span>
-                      <span className="campaign-group-list-picker-metadata"><strong>{list.groupCount.toLocaleString()} {list.groupCount === 1 ? "group" : "groups"}</strong><small>Membership r{list.membershipRevision} · Updated {formatUpdatedAt(list.updatedAt)}</small></span>
+                      <span className="campaign-group-list-picker-metadata"><strong>{list.groupCount.toLocaleString()} {list.groupCount === 1 ? "group" : "groups"}</strong><small>Membership r{list.membershipRevision} · Updated <DateTime value={list.updatedAt} /></small></span>
                     </button>
                   );
                 }) : (

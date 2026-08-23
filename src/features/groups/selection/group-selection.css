@@ -60,7 +60,6 @@
 .group-selection-table th {
   height: 34px;
   padding: 0 9px;
-  border-bottom: 1px solid var(--border);
   color: var(--dim);
   font-size: 8px;
   font-weight: 650;

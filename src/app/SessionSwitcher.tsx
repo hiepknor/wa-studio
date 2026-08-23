@@ -1,9 +1,10 @@
 import { KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 
 import type { RuntimeSession } from "@/shared/api/runtime-client";
+import { sessionIdentityLabel } from "@/shared/presentation/session";
 import { AppIcon } from "@/shared/ui/AppIcon";
-import { Badge } from "@/shared/ui/Badge";
 import type { FeedbackTone } from "@/shared/ui/feedback-tone";
+import { StatusDot } from "@/shared/ui/StatusDot";
 
 interface SessionSwitcherProps {
   onSelect: (sessionId: string) => void;
@@ -20,6 +21,16 @@ function sessionTone(status: string): FeedbackTone {
   if (status === "failed" || status === "disconnected") return "danger";
   if (status === "initializing" || status === "authenticating") return "warning";
   return "neutral";
+}
+
+function SessionStatus({ className, status }: { className: string; status: string }) {
+  const tone = sessionTone(status);
+  return (
+    <span className={`workspace-session-status ${className}`} data-tone={tone}>
+      <StatusDot tone={tone} />
+      <span>{status}</span>
+    </span>
+  );
 }
 
 export function SessionSwitcher({
@@ -133,12 +144,10 @@ export function SessionSwitcher({
         {selectedSession ? (
           <span className="workspace-session-value">
             <span>{selectedSession.name}</span>
-            <Badge
+            <SessionStatus
               className="workspace-session-state"
-              tone={sessionTone(selectedSession.status)}
-            >
-              {selectedSession.status}
-            </Badge>
+              status={selectedSession.status}
+            />
           </span>
         ) : (
           <span className="workspace-session-placeholder">No session</span>
@@ -154,6 +163,7 @@ export function SessionSwitcher({
           {sessions.map((session, index) => {
             const selected = session.id === selectedSessionId;
             const highlighted = index === highlightedIndex;
+            const identity = sessionIdentityLabel(session);
             return (
               <div
                 aria-selected={selected}
@@ -167,14 +177,12 @@ export function SessionSwitcher({
               >
                 <span className="workspace-session-option-copy">
                   <strong>{session.name}</strong>
-                  <small>{session.pushName ?? session.phone ?? "No profile"}</small>
+                  <small title={identity}>{identity}</small>
                 </span>
-                <Badge
+                <SessionStatus
                   className="workspace-session-option-status"
-                  tone={sessionTone(session.status)}
-                >
-                  {session.status}
-                </Badge>
+                  status={session.status}
+                />
                 <span aria-hidden="true" className="workspace-session-check">
                   {selected && <AppIcon name="check" size="sm" />}
                 </span>

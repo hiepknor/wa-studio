@@ -14,6 +14,7 @@ import type {
   RuntimeGroupDetail,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
+import type { ManagedRuntimeProvisioningProfile } from "@/shared/native/managed-runtime";
 import { ToastProvider } from "@/shared/ui/Toast";
 
 const session: RuntimeSession = {
@@ -85,12 +86,20 @@ const groupMemberPage = {
   meta: { total: 1, limit: 25, offset: 0, datasetRevision: 0 },
 };
 
-function WorkspaceHarness() {
+interface WorkspaceHarnessProps {
+  getProvisioningProfile?: () => Promise<ManagedRuntimeProvisioningProfile | null>;
+}
+
+const noProvisioningProfile = async () => null;
+
+function WorkspaceHarness({
+  getProvisioningProfile = noProvisioningProfile,
+}: WorkspaceHarnessProps = {}) {
   const { connect, connected, selectedSessionId } = useRuntimeConnection();
   if (connected)
     return (
       <ToastProvider>
-        <WorkspaceShell />
+        <WorkspaceShell getProvisioningProfile={getProvisioningProfile} />
       </ToastProvider>
     );
   return (
@@ -128,7 +137,14 @@ describe("WorkspaceShell", () => {
         createApi={() => fakeApi}
         probeConnection={probeConnection}
       >
-        <WorkspaceHarness />
+        <WorkspaceHarness
+          getProvisioningProfile={async () => ({
+            openwaBaseUrl: "https://openwa.onio.cc",
+            openwaAllowedSessionIds: [session.id],
+            allowLiveSends: false,
+            eventInboxBaseUrl: "https://wa-events.onio.cc",
+          })}
+        />
       </RuntimeConnectionProvider>,
     );
 
@@ -143,15 +159,35 @@ describe("WorkspaceShell", () => {
     expect(
       screen.getByRole("combobox", { name: "Active session" }),
     ).toHaveTextContent(/dev-session.*ready/);
-    expect(within(screen.getByLabelText("WA Runtime connection")).getByText("Connected"))
-      .toHaveClass("ui-badge-success");
-    expect(within(screen.getByRole("combobox", { name: "Active session" })).getByText("ready"))
-      .toHaveClass("ui-badge-success");
+    await user.click(screen.getByRole("combobox", { name: "Active session" }));
+    const sessionListbox = screen.getByRole("listbox", { name: "Gateway sessions" });
+    expect(within(sessionListbox).getByText("Development · 84900000000"))
+      .toBeInTheDocument();
+    const optionStatus = within(sessionListbox).getByText("ready")
+      .closest(".workspace-session-status");
+    expect(optionStatus).toHaveAttribute("data-tone", "success");
+    expect(optionStatus).not.toHaveClass("ui-badge");
+    expect(optionStatus?.querySelector(".status-dot.status-tone-success"))
+      .toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    const connectionActions = screen.getByLabelText("Workspace connection actions");
+    expect(within(connectionActions).getByRole("button", { name: "Disconnect workspace" }))
+      .toHaveTextContent("Disconnect");
+    expect(within(connectionActions).queryByText("WA Runtime")).not.toBeInTheDocument();
+    expect(within(connectionActions).queryByText(/session/i)).not.toBeInTheDocument();
+    const activeSessionStatus = within(
+      screen.getByRole("combobox", { name: "Active session" }),
+    ).getByText("ready").closest(".workspace-session-status");
+    expect(activeSessionStatus).toHaveAttribute("data-tone", "success");
+    expect(activeSessionStatus).not.toHaveClass("ui-badge");
+    expect(activeSessionStatus?.querySelector(".status-dot.status-tone-success"))
+      .toBeInTheDocument();
     const statusBar = screen.getByLabelText("Workspace status");
-    expect(within(statusBar).getByText("Connected")).toHaveClass("ui-badge-success");
-    expect(within(statusBar).getByText("to http://127.0.0.1:3100")).toBeInTheDocument();
+    expect(within(statusBar).getByText("Connected to")).not.toHaveClass("ui-badge-success");
+    expect(statusBar.querySelector(".status-dot.status-tone-success")).toBeInTheDocument();
+    expect(await within(statusBar).findByText("https://openwa.onio.cc")).toBeInTheDocument();
+    expect(within(statusBar).queryByText(/127\.0\.0\.1:3100/)).not.toBeInTheDocument();
     expect(within(statusBar).queryByText(/session:/i)).not.toBeInTheDocument();
-    expect(screen.getByText("1 session")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Groups" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Groups" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Sessions" })).toHaveAttribute(
@@ -189,12 +225,12 @@ describe("WorkspaceShell", () => {
       screen.queryByRole("button", { name: "WA Runtime" }),
     ).not.toBeInTheDocument();
     await user.click(
-      screen.getByRole("button", { name: "Disconnect WA Runtime" }),
+      screen.getByRole("button", { name: "Disconnect workspace" }),
     );
     const disconnectDialog = screen.getByRole("dialog", {
-      name: "Disconnect from WA Runtime?",
+      name: "Disconnect workspace?",
     });
-    expect(disconnectDialog).toHaveTextContent("does not stop WA Runtime");
+    expect(disconnectDialog).toHaveTextContent("Runtime and active syncs continue");
     await user.click(
       within(disconnectDialog).getByRole("button", { name: "Disconnect" }),
     );
@@ -236,7 +272,7 @@ describe("WorkspaceShell", () => {
       await screen.findByRole("button", { name: "Reload sessions" }),
     );
     await user.click(
-      screen.getByRole("button", { name: "Disconnect WA Runtime" }),
+      screen.getByRole("button", { name: "Disconnect workspace" }),
     );
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
@@ -283,9 +319,8 @@ describe("WorkspaceShell", () => {
     await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
 
     expect(sessionCombobox).toHaveTextContent(/standby-session.*disconnected/);
-    expect(within(screen.getByLabelText("WA Runtime connection")).getByText("Connected"))
-      .toHaveClass("ui-badge-success");
-    expect(screen.getByText("2 sessions")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Workspace connection actions"))
+      .getByRole("button", { name: "Disconnect workspace" })).toBeInTheDocument();
 
     await user.click(sessionCombobox);
     expect(
@@ -321,11 +356,11 @@ describe("WorkspaceShell", () => {
       screen.getByRole("button", { name: "Connect test WA Runtime" }),
     );
     const disconnectButton = await screen.findByRole("button", {
-      name: "Disconnect WA Runtime",
+      name: "Disconnect workspace",
     });
     await user.click(disconnectButton);
     const dialog = screen.getByRole("dialog", {
-      name: "Disconnect from WA Runtime?",
+      name: "Disconnect workspace?",
     });
     expect(
       within(dialog).getByRole("button", { name: "Cancel" }),

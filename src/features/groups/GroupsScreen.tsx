@@ -11,6 +11,7 @@ import type {
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DateTime } from "@/shared/ui/DateTime";
 import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
@@ -94,28 +95,6 @@ function booleanLabel(
 ): string {
   if (value === null) return "Unknown";
   return value ? positive : negative;
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function formatCompactDate(value: string | null): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  const datePart = new Intl.DateTimeFormat(undefined, {
-    day: "2-digit",
-    month: "short",
-  }).format(date);
-  const timePart = new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-  return `${datePart} · ${timePart}`;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -972,11 +951,8 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                           capability={group.sendCapability}
                         />
                       </td>
-                      <td
-                        className="data-cell-time"
-                        title={formatDate(group.syncedAt)}
-                      >
-                        {formatDate(group.syncedAt)}
+                      <td className="data-cell-time">
+                        <DateTime value={group.syncedAt} />
                       </td>
                       <td className="data-cell-action">
                         <Button
@@ -1068,6 +1044,7 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                     title="Group profile"
                   />
                   <WorkspaceSummaryCard
+                    className="groups-identity-card"
                     description={detail.description || "No group description."}
                     label="Synchronized group"
                     metrics={[
@@ -1075,8 +1052,7 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                       { label: "Access", value: accessLabel(detail.isAdmin) },
                       {
                         label: "Synced",
-                        title: formatDate(detail.syncedAt),
-                        value: formatCompactDate(detail.syncedAt),
+                        value: <DateTime value={detail.syncedAt} />,
                       },
                     ]}
                     status={<Badge tone={detail.isActive ? "success" : "neutral"}>{detail.isActive ? "Active" : "Inactive"}</Badge>}
@@ -1121,7 +1097,7 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                       <dl className="groups-capability-meta">
                         <div>
                           <dt>Checked</dt>
-                          <dd>{formatDate(detail.sendCapability.checkedAt)}</dd>
+                          <dd><DateTime value={detail.sendCapability.checkedAt} /></dd>
                         </div>
                         <div>
                           <dt>Freshness</dt>
@@ -1230,11 +1206,11 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                     <dl className="groups-facts groups-facts-contained">
                       <div>
                         <dt>Record synced</dt>
-                        <dd>{formatDate(detail.syncedAt)}</dd>
+                        <dd><DateTime value={detail.syncedAt} /></dd>
                       </div>
                       <div>
                         <dt>Details synced</dt>
-                        <dd>{formatDate(detail.detailsSyncedAt)}</dd>
+                        <dd><DateTime value={detail.detailsSyncedAt} /></dd>
                       </div>
                       <div>
                         <dt>Capability revision</dt>
@@ -1243,9 +1219,7 @@ export function GroupsScreen({ navigation }: GroupsScreenProps = {}) {
                       {detail.sendCapability.invalidatedAt && (
                         <div>
                           <dt>Invalidated</dt>
-                          <dd>
-                            {formatDate(detail.sendCapability.invalidatedAt)}
-                          </dd>
+                          <dd><DateTime value={detail.sendCapability.invalidatedAt} /></dd>
                         </div>
                       )}
                       {detail.ownerId && (

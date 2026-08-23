@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useRuntimeConnection } from "./RuntimeConnectionContext";
 import { SessionSwitcher } from "./SessionSwitcher";
@@ -8,14 +8,17 @@ import {
   type WorkspacePageId,
 } from "./workspace-pages";
 import { SessionsScreen } from "@/features/sessions/SessionsScreen";
+import { SettingsScreen } from "@/features/settings/SettingsScreen";
 import { GroupsWorkspace } from "@/features/groups/GroupsWorkspace";
 import { CampaignsScreen } from "@/features/campaigns/CampaignsScreen";
+import { getManagedRuntimeProvisioningProfile } from "@/shared/native/managed-runtime";
 import { AppIcon, type AppIconName } from "@/shared/ui/AppIcon";
-import { Badge } from "@/shared/ui/Badge";
 import { BrandMark } from "@/shared/ui/BrandMark";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DateTime } from "@/shared/ui/DateTime";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
+import { StatusDot } from "@/shared/ui/StatusDot";
 
 const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
   activity: "activity",
@@ -26,12 +29,8 @@ const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
   settings: "settings",
 };
 
-function formatSyncTime(value: string | null | undefined): string {
-  if (!value) return "not synced";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
+interface WorkspaceShellProps {
+  getProvisioningProfile?: typeof getManagedRuntimeProvisioningProfile;
 }
 
 function renderPage(pageId: WorkspacePageId, openGroups: () => void) {
@@ -42,27 +41,46 @@ function renderPage(pageId: WorkspacePageId, openGroups: () => void) {
       return <GroupsWorkspace />;
     case "sessions":
       return <SessionsScreen onOpenGroups={openGroups} />;
+    case "settings":
+      return <SettingsScreen />;
     default:
       throw new Error(`Workspace page is not implemented: ${pageId}`);
   }
 }
 
-export function WorkspaceShell() {
+export function WorkspaceShell({
+  getProvisioningProfile = getManagedRuntimeProvisioningProfile,
+}: WorkspaceShellProps = {}) {
   const {
     connected,
     disconnect,
+    managedRuntime,
     selectedSessionId,
     selectSession,
   } = useRuntimeConnection();
   const [activePage, setActivePage] = useState<WorkspacePageId>(DEFAULT_WORKSPACE_PAGE);
   const [disconnectConfirmationOpen, setDisconnectConfirmationOpen] = useState(false);
+  const [openwaBaseUrl, setOpenwaBaseUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    void getProvisioningProfile()
+      .then(profile => {
+        if (!disposed) setOpenwaBaseUrl(profile?.openwaBaseUrl ?? null);
+      })
+      .catch(() => {
+        if (!disposed) setOpenwaBaseUrl(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [getProvisioningProfile, managedRuntime.phase]);
+
   if (!connected) throw new Error("WorkspaceShell requires a Runtime connection");
 
   const selectedSession =
     connected.sessions.find((session) => session.id === selectedSessionId) ?? null;
-  const sessionCountLabel = `${connected.sessions.length} ${
-    connected.sessions.length === 1 ? "session" : "sessions"
-  }`;
+  const isManagedWorkspace = openwaBaseUrl !== null || managedRuntime.phase !== "unavailable";
   const activePageLabel = WORKSPACE_SECTIONS.flatMap((section) => section.pages).find(
     (page) => page.id === activePage,
   )?.label;
@@ -107,24 +125,18 @@ export function WorkspaceShell() {
           ))}
         </nav>
 
-        <div aria-label="WA Runtime connection" className="workspace-runtime-summary">
-          <div className="workspace-runtime-copy">
-            <span className="workspace-runtime-label">WA Runtime</span>
-            <div className="workspace-runtime-state">
-              <Badge tone="success">Connected</Badge>
-              <span aria-hidden="true" className="workspace-runtime-divider">·</span>
-              <span className="workspace-runtime-meta">{sessionCountLabel}</span>
-            </div>
-          </div>
+        <div aria-label="Workspace connection actions" className="workspace-runtime-summary">
           <Button
-            aria-label="Disconnect WA Runtime"
+            aria-label="Disconnect workspace"
             className="workspace-runtime-disconnect"
             icon="disconnect"
             onClick={() => setDisconnectConfirmationOpen(true)}
-            size="sm"
-            title="Disconnect WA Runtime"
+            size="md"
+            title="Disconnect workspace"
             variant="danger"
-          />
+          >
+            Disconnect
+          </Button>
         </div>
       </aside>
 
@@ -153,14 +165,20 @@ export function WorkspaceShell() {
         </div>
 
         <footer aria-label="Workspace status" className="status-bar">
-          <span className="status-bar-connection"><Badge tone="success">Connected</Badge><span>to {connected.profile.baseUrl}</span></span>
-          <span>Last sync: {formatSyncTime(selectedSession?.syncedAt)}</span>
+          <span className="status-bar-connection">
+            <StatusDot tone="success" />
+            <span>Connected to</span>
+            <span title={openwaBaseUrl ?? connected.profile.baseUrl}>
+              {openwaBaseUrl ?? (isManagedWorkspace ? "" : connected.profile.baseUrl)}
+            </span>
+          </span>
+          <span>Last sync: <DateTime fallback="not synced" value={selectedSession?.syncedAt} /></span>
         </footer>
         </div>
 
         <DrawerHost className="workspace-drawer-host" />
         <ConfirmationDialog
-          body="WA Studio will clear the current connection and in-memory credentials. This does not stop WA Runtime or any sync already running in the background."
+          body="WA Studio will detach this window from the local workspace. Runtime and active syncs continue in the background."
           confirmLabel="Disconnect"
           confirmVariant="danger"
           onCancel={() => setDisconnectConfirmationOpen(false)}
@@ -169,7 +187,7 @@ export function WorkspaceShell() {
             disconnect();
           }}
           open={disconnectConfirmationOpen}
-          title="Disconnect from WA Runtime?"
+          title="Disconnect workspace?"
         />
       </main>
     </DrawerProvider>

@@ -47,22 +47,22 @@ export function ConnectionScreen({
       <header className="connection-brand">
         <BrandMark />
         <strong>WA Studio</strong>
-        <span className="connection-build">desktop / runtime gateway</span>
+        <span className="connection-build">developer fallback</span>
       </header>
 
       <div className="connection-stage">
         <section className="intro connection-intro" aria-labelledby="page-title">
-          <span className="eyebrow">Secure runtime access</span>
-          <h1 id="page-title">Connect to <span>WA Runtime</span></h1>
+          <span className="eyebrow">Developer mode</span>
+          <h1 id="page-title">Attach an external <span>Runtime</span></h1>
           <p>
-            Attach this workspace to the service that owns Gateway sessions and
-            automation execution.
+            The bundled desktop supervisor is unavailable. Use this fallback only when developing
+            against a separately managed Runtime.
           </p>
 
           <dl className="connection-specs">
             <div><dt>Protocol</dt><dd>WA Runtime API v1</dd></div>
-            <div><dt>Transport</dt><dd>HTTPS / localhost</dd></div>
-            <div><dt>Credentials</dt><dd>Memory only</dd></div>
+            <div><dt>Mode</dt><dd>external / unmanaged</dd></div>
+            <div><dt>Secrets</dt><dd>memory only</dd></div>
           </dl>
         </section>
 
@@ -72,8 +72,8 @@ export function ConnectionScreen({
               <span className="connection-window-dots" aria-hidden="true">
                 <i /><i /><i />
               </span>
-              <span>runtime.connect</span>
-              <span className="connection-terminal-state">local</span>
+              <span>runtime.attach</span>
+              <span className="connection-terminal-state">external</span>
             </header>
 
             <div className="card-content stack stack-md">
@@ -86,10 +86,10 @@ export function ConnectionScreen({
                 icon="server"
                 id="runtime-url"
                 inputMode="url"
-                label="WA Runtime base URL"
+                label="External Runtime base URL"
                 monospace
                 onChange={(event) => setBaseUrl(event.currentTarget.value)}
-                placeholder="https://wa-runtime.example.com"
+                placeholder="http://127.0.0.1:34100"
                 required
                 spellCheck={false}
                 type="url"
@@ -102,7 +102,7 @@ export function ConnectionScreen({
                 disabled={isChecking}
                 icon="key"
                 id="runtime-key"
-                label="WA Runtime API key"
+                label="External Runtime API key"
                 monospace
                 onChange={(event) => setApiKey(event.currentTarget.value)}
                 placeholder="Enter the development key"
@@ -115,17 +115,17 @@ export function ConnectionScreen({
                 <InlineAlert
                   className="connection-status"
                   indicator
-                  title="Waiting for credentials"
+                  title="Waiting for developer credentials"
                   tone="neutral"
                 >
-                  No active WA Runtime session
+                  Managed desktop setup is not available in this mode.
                 </InlineAlert>
               )}
               {state.status === "checking" && (
                 <InlineAlert
                   className="connection-status"
                   indicator
-                  title="Connecting to WA Runtime"
+                  title="Attaching external Runtime"
                   tone="warning"
                 >
                   Verifying credentials and Runtime readiness…
@@ -140,7 +140,7 @@ export function ConnectionScreen({
                 <InlineAlert
                   className="connection-status"
                   indicator
-                  title="WA Runtime connected"
+                  title="External Runtime attached"
                   tone="success"
                 >
                   {state.result.readySessions} of {state.result.sessionCount} sessions ready.
@@ -151,14 +151,14 @@ export function ConnectionScreen({
             <footer className="card-footer">
               <span className="connection-shortcut" aria-hidden="true">↵ enter</span>
               <Button
-                aria-label={isChecking ? "Connecting to WA Runtime" : "Connect to Runtime"}
+                aria-label={isChecking ? "Attaching external Runtime" : "Attach external Runtime"}
                 className="connection-submit-button"
                 loading={isChecking}
                 size="lg"
                 type="submit"
                 variant="primary"
               >
-                {isChecking ? "Connecting…" : "Connect to Runtime"}
+                {isChecking ? "Attaching…" : "Attach Runtime"}
               </Button>
             </footer>
           </article>
@@ -166,8 +166,8 @@ export function ConnectionScreen({
       </div>
 
       <footer className="connection-footer">
-        <span><i /> runtime bridge</span>
-        <span>credentials remain on device</span>
+        <span><i /> developer fallback</span>
+        <span>credentials remain in memory</span>
       </footer>
     </main>
   );

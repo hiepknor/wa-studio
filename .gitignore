@@ -11,6 +11,9 @@ node_modules
 dist
 dist-ssr
 *.local
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
+src-tauri/resources/runtime-migrations/
 
 # Editor directories and files
 .vscode/
