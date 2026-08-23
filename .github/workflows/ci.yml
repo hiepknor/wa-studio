@@ -31,7 +31,7 @@ jobs:
       - run: git diff --check
 
   desktop:
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -48,13 +48,14 @@ jobs:
         run: |
           brew install postgresql@17
           brew services start postgresql@17
-          for attempt in {1..60}; do
+          for _ in {1..60}; do
             "$(brew --prefix postgresql@17)/bin/pg_isready" && exit 0
             sleep 1
           done
           exit 1
       - name: Run packaged managed Runtime E2E
         run: |
-          export DATABASE_URL="postgresql://$(whoami)@127.0.0.1:5432/postgres"
+          DATABASE_USER="$(whoami)"
+          export DATABASE_URL="postgresql://${DATABASE_USER}@127.0.0.1:5432/postgres"
           export WA_STUDIO_APP_BINARY="$PWD/apps/studio/src-tauri/target/debug/bundle/macos/WA Studio.app/Contents/MacOS/wa-studio"
           npm run test:managed-runtime:event-inbox

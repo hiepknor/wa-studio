@@ -68,7 +68,7 @@ jobs:
 
   desktop:
     needs: verify
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 90
     env:
       WA_STUDIO_UPDATER_ENDPOINT: ${{ secrets.WA_STUDIO_UPDATER_ENDPOINT }}
