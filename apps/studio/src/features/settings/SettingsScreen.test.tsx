@@ -6,6 +6,23 @@ import { RuntimeConnectionContext } from "@/app/RuntimeConnectionState";
 import type { RuntimeConnectionContextValue } from "@/app/RuntimeConnectionState";
 import { SettingsScreen } from "./SettingsScreen";
 
+function getDiagnostics() {
+  return Promise.resolve({
+    generatedAtMs: 1_787_312_300_000,
+    desktopProduct: "wa-studio" as const,
+    runtimeService: "wa-runtime" as const,
+    runtimePhase: "ready" as const,
+    runtimeVersion: "0.1.0",
+    processGeneration: 3,
+    managedPostgresRunning: true,
+    recoveryPointCount: 1,
+    latestRecoveryPointAtMs: 1_787_312_262_148,
+    recoveryFreshness: "fresh" as const,
+    lastIntegrityCheckAtMs: 1_787_312_260_000,
+    integrityFreshness: "fresh" as const,
+  });
+}
+
 function context(): RuntimeConnectionContextValue {
   return {
     connect: vi.fn(),
@@ -50,6 +67,7 @@ describe("SettingsScreen", () => {
     render(
       <RuntimeConnectionContext.Provider value={context()}>
         <SettingsScreen
+          getDiagnostics={getDiagnostics}
           getUpdateState={vi.fn().mockResolvedValue({
             currentVersion: "0.2.0",
             disabledReason: "Test build",
@@ -72,6 +90,8 @@ describe("SettingsScreen", () => {
       "pre-migration-v0.1.0-1787312262148.dump.age",
     );
     expect(await screen.findByText("Settings operation completed")).toBeInTheDocument();
+    expect(screen.getAllByText("Fresh")).toHaveLength(2);
+    expect(screen.getByText("Local recovery posture")).toBeInTheDocument();
   });
 
   it("checks and explicitly confirms a signed update that pauses Runtime", async () => {
@@ -99,6 +119,7 @@ describe("SettingsScreen", () => {
       <RuntimeConnectionContext.Provider value={context()}>
         <SettingsScreen
           checkUpdate={checkUpdate}
+          getDiagnostics={getDiagnostics}
           getUpdateState={getUpdateState}
           getProvisioningProfile={vi.fn().mockResolvedValue(null)}
           installUpdate={installUpdate}
@@ -116,5 +137,44 @@ describe("SettingsScreen", () => {
     await user.click(screen.getByRole("button", { name: "Pause Runtime and install" }));
 
     expect(installUpdate).toHaveBeenCalledWith(true);
+  });
+
+  it("creates local recovery points and exports portable archives with confirmed passphrases", async () => {
+    const user = userEvent.setup();
+    const createBackup = vi.fn().mockResolvedValue(undefined);
+    const exportRecoveryArchive = vi.fn().mockResolvedValue("wa-runtime-recovery.dump.age");
+    const listBackups = vi.fn().mockResolvedValue([]);
+    render(
+      <RuntimeConnectionContext.Provider value={context()}>
+        <SettingsScreen
+          createBackup={createBackup}
+          exportRecoveryArchive={exportRecoveryArchive}
+          getDiagnostics={getDiagnostics}
+          getUpdateState={vi.fn().mockResolvedValue({
+            currentVersion: "0.2.0",
+            disabledReason: "Test build",
+            enabled: false,
+            pending: null,
+          })}
+          getProvisioningProfile={vi.fn().mockResolvedValue(null)}
+          listBackups={listBackups}
+          subscribeUpdateProgress={vi.fn().mockResolvedValue(vi.fn())}
+        />
+      </RuntimeConnectionContext.Provider>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Create backup" }));
+    expect(createBackup).toHaveBeenCalledOnce();
+    expect(listBackups).toHaveBeenCalledTimes(2);
+
+    await user.type(screen.getByLabelText("Recovery passphrase"), "recovery-passphrase-2026");
+    await user.type(
+      screen.getByLabelText("Confirm passphrase for export"),
+      "recovery-passphrase-2026",
+    );
+    await user.click(screen.getByRole("button", { name: "Export archive" }));
+
+    expect(exportRecoveryArchive).toHaveBeenCalledWith("recovery-passphrase-2026");
+    expect(await screen.findByText(/was exported and verified/u)).toBeInTheDocument();
   });
 });

@@ -3,6 +3,7 @@ import { createContext, useContext } from "react";
 import type {
   RuntimeApi,
   RuntimeConnectionInput,
+  RuntimeConnectionProfile,
   RuntimeConnectionResult,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
@@ -23,7 +24,7 @@ export type ManagedConnectionFlow =
 
 export interface ConnectedRuntime {
   api: RuntimeApi;
-  profile: RuntimeConnectionInput;
+  profile: RuntimeConnectionProfile;
   sessions: RuntimeSession[];
 }
 

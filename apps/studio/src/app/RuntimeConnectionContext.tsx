@@ -9,9 +9,11 @@ import {
 
 import {
   normalizeRuntimeConnection,
+  normalizeRuntimeProfile,
   probeRuntimeConnection,
   RuntimeApi,
   type RuntimeConnectionInput,
+  type RuntimeConnectionProfile,
 } from "@/shared/api/runtime-client";
 import {
   getManagedRuntimeState,
@@ -30,7 +32,7 @@ import {
 export { useRuntimeConnection } from "./RuntimeConnectionState";
 
 interface RuntimeConnectionProviderProps extends PropsWithChildren {
-  createApi?: (profile: RuntimeConnectionInput) => RuntimeApi;
+  createApi?: (profile: RuntimeConnectionProfile) => RuntimeApi;
   discoverManagedRuntime?: typeof getManagedRuntimeState;
   probeConnection?: typeof probeRuntimeConnection;
   provisionRuntime?: typeof provisionManagedRuntime;
@@ -38,7 +40,7 @@ interface RuntimeConnectionProviderProps extends PropsWithChildren {
   subscribeToManagedRuntime?: typeof subscribeManagedRuntimeState;
 }
 
-function defaultCreateApi(profile: RuntimeConnectionInput): RuntimeApi {
+function defaultCreateApi(profile: RuntimeConnectionProfile): RuntimeApi {
   return new RuntimeApi(profile);
 }
 
@@ -75,12 +77,12 @@ export function RuntimeConnectionProvider({
     setManagedConnectionFlowState(flow);
   }, []);
 
-  const connect = useCallback(
-    async (input: RuntimeConnectionInput) => {
+  const attach = useCallback(
+    async (input: RuntimeConnectionProfile) => {
       const revision = ++connectionRevision.current;
       const result = await probeConnection(input);
       if (revision !== connectionRevision.current) return result;
-      const profile = normalizeRuntimeConnection(input);
+      const profile = normalizeRuntimeProfile(input);
       setConnected({ api: createApi(profile), profile, sessions: result.sessions });
       setManagedConnectionFlow("connected");
       setSelectedSessionId(
@@ -91,6 +93,11 @@ export function RuntimeConnectionProvider({
       return result;
     },
     [createApi, probeConnection, setManagedConnectionFlow],
+  );
+
+  const connect = useCallback(
+    (input: RuntimeConnectionInput) => attach(normalizeRuntimeConnection(input)),
+    [attach],
   );
 
   const configureManagedRuntime = useCallback(async (input: ManagedRuntimeProvisioningInput) => {
@@ -142,12 +149,12 @@ export function RuntimeConnectionProvider({
         || managedConnectionFlowRef.current === "error"
       ) return;
       const connection = snapshot.connection;
-      const fingerprint = `${connection.baseUrl}\n${connection.apiKey}`;
+      const fingerprint = `${connection.transport}\n${connection.baseUrl}`;
       if (managedConnectionInFlight.current === fingerprint) return;
       managedConnectionInFlight.current = fingerprint;
       setManagedConnectionError(null);
       setManagedConnectionFlow("attaching");
-      void connect(connection).catch((error: unknown) => {
+      void attach(connection).catch((error: unknown) => {
         setManagedConnectionError(
           error instanceof Error ? error.message : "Could not connect to managed Runtime.",
         );
@@ -182,7 +189,7 @@ export function RuntimeConnectionProvider({
       disposed = true;
       unlisten?.();
     };
-  }, [connect, discoverManagedRuntime, setManagedConnectionFlow, subscribeToManagedRuntime]);
+  }, [attach, discoverManagedRuntime, setManagedConnectionFlow, subscribeToManagedRuntime]);
 
   const disconnect = useCallback(() => {
     connectionRevision.current += 1;

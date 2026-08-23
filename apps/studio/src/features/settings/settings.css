@@ -33,6 +33,8 @@
 .settings-update-body dt { color: var(--muted); font-size: 11px; }
 .settings-update-body dd { margin: 0; }
 .settings-update-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.settings-backup-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
+.settings-recovery-fields { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .settings-migration-command {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -90,4 +92,5 @@
   .settings-runtime-card { align-items: stretch; flex-direction: column; }
   .settings-runtime-card dl { grid-template-columns: repeat(2, 1fr); }
   .settings-configuration-grid { grid-template-columns: 1fr; }
+  .settings-recovery-fields { grid-template-columns: 1fr; }
 }

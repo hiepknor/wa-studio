@@ -179,8 +179,14 @@ const ERROR_COPY: Record<string, string> = {
     "Campaign targets changed in Runtime. The canonical target snapshot is being reloaded.",
   CAMPAIGN_RUN_LAUNCH_CONFLICT:
     "This campaign is no longer launchable or already has a LIVE run. Campaign and run state are being reloaded.",
+  CAMPAIGN_RUN_REVISION_REQUIRED:
+    "Runtime requires explicit campaign and target revisions for LIVE. Run preflight again.",
   CAMPAIGN_RUN_REVISION_CONFLICT:
     "Campaign content or targets changed after review. The campaign is being reloaded; run preflight again.",
+  CAMPAIGN_RUN_PREFLIGHT_REQUIRED:
+    "Run a passing LIVE preflight before launching this campaign.",
+  CAMPAIGN_RUN_PREFLIGHT_INVALID:
+    "The LIVE preflight proof expired or no longer matches this campaign. Run preflight again.",
   CAMPAIGN_RUN_SCHEDULE_EXPIRED:
     "This one-time schedule has expired. Return to a DRAFT editor to revise it, or create a new campaign.",
   CAMPAIGN_RUN_STATE_CONFLICT:

@@ -1,8 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 
-import type { RuntimeConnectionInput } from "@/shared/api/runtime-client";
-
 export type ManagedRuntimePhase =
   | "discovering"
   | "provisioningRequired"
@@ -31,8 +29,13 @@ export interface RuntimeReleaseManifest {
 export interface ManagedRuntimeSnapshot {
   phase: ManagedRuntimePhase;
   manifest: RuntimeReleaseManifest | null;
-  connection: RuntimeConnectionInput | null;
+  connection: ManagedRuntimeConnection | null;
   error: string | null;
+}
+
+export interface ManagedRuntimeConnection {
+  baseUrl: string;
+  transport: "native";
 }
 
 export interface ManagedRuntimeProvisioningInput {
@@ -50,15 +53,36 @@ export interface ManagedRuntimeProvisioningProfile {
 
 export interface ManagedRuntimeBackup {
   id: string;
-  kind: "pre-migration" | "pre-restore" | "pre-update";
+  kind: "automatic" | "manual" | "pre-migration" | "pre-restore" | "pre-update";
   createdAtMs: number;
   sizeBytes: number;
+}
+
+export type ProtectionFreshness = "fresh" | "due" | "missing";
+
+export interface ManagedRuntimeDiagnostics {
+  generatedAtMs: number;
+  desktopProduct: "wa-studio";
+  runtimeService: "wa-runtime";
+  runtimePhase: ManagedRuntimePhase;
+  runtimeVersion: string | null;
+  processGeneration: number | null;
+  managedPostgresRunning: boolean;
+  recoveryPointCount: number;
+  latestRecoveryPointAtMs: number | null;
+  recoveryFreshness: ProtectionFreshness;
+  lastIntegrityCheckAtMs: number | null;
+  integrityFreshness: ProtectionFreshness;
 }
 
 export const MANAGED_RUNTIME_STATE_CHANGED_EVENT = "managed-runtime://state-changed";
 
 export function getManagedRuntimeState(): Promise<ManagedRuntimeSnapshot> {
   return invoke<ManagedRuntimeSnapshot>("get_managed_runtime_state");
+}
+
+export function getManagedRuntimeDiagnostics(): Promise<ManagedRuntimeDiagnostics> {
+  return invoke<ManagedRuntimeDiagnostics>("get_managed_runtime_diagnostics");
 }
 
 export function provisionManagedRuntime(
@@ -87,8 +111,22 @@ export function listManagedRuntimeBackups(): Promise<ManagedRuntimeBackup[]> {
   return invoke<ManagedRuntimeBackup[]>("list_managed_runtime_backups");
 }
 
+export function createManagedRuntimeBackup(): Promise<void> {
+  return invoke("create_managed_runtime_backup");
+}
+
+export function exportManagedRuntimeRecoveryArchive(
+  passphrase: string,
+): Promise<string | null> {
+  return invoke<string | null>("export_managed_runtime_recovery_archive", { passphrase });
+}
+
 export function restoreManagedRuntimeBackup(backupId: string): Promise<void> {
   return invoke("restore_managed_runtime_backup", { backupId });
+}
+
+export function restoreManagedRuntimeRecoveryArchive(passphrase: string): Promise<boolean> {
+  return invoke<boolean>("restore_managed_runtime_recovery_archive", { passphrase });
 }
 
 export function subscribeManagedRuntimeState(

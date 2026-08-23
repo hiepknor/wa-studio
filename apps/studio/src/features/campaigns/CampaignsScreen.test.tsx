@@ -117,6 +117,12 @@ function report(
   return {
     status, policyVersion: 6, campaignRevision: 3, targetsRevision: 4,
     executionMode, checkedAt: "2026-08-14T03:00:00.000Z", totalTargets: 9,
+    liveLaunchToken: executionMode === "LIVE" && status === "PASS"
+      ? "clp1.test-payload.test-signature-with-sufficient-length"
+      : null,
+    liveLaunchTokenExpiresAt: executionMode === "LIVE" && status === "PASS"
+      ? "2026-08-14T03:02:00.000Z"
+      : null,
     allowedTargets: 5, deniedTargets: 3, unknownTargets: 1,
     checks: [{ code: "GROUP_CAPABILITY", status, message: "Runtime policy result" }],
     targetIssues: [{ groupId: "denied@g.us", groupName: "Denied room", capability: "DENIED", reason: "TARGET_CAPABILITY_DENIED" }],
@@ -792,6 +798,7 @@ describe("CampaignsScreen", () => {
       executionMode: "LIVE",
       expectedCampaignRevision: 3,
       expectedTargetsRevision: 4,
+      preflightToken: "clp1.test-payload.test-signature-with-sufficient-length",
     }, expect.any(String));
     expect(await screen.findByText(/Runtime status is Active/)).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Details" }));

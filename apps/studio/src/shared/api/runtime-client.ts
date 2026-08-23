@@ -2,6 +2,7 @@ import createClient from "openapi-fetch";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
 import type { components, paths } from "@wa/runtime-contract";
+import { managedRuntimeFetch } from "@/shared/native/runtime-transport";
 
 export type RuntimeSession = components["schemas"]["SessionDto"];
 export type RuntimeSyncRun = components["schemas"]["SyncRunDto"];
@@ -88,6 +89,19 @@ export interface RuntimeCampaignListInput {
 export interface RuntimeConnectionInput {
   baseUrl: string;
   apiKey: string;
+}
+
+export interface NativeRuntimeConnection {
+  baseUrl: string;
+  transport: "native";
+}
+
+export type RuntimeConnectionProfile = RuntimeConnectionInput | NativeRuntimeConnection;
+
+function isNativeRuntimeConnection(
+  input: RuntimeConnectionProfile,
+): input is NativeRuntimeConnection {
+  return "transport" in input && input.transport === "native";
 }
 
 export interface RuntimeConnectionResult {
@@ -183,18 +197,30 @@ export function normalizeRuntimeConnection(
   return { baseUrl: normalizeRuntimeBaseUrl(input.baseUrl), apiKey };
 }
 
+export function normalizeRuntimeProfile(
+  input: RuntimeConnectionProfile,
+): RuntimeConnectionProfile {
+  if (isNativeRuntimeConnection(input)) {
+    return { baseUrl: normalizeRuntimeBaseUrl(input.baseUrl), transport: "native" };
+  }
+  return normalizeRuntimeConnection(input);
+}
+
 export class RuntimeApi {
   private readonly client;
 
   constructor(
-    connection: RuntimeConnectionInput,
-    runtimeFetch: typeof globalThis.fetch = tauriFetch,
+    connection: RuntimeConnectionProfile,
+    runtimeFetch?: typeof globalThis.fetch,
   ) {
-    const normalized = normalizeRuntimeConnection(connection);
+    const normalized = normalizeRuntimeProfile(connection);
+    const native = isNativeRuntimeConnection(normalized);
     this.client = createClient<paths>({
       baseUrl: normalized.baseUrl,
-      fetch: runtimeFetch,
-      headers: { "X-Runtime-Key": normalized.apiKey },
+      fetch: runtimeFetch ?? (native ? managedRuntimeFetch : tauriFetch),
+      ...(!isNativeRuntimeConnection(normalized)
+        ? { headers: { "X-Runtime-Key": normalized.apiKey } }
+        : {}),
     });
   }
 
@@ -726,8 +752,8 @@ export class RuntimeApi {
 }
 
 export async function probeRuntimeConnection(
-  input: RuntimeConnectionInput,
-  runtimeFetch: typeof globalThis.fetch = tauriFetch,
+  input: RuntimeConnectionProfile,
+  runtimeFetch?: typeof globalThis.fetch,
 ): Promise<RuntimeConnectionResult> {
   const api = new RuntimeApi(input, runtimeFetch);
   await api.assertReady();

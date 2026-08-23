@@ -10,11 +10,17 @@ import {
   type AppUpdateSnapshot,
 } from "@/shared/native/app-updates";
 import {
+  createManagedRuntimeBackup,
+  exportManagedRuntimeRecoveryArchive,
+  getManagedRuntimeDiagnostics,
   getManagedRuntimeProvisioningProfile,
   listManagedRuntimeBackups,
   reconfigureManagedRuntime,
   restoreManagedRuntimeBackup,
+  restoreManagedRuntimeRecoveryArchive,
   type ManagedRuntimeBackup,
+  type ManagedRuntimeDiagnostics,
+  type ProtectionFreshness,
 } from "@/shared/native/managed-runtime";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
@@ -22,21 +28,28 @@ import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
+import { TextField } from "@/shared/ui/TextField";
 import { ManagedRuntimeConfigurationPanel } from "./ManagedRuntimeConfigurationPanel";
 import "./settings.css";
 
 interface SettingsScreenProps {
   checkUpdate?: typeof checkForAppUpdate;
+  createBackup?: typeof createManagedRuntimeBackup;
+  exportRecoveryArchive?: typeof exportManagedRuntimeRecoveryArchive;
+  getDiagnostics?: typeof getManagedRuntimeDiagnostics;
   getUpdateState?: typeof getAppUpdateState;
   installUpdate?: typeof installAppUpdate;
   getProvisioningProfile?: typeof getManagedRuntimeProvisioningProfile;
   listBackups?: typeof listManagedRuntimeBackups;
   restoreBackup?: typeof restoreManagedRuntimeBackup;
+  restoreRecoveryArchive?: typeof restoreManagedRuntimeRecoveryArchive;
   saveProvisioningProfile?: typeof reconfigureManagedRuntime;
   subscribeUpdateProgress?: typeof subscribeAppUpdateProgress;
 }
 
 function backupKind(kind: ManagedRuntimeBackup["kind"]): string {
+  if (kind === "automatic") return "Rolling daily backup";
+  if (kind === "manual") return "Manual recovery point";
   if (kind === "pre-migration") return "Before migration";
   if (kind === "pre-update") return "Before app update";
   return "Before restore";
@@ -48,23 +61,46 @@ function bytes(value: number): string {
   return `${(value / 1_048_576).toFixed(1)} MB`;
 }
 
+function protectionTone(freshness: ProtectionFreshness): "success" | "warning" | "danger" {
+  if (freshness === "fresh") return "success";
+  if (freshness === "due") return "warning";
+  return "danger";
+}
+
+function protectionLabel(freshness: ProtectionFreshness): string {
+  if (freshness === "fresh") return "Fresh";
+  if (freshness === "due") return "Due";
+  return "Missing";
+}
+
 export function SettingsScreen({
   checkUpdate = checkForAppUpdate,
+  createBackup = createManagedRuntimeBackup,
+  exportRecoveryArchive = exportManagedRuntimeRecoveryArchive,
+  getDiagnostics = getManagedRuntimeDiagnostics,
   getUpdateState = getAppUpdateState,
   installUpdate = installAppUpdate,
   getProvisioningProfile = getManagedRuntimeProvisioningProfile,
   listBackups = listManagedRuntimeBackups,
   restoreBackup = restoreManagedRuntimeBackup,
+  restoreRecoveryArchive = restoreManagedRuntimeRecoveryArchive,
   saveProvisioningProfile = reconfigureManagedRuntime,
   subscribeUpdateProgress = subscribeAppUpdateProgress,
 }: SettingsScreenProps = {}) {
   const { managedRuntime } = useRuntimeConnection();
   const [backups, setBackups] = useState<ManagedRuntimeBackup[]>([]);
+  const [diagnostics, setDiagnostics] = useState<ManagedRuntimeDiagnostics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<ManagedRuntimeBackup | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [creatingBackup, setCreatingBackup] = useState(false);
+  const [exportingArchive, setExportingArchive] = useState(false);
+  const [importingArchive, setImportingArchive] = useState(false);
+  const [confirmingImport, setConfirmingImport] = useState(false);
+  const [archivePassphrase, setArchivePassphrase] = useState("");
+  const [archivePassphraseConfirmation, setArchivePassphraseConfirmation] = useState("");
   const [updateState, setUpdateState] = useState<AppUpdateSnapshot | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [confirmingUpdate, setConfirmingUpdate] = useState(false);
@@ -75,13 +111,18 @@ export function SettingsScreen({
     setLoading(true);
     setError(null);
     try {
-      setBackups(await listBackups());
+      const [nextBackups, nextDiagnostics] = await Promise.all([
+        listBackups(),
+        getDiagnostics(),
+      ]);
+      setBackups(nextBackups);
+      setDiagnostics(nextDiagnostics);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not list local backups.");
     } finally {
       setLoading(false);
     }
-  }, [listBackups]);
+  }, [getDiagnostics, listBackups]);
 
   useEffect(() => {
     void reload();
@@ -126,6 +167,62 @@ export function SettingsScreen({
       setError(caught instanceof Error ? caught.message : "Could not restore the backup.");
     } finally {
       setRestoring(false);
+    }
+  }
+
+  async function createManualBackup() {
+    setCreatingBackup(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await createBackup();
+      setNotice("A verified manual recovery point was created on this device.");
+      await reload();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not create a manual backup.");
+    } finally {
+      setCreatingBackup(false);
+    }
+  }
+
+  async function exportArchive() {
+    if (archivePassphrase !== archivePassphraseConfirmation) {
+      setError("Recovery passphrases do not match.");
+      return;
+    }
+    setExportingArchive(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const name = await exportRecoveryArchive(archivePassphrase);
+      if (name) {
+        setNotice(`Portable recovery archive ${name} was exported and verified.`);
+        setArchivePassphrase("");
+        setArchivePassphraseConfirmation("");
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not export a recovery archive.");
+    } finally {
+      setExportingArchive(false);
+    }
+  }
+
+  async function confirmImportArchive() {
+    setImportingArchive(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const restored = await restoreRecoveryArchive(archivePassphrase);
+      if (restored) {
+        setNotice("Portable recovery archive restored. WA Studio is restarting the local Runtime.");
+        setArchivePassphrase("");
+        setArchivePassphraseConfirmation("");
+      }
+      setConfirmingImport(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not restore the recovery archive.");
+    } finally {
+      setImportingArchive(false);
     }
   }
 
@@ -183,9 +280,50 @@ export function SettingsScreen({
         <dl>
           <div><dt>State</dt><dd><Badge tone={runtimeReady ? "success" : "warning"}>{managedRuntime.phase}</Badge></dd></div>
           <div><dt>Runtime</dt><dd>{managedRuntime.manifest?.version ?? "Unknown"}</dd></div>
+          <div><dt>Supervisor generation</dt><dd>{diagnostics?.processGeneration ?? "Not running"}</dd></div>
+          <div><dt>Managed PostgreSQL</dt><dd>{diagnostics?.managedPostgresRunning ? "Running" : "Stopped"}</dd></div>
           <div><dt>Queue</dt><dd>PostgreSQL</dd></div>
           <div><dt>OpenWA</dt><dd>0.22.0 pinned</dd></div>
         </dl>
+      </section>
+
+      <section aria-labelledby="protection-status-title" className="settings-update-card">
+        <header className="settings-backup-header">
+          <div>
+            <span className="settings-card-label">Protection status</span>
+            <h3 id="protection-status-title">Local recovery posture</h3>
+            <p>Backup and integrity signals are calculated by the native supervisor without exposing local paths.</p>
+          </div>
+          <Badge tone={diagnostics ? protectionTone(diagnostics.recoveryFreshness) : "neutral"}>
+            {diagnostics ? protectionLabel(diagnostics.recoveryFreshness) : "Inspecting"}
+          </Badge>
+        </header>
+        <div className="settings-update-body">
+          <dl>
+            <div>
+              <dt>Latest recovery point</dt>
+              <dd>{diagnostics?.latestRecoveryPointAtMs
+                ? <DateTime value={new Date(diagnostics.latestRecoveryPointAtMs).toISOString()} />
+                : "Never"}</dd>
+            </div>
+            <div>
+              <dt>Recovery points</dt>
+              <dd>{diagnostics?.recoveryPointCount ?? 0}</dd>
+            </div>
+            <div>
+              <dt>Integrity check</dt>
+              <dd><Badge tone={diagnostics ? protectionTone(diagnostics.integrityFreshness) : "neutral"}>
+                {diagnostics ? protectionLabel(diagnostics.integrityFreshness) : "Inspecting"}
+              </Badge></dd>
+            </div>
+            <div>
+              <dt>Last verified</dt>
+              <dd>{diagnostics?.lastIntegrityCheckAtMs
+                ? <DateTime value={new Date(diagnostics.lastIntegrityCheckAtMs).toISOString()} />
+                : "Never"}</dd>
+            </div>
+          </dl>
+        </div>
       </section>
 
       {managedRuntime.phase === "restoring" && (
@@ -260,9 +398,19 @@ export function SettingsScreen({
         <header className="settings-backup-header">
           <div>
             <h3 id="backup-list-title">Encrypted database backups</h3>
-            <p>WA Studio verifies every archive with bundled pg_restore before committing it.</p>
+            <p>Rolling backups run at most once per 24 hours. Every archive is verified before commit.</p>
           </div>
-          <Badge tone="neutral">{backups.length} retained</Badge>
+          <div className="settings-backup-actions">
+            <Badge tone="neutral">{backups.length} retained</Badge>
+            <Button
+              disabled={!runtimeReady || creatingBackup || restoring}
+              loading={creatingBackup}
+              onClick={() => void createManualBackup()}
+              size="sm"
+            >
+              {creatingBackup ? "Creating…" : "Create backup"}
+            </Button>
+          </div>
         </header>
         <div className="data-table-scroll">
           <table>
@@ -295,6 +443,60 @@ export function SettingsScreen({
         </div>
       </section>
 
+      <section aria-labelledby="recovery-archive-title" className="settings-update-card">
+        <header className="settings-backup-header">
+          <div>
+            <span className="settings-card-label">Off-device recovery</span>
+            <h3 id="recovery-archive-title">Portable Runtime archive</h3>
+            <p>Export a passphrase-encrypted archive before moving devices or performing high-risk maintenance.</p>
+          </div>
+          <Badge tone="warning">Passphrase required</Badge>
+        </header>
+        <div className="settings-update-body stack stack-md">
+          <div className="settings-recovery-fields">
+            <TextField
+              autoComplete="new-password"
+              disabled={!runtimeReady || exportingArchive || importingArchive}
+              id="recovery-passphrase"
+              label="Recovery passphrase"
+              minLength={16}
+              onChange={event => setArchivePassphrase(event.currentTarget.value)}
+              type="password"
+              value={archivePassphrase}
+            />
+            <TextField
+              autoComplete="new-password"
+              disabled={!runtimeReady || exportingArchive || importingArchive}
+              id="recovery-passphrase-confirmation"
+              label="Confirm passphrase for export"
+              minLength={16}
+              onChange={event => setArchivePassphraseConfirmation(event.currentTarget.value)}
+              type="password"
+              value={archivePassphraseConfirmation}
+            />
+          </div>
+          <InlineAlert title="Keep the passphrase outside this device" tone="neutral">
+            The portable archive cannot be recovered with the device key or by WA Studio support.
+          </InlineAlert>
+          <div className="settings-update-actions">
+            <Button
+              disabled={!runtimeReady || archivePassphrase.length < 16 || exportingArchive || importingArchive}
+              loading={exportingArchive}
+              onClick={() => void exportArchive()}
+            >
+              {exportingArchive ? "Exporting…" : "Export archive"}
+            </Button>
+            <Button
+              disabled={!runtimeReady || archivePassphrase.length < 16 || exportingArchive || importingArchive}
+              onClick={() => setConfirmingImport(true)}
+              variant="danger"
+            >
+              Import and restore
+            </Button>
+          </div>
+        </div>
+      </section>
+
       <ConfirmationDialog
         body={selected ? (
           <>
@@ -311,6 +513,23 @@ export function SettingsScreen({
         onConfirm={() => void confirmRestore()}
         open={selected !== null}
         title="Restore local Runtime data?"
+      />
+      <ConfirmationDialog
+        body={(
+          <>
+            WA Studio will ask for a portable archive, stop local Runtime processes, create a
+            device-encrypted safety backup, then restore the selected archive in one PostgreSQL
+            transaction. Current local data will be replaced.
+          </>
+        )}
+        busy={importingArchive}
+        busyLabel="Restoring…"
+        confirmLabel="Choose archive and restore"
+        confirmVariant="danger"
+        onCancel={() => { if (!importingArchive) setConfirmingImport(false); }}
+        onConfirm={() => void confirmImportArchive()}
+        open={confirmingImport}
+        title="Restore a portable Runtime archive?"
       />
       <ConfirmationDialog
         body={updateState?.pending ? (

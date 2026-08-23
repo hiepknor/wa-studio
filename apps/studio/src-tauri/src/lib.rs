@@ -7,6 +7,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(managed_runtime::ManagedRuntimeState::default())
         .manage(windowing::WindowingState::default())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_shell::init())
         .menu(windowing::build_menu)
@@ -21,12 +22,17 @@ pub fn run() {
             app_updates::check_for_app_update,
             app_updates::get_app_update_state,
             app_updates::install_app_update,
+            managed_runtime::get_managed_runtime_diagnostics,
             managed_runtime::get_managed_runtime_state,
             managed_runtime::get_managed_runtime_provisioning_profile,
+            managed_runtime::create_managed_runtime_backup,
+            managed_runtime::export_managed_runtime_recovery_archive,
             managed_runtime::list_managed_runtime_backups,
             managed_runtime::provision_managed_runtime,
+            managed_runtime::transport::request_managed_runtime,
             managed_runtime::reset_managed_runtime_database,
             managed_runtime::reconfigure_managed_runtime,
+            managed_runtime::restore_managed_runtime_recovery_archive,
             managed_runtime::restore_managed_runtime_backup,
             windowing::get_window_state,
             windowing::get_window_capabilities,

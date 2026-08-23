@@ -1,17 +1,21 @@
 use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
-    path::{Path, PathBuf},
+    fs::{self, File},
+    io::{self, Read},
+    path::PathBuf,
 };
 
 use age::{secrecy::ExposeSecret, x25519};
 use dirs::data_dir;
+use keyring::{Entry, Error as KeyringError};
 use rand::{distr::Alphanumeric, RngExt};
 use serde::{Deserialize, Serialize};
 
 const STORE_SCHEMA_VERSION: u8 = 1;
 const STORE_DIRECTORY: &str = "dev.hiepknor.wastudio";
 const STORE_FILE: &str = "secrets.json";
+const RUNTIME_CREDENTIALS_ENTRY: &str = "runtime-credentials-v2";
+const POSTGRES_PASSWORD_ENTRY: &str = "postgres-password-v1";
+const BACKUP_IDENTITY_ENTRY: &str = "backup-identity-v1";
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -39,27 +43,29 @@ pub struct ManagedRuntimeCredentials {
 }
 
 pub fn managed_postgres_password() -> Result<String, String> {
-    let mut store = load_store()?;
-    if let Some(password) = store.postgres_password {
+    migrate_legacy_store()?;
+    if let Some(password) = read_secure_entry(POSTGRES_PASSWORD_ENTRY, "PostgreSQL password")? {
         if password.len() >= 32 {
             return Ok(password);
         }
         return Err("The managed PostgreSQL local secret is invalid.".to_string());
     }
     let password = random_secret(48);
-    store.postgres_password = Some(password.clone());
-    save_store(&store)?;
+    write_secure_entry(POSTGRES_PASSWORD_ENTRY, "PostgreSQL password", &password)?;
     Ok(password)
 }
 
 pub fn managed_postgres_backup_identity() -> Result<x25519::Identity, String> {
-    let mut store = load_store()?;
-    if let Some(encoded) = store.backup_identity {
+    migrate_legacy_store()?;
+    if let Some(encoded) = read_secure_entry(BACKUP_IDENTITY_ENTRY, "backup identity")? {
         return parse_backup_identity(&encoded);
     }
     let identity = x25519::Identity::generate();
-    store.backup_identity = Some(identity.to_string().expose_secret().to_string());
-    save_store(&store)?;
+    write_secure_entry(
+        BACKUP_IDENTITY_ENTRY,
+        "backup identity",
+        identity.to_string().expose_secret(),
+    )?;
     Ok(identity)
 }
 
@@ -72,18 +78,19 @@ pub fn parse_backup_identity(encoded: &str) -> Result<x25519::Identity, String> 
 pub fn save_managed_runtime_credentials(
     credentials: &ManagedRuntimeCredentials,
 ) -> Result<(), String> {
-    let mut store = load_store()?;
-    store.runtime = Some(credentials.clone());
-    save_store(&store)
+    migrate_legacy_store()?;
+    let encoded = serde_json::to_string(credentials)
+        .map_err(|error| format!("Could not encode Managed Runtime credentials: {error}"))?;
+    write_secure_entry(RUNTIME_CREDENTIALS_ENTRY, "Runtime credentials", &encoded)
 }
 
 pub fn load_managed_runtime_credentials() -> Result<Option<ManagedRuntimeCredentials>, String> {
-    let Some(store) = load_store_optional()? else {
+    migrate_legacy_store()?;
+    let Some(encoded) = read_secure_entry(RUNTIME_CREDENTIALS_ENTRY, "Runtime credentials")? else {
         return Ok(None);
     };
-    let Some(credentials) = store.runtime else {
-        return Ok(None);
-    };
+    let credentials: ManagedRuntimeCredentials = serde_json::from_str(&encoded)
+        .map_err(|_| "Managed Runtime credentials have an unsupported format.".to_string())?;
     if credentials.schema_version != 2
         || credentials.runtime_api_key.len() < 32
         || credentials.event_inbox_device_token.len() < 32
@@ -108,14 +115,67 @@ fn store_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "Could not resolve the WA Studio application data directory.".to_string())
 }
 
-fn load_store() -> Result<LocalSecretFile, String> {
-    Ok(load_store_optional()?.unwrap_or(LocalSecretFile {
-        schema_version: STORE_SCHEMA_VERSION,
-        ..LocalSecretFile::default()
-    }))
+fn secure_entry(account: &str, label: &str) -> Result<Entry, String> {
+    Entry::new(STORE_DIRECTORY, account).map_err(|error| secure_store_error(label, error))
 }
 
-fn load_store_optional() -> Result<Option<LocalSecretFile>, String> {
+fn read_secure_entry(account: &str, label: &str) -> Result<Option<String>, String> {
+    let entry = secure_entry(account, label)?;
+    read_secure_result(entry.get_password(), label)
+}
+
+fn read_secure_result(
+    result: Result<String, KeyringError>,
+    label: &str,
+) -> Result<Option<String>, String> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(KeyringError::NoEntry) => Ok(None),
+        Err(error) => Err(secure_store_error(label, error)),
+    }
+}
+
+fn write_secure_entry(account: &str, label: &str, value: &str) -> Result<(), String> {
+    secure_entry(account, label)?
+        .set_password(value)
+        .map_err(|error| secure_store_error(label, error))
+}
+
+fn secure_store_error(label: &str, error: KeyringError) -> String {
+    format!("Could not access {label} in the operating system credential store: {error}")
+}
+
+fn migrate_legacy_store() -> Result<(), String> {
+    let Some(store) = load_legacy_store()? else {
+        return Ok(());
+    };
+    if let Some(credentials) = store.runtime {
+        let encoded = serde_json::to_string(&credentials)
+            .map_err(|error| format!("Could not encode Managed Runtime credentials: {error}"))?;
+        write_secure_entry_if_missing(RUNTIME_CREDENTIALS_ENTRY, "Runtime credentials", &encoded)?;
+    }
+    if let Some(password) = store.postgres_password {
+        write_secure_entry_if_missing(POSTGRES_PASSWORD_ENTRY, "PostgreSQL password", &password)?;
+    }
+    if let Some(identity) = store.backup_identity {
+        write_secure_entry_if_missing(BACKUP_IDENTITY_ENTRY, "backup identity", &identity)?;
+    }
+    let path = store_path()?;
+    fs::remove_file(&path).map_err(|error| {
+        format!(
+            "Managed secrets were migrated to the operating system credential store, but the legacy secret file could not be removed: {error}"
+        )
+    })
+}
+
+fn write_secure_entry_if_missing(account: &str, label: &str, value: &str) -> Result<(), String> {
+    if read_secure_entry(account, label)?.is_none() {
+        write_secure_entry(account, label, value)?;
+    }
+    Ok(())
+}
+
+fn load_legacy_store() -> Result<Option<LocalSecretFile>, String> {
     let path = store_path()?;
     let mut file = match File::open(&path) {
         Ok(file) => file,
@@ -133,76 +193,13 @@ fn load_store_optional() -> Result<Option<LocalSecretFile>, String> {
     Ok(Some(store))
 }
 
-fn save_store(store: &LocalSecretFile) -> Result<(), String> {
-    let path = store_path()?;
-    let directory = path
-        .parent()
-        .ok_or_else(|| "Local WA Studio secret path has no parent directory.".to_string())?;
-    fs::create_dir_all(directory)
-        .map_err(|error| format!("Could not create the WA Studio data directory: {error}"))?;
-    restrict_directory(directory)?;
-
-    let temporary = directory.join(format!(".{STORE_FILE}.{}.tmp", std::process::id()));
-    let encoded = serde_json::to_vec_pretty(store)
-        .map_err(|error| format!("Could not encode local WA Studio secrets: {error}"))?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(|error| format!("Could not create local WA Studio secret file: {error}"))?;
-    restrict_file(&file)?;
-    file.write_all(&encoded)
-        .and_then(|_| file.sync_all())
-        .map_err(|error| format!("Could not write local WA Studio secrets: {error}"))?;
-    drop(file);
-    fs::rename(&temporary, &path)
-        .map_err(|error| format!("Could not commit local WA Studio secrets: {error}"))?;
-    restrict_file_path(&path)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn restrict_directory(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|error| format!("Could not restrict WA Studio data directory: {error}"))
-}
-
-#[cfg(not(unix))]
-fn restrict_directory(_path: &Path) -> Result<(), String> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn restrict_file(file: &File) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    file.set_permissions(fs::Permissions::from_mode(0o600))
-        .map_err(|error| format!("Could not restrict local WA Studio secret file: {error}"))
-}
-
-#[cfg(not(unix))]
-fn restrict_file(_file: &File) -> Result<(), String> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn restrict_file_path(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-        .map_err(|error| format!("Could not restrict local WA Studio secret file: {error}"))
-}
-
-#[cfg(not(unix))]
-fn restrict_file_path(_path: &Path) -> Result<(), String> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use age::secrecy::ExposeSecret;
 
-    use super::{parse_backup_identity, random_secret};
+    use keyring::Error as KeyringError;
+
+    use super::{parse_backup_identity, random_secret, read_secure_result};
 
     #[test]
     fn generated_secret_has_requested_length() {
@@ -218,5 +215,13 @@ mod tests {
             encoded.expose_secret(),
             restored.to_string().expose_secret()
         );
+    }
+
+    #[test]
+    fn credential_store_failures_do_not_fall_back_to_plaintext_storage() {
+        let error = read_secure_result(Err(KeyringError::NoDefaultStore), "Runtime credentials")
+            .unwrap_err();
+
+        assert!(error.contains("operating system credential store"));
     }
 }

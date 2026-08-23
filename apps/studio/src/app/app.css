@@ -232,6 +232,14 @@ select:focus-visible {
   line-height: 1.6;
   margin: 0;
 }
+.managed-runtime-recovery {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.managed-runtime-recovery h3 { color: #e7e8ed; font-size: 13px; margin: 4px 0; }
+.managed-runtime-recovery p,
+.managed-runtime-recovery small { color: var(--muted); font-size: 9px; line-height: 1.5; margin: 0; }
+.managed-runtime-recovery-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .connection-runtime-grid { display: grid; margin: 4px 0 0; border-top: 1px solid var(--border); }
 .connection-runtime-grid div { display: grid; grid-template-columns: 86px 1fr; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .connection-runtime-grid dt,

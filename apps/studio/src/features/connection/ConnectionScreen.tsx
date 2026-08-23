@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 
 import {
   probeRuntimeConnection,
+  type RuntimeConnectionInput,
   type RuntimeConnectionResult,
 } from "@/shared/api/runtime-client";
 import { BrandMark } from "@/shared/ui/BrandMark";
@@ -16,7 +17,7 @@ type ConnectionState =
   | { status: "failed"; message: string };
 
 interface ConnectionScreenProps {
-  probeConnection?: typeof probeRuntimeConnection;
+  probeConnection?: (input: RuntimeConnectionInput) => Promise<RuntimeConnectionResult>;
 }
 
 export function ConnectionScreen({

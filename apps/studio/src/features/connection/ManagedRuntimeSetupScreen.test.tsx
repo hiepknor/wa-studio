@@ -38,4 +38,29 @@ describe("ManagedRuntimeSetupScreen", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Managed PostgreSQL could not start.");
     expect(await screen.findByDisplayValue("https://openwa.onio.cc")).toBeInTheDocument();
   });
+
+  it("offers transactional local recovery while the managed database is degraded", async () => {
+    const user = userEvent.setup();
+    const restoreBackup = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ManagedRuntimeSetupScreen
+        flow="error"
+        listBackups={vi.fn().mockResolvedValue([{
+          id: "automatic-1787312262148.dump.age",
+          kind: "automatic",
+          createdAtMs: 1_787_312_262_148,
+          sizeBytes: 42,
+        }])}
+        onConnect={vi.fn()}
+        restoreBackup={restoreBackup}
+        snapshot={{ ...snapshot, phase: "degraded", error: "Database corrupt." }}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /Restore/u }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("quarantine");
+    await user.click(screen.getByRole("button", { name: "Quarantine and restore" }));
+
+    expect(restoreBackup).toHaveBeenCalledWith("automatic-1787312262148.dump.age");
+  });
 });

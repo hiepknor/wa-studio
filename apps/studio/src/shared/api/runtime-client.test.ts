@@ -234,6 +234,8 @@ describe("RuntimeApi", () => {
     const report = {
       status: "WARN", policyVersion: 2, campaignRevision: 1, targetsRevision: 2,
       executionMode: "LIVE", checkedAt: "2026-08-14T00:00:00.000Z", totalTargets: 1,
+      liveLaunchToken: "clp1.test-payload.test-signature-with-sufficient-length",
+      liveLaunchTokenExpiresAt: "2026-08-14T00:02:00.000Z",
       allowedTargets: 0, deniedTargets: 0, unknownTargets: 1, checks: [], targetIssues: [],
     } as const;
     const source = {
@@ -276,6 +278,7 @@ describe("RuntimeApi", () => {
       executionMode: "LIVE",
       expectedCampaignRevision: 1,
       expectedTargetsRevision: 4,
+      preflightToken: report.liveLaunchToken,
     }, "launch-key");
     await api.getCampaignRun(run.id);
     await api.pauseCampaignRun(run.id);
@@ -302,6 +305,7 @@ describe("RuntimeApi", () => {
     expect(requests[5].headers.get("Idempotency-Key")).toBe("launch-key");
     await expect(requests[5].clone().json()).resolves.toEqual({
       executionMode: "LIVE", expectedCampaignRevision: 1, expectedTargetsRevision: 4,
+      preflightToken: report.liveLaunchToken,
     });
     expect(requests.some((request) => request.url.includes("message"))).toBe(false);
   });

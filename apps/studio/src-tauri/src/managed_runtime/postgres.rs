@@ -6,7 +6,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use age::{x25519, Decryptor, Encryptor};
+use age::{secrecy::SecretString, x25519, Decryptor, Encryptor};
 use fs2::FileExt;
 use postgresql_embedded::{blocking::PostgreSQL, SettingsBuilder, Status};
 
@@ -16,7 +16,12 @@ use super::model::ManagedRuntimeBackup;
 use std::os::unix::fs::OpenOptionsExt;
 
 const DATABASE_NAME: &str = "wa_runtime";
-const BACKUP_RETENTION_COUNT: usize = 7;
+const AUTOMATIC_BACKUP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const INTEGRITY_CHECK_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const INTEGRITY_MARKER_PREFIX: &str = "integrity-ok-v1-";
+const AUTOMATIC_BACKUP_RETENTION_COUNT: usize = 7;
+const MANUAL_BACKUP_RETENTION_COUNT: usize = 5;
+const SAFETY_BACKUP_RETENTION_COUNT: usize = 3;
 
 pub struct ManagedPostgres {
     postgresql: PostgreSQL,
@@ -56,8 +61,9 @@ impl ManagedPostgres {
         let _ = fs::remove_file(&password_file);
         setup_result.map_err(|error| format!("Could not provision managed PostgreSQL: {error}"))?;
         if postgresql.status() == Status::Started {
-            eprintln!(
-                "[managed-postgres] Recovering a PostgreSQL process left by an earlier app exit."
+            super::observability::warn(
+                "managed_postgres.orphan_process_recovered",
+                serde_json::json!({}),
             );
             postgresql.stop().map_err(|error| {
                 format!("Could not stop the previously orphaned managed PostgreSQL: {error}")
@@ -153,16 +159,166 @@ impl ManagedPostgres {
         self.create_encrypted_backup(backup_directory, &prefix, identity, true)
     }
 
+    pub fn create_automatic_backup(
+        &self,
+        backup_directory: &Path,
+        identity: &x25519::Identity,
+    ) -> Result<Option<PathBuf>, String> {
+        if !self.database_preexisting {
+            return Ok(None);
+        }
+        let now = unix_timestamp_millis()?;
+        let interval = AUTOMATIC_BACKUP_INTERVAL.as_millis() as u64;
+        if list_backups(backup_directory)?.iter().any(|backup| {
+            now.saturating_sub(backup.created_at_ms) < interval || backup.created_at_ms > now
+        }) {
+            return Ok(None);
+        }
+        self.create_encrypted_backup(backup_directory, "automatic-", identity, true)
+            .map(Some)
+    }
+
+    pub fn create_manual_backup(
+        &self,
+        backup_directory: &Path,
+        identity: &x25519::Identity,
+    ) -> Result<PathBuf, String> {
+        self.create_encrypted_backup(backup_directory, "manual-", identity, true)
+    }
+
+    pub fn verify_integrity_if_due(&self, state_directory: &Path) -> Result<bool, String> {
+        if !self.database_preexisting {
+            return Ok(false);
+        }
+        fs::create_dir_all(state_directory).map_err(|error| {
+            format!(
+                "Could not create PostgreSQL integrity state directory {}: {error}",
+                state_directory.display()
+            )
+        })?;
+        let now = unix_timestamp_millis()?;
+        let interval = INTEGRITY_CHECK_INTERVAL.as_millis() as u64;
+        if latest_integrity_check(state_directory)?
+            .is_some_and(|timestamp| timestamp > now || now.saturating_sub(timestamp) < interval)
+        {
+            return Ok(false);
+        }
+        self.run_pg_amcheck()?;
+        commit_integrity_marker(state_directory, now)?;
+        Ok(true)
+    }
+
+    pub fn create_portable_backup(
+        &self,
+        destination: &Path,
+        passphrase: SecretString,
+    ) -> Result<(), String> {
+        validate_portable_destination(destination)?;
+        let partial_path = portable_partial_path(destination)?;
+        let result = (|| {
+            self.write_encrypted_dump_with(
+                &partial_path,
+                Encryptor::with_user_passphrase(passphrase.clone()),
+            )?;
+            self.verify_passphrase_encrypted_dump(&partial_path, passphrase)?;
+            fs::rename(&partial_path, destination).map_err(|error| {
+                format!(
+                    "Could not commit portable PostgreSQL recovery archive {}: {error}",
+                    destination.display()
+                )
+            })?;
+            sync_parent_directory(destination)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&partial_path);
+        }
+        result
+    }
+
+    pub fn restore_portable_backup(
+        &self,
+        source: &Path,
+        passphrase: SecretString,
+        backup_directory: &Path,
+        release_version: &str,
+        identity: &x25519::Identity,
+    ) -> Result<PathBuf, String> {
+        validate_portable_source(source)?;
+        self.verify_passphrase_encrypted_dump(source, passphrase.clone())?;
+        let prefix = format!("pre-restore-v{}-", safe_filename_component(release_version));
+        let safety_backup =
+            self.create_encrypted_backup(backup_directory, &prefix, identity, false)?;
+        self.restore_passphrase_encrypted_dump(source, passphrase)?;
+        rotate_backups(backup_directory)?;
+        Ok(safety_backup)
+    }
+
+    pub fn restore_verified_source(
+        &self,
+        source: &Path,
+        identity: &x25519::Identity,
+    ) -> Result<(), String> {
+        validate_portable_source(source)?;
+        self.verify_encrypted_dump(source, identity)?;
+        self.restore_encrypted_dump(source, identity)
+    }
+
     pub fn stop(&self) -> Result<(), String> {
         self.postgresql
             .stop()
             .map_err(|error| format!("Could not stop managed PostgreSQL: {error}"))
     }
 
+    fn run_pg_amcheck(&self) -> Result<(), String> {
+        let settings = self.postgresql.settings();
+        let pg_amcheck = settings.binary_dir().join(postgres_binary("pg_amcheck"));
+        let output = Command::new(&pg_amcheck)
+            .args([
+                "--no-password",
+                "--install-missing=pg_catalog",
+                "--on-error-stop",
+                "--jobs=1",
+                "--host",
+                settings.host.as_str(),
+                "--port",
+                &settings.port.to_string(),
+                "--username",
+                settings.username.as_str(),
+                DATABASE_NAME,
+            ])
+            .env("PGPASSWORD", &settings.password)
+            .output()
+            .map_err(|error| format!("Could not start bundled pg_amcheck: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() { stderr } else { stdout };
+        Err(if detail.is_empty() {
+            "Managed PostgreSQL integrity check failed.".to_string()
+        } else {
+            format!("Managed PostgreSQL integrity check failed: {detail}")
+        })
+    }
+
     fn write_encrypted_dump(
         &self,
         destination: &Path,
         identity: &x25519::Identity,
+    ) -> Result<(), String> {
+        let recipient = identity.to_public();
+        let encryptor =
+            Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
+                .map_err(|error| format!("Could not initialize backup encryption: {error}"))?;
+        self.write_encrypted_dump_with(destination, encryptor)
+    }
+
+    fn write_encrypted_dump_with(
+        &self,
+        destination: &Path,
+        encryptor: Encryptor,
     ) -> Result<(), String> {
         let settings = self.postgresql.settings();
         let pg_dump = settings.binary_dir().join(postgres_binary("pg_dump"));
@@ -194,10 +350,6 @@ impl ManagedPostgres {
             let output = secure_file(destination)
                 .map(BufWriter::new)
                 .map_err(|error| format!("Could not create encrypted backup: {error}"))?;
-            let recipient = identity.to_public();
-            let encryptor =
-                Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
-                    .map_err(|error| format!("Could not initialize backup encryption: {error}"))?;
             let mut encrypted = encryptor
                 .wrap_output(output)
                 .map_err(|error| format!("Could not write backup encryption header: {error}"))?;
@@ -246,10 +398,7 @@ impl ManagedPostgres {
                 backup_directory.display()
             )
         })?;
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| format!("System clock cannot timestamp a database backup: {error}"))?
-            .as_millis();
+        let timestamp = unix_timestamp_millis()?;
         let final_path = backup_directory.join(format!("{prefix}{timestamp}.dump.age"));
         let partial_path = backup_directory.join(format!("{prefix}{timestamp}.dump.age.partial"));
         if let Err(error) = self.write_encrypted_dump(&partial_path, identity) {
@@ -317,6 +466,40 @@ impl ManagedPostgres {
                 DATABASE_NAME,
             ],
             "Encrypted PostgreSQL backup restore",
+        )
+    }
+
+    fn verify_passphrase_encrypted_dump(
+        &self,
+        source: &Path,
+        passphrase: SecretString,
+    ) -> Result<(), String> {
+        let mut plaintext = passphrase_decryptor(source, passphrase)?;
+        self.run_pg_restore(
+            &mut plaintext,
+            &["--list"],
+            "Portable PostgreSQL recovery archive verification",
+        )
+    }
+
+    fn restore_passphrase_encrypted_dump(
+        &self,
+        source: &Path,
+        passphrase: SecretString,
+    ) -> Result<(), String> {
+        let mut plaintext = passphrase_decryptor(source, passphrase)?;
+        self.run_pg_restore(
+            &mut plaintext,
+            &[
+                "--clean",
+                "--if-exists",
+                "--single-transaction",
+                "--no-owner",
+                "--no-privileges",
+                "--dbname",
+                DATABASE_NAME,
+            ],
+            "Portable PostgreSQL recovery archive restore",
         )
     }
 
@@ -404,6 +587,156 @@ fn secure_file(path: &Path) -> io::Result<File> {
     #[cfg(unix)]
     options.mode(0o600);
     options.open(path)
+}
+
+fn unix_timestamp_millis() -> Result<u64, String> {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("System clock cannot timestamp a database backup: {error}"))?
+        .as_millis();
+    u64::try_from(millis).map_err(|_| "Database backup timestamp exceeds u64.".to_string())
+}
+
+fn latest_integrity_check(directory: &Path) -> Result<Option<u64>, String> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect PostgreSQL integrity state: {error}"
+            ))
+        }
+    };
+    let mut latest = None;
+    for entry in entries {
+        let entry = entry
+            .map_err(|error| format!("Could not inspect PostgreSQL integrity state: {error}"))?;
+        if !entry
+            .file_type()
+            .map_err(|error| format!("Could not inspect PostgreSQL integrity marker: {error}"))?
+            .is_file()
+        {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(timestamp) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(INTEGRITY_MARKER_PREFIX))
+            .and_then(|value| value.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        latest = Some(latest.map_or(timestamp, |current: u64| current.max(timestamp)));
+    }
+    Ok(latest)
+}
+
+pub fn last_integrity_check_at(directory: &Path) -> Result<Option<u64>, String> {
+    latest_integrity_check(directory)
+}
+
+pub fn integrity_check_interval_millis() -> u64 {
+    INTEGRITY_CHECK_INTERVAL.as_millis() as u64
+}
+
+fn commit_integrity_marker(directory: &Path, timestamp: u64) -> Result<(), String> {
+    let marker = directory.join(format!("{INTEGRITY_MARKER_PREFIX}{timestamp}"));
+    let file = secure_file(&marker)
+        .map_err(|error| format!("Could not commit PostgreSQL integrity marker: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("Could not sync PostgreSQL integrity marker: {error}"))?;
+    sync_parent_directory(&marker)?;
+    for entry in fs::read_dir(directory)
+        .map_err(|error| format!("Could not rotate PostgreSQL integrity state: {error}"))?
+    {
+        let entry = entry
+            .map_err(|error| format!("Could not rotate PostgreSQL integrity state: {error}"))?;
+        let path = entry.path();
+        if path != marker
+            && entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(INTEGRITY_MARKER_PREFIX))
+            && path.is_file()
+            && !path.is_symlink()
+        {
+            fs::remove_file(&path).map_err(|error| {
+                format!(
+                    "Could not rotate PostgreSQL integrity marker {}: {error}",
+                    path.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_portable_source(path: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("Could not open the PostgreSQL recovery archive: {error}"))?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err("The PostgreSQL recovery archive is not a regular file.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_portable_destination(path: &Path) -> Result<(), String> {
+    if path.file_name().is_none() {
+        return Err("Choose a file for the PostgreSQL recovery archive.".to_string());
+    }
+    if path.exists() {
+        return Err(
+            "The selected recovery archive already exists; choose a new file name.".to_string(),
+        );
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "The recovery archive destination has no parent directory.".to_string())?;
+    let metadata = fs::metadata(parent).map_err(|error| {
+        format!(
+            "Could not inspect the recovery archive directory {}: {error}",
+            parent.display()
+        )
+    })?;
+    if !metadata.is_dir() {
+        return Err("The recovery archive destination is not a directory.".to_string());
+    }
+    Ok(())
+}
+
+fn portable_partial_path(destination: &Path) -> Result<PathBuf, String> {
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "The recovery archive file name is not valid UTF-8.".to_string())?;
+    Ok(destination.with_file_name(format!(".{name}.{}.partial", uuid::Uuid::new_v4())))
+}
+
+fn sync_parent_directory(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        File::open(
+            path.parent()
+                .ok_or_else(|| "The recovery archive has no parent directory.".to_string())?,
+        )
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("Could not sync the recovery archive directory: {error}"))?;
+    }
+    Ok(())
+}
+
+fn passphrase_decryptor(source: &Path, passphrase: SecretString) -> Result<Box<dyn Read>, String> {
+    let encrypted = File::open(source)
+        .map(BufReader::new)
+        .map_err(|error| format!("Could not open portable PostgreSQL recovery archive: {error}"))?;
+    let decryptor = Decryptor::new(encrypted).map_err(|error| {
+        format!("Could not parse portable PostgreSQL recovery archive: {error}")
+    })?;
+    let identity = age::scrypt::Identity::new(passphrase);
+    decryptor
+        .decrypt(std::iter::once(&identity as &dyn age::Identity))
+        .map(|reader| Box::new(reader) as Box<dyn Read>)
+        .map_err(|error| format!("Could not decrypt portable PostgreSQL recovery archive: {error}"))
 }
 
 fn stream_archive_to(
@@ -510,6 +843,81 @@ pub fn list_backups(directory: &Path) -> Result<Vec<ManagedRuntimeBackup>, Strin
     Ok(backups)
 }
 
+pub fn stage_managed_backup(
+    directory: &Path,
+    backup_id: &str,
+    staging_directory: &Path,
+) -> Result<PathBuf, String> {
+    let source = resolve_managed_backup(directory, backup_id)?;
+    fs::create_dir_all(staging_directory).map_err(|error| {
+        format!(
+            "Could not create PostgreSQL recovery staging directory {}: {error}",
+            staging_directory.display()
+        )
+    })?;
+    let staged = staging_directory.join(format!("{}.dump.age", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut input = File::open(&source)
+            .map(BufReader::new)
+            .map_err(|error| format!("Could not open selected PostgreSQL backup: {error}"))?;
+        let mut output = secure_file(&staged)
+            .map(BufWriter::new)
+            .map_err(|error| format!("Could not stage selected PostgreSQL backup: {error}"))?;
+        io::copy(&mut input, &mut output)
+            .map_err(|error| format!("Could not stage selected PostgreSQL backup: {error}"))?;
+        output
+            .flush()
+            .and_then(|_| output.get_ref().sync_all())
+            .map_err(|error| format!("Could not sync staged PostgreSQL backup: {error}"))?;
+        sync_parent_directory(&staged)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&staged);
+    }
+    result.map(|_| staged)
+}
+
+pub fn retain_staged_managed_backup(
+    staged: &Path,
+    directory: &Path,
+    backup_id: &str,
+) -> Result<(), String> {
+    if managed_backup_identity(backup_id).is_none()
+        || Path::new(backup_id)
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some(backup_id)
+    {
+        return Err("The selected PostgreSQL backup identifier is invalid.".to_string());
+    }
+    validate_portable_source(staged)?;
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("Could not recreate PostgreSQL backup directory: {error}"))?;
+    let destination = directory.join(backup_id);
+    if destination.exists() {
+        return Ok(());
+    }
+    let mut input = File::open(staged)
+        .map(BufReader::new)
+        .map_err(|error| format!("Could not reopen staged PostgreSQL backup: {error}"))?;
+    let mut output = secure_file(&destination)
+        .map(BufWriter::new)
+        .map_err(|error| format!("Could not retain selected PostgreSQL backup: {error}"))?;
+    let result = io::copy(&mut input, &mut output)
+        .map_err(|error| format!("Could not retain selected PostgreSQL backup: {error}"))
+        .and_then(|_| {
+            output
+                .flush()
+                .and_then(|_| output.get_ref().sync_all())
+                .map_err(|error| format!("Could not sync retained PostgreSQL backup: {error}"))
+        })
+        .and_then(|_| sync_parent_directory(&destination));
+    if result.is_err() {
+        let _ = fs::remove_file(&destination);
+    }
+    result
+}
+
 fn resolve_managed_backup(directory: &Path, backup_id: &str) -> Result<PathBuf, String> {
     if Path::new(backup_id)
         .file_name()
@@ -537,6 +945,10 @@ fn managed_backup_identity(name: &str) -> Option<(&'static str, u64)> {
         "pre-restore"
     } else if prefix.starts_with("pre-update-v") {
         "pre-update"
+    } else if prefix == "automatic" {
+        "automatic"
+    } else if prefix == "manual" {
+        "manual"
     } else {
         return None;
     };
@@ -547,26 +959,22 @@ fn rotate_backups(directory: &Path) -> Result<(), String> {
     let mut backups = fs::read_dir(directory)
         .map_err(|error| format!("Could not inspect PostgreSQL backups: {error}"))?
         .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let (kind, timestamp) = path
+                .file_name()
                 .and_then(|name| name.to_str())
-                .and_then(managed_backup_identity)
-                .is_some()
-                && path.is_file()
-                && !path.is_symlink()
+                .and_then(managed_backup_identity)?;
+            (path.is_file() && !path.is_symlink()).then_some((path, kind, timestamp))
         })
         .collect::<Vec<_>>();
-    backups.sort_by_key(|path| {
-        std::cmp::Reverse(
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .and_then(managed_backup_identity)
-                .map(|(_, timestamp)| timestamp)
-                .unwrap_or(0),
-        )
-    });
-    for expired in backups.into_iter().skip(BACKUP_RETENTION_COUNT) {
+    backups.sort_by_key(|(_, kind, timestamp)| (*kind, std::cmp::Reverse(*timestamp)));
+    let mut seen = std::collections::HashMap::<&str, usize>::new();
+    for (expired, _, _) in backups.into_iter().filter(|(_, kind, _)| {
+        let count = seen.entry(kind).or_default();
+        *count += 1;
+        *count > backup_retention(kind)
+    }) {
         fs::remove_file(&expired).map_err(|error| {
             format!(
                 "Could not rotate expired PostgreSQL backup {}: {error}",
@@ -577,6 +985,14 @@ fn rotate_backups(directory: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn backup_retention(kind: &str) -> usize {
+    match kind {
+        "automatic" => AUTOMATIC_BACKUP_RETENTION_COUNT,
+        "manual" => MANUAL_BACKUP_RETENTION_COUNT,
+        _ => SAFETY_BACKUP_RETENTION_COUNT,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -585,12 +1001,14 @@ mod tests {
         process::Command,
     };
 
-    use age::x25519;
+    use age::{secrecy::SecretString, x25519};
 
     use super::{
-        acquire_root_lock, list_backups, postgres_binary, resolve_managed_backup, rotate_backups,
-        safe_filename_component, stream_archive_to, ManagedPostgres, BACKUP_RETENTION_COUNT,
-        DATABASE_NAME,
+        acquire_root_lock, commit_integrity_marker, latest_integrity_check, list_backups,
+        postgres_binary, resolve_managed_backup, retain_staged_managed_backup, rotate_backups,
+        safe_filename_component, stage_managed_backup, stream_archive_to, ManagedPostgres,
+        AUTOMATIC_BACKUP_RETENTION_COUNT, DATABASE_NAME, MANUAL_BACKUP_RETENTION_COUNT,
+        SAFETY_BACKUP_RETENTION_COUNT,
     };
 
     struct EarlyClosingWriter {
@@ -644,13 +1062,27 @@ mod tests {
     }
 
     #[test]
-    fn rotates_only_managed_backups_and_keeps_the_newest_seven() {
+    fn rotates_each_backup_class_without_one_class_evicting_another() {
         let directory = tempfile::tempdir().unwrap();
-        for index in 0..9 {
+        for index in 0..(AUTOMATIC_BACKUP_RETENTION_COUNT + 2) {
+            fs::write(
+                directory.path().join(format!("automatic-{index}.dump.age")),
+                [],
+            )
+            .unwrap();
+        }
+        for index in 0..(MANUAL_BACKUP_RETENTION_COUNT + 1) {
+            fs::write(
+                directory.path().join(format!("manual-{index}.dump.age")),
+                [],
+            )
+            .unwrap();
+        }
+        for index in 0..(SAFETY_BACKUP_RETENTION_COUNT + 1) {
             fs::write(
                 directory
                     .path()
-                    .join(format!("pre-migration-v0.1.{index}-{index}.dump.age")),
+                    .join(format!("pre-migration-v0.1.0-{index}.dump.age")),
                 [],
             )
             .unwrap();
@@ -669,13 +1101,54 @@ mod tests {
 
         assert_eq!(
             list_backups(directory.path()).unwrap().len(),
-            BACKUP_RETENTION_COUNT
+            AUTOMATIC_BACKUP_RETENTION_COUNT
+                + MANUAL_BACKUP_RETENTION_COUNT
+                + SAFETY_BACKUP_RETENTION_COUNT
+                + 2
         );
         assert!(directory
             .path()
             .join("pre-update-v0.2.0-to-v0.3.0-101.dump.age")
             .exists());
         assert!(directory.path().join("user-owned.dump.age").exists());
+    }
+
+    #[test]
+    fn lists_automatic_and_manual_recovery_points() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("automatic-10.dump.age"), [1]).unwrap();
+        fs::write(directory.path().join("manual-20.dump.age"), [1, 2]).unwrap();
+
+        let backups = list_backups(directory.path()).unwrap();
+
+        assert_eq!(backups[0].kind, "manual");
+        assert_eq!(backups[1].kind, "automatic");
+    }
+
+    #[test]
+    fn stages_and_retains_a_backup_across_cluster_quarantine() {
+        let directory = tempfile::tempdir().unwrap();
+        let staging = tempfile::tempdir().unwrap();
+        let backup_id = "automatic-20.dump.age";
+        let source = directory.path().join(backup_id);
+        fs::write(&source, [1, 2, 3, 4]).unwrap();
+
+        let staged = stage_managed_backup(directory.path(), backup_id, staging.path()).unwrap();
+        fs::remove_file(&source).unwrap();
+        retain_staged_managed_backup(&staged, directory.path(), backup_id).unwrap();
+
+        assert_eq!(fs::read(source).unwrap(), [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn commits_only_the_latest_successful_integrity_marker() {
+        let directory = tempfile::tempdir().unwrap();
+
+        commit_integrity_marker(directory.path(), 10).unwrap();
+        commit_integrity_marker(directory.path(), 20).unwrap();
+
+        assert_eq!(latest_integrity_check(directory.path()).unwrap(), Some(20));
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[test]
@@ -722,6 +1195,13 @@ mod tests {
             "CREATE TABLE restore_probe(value text NOT NULL); INSERT INTO restore_probe VALUES ('before');",
         );
         postgres.database_preexisting = true;
+        let integrity_state = tempfile::tempdir().unwrap();
+        assert!(postgres
+            .verify_integrity_if_due(integrity_state.path())
+            .unwrap());
+        assert!(!postgres
+            .verify_integrity_if_due(integrity_state.path())
+            .unwrap());
         let identity = x25519::Identity::generate();
         let backup = postgres
             .create_release_backup(backups.path(), "0.1.0", &identity)
@@ -758,6 +1238,23 @@ mod tests {
             .unwrap()
             .iter()
             .any(|backup| backup.kind == "pre-update"));
+
+        let portable = backups.path().join("portable-recovery.dump.age");
+        let passphrase = SecretString::from("portable-test-passphrase".to_string());
+        postgres
+            .create_portable_backup(&portable, passphrase.clone())
+            .unwrap();
+        execute_sql(
+            &postgres,
+            "TRUNCATE restore_probe; INSERT INTO restore_probe VALUES ('portable-after');",
+        );
+        postgres
+            .restore_portable_backup(&portable, passphrase, backups.path(), "0.3.0", &identity)
+            .unwrap();
+        assert_eq!(
+            query_sql(&postgres, "SELECT value FROM restore_probe"),
+            "before"
+        );
     }
 
     fn execute_sql(postgres: &ManagedPostgres, sql: &str) {

@@ -5,6 +5,7 @@ use std::sync::{
 use std::time::Duration;
 
 use serde::Serialize;
+use serde_json::json;
 use tauri::{App, AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use url::Url;
@@ -207,9 +208,15 @@ pub async fn install_app_update(
     let backup_path =
         managed_runtime::prepare_for_app_update(&app, &update.current_version, &update.version)
             .await?;
-    eprintln!(
-        "[app-update] Created and verified pre-update backup at {}.",
-        backup_path.display()
+    managed_runtime::observability::info(
+        "managed_postgres.backup_created",
+        json!({
+            "kind": "pre-update",
+            "backupId": backup_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unavailable"),
+        }),
     );
     emit_progress(&app, "installing", None, None);
     if let Err(error) = update.install(bytes) {

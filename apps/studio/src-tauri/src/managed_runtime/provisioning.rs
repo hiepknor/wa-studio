@@ -8,7 +8,8 @@ use uuid::Uuid;
 use super::secret_store;
 
 const OPENWA_RELEASE: &str = "0.22.0";
-const EVENT_INBOX_PROTOCOL: u8 = 1;
+const EVENT_INBOX_PROTOCOL_V1: u8 = 1;
+const EVENT_INBOX_PROTOCOL_V2: u8 = 2;
 const MAX_SECRET_LENGTH: usize = 4_096;
 const MAX_SESSION_COUNT: usize = 1_000;
 
@@ -251,9 +252,10 @@ fn probe_and_pair(
     let discovery: StudioDiscovery = discovery
         .json()
         .map_err(|error| format!("WA Studio discovery response is invalid: {error}"))?;
-    if discovery.protocol_version != EVENT_INBOX_PROTOCOL {
+    if !supports_event_inbox_protocol(discovery.protocol_version) {
         return Err("WA Studio discovery protocol is incompatible.".to_string());
     }
+    let discovered_protocol = discovery.protocol_version;
     let event_inbox_base_url = normalize_origin(&discovery.event_inbox_url, "Event Inbox")?;
 
     let pairing = client
@@ -274,14 +276,17 @@ fn probe_and_pair(
     let pairing: PairingResponse = pairing
         .json()
         .map_err(|error| format!("WA Event Inbox pairing response is invalid: {error}"))?;
-    validate_pairing(pairing, &event_inbox_base_url)
+    validate_pairing(pairing, &event_inbox_base_url, discovered_protocol)
 }
 
 fn validate_pairing(
     mut pairing: PairingResponse,
     discovered_base_url: &str,
+    discovered_protocol: u8,
 ) -> Result<PairingResponse, String> {
-    if pairing.protocol_version != EVENT_INBOX_PROTOCOL {
+    if !supports_event_inbox_protocol(pairing.protocol_version)
+        || pairing.protocol_version != discovered_protocol
+    {
         return Err("WA Event Inbox protocol is incompatible.".to_string());
     }
     pairing.event_inbox_base_url = normalize_origin(&pairing.event_inbox_base_url, "Event Inbox")?;
@@ -311,6 +316,10 @@ fn validate_pairing(
         .filter(|id| seen.insert(id.clone()))
         .collect();
     Ok(pairing)
+}
+
+fn supports_event_inbox_protocol(protocol: u8) -> bool {
+    matches!(protocol, EVENT_INBOX_PROTOCOL_V1 | EVENT_INBOX_PROTOCOL_V2)
 }
 
 fn credentials(
@@ -378,7 +387,10 @@ fn profile_from_credentials(
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize, validate_pairing, ManagedRuntimeProvisioningInput, PairingResponse};
+    use super::{
+        normalize, supports_event_inbox_protocol, validate_pairing,
+        ManagedRuntimeProvisioningInput, PairingResponse,
+    };
 
     fn input() -> ManagedRuntimeProvisioningInput {
         ManagedRuntimeProvisioningInput {
@@ -408,24 +420,27 @@ mod tests {
 
     #[test]
     fn accepts_only_a_pairing_bound_to_the_discovered_origin_and_callback() {
+        assert!(supports_event_inbox_protocol(1));
+        assert!(supports_event_inbox_protocol(2));
+        assert!(!supports_event_inbox_protocol(3));
         let valid = PairingResponse {
-            protocol_version: 1,
+            protocol_version: 2,
             event_inbox_base_url: "https://events.example.test".to_string(),
             callback_url: "https://events.example.test/api/v1/webhooks/openwa".to_string(),
             device_token: "device-token-with-at-least-thirty-two-characters".to_string(),
             webhook_secret: "webhook-secret-with-at-least-thirty-two-characters".to_string(),
             session_ids: vec!["00000000-0000-4000-8000-000000000001".to_string()],
         };
-        assert!(validate_pairing(valid, "https://events.example.test").is_ok());
+        assert!(validate_pairing(valid, "https://events.example.test", 2).is_ok());
 
         let wrong_origin = PairingResponse {
-            protocol_version: 1,
+            protocol_version: 2,
             event_inbox_base_url: "https://attacker.example.test".to_string(),
             callback_url: "https://attacker.example.test/api/v1/webhooks/openwa".to_string(),
             device_token: "device-token-with-at-least-thirty-two-characters".to_string(),
             webhook_secret: "webhook-secret-with-at-least-thirty-two-characters".to_string(),
             session_ids: vec!["00000000-0000-4000-8000-000000000001".to_string()],
         };
-        assert!(validate_pairing(wrong_origin, "https://events.example.test").is_err());
+        assert!(validate_pairing(wrong_origin, "https://events.example.test", 2).is_err());
     }
 }

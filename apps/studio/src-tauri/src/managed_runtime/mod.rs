@@ -1,35 +1,122 @@
 mod config;
+mod config_envelope;
 mod model;
+pub(crate) mod observability;
 mod postgres;
 mod provisioning;
 mod secret_store;
 mod state;
+pub(crate) mod transport;
 
 use std::{
-    fs::create_dir_all,
+    fs::{self, create_dir_all},
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    path::Path,
+    path::{Path, PathBuf},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use age::secrecy::SecretString;
 use config::{DesktopDatabaseConfig, DesktopRuntimeConfig};
-use model::{ManagedRuntimeConnection, ManagedRuntimePhase};
+use model::{ManagedRuntimeConnection, ManagedRuntimePhase, ProtectionFreshness};
 use provisioning::{ManagedRuntimeProvisioningInput, ManagedRuntimeProvisioningProfile};
+use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
-pub use model::{ManagedRuntimeBackup, ManagedRuntimeSnapshot, RuntimeReleaseManifest};
+pub use model::{
+    ManagedRuntimeBackup, ManagedRuntimeDiagnostics, ManagedRuntimeSnapshot,
+    ManagedRuntimeTransportKind, RuntimeReleaseManifest,
+};
+use state::AutoRestartPlan;
 pub use state::ManagedRuntimeState;
 
 pub const STATE_CHANGED_EVENT: &str = "managed-runtime://state-changed";
+const RECOVERY_FRESHNESS_INTERVAL_MS: u64 = 24 * 60 * 60 * 1_000;
+
+fn current_timestamp_millis() -> Result<u64, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .map_err(|error| format!("System clock error: {error}"))
+}
+
+fn protection_freshness(
+    now_ms: u64,
+    last_success_at_ms: Option<u64>,
+    interval_ms: u64,
+) -> ProtectionFreshness {
+    match last_success_at_ms {
+        None => ProtectionFreshness::Missing,
+        Some(timestamp) if now_ms.saturating_sub(timestamp) <= interval_ms => {
+            ProtectionFreshness::Fresh
+        }
+        Some(_) => ProtectionFreshness::Due,
+    }
+}
 
 #[tauri::command]
 pub fn get_managed_runtime_state(
     state: State<'_, ManagedRuntimeState>,
 ) -> Result<ManagedRuntimeSnapshot, String> {
     state.snapshot()
+}
+
+#[tauri::command]
+pub async fn get_managed_runtime_diagnostics(
+    app: AppHandle,
+) -> Result<ManagedRuntimeDiagnostics, String> {
+    let state = app.state::<ManagedRuntimeState>();
+    let snapshot = state.snapshot()?;
+    let generated_at_ms = current_timestamp_millis()?;
+    let process_generation = state.process_generation()?;
+    let managed_postgres_running = state.managed_postgres_running()?;
+    let config = tauri::async_runtime::spawn_blocking(DesktopRuntimeConfig::load)
+        .await
+        .map_err(|error| format!("Managed Runtime configuration task failed: {error}"))??;
+    let app_data_directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Could not resolve WA Desktop data directory: {error}"))?;
+    let backup_directory = config
+        .as_ref()
+        .and_then(|config| config.managed_backup_directory(&app_data_directory));
+    let (backups, last_integrity_check_at_ms) = match backup_directory {
+        Some(directory) => tauri::async_runtime::spawn_blocking(move || {
+            Ok::<_, String>((
+                postgres::list_backups(&directory)?,
+                postgres::last_integrity_check_at(&directory)?,
+            ))
+        })
+        .await
+        .map_err(|error| format!("Managed PostgreSQL diagnostics task failed: {error}"))??,
+        None => (Vec::new(), None),
+    };
+    let latest_recovery_point_at_ms = backups.first().map(|backup| backup.created_at_ms);
+    Ok(ManagedRuntimeDiagnostics {
+        generated_at_ms,
+        desktop_product: "wa-studio",
+        runtime_service: "wa-runtime",
+        runtime_phase: snapshot.phase,
+        runtime_version: snapshot.manifest.map(|manifest| manifest.version),
+        process_generation,
+        managed_postgres_running,
+        recovery_point_count: backups.len(),
+        latest_recovery_point_at_ms,
+        recovery_freshness: protection_freshness(
+            generated_at_ms,
+            latest_recovery_point_at_ms,
+            RECOVERY_FRESHNESS_INTERVAL_MS,
+        ),
+        last_integrity_check_at_ms,
+        integrity_freshness: protection_freshness(
+            generated_at_ms,
+            last_integrity_check_at_ms,
+            postgres::integrity_check_interval_millis(),
+        ),
+    })
 }
 
 #[tauri::command]
@@ -125,6 +212,86 @@ pub async fn list_managed_runtime_backups(
 }
 
 #[tauri::command]
+pub async fn create_managed_runtime_backup(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<ManagedRuntimeState>();
+    let _maintenance = state.begin_maintenance("manual database backup")?;
+    if state.snapshot()?.phase != ManagedRuntimePhase::Ready {
+        return Err("Managed Runtime must be ready before creating a manual backup.".to_string());
+    }
+    let config = load_runtime_config().await?;
+    let identity = managed_backup_identity(&config).await?;
+    let backup_directory = managed_backup_directory_for_config(&app, &config)?;
+    let backup_app = app.clone();
+    let path = tauri::async_runtime::spawn_blocking(move || {
+        backup_app
+            .state::<ManagedRuntimeState>()
+            .create_manual_postgres_backup(&backup_directory, &identity)
+    })
+    .await
+    .map_err(|error| format!("Managed PostgreSQL manual backup task failed: {error}"))??;
+    observability::info(
+        "managed_postgres.backup_created",
+        json!({ "kind": "manual", "backupId": backup_file_name(&path) }),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn export_managed_runtime_recovery_archive(
+    app: AppHandle,
+    passphrase: String,
+) -> Result<Option<String>, String> {
+    let passphrase = recovery_passphrase(passphrase)?;
+    if app.state::<ManagedRuntimeState>().snapshot()?.phase != ManagedRuntimePhase::Ready {
+        return Err(
+            "Managed Runtime must be ready before exporting a recovery archive.".to_string(),
+        );
+    }
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("System clock error: {error}"))?
+        .as_millis();
+    let dialog_app = app.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .add_filter("WA Runtime recovery archive", &["age"])
+            .set_file_name(format!("wa-runtime-recovery-{timestamp}.dump.age"))
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|error| format!("Recovery archive save dialog failed: {error}"))?;
+    let Some(destination) = selected else {
+        return Ok(None);
+    };
+    let destination = destination
+        .into_path()
+        .map_err(|error| format!("Recovery archive destination is invalid: {error}"))?;
+    let state = app.state::<ManagedRuntimeState>();
+    let _maintenance = state.begin_maintenance("recovery archive export")?;
+    if state.snapshot()?.phase != ManagedRuntimePhase::Ready {
+        return Err(
+            "Managed Runtime changed state before the recovery export started.".to_string(),
+        );
+    }
+    let export_app = app.clone();
+    let display_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("WA Runtime recovery archive")
+        .to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        export_app
+            .state::<ManagedRuntimeState>()
+            .create_portable_postgres_backup(&destination, passphrase)
+    })
+    .await
+    .map_err(|error| format!("Portable PostgreSQL backup task failed: {error}"))??;
+    Ok(Some(display_name))
+}
+
+#[tauri::command]
 pub async fn restore_managed_runtime_backup(
     app: AppHandle,
     backup_id: String,
@@ -140,31 +307,37 @@ async fn restore_managed_runtime_backup_inner(
 ) -> Result<(), String> {
     let state = app.state::<ManagedRuntimeState>();
     let snapshot = state.snapshot()?;
-    if snapshot.phase != ManagedRuntimePhase::Ready {
-        return Err("Managed Runtime must be ready before restoring a backup.".to_string());
+    if !matches!(
+        snapshot.phase,
+        ManagedRuntimePhase::Ready | ManagedRuntimePhase::Degraded
+    ) {
+        return Err(
+            "Managed Runtime must be ready or degraded before restoring a backup.".to_string(),
+        );
     }
     let manifest = snapshot
         .manifest
         .ok_or_else(|| "Managed Runtime release metadata is unavailable.".to_string())?;
-    let config = tauri::async_runtime::spawn_blocking(DesktopRuntimeConfig::load)
-        .await
-        .map_err(|error| format!("Managed Runtime configuration task failed: {error}"))??
-        .ok_or_else(|| "Managed Runtime provisioning is unavailable.".to_string())?;
-    let identity = match config.backup_identity_override() {
-        Some(encoded) => secret_store::parse_backup_identity(&encoded)?,
-        None => {
-            tauri::async_runtime::spawn_blocking(secret_store::managed_postgres_backup_identity)
-                .await
-                .map_err(|error| {
-                    format!("Managed PostgreSQL local secret task failed: {error}")
-                })??
-        }
-    };
+    let config = load_runtime_config().await?;
+    let identity = managed_backup_identity(&config).await?;
     let backup_directory = managed_backup_directory_for_config(app, &config)?;
     publish_snapshot(
         app,
         ManagedRuntimeSnapshot::phase(ManagedRuntimePhase::Restoring, manifest.clone()),
     );
+
+    if snapshot.phase == ManagedRuntimePhase::Degraded {
+        return restore_degraded_managed_backup(
+            app,
+            config,
+            backup_directory,
+            backup_id,
+            manifest,
+            identity,
+        )
+        .await;
+    }
+
     let stop_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         stop_app
@@ -176,6 +349,7 @@ async fn restore_managed_runtime_backup_inner(
 
     let restore_app = app.clone();
     let release_version = manifest.version;
+    let restored_backup_id = backup_id.clone();
     let restore_result = tauri::async_runtime::spawn_blocking(move || {
         restore_app
             .state::<ManagedRuntimeState>()
@@ -184,9 +358,12 @@ async fn restore_managed_runtime_backup_inner(
     .await
     .map_err(|error| format!("Managed PostgreSQL restore task failed: {error}"))?;
     if let Ok(ref safety_backup) = restore_result {
-        eprintln!(
-            "[managed-postgres] Restored encrypted backup; pre-restore safety backup is at {}.",
-            safety_backup.display()
+        observability::info(
+            "managed_postgres.backup_restored",
+            json!({
+                "sourceBackupId": restored_backup_id,
+                "safetyBackupId": backup_file_name(safety_backup),
+            }),
         );
     }
 
@@ -203,6 +380,194 @@ async fn restore_managed_runtime_backup_inner(
 }
 
 #[tauri::command]
+pub async fn restore_managed_runtime_recovery_archive(
+    app: AppHandle,
+    passphrase: String,
+) -> Result<bool, String> {
+    let passphrase = recovery_passphrase(passphrase)?;
+    if app.state::<ManagedRuntimeState>().snapshot()?.phase != ManagedRuntimePhase::Ready {
+        return Err(
+            "Managed Runtime must be ready before importing a portable recovery archive."
+                .to_string(),
+        );
+    }
+    let dialog_app = app.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .add_filter("WA Runtime recovery archive", &["age"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|error| format!("Recovery archive open dialog failed: {error}"))?;
+    let Some(source) = selected else {
+        return Ok(false);
+    };
+    let source = source
+        .into_path()
+        .map_err(|error| format!("Recovery archive source is invalid: {error}"))?;
+    let state = app.state::<ManagedRuntimeState>();
+    let _maintenance = state.begin_maintenance("portable database restore")?;
+    let snapshot = state.snapshot()?;
+    if snapshot.phase != ManagedRuntimePhase::Ready {
+        return Err(
+            "Managed Runtime changed state before the recovery import started.".to_string(),
+        );
+    }
+    let manifest = snapshot
+        .manifest
+        .ok_or_else(|| "Managed Runtime release metadata is unavailable.".to_string())?;
+    let config = load_runtime_config().await?;
+    let identity = managed_backup_identity(&config).await?;
+    let backup_directory = managed_backup_directory_for_config(&app, &config)?;
+    publish_snapshot(
+        &app,
+        ManagedRuntimeSnapshot::phase(ManagedRuntimePhase::Restoring, manifest.clone()),
+    );
+
+    let stop_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        stop_app
+            .state::<ManagedRuntimeState>()
+            .stop_processes_for_restart()
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime stop task failed: {error}"))??;
+
+    let restore_app = app.clone();
+    let release_version = manifest.version;
+    let restore_result = tauri::async_runtime::spawn_blocking(move || {
+        restore_app
+            .state::<ManagedRuntimeState>()
+            .restore_portable_postgres_backup(
+                &source,
+                passphrase,
+                &backup_directory,
+                &release_version,
+                &identity,
+            )
+    })
+    .await
+    .map_err(|error| format!("Portable PostgreSQL restore task failed: {error}"))?;
+
+    let restart_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        restart_app
+            .state::<ManagedRuntimeState>()
+            .stop_postgres_for_restart()
+    })
+    .await
+    .map_err(|error| format!("Managed PostgreSQL restart task failed: {error}"))??;
+    initialize(&app);
+    restore_result.map(|_| true)
+}
+
+async fn restore_degraded_managed_backup(
+    app: &AppHandle,
+    config: DesktopRuntimeConfig,
+    backup_directory: PathBuf,
+    backup_id: String,
+    manifest: RuntimeReleaseManifest,
+    identity: age::x25519::Identity,
+) -> Result<(), String> {
+    let app_data_directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Could not resolve WA Desktop data directory: {error}"))?;
+    let (root, password) = match config.database {
+        DesktopDatabaseConfig::External { .. } => {
+            return Err("External PostgreSQL databases are not managed by WA Studio.".to_string())
+        }
+        DesktopDatabaseConfig::Managed { root, password, .. } => {
+            let password = match password {
+                Some(password) => password,
+                None => {
+                    tauri::async_runtime::spawn_blocking(secret_store::managed_postgres_password)
+                        .await
+                        .map_err(|error| {
+                            format!("Managed PostgreSQL local secret task failed: {error}")
+                        })??
+                }
+            };
+            (
+                root.unwrap_or_else(|| app_data_directory.join("postgresql")),
+                password,
+            )
+        }
+    };
+    let staging_directory = std::env::temp_dir()
+        .join("wa-runtime-recovery")
+        .join(uuid::Uuid::new_v4().to_string());
+    let stage_directory = staging_directory.clone();
+    let stage_backup_directory = backup_directory.clone();
+    let stage_backup_id = backup_id.clone();
+    let staged = tauri::async_runtime::spawn_blocking(move || {
+        postgres::stage_managed_backup(&stage_backup_directory, &stage_backup_id, &stage_directory)
+    })
+    .await
+    .map_err(|error| format!("Managed PostgreSQL recovery staging task failed: {error}"))??;
+
+    let recovery_app = app.clone();
+    let recovery_root = root.clone();
+    let recovery_backup_directory = backup_directory.clone();
+    let recovery_backup_id = backup_id.clone();
+    let staged_for_recovery = staged.clone();
+    let recovery = tauri::async_runtime::spawn_blocking(move || {
+        let state = recovery_app.state::<ManagedRuntimeState>();
+        state.stop_processes_for_restart()?;
+        state.stop_postgres_for_restart()?;
+        let quarantine = quarantine_path(&recovery_root, "stale")?;
+        if recovery_root.exists() {
+            fs::rename(&recovery_root, &quarantine).map_err(|error| {
+                format!(
+                    "Could not quarantine degraded PostgreSQL data at {}: {error}",
+                    quarantine.display()
+                )
+            })?;
+            observability::warn(
+                "managed_postgres.data_quarantined",
+                json!({ "reason": "degraded-recovery" }),
+            );
+        }
+        state.resume_for_restart();
+        state.start_postgres(&recovery_root, password)?;
+        let restore_result =
+            state.restore_postgres_verified_source(&staged_for_recovery, &identity);
+        let retain_result = if restore_result.is_ok() {
+            postgres::retain_staged_managed_backup(
+                &staged_for_recovery,
+                &recovery_backup_directory,
+                &recovery_backup_id,
+            )
+        } else {
+            Ok(())
+        };
+        let stop_result = state.stop_postgres_for_restart();
+        restore_result.and(retain_result).and(stop_result)
+    })
+    .await
+    .map_err(|error| format!("Managed PostgreSQL degraded recovery task failed: {error}"))?;
+
+    let _ = fs::remove_file(&staged);
+    let _ = fs::remove_dir(&staging_directory);
+    match recovery {
+        Ok(()) => {
+            app.state::<ManagedRuntimeState>().resume_for_restart();
+            initialize(app);
+            Ok(())
+        }
+        Err(error) => {
+            publish_snapshot(
+                app,
+                ManagedRuntimeSnapshot::degraded(Some(manifest), error.clone()),
+            );
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
 pub async fn reset_managed_runtime_database(app: AppHandle) -> Result<(), String> {
     let snapshot = app.state::<ManagedRuntimeState>().snapshot()?;
     if snapshot.phase != ManagedRuntimePhase::Degraded {
@@ -210,18 +575,27 @@ pub async fn reset_managed_runtime_database(app: AppHandle) -> Result<(), String
             "Local workspace reset is only available after a Runtime startup failure.".to_string(),
         );
     }
-    let data_dir = app
+    let app_data_directory = app
         .path()
         .app_data_dir()
         .map_err(|error| format!("Could not resolve WA Desktop data directory: {error}"))?;
-    let postgres_dir = data_dir.join("postgresql");
-    let quarantine = data_dir.join(format!(
-        "postgresql-stale-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| format!("System clock error: {error}"))?
-            .as_millis()
-    ));
+    let config = load_runtime_config().await?;
+    let postgres_dir = match &config.database {
+        DesktopDatabaseConfig::External { .. } => {
+            return Err("External PostgreSQL databases cannot be reset by WA Studio.".to_string())
+        }
+        DesktopDatabaseConfig::Managed { root, .. } => root
+            .clone()
+            .unwrap_or_else(|| app_data_directory.join("postgresql")),
+    };
+    let backup_directory = managed_backup_directory_for_config(&app, &config)?;
+    if backup_directory.starts_with(&postgres_dir) {
+        return Err(
+            "Refusing to reset PostgreSQL because its backup directory is inside the database root. Move WA_DESKTOP_BACKUP_ROOT outside WA_DESKTOP_POSTGRES_ROOT."
+                .to_string(),
+        );
+    }
+    let quarantine = quarantine_path(&postgres_dir, "stale")?;
     let reset_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = reset_app.state::<ManagedRuntimeState>();
@@ -243,7 +617,10 @@ pub async fn reset_managed_runtime_database(app: AppHandle) -> Result<(), String
 pub fn initialize(app: &AppHandle) {
     let state = app.state::<ManagedRuntimeState>();
     if let Err(error) = state.begin_initialization() {
-        eprintln!("[managed-runtime] {error}");
+        observability::warn(
+            "managed_runtime.initialization_skipped",
+            json!({ "reason": error }),
+        );
         return;
     }
     let app = app.clone();
@@ -263,15 +640,20 @@ pub fn initialize(app: &AppHandle) {
             })
             .await
             {
-                Err(cleanup_error) => eprintln!(
-                    "[managed-runtime] Initialization cleanup task failed: {cleanup_error}"
+                Err(cleanup_error) => observability::error(
+                    "managed_runtime.initialization_cleanup_failed",
+                    json!({ "reason": cleanup_error.to_string(), "taskFailed": true }),
                 ),
-                Ok(Err(cleanup_error)) => {
-                    eprintln!("[managed-runtime] Initialization cleanup failed: {cleanup_error}")
-                }
+                Ok(Err(cleanup_error)) => observability::error(
+                    "managed_runtime.initialization_cleanup_failed",
+                    json!({ "reason": cleanup_error, "taskFailed": false }),
+                ),
                 Ok(Ok(())) => {}
             }
-            eprintln!("[managed-runtime] Initialization failed: {error}");
+            observability::error(
+                "managed_runtime.initialization_failed",
+                json!({ "reason": error }),
+            );
             publish_snapshot(&app, ManagedRuntimeSnapshot::degraded(manifest, error));
         }
         app.state::<ManagedRuntimeState>().finish_initialization();
@@ -396,8 +778,14 @@ pub async fn restart_after_failed_app_update(app: &AppHandle) {
     })
     .await
     {
-        Err(error) => eprintln!("[managed-runtime] Failed-update cleanup task failed: {error}"),
-        Ok(Err(error)) => eprintln!("[managed-runtime] Failed-update cleanup failed: {error}"),
+        Err(error) => observability::error(
+            "managed_runtime.failed_update_cleanup_failed",
+            json!({ "reason": error.to_string(), "taskFailed": true }),
+        ),
+        Ok(Err(error)) => observability::error(
+            "managed_runtime.failed_update_cleanup_failed",
+            json!({ "reason": error, "taskFailed": false }),
+        ),
         Ok(Ok(())) => {}
     }
     app.state::<ManagedRuntimeState>().resume_for_restart();
@@ -405,19 +793,22 @@ pub async fn restart_after_failed_app_update(app: &AppHandle) {
 }
 
 async fn restart_managed_runtime(app: &AppHandle) -> Result<(), String> {
+    let result = stop_runtime_stack_for_restart(app).await;
+    app.state::<ManagedRuntimeState>().resume_for_restart();
+    initialize(app);
+    result
+}
+
+async fn stop_runtime_stack_for_restart(app: &AppHandle) -> Result<(), String> {
     let restart_app = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         let state = restart_app.state::<ManagedRuntimeState>();
         let process_result = state.stop_processes_for_restart();
         let postgres_result = state.stop_postgres_for_restart();
         process_result.and(postgres_result)
     })
     .await
-    .map_err(|error| format!("Managed Runtime restart task failed: {error}"))
-    .and_then(|result| result);
-    app.state::<ManagedRuntimeState>().resume_for_restart();
-    initialize(app);
-    result
+    .map_err(|error| format!("Managed Runtime restart task failed: {error}"))?
 }
 
 async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
@@ -486,6 +877,21 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
                 .await
                 .map_err(|error| format!("Managed PostgreSQL task failed: {error}"))??;
             if database_preexisting {
+                let integrity_app = app.clone();
+                let integrity_directory = backup_directory.clone();
+                let integrity_checked = tauri::async_runtime::spawn_blocking(move || {
+                    integrity_app
+                        .state::<ManagedRuntimeState>()
+                        .verify_postgres_integrity_if_due(&integrity_directory)
+                })
+                .await
+                .map_err(|error| format!("Managed PostgreSQL integrity task failed: {error}"))??;
+                if integrity_checked {
+                    observability::info(
+                        "managed_postgres.integrity_check_succeeded",
+                        json!({ "tool": "pg_amcheck" }),
+                    );
+                }
                 let identity = match backup_identity {
                     Some(encoded) => secret_store::parse_backup_identity(&encoded)?,
                     None => tauri::async_runtime::spawn_blocking(
@@ -497,17 +903,36 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
                     })??,
                 };
                 let backup_app = app.clone();
-                if let Some(path) = tauri::async_runtime::spawn_blocking(move || {
-                    backup_app
-                        .state::<ManagedRuntimeState>()
-                        .create_postgres_backup(&backup_directory, &release_version, &identity)
-                })
-                .await
-                .map_err(|error| format!("Managed PostgreSQL backup task failed: {error}"))??
-                {
-                    eprintln!(
-                        "[managed-postgres] Created and verified encrypted pre-migration backup at {}.",
-                        path.display()
+                let (release_backup, automatic_backup) =
+                    tauri::async_runtime::spawn_blocking(move || {
+                        let state = backup_app.state::<ManagedRuntimeState>();
+                        let release_backup = state.create_postgres_backup(
+                            &backup_directory,
+                            &release_version,
+                            &identity,
+                        )?;
+                        let automatic_backup =
+                            state.create_automatic_postgres_backup(&backup_directory, &identity)?;
+                        Ok::<_, String>((release_backup, automatic_backup))
+                    })
+                    .await
+                    .map_err(|error| format!("Managed PostgreSQL backup task failed: {error}"))??;
+                if let Some(path) = release_backup {
+                    observability::info(
+                        "managed_postgres.backup_created",
+                        json!({
+                            "kind": "pre-migration",
+                            "backupId": backup_file_name(&path),
+                        }),
+                    );
+                }
+                if let Some(path) = automatic_backup {
+                    observability::info(
+                        "managed_postgres.backup_created",
+                        json!({
+                            "kind": "automatic",
+                            "backupId": backup_file_name(&path),
+                        }),
                     );
                 }
             }
@@ -529,36 +954,74 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
         app,
         ManagedRuntimeSnapshot::phase(ManagedRuntimePhase::RuntimeStarting, manifest.clone()),
     );
-    for role in ["api", "worker", "scheduler"] {
-        spawn_role(
-            app,
-            role,
-            &environment,
-            &app_data_directory,
-            manifest.clone(),
-        )?;
-    }
-    wait_until_ready(config.port).await?;
-
-    publish_snapshot(
+    let launch = RuntimeLaunchContext {
+        environment,
+        working_directory: app_data_directory,
+        manifest: manifest.clone(),
+        port: config.port,
+        api_key: config.api_key.clone(),
+    };
+    let generation = spawn_runtime(app, &launch)?;
+    wait_until_operational(
         app,
-        ManagedRuntimeSnapshot::ready(
-            manifest,
-            ManagedRuntimeConnection {
-                base_url: format!("http://127.0.0.1:{}", config.port),
-                api_key: config.api_key,
-            },
-        ),
-    );
+        config.port,
+        &config.api_key,
+        generation.number,
+        &generation.instance_id,
+    )
+    .await?;
+
+    publish_ready_snapshot(app, manifest, config.port, config.api_key)?;
     Ok(())
 }
 
 async fn managed_backup_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    let config = tauri::async_runtime::spawn_blocking(DesktopRuntimeConfig::load)
+    let config = load_runtime_config().await?;
+    managed_backup_directory_for_config(app, &config)
+}
+
+async fn load_runtime_config() -> Result<DesktopRuntimeConfig, String> {
+    tauri::async_runtime::spawn_blocking(DesktopRuntimeConfig::load)
         .await
         .map_err(|error| format!("Managed Runtime configuration task failed: {error}"))??
-        .ok_or_else(|| "Managed Runtime provisioning is unavailable.".to_string())?;
-    managed_backup_directory_for_config(app, &config)
+        .ok_or_else(|| "Managed Runtime provisioning is unavailable.".to_string())
+}
+
+async fn managed_backup_identity(
+    config: &DesktopRuntimeConfig,
+) -> Result<age::x25519::Identity, String> {
+    match config.backup_identity_override() {
+        Some(encoded) => secret_store::parse_backup_identity(&encoded),
+        None => {
+            tauri::async_runtime::spawn_blocking(secret_store::managed_postgres_backup_identity)
+                .await
+                .map_err(|error| format!("Managed PostgreSQL local secret task failed: {error}"))?
+        }
+    }
+}
+
+fn recovery_passphrase(passphrase: String) -> Result<SecretString, String> {
+    if !(16..=1024).contains(&passphrase.chars().count()) {
+        return Err(
+            "Recovery archive passphrase must contain between 16 and 1024 characters.".to_string(),
+        );
+    }
+    Ok(SecretString::from(passphrase))
+}
+
+fn quarantine_path(root: &Path, label: &str) -> Result<PathBuf, String> {
+    let parent = root
+        .parent()
+        .ok_or_else(|| "Managed PostgreSQL root has no parent directory.".to_string())?;
+    let name = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Managed PostgreSQL root name is not valid UTF-8.".to_string())?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("System clock error: {error}"))?
+        .as_millis();
+    Ok(parent.join(format!("{name}-{label}-{timestamp}")))
 }
 
 fn managed_backup_directory_for_config(
@@ -601,129 +1064,402 @@ async fn run_migrations(
     environment: &[(String, String)],
     working_directory: &Path,
 ) -> Result<(), String> {
-    let output = app
+    let envelope = config_envelope::prepare(working_directory, environment)?;
+    let (mut events, mut child) = app
         .shell()
         .sidecar("wa-runtime")
         .map_err(|error| format!("Could not resolve WA Runtime sidecar: {error}"))?
         .args(["migrate"])
-        .envs(environment.iter().cloned())
+        .env_clear()
+        .envs(envelope.process_environment())
         .current_dir(working_directory)
-        .output()
-        .await
-        .map_err(|error| format!("Could not run Runtime migrations: {error}"))?;
-    if !output.status.success() {
-        return Err(command_failure("Runtime migration", &output.stderr));
+        .spawn()
+        .map_err(|error| {
+            envelope.remove();
+            format!("Could not run Runtime migrations: {error}")
+        })?;
+    if let Err(error) = child.write(envelope.key_line().as_bytes()) {
+        envelope.remove();
+        let _ = child.kill();
+        return Err(format!(
+            "Could not deliver Runtime migration configuration: {error}"
+        ));
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.trim().is_empty() {
-        eprintln!("[wa-runtime:migrate] {}", stdout.trim());
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut exit_code = None;
+    while let Some(event) = events.recv().await {
+        match event {
+            CommandEvent::Stdout(line) => {
+                stdout.extend_from_slice(&line);
+                stdout.push(b'\n');
+            }
+            CommandEvent::Stderr(line) => {
+                stderr.extend_from_slice(&line);
+                stderr.push(b'\n');
+            }
+            CommandEvent::Error(error) => {
+                stderr.extend_from_slice(error.as_bytes());
+                stderr.push(b'\n');
+            }
+            CommandEvent::Terminated(payload) => {
+                exit_code = payload.code;
+                break;
+            }
+            _ => {}
+        }
+    }
+    envelope.remove();
+    if exit_code != Some(0) {
+        return Err(command_failure("Runtime migration", &stderr));
+    }
+    let stdout = String::from_utf8_lossy(&stdout);
+    for line in stdout.lines() {
+        observability::forward_runtime_line("migrate", "stdout", line.as_bytes());
     }
     Ok(())
 }
 
-fn spawn_role(
-    app: &AppHandle,
-    role: &'static str,
-    environment: &[(String, String)],
-    working_directory: &Path,
+struct RuntimeGeneration {
+    number: u64,
+    instance_id: String,
+}
+
+#[derive(Clone)]
+struct RuntimeLaunchContext {
+    environment: Vec<(String, String)>,
+    working_directory: PathBuf,
     manifest: RuntimeReleaseManifest,
-) -> Result<(), String> {
-    let (mut events, child) = app
+    port: u16,
+    api_key: String,
+}
+
+fn spawn_runtime(
+    app: &AppHandle,
+    launch: &RuntimeLaunchContext,
+) -> Result<RuntimeGeneration, String> {
+    let generation = app.state::<ManagedRuntimeState>().next_process_generation();
+    let instance_id = format!("desktop-{generation}");
+    let mut environment = launch.environment.clone();
+    environment.push(("RUNTIME_INSTANCE_ID".to_string(), instance_id.clone()));
+    let envelope = config_envelope::prepare(&launch.working_directory, &environment)?;
+    let (mut events, mut child) = app
         .shell()
         .sidecar("wa-runtime")
         .map_err(|error| format!("Could not resolve WA Runtime sidecar: {error}"))?
-        .args([role])
-        .envs(environment.iter().cloned())
-        .current_dir(working_directory)
+        .args(["desktop"])
+        .env_clear()
+        .envs(envelope.process_environment())
+        .current_dir(&launch.working_directory)
         .spawn()
-        .map_err(|error| format!("Could not start Runtime {role}: {error}"))?;
-    app.state::<ManagedRuntimeState>().push_process(child)?;
+        .map_err(|error| {
+            envelope.remove();
+            format!("Could not start Runtime desktop generation {generation}: {error}")
+        })?;
+    if let Err(error) = child.write(envelope.key_line().as_bytes()) {
+        envelope.remove();
+        let _ = child.kill();
+        return Err(format!(
+            "Could not deliver Runtime desktop generation {generation} configuration: {error}"
+        ));
+    }
+    if let Err(error) = app
+        .state::<ManagedRuntimeState>()
+        .push_process(generation, child)
+    {
+        envelope.remove();
+        return Err(error);
+    }
 
     let app = app.clone();
+    let restart_launch = launch.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
             match event {
-                CommandEvent::Stdout(line) => log_process_line(role, "stdout", &line),
-                CommandEvent::Stderr(line) => log_process_line(role, "stderr", &line),
+                CommandEvent::Stdout(line) => log_process_line("desktop", "stdout", &line),
+                CommandEvent::Stderr(line) => log_process_line("desktop", "stderr", &line),
                 CommandEvent::Error(error) => {
-                    eprintln!("[wa-runtime:{role}] process error: {error}");
+                    observability::error(
+                        "managed_runtime.process_error",
+                        json!({ "generation": generation, "reason": error.to_string() }),
+                    );
                 }
                 CommandEvent::Terminated(payload) => {
-                    let state = app.state::<ManagedRuntimeState>();
-                    let should_degrade = state
-                        .snapshot()
-                        .map(|snapshot| {
-                            !matches!(
-                                snapshot.phase,
-                                ManagedRuntimePhase::Stopping
-                                    | ManagedRuntimePhase::Restoring
-                                    | ManagedRuntimePhase::Reconfiguring
-                                    | ManagedRuntimePhase::Updating
-                                    | ManagedRuntimePhase::Degraded
-                            )
-                        })
-                        .unwrap_or(true);
-                    if should_degrade {
-                        publish_snapshot(
-                            &app,
-                            ManagedRuntimeSnapshot::degraded(
-                                Some(manifest),
-                                format!(
-                                    "Runtime {role} exited unexpectedly (code {:?}, signal {:?}).",
-                                    payload.code, payload.signal
-                                ),
-                            ),
-                        );
-                    }
+                    handle_runtime_termination(
+                        &app,
+                        generation,
+                        restart_launch.clone(),
+                        format!(
+                            "Runtime desktop generation {generation} exited unexpectedly (code {:?}, signal {:?}).",
+                            payload.code, payload.signal
+                        ),
+                    )
+                    .await;
                     break;
                 }
                 _ => {}
             }
         }
     });
-    Ok(())
+    Ok(RuntimeGeneration {
+        number: generation,
+        instance_id,
+    })
 }
 
-async fn wait_until_ready(port: u16) -> Result<(), String> {
+async fn handle_runtime_termination(
+    app: &AppHandle,
+    generation: u64,
+    launch: RuntimeLaunchContext,
+    error: String,
+) {
+    let state = app.state::<ManagedRuntimeState>();
+    let is_current = match state.mark_process_terminated(generation) {
+        Ok(current) => current,
+        Err(state_error) => {
+            publish_snapshot(
+                app,
+                ManagedRuntimeSnapshot::degraded(Some(launch.manifest), state_error),
+            );
+            return;
+        }
+    };
+    if !is_current {
+        observability::info(
+            "managed_runtime.stale_termination_ignored",
+            json!({ "generation": generation }),
+        );
+        return;
+    }
+
+    let phase = state.snapshot().map(|snapshot| snapshot.phase);
+    if phase
+        .as_ref()
+        .is_ok_and(|phase| *phase == ManagedRuntimePhase::Ready)
+    {
+        match state.plan_auto_restart() {
+            Ok(AutoRestartPlan::Retry(delay)) => {
+                observability::warn(
+                    "managed_runtime.restart_scheduled",
+                    json!({
+                        "generation": generation,
+                        "delayMs": delay.as_millis(),
+                    }),
+                );
+                publish_snapshot(
+                    app,
+                    ManagedRuntimeSnapshot::phase(
+                        ManagedRuntimePhase::RuntimeStarting,
+                        launch.manifest.clone(),
+                    ),
+                );
+                let wait = tauri::async_runtime::spawn_blocking(move || thread::sleep(delay)).await;
+                if let Err(wait_error) = wait {
+                    state.finish_auto_restart();
+                    publish_snapshot(
+                        app,
+                        ManagedRuntimeSnapshot::degraded(
+                            Some(launch.manifest),
+                            format!("Managed Runtime restart delay failed: {wait_error}"),
+                        ),
+                    );
+                    return;
+                }
+                if !state.auto_restart_is_allowed() {
+                    state.finish_auto_restart();
+                    return;
+                }
+                let next_generation = match spawn_runtime(app, &launch) {
+                    Ok(generation) => generation,
+                    Err(restart_error) => {
+                        state.finish_auto_restart();
+                        publish_snapshot(
+                            app,
+                            ManagedRuntimeSnapshot::degraded(Some(launch.manifest), restart_error),
+                        );
+                        return;
+                    }
+                };
+                let operational = wait_until_operational(
+                    app,
+                    launch.port,
+                    &launch.api_key,
+                    next_generation.number,
+                    &next_generation.instance_id,
+                )
+                .await;
+                if !state.auto_restart_is_allowed() {
+                    state.finish_auto_restart();
+                    return;
+                }
+                if let Err(restart_error) = operational {
+                    let stop_app = app.clone();
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        stop_app
+                            .state::<ManagedRuntimeState>()
+                            .stop_processes_for_restart()
+                    })
+                    .await;
+                    state.finish_auto_restart();
+                    publish_snapshot(
+                        app,
+                        ManagedRuntimeSnapshot::degraded(Some(launch.manifest), restart_error),
+                    );
+                    return;
+                }
+                state.finish_auto_restart();
+                if let Err(ready_error) = publish_ready_snapshot(
+                    app,
+                    launch.manifest.clone(),
+                    launch.port,
+                    launch.api_key,
+                ) {
+                    publish_snapshot(
+                        app,
+                        ManagedRuntimeSnapshot::degraded(Some(launch.manifest), ready_error),
+                    );
+                }
+            }
+            Ok(AutoRestartPlan::Exhausted) => publish_snapshot(
+                app,
+                ManagedRuntimeSnapshot::degraded(
+                    Some(launch.manifest),
+                    format!("{error} Automatic restart limit reached (3 attempts in 5 minutes)."),
+                ),
+            ),
+            Ok(AutoRestartPlan::Cancelled) => {}
+            Err(state_error) => publish_snapshot(
+                app,
+                ManagedRuntimeSnapshot::degraded(Some(launch.manifest), state_error),
+            ),
+        }
+        return;
+    }
+
+    let should_degrade = phase
+        .map(|phase| {
+            !matches!(
+                phase,
+                ManagedRuntimePhase::Stopping
+                    | ManagedRuntimePhase::Restoring
+                    | ManagedRuntimePhase::Reconfiguring
+                    | ManagedRuntimePhase::Updating
+                    | ManagedRuntimePhase::Degraded
+            )
+        })
+        .unwrap_or(true);
+    if should_degrade {
+        publish_snapshot(
+            app,
+            ManagedRuntimeSnapshot::degraded(Some(launch.manifest), error),
+        );
+    }
+}
+
+async fn wait_until_operational(
+    app: &AppHandle,
+    port: u16,
+    api_key: &str,
+    generation: u64,
+    instance_id: &str,
+) -> Result<(), String> {
+    let readiness_app = app.clone();
+    let api_key = api_key.to_string();
+    let instance_id = instance_id.to_string();
     tauri::async_runtime::spawn_blocking(move || {
         let deadline = Instant::now() + Duration::from_secs(45);
         let address = SocketAddr::from(([127, 0, 0, 1], port));
         while Instant::now() < deadline {
-            if runtime_is_ready(address) {
+            if !readiness_app
+                .state::<ManagedRuntimeState>()
+                .process_generation_is_current(generation)?
+            {
+                return Err(format!(
+                    "Managed Runtime generation {generation} exited before becoming operational."
+                ));
+            }
+            if runtime_is_operational(address, &api_key, &instance_id) {
                 return Ok(());
             }
             thread::sleep(Duration::from_millis(500));
         }
         Err(format!(
-            "Managed Runtime did not become ready on 127.0.0.1:{port} within 45 seconds."
+            "Managed Runtime generation {generation} did not become operational on 127.0.0.1:{port} within 45 seconds."
         ))
     })
     .await
-    .map_err(|error| format!("Runtime readiness task failed: {error}"))?
+    .map_err(|error| format!("Runtime operational health task failed: {error}"))?
 }
 
-fn runtime_is_ready(address: SocketAddr) -> bool {
+fn runtime_is_operational(address: SocketAddr, api_key: &str, instance_id: &str) -> bool {
     let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(500)) else {
         return false;
     };
     let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
-    let request =
-        b"GET /api/v1/health/ready HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
-    if stream.write_all(request).is_err() {
+    if api_key.contains('\r') || api_key.contains('\n') {
+        return false;
+    }
+    let request = format!(
+        "GET /api/v1/health/operational HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Runtime-Key: {api_key}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
     let mut response = String::new();
     stream.read_to_string(&mut response).is_ok()
-        && response.starts_with("HTTP/1.1 200")
-        && response.contains("\"status\":\"ready\"")
+        && operational_response_matches(&response, instance_id)
+}
+
+fn operational_response_matches(response: &str, instance_id: &str) -> bool {
+    let Some((headers, body)) = response.split_once("\r\n\r\n") else {
+        return false;
+    };
+    if !headers.starts_with("HTTP/1.1 200") {
+        return false;
+    }
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .is_some_and(|payload| {
+            payload.get("status").and_then(|value| value.as_str()) == Some("operational")
+                && payload.get("instanceId").and_then(|value| value.as_str()) == Some(instance_id)
+        })
 }
 
 fn publish_snapshot(app: &AppHandle, snapshot: ManagedRuntimeSnapshot) {
     if let Err(error) = app.state::<ManagedRuntimeState>().replace(snapshot.clone()) {
-        eprintln!("Could not update managed Runtime state: {error}");
+        observability::error(
+            "managed_runtime.state_update_failed",
+            json!({ "reason": error }),
+        );
         return;
     }
+    observability::info(
+        "managed_runtime.phase_changed",
+        json!({ "phase": snapshot.phase }),
+    );
     let _ = app.emit(STATE_CHANGED_EVENT, snapshot);
+}
+
+fn publish_ready_snapshot(
+    app: &AppHandle,
+    manifest: RuntimeReleaseManifest,
+    port: u16,
+    api_key: String,
+) -> Result<(), String> {
+    let base_url = format!("http://127.0.0.1:{port}");
+    app.state::<ManagedRuntimeState>()
+        .set_runtime_transport(base_url.clone(), api_key)?;
+    publish_snapshot(
+        app,
+        ManagedRuntimeSnapshot::ready(
+            manifest,
+            ManagedRuntimeConnection {
+                base_url,
+                transport: ManagedRuntimeTransportKind::Native,
+            },
+        ),
+    );
+    Ok(())
 }
 
 fn command_failure(operation: &str, stderr: &[u8]) -> String {
@@ -735,11 +1471,15 @@ fn command_failure(operation: &str, stderr: &[u8]) -> String {
     }
 }
 
+fn backup_file_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unavailable")
+        .to_string()
+}
+
 fn log_process_line(role: &str, stream: &str, bytes: &[u8]) {
-    let line = String::from_utf8_lossy(bytes);
-    if !line.trim().is_empty() {
-        eprintln!("[wa-runtime:{role}:{stream}] {}", line.trim());
-    }
+    observability::forward_runtime_line(role, stream, bytes);
 }
 
 fn parse_and_validate_manifest(bytes: &[u8]) -> Result<RuntimeReleaseManifest, String> {
@@ -771,7 +1511,7 @@ fn parse_and_validate_manifest(bytes: &[u8]) -> Result<RuntimeReleaseManifest, S
     {
         return Err("WA Runtime does not support the desktop-managed profile.".to_string());
     }
-    for role in ["api", "worker", "scheduler", "migrate"] {
+    for role in ["desktop", "migrate"] {
         if !manifest.roles.iter().any(|candidate| candidate == role) {
             return Err(format!("WA Runtime does not provide the {role} role."));
         }
@@ -796,7 +1536,13 @@ fn parse_and_validate_manifest(bytes: &[u8]) -> Result<RuntimeReleaseManifest, S
 
 #[cfg(test)]
 mod tests {
-    use super::parse_and_validate_manifest;
+    use std::path::Path;
+
+    use super::{
+        operational_response_matches, parse_and_validate_manifest, protection_freshness,
+        quarantine_path, recovery_passphrase,
+    };
+    use crate::managed_runtime::model::ProtectionFreshness;
 
     const VALID_MANIFEST: &str = r#"{
       "schemaVersion": 1,
@@ -804,7 +1550,7 @@ mod tests {
       "version": "0.1.0",
       "contractVersion": "v1",
       "profiles": ["server", "desktop-managed"],
-      "roles": ["api", "worker", "scheduler", "migrate"],
+      "roles": ["api", "worker", "scheduler", "desktop", "migrate"],
       "databaseBackends": ["postgres"],
       "queueBackends": ["redis", "postgres"]
     }"#;
@@ -815,6 +1561,26 @@ mod tests {
 
         assert_eq!(manifest.service, "wa-runtime");
         assert_eq!(manifest.version, "0.1.0");
+    }
+
+    #[test]
+    fn classifies_protection_freshness_without_clock_underflow() {
+        assert_eq!(
+            protection_freshness(1_000, None, 100),
+            ProtectionFreshness::Missing
+        );
+        assert_eq!(
+            protection_freshness(1_000, Some(900), 100),
+            ProtectionFreshness::Fresh
+        );
+        assert_eq!(
+            protection_freshness(1_000, Some(899), 100),
+            ProtectionFreshness::Due
+        );
+        assert_eq!(
+            protection_freshness(1_000, Some(1_001), 100),
+            ProtectionFreshness::Fresh
+        );
     }
 
     #[test]
@@ -845,5 +1611,45 @@ mod tests {
             parse_and_validate_manifest(manifest.as_bytes()).unwrap_err(),
             "WA Runtime does not support the PostgreSQL queue backend."
         );
+    }
+
+    #[test]
+    fn rejects_a_runtime_without_the_desktop_role() {
+        let manifest = VALID_MANIFEST.replace("\"desktop\", ", "");
+
+        assert_eq!(
+            parse_and_validate_manifest(manifest.as_bytes()).unwrap_err(),
+            "WA Runtime does not provide the desktop role."
+        );
+    }
+
+    #[test]
+    fn operational_health_must_match_the_spawned_generation() {
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"operational\",\"instanceId\":\"desktop-7\"}";
+
+        assert!(operational_response_matches(response, "desktop-7"));
+        assert!(!operational_response_matches(response, "desktop-6"));
+        assert!(!operational_response_matches(
+            &response.replace("200 OK", "503 Service Unavailable"),
+            "desktop-7"
+        ));
+    }
+
+    #[test]
+    fn requires_a_substantial_portable_recovery_passphrase() {
+        assert!(recovery_passphrase("short".to_string()).is_err());
+        assert!(recovery_passphrase("sixteen-characters".to_string()).is_ok());
+    }
+
+    #[test]
+    fn quarantines_only_as_a_sibling_of_the_managed_cluster() {
+        let path = quarantine_path(Path::new("/var/local/wa/postgresql"), "stale").unwrap();
+
+        assert_eq!(path.parent(), Some(Path::new("/var/local/wa")));
+        assert!(path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("postgresql-stale-"));
     }
 }

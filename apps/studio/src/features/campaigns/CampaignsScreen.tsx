@@ -1016,6 +1016,7 @@ export function CampaignsScreen() {
       || reportStale
       || preflight.status === "BLOCK"
       || preflight.executionMode !== executionMode
+      || (executionMode === "LIVE" && !preflight.liveLaunchToken)
     ) return;
     const epoch = editorEpochRef.current;
     const request = ++runRequestRef.current;
@@ -1037,6 +1038,7 @@ export function CampaignsScreen() {
         executionMode,
         expectedCampaignRevision: campaign.revision,
         expectedTargetsRevision: targetsRevision,
+        ...(executionMode === "LIVE" ? { preflightToken: preflight.liveLaunchToken! } : {}),
       }, key);
       if (
         epoch !== editorEpochRef.current
@@ -1061,7 +1063,11 @@ export function CampaignsScreen() {
       if (epoch !== editorEpochRef.current || request !== runRequestRef.current) return;
       const code = error instanceof RuntimeRequestError ? error.code : null;
       setRunError(campaignErrorMessage(error, "Could not create campaign run."));
-      if (code === "CAMPAIGN_RUN_REVISION_CONFLICT") {
+      if (
+        code === "CAMPAIGN_RUN_REVISION_CONFLICT"
+        || code === "CAMPAIGN_RUN_PREFLIGHT_REQUIRED"
+        || code === "CAMPAIGN_RUN_PREFLIGHT_INVALID"
+      ) {
         launchKeyRef.current = null;
         setPreflight(null);
         await refreshCampaignAfterRun(campaign.id, epoch, request);

@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHmac, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createRequire } from "node:module";
 import { createServer as createNetServer } from "node:net";
@@ -28,6 +28,10 @@ const managedPostgresPassword =
 const managedPostgresRoot = resolve(
   studioRoot,
   "src-tauri/target/managed-postgres-e2e",
+);
+const managedBackupRoot = resolve(
+  studioRoot,
+  "src-tauri/target/managed-postgres-e2e-backups",
 );
 const appBinary = resolve(
   process.env.WA_STUDIO_APP_BINARY
@@ -73,16 +77,19 @@ async function main() {
       ? await startOpenWaStub(profile.openwaApiKey, profile.webhookSecret)
       : developmentOpenWa(profile.openwaBaseUrl);
     eventInbox = withEventInbox
-      ? await startEventInbox(openwa.baseUrl, profile.eventInboxMasterSecret)
+      ? await startEventInbox(
+          openwa.baseUrl,
+          profile.openwaApiKey,
+          profile.eventInboxMasterSecret,
+        )
       : undefined;
 
     const openwaBaseUrl = openwa.baseUrl;
     const eventInboxBaseUrl = eventInbox?.baseUrl ?? profile.eventInboxBaseUrl;
     const eventInboxDeviceToken = eventInbox
-      ? issueDeviceToken(profile.eventInboxMasterSecret, eventInbox.deviceId, [sessionId])
+      ? eventInbox.deviceToken
       : profile.eventInboxDeviceToken;
-    app = spawn(appBinary, [], {
-      env: {
+    const appEnvironment = {
         ...process.env,
         ...databaseEnvironment,
         WA_DESKTOP_DEV_RUNTIME: "1",
@@ -101,7 +108,9 @@ async function main() {
                 `${eventInboxBaseUrl}/api/v1/webhooks/openwa`,
             }
           : {}),
-      },
+    };
+    app = spawn(appBinary, [], {
+      env: appEnvironment,
       stdio: "inherit",
     });
 
@@ -118,6 +127,11 @@ async function main() {
       return;
     }
 
+    const operational = await waitForRuntimeOperational(profile.runtimeApiKey);
+    assert(
+      /^desktop-[1-9][0-9]*$/u.test(operational.instanceId),
+      "Packaged Runtime operational health did not report its supervisor generation",
+    );
     const health = await waitForRuntimeReady();
     assertCompleteRuntimeHealth(health);
     const registration = await waitForWebhookRegistration(openwa, eventInboxBaseUrl);
@@ -138,6 +152,16 @@ async function main() {
 
     nativeQuitStudio();
     await waitForChildExit(app, 30_000, "WA Studio did not exit after the native quit request");
+    app = spawn(appBinary, [], { env: appEnvironment, stdio: "inherit" });
+    await waitForRuntimeOperational(profile.runtimeApiKey);
+    await waitForRuntimeReady();
+    assertManagedBackupCreated();
+    nativeQuitStudio();
+    await waitForChildExit(
+      app,
+      30_000,
+      "WA Studio did not exit after the backup-verification restart",
+    );
     successfulNativeQuit = true;
   } catch (error) {
     runFailed = true;
@@ -170,7 +194,21 @@ async function main() {
   if (oneShot) {
     if (!successfulNativeQuit) throw new Error("Packaged E2E did not complete a native app shutdown.");
     process.stdout.write(
-      "Packaged managed Runtime E2E passed: OpenWA 0.22.0 registration, durable Event Inbox claim/ACK, local PostgreSQL dedup, safe native shutdown.\n",
+      "Packaged managed Runtime E2E passed: OpenWA 0.22.0 registration, durable Event Inbox claim/ACK, local PostgreSQL dedup, verified encrypted restart backup, safe native shutdown.\n",
+    );
+  }
+}
+
+function assertManagedBackupCreated() {
+  const backups = readdirSync(managedBackupRoot)
+    .filter(name => name.endsWith(".dump.age"))
+    .map(name => resolve(managedBackupRoot, name));
+  assert(backups.length > 0, "Packaged Runtime restart did not create a recovery backup");
+  for (const backup of backups) {
+    assert(statSync(backup).size > 0, `Packaged Runtime created an empty backup: ${backup}`);
+    assert(
+      readFileSync(backup).subarray(0, 64).toString("utf8").includes("age-encryption.org/v1"),
+      `Packaged Runtime backup is not an age archive: ${backup}`,
     );
   }
 }
@@ -220,7 +258,7 @@ function externalDatabaseEnvironment() {
 function managedDatabaseEnvironment() {
   return {
     WA_DESKTOP_POSTGRES_ROOT: managedPostgresRoot,
-    WA_DESKTOP_BACKUP_ROOT: resolve(managedPostgresRoot, "backups"),
+    WA_DESKTOP_BACKUP_ROOT: managedBackupRoot,
     // Public age crate test identity; never used outside this isolated E2E cluster.
     WA_DESKTOP_BACKUP_IDENTITY:
       "AGE-SECRET-KEY-1GQ9778VQXMMJVE8SK7J6VT8UJ4HDQAJUVSFCWCM02D8GEWQ72PVQ2Y5J33",
@@ -281,26 +319,12 @@ async function handleOpenWaRequest(request, response, state) {
     });
   }
   if (request.method === "GET" && url.pathname === "/api/sessions") {
-    return json(response, 200, []);
+    return json(response, 200, [openWaSession()]);
   }
   const sessionPath = url.pathname.match(/^\/api\/sessions\/([^/]+)$/u);
   if (request.method === "GET" && sessionPath
     && decodeURIComponent(sessionPath[1]) === sessionId) {
-    const timestamp = new Date().toISOString();
-    return json(response, 200, {
-      id: sessionId,
-      name: "Packaged E2E session",
-      status: "ready",
-      phone: null,
-      pushName: "WA Studio E2E",
-      connectedAt: timestamp,
-      lastActive: timestamp,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      lastError: null,
-      restriction: null,
-      engineLoaded: true,
-    });
+    return json(response, 200, openWaSession());
   }
   const groupsPath = url.pathname.match(/^\/api\/sessions\/([^/]+)\/groups$/u);
   if (request.method === "GET" && groupsPath
@@ -346,6 +370,24 @@ async function handleOpenWaRequest(request, response, state) {
   return json(response, 405, { error: "method not allowed" });
 }
 
+function openWaSession() {
+  const timestamp = new Date().toISOString();
+  return {
+    id: sessionId,
+    name: "Packaged E2E session",
+    status: "ready",
+    phone: null,
+    pushName: "WA Studio E2E",
+    connectedAt: timestamp,
+    lastActive: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    lastError: null,
+    restriction: null,
+    engineLoaded: true,
+  };
+}
+
 async function readJsonBody(request) {
   const chunks = [];
   let bytes = 0;
@@ -362,7 +404,7 @@ function json(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-async function startEventInbox(openwaBaseUrl, masterSecret) {
+async function startEventInbox(openwaBaseUrl, openwaApiKey, masterSecret) {
   const databaseUrl = localDevelopmentDatabaseUrl();
   const schema = `wa_studio_event_inbox_e2e_${process.pid}_${Date.now()}`;
   assert(/^[a-z0-9_]+$/u.test(schema), "Unsafe Event Inbox test schema name");
@@ -394,10 +436,12 @@ async function startEventInbox(openwaBaseUrl, masterSecret) {
       { cwd: runtimeRoot, env: environment, stdio: "inherit" },
     );
     await waitForJson(`${baseUrl}/api/v1/health/ready`, value =>
-      value.status === "ready" && value.protocolVersion === 1, 30_000);
+      value.status === "ready" && value.protocolVersion === 2, 30_000);
+    const pairing = await pairEventInbox(baseUrl, openwaBaseUrl, openwaApiKey, deviceId);
     return {
       baseUrl,
       deviceId,
+      deviceToken: pairing.deviceToken,
       close: async () => {
         await terminateChild(child, "Event Inbox");
         await adminPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
@@ -412,16 +456,16 @@ async function startEventInbox(openwaBaseUrl, masterSecret) {
   }
 }
 
-function issueDeviceToken(masterSecret, deviceId, sessionIds) {
-  const payload = Buffer.from(JSON.stringify({
-    version: 1,
-    deviceId,
-    sessionIds,
-  }), "utf8").toString("base64url");
-  const signature = createHmac("sha256", masterSecret)
-    .update(`device-token:v1:${payload}`)
-    .digest("base64url");
-  return `${payload}.${signature}`;
+async function pairEventInbox(baseUrl, openwaBaseUrl, openwaApiKey, deviceId) {
+  const response = await fetch(`${baseUrl}/api/v1/event-inbox/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ openwaBaseUrl, openwaApiKey, deviceId }),
+  });
+  if (!response.ok) throw new Error(`Event Inbox pairing returned HTTP ${response.status}`);
+  const pairing = await response.json();
+  assert(pairing.protocolVersion === 2, "Event Inbox pairing protocol drifted");
+  return pairing;
 }
 
 function runRuntimeEntrypoint(name, environment) {
@@ -466,6 +510,17 @@ async function waitForRuntimeReady() {
       && value.processes?.worker === "healthy"
       && value.processes?.scheduler === "healthy",
     180_000,
+  );
+}
+
+async function waitForRuntimeOperational(runtimeApiKey) {
+  return waitForJson(
+    `http://127.0.0.1:${runtimePort}/api/v1/health/operational`,
+    value => value.status === "operational"
+      && value.processes?.worker === "healthy"
+      && value.processes?.scheduler === "healthy",
+    180_000,
+    { headers: { "x-runtime-key": runtimeApiKey } },
   );
 }
 
@@ -622,12 +677,12 @@ async function assertLocalWebhookCommitted(event, expectedCount) {
   }
 }
 
-async function waitForJson(url, predicate, timeoutMs) {
+async function waitForJson(url, predicate, timeoutMs, init = {}) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+      const response = await fetch(url, { ...init, signal: AbortSignal.timeout(2_000) });
       if (response.ok) {
         const value = await response.json();
         if (predicate(value)) return value;
@@ -684,6 +739,7 @@ function cleanManagedPostgresData() {
   // Remove the installation cache too: every one-shot run must prove that PostgreSQL can be
   // extracted from the bundled archive without relying on a previous developer machine install.
   rmSync(managedPostgresRoot, { recursive: true, force: true });
+  rmSync(managedBackupRoot, { recursive: true, force: true });
 }
 
 function nativeQuitStudio() {

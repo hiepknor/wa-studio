@@ -31,7 +31,7 @@ const managedReady = (): ManagedRuntimeSnapshot => ({
   },
   connection: {
     baseUrl: "http://127.0.0.1:3100",
-    apiKey: "runtime-key-with-at-least-32-characters",
+    transport: "native",
   },
   error: null,
 });
