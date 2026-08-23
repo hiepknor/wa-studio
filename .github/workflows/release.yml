@@ -78,7 +78,6 @@ jobs:
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -92,6 +91,7 @@ jobs:
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       - name: Install App Store Connect private key
         env:
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
         run: |
           test -n "$APPLE_API_PRIVATE_KEY"
@@ -100,7 +100,10 @@ jobs:
       - run: npm ci
       - run: npm -w @wa/studio run check:native
       - run: npm run check:release
-      - run: npm run build:desktop:signed-update
+      - name: Build signed desktop update
+        env:
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+        run: npm run build:desktop:signed-update
       - uses: actions/upload-artifact@v4
         with:
           name: wa-studio-${{ github.ref_name }}-macos
