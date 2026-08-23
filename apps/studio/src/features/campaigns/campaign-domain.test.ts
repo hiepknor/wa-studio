@@ -4,6 +4,7 @@ import type { RuntimeCampaign, RuntimeCampaignPreflight } from "@/shared/api/run
 import {
   campaignTargetDiff,
   campaignErrorMessage,
+  campaignFormFromDto,
   createCampaignPayload,
   isPreflightStale,
   updateCampaignPayload,
@@ -31,7 +32,7 @@ const validOnce: CampaignFormValues = {
   name: "Release",
   text: "Ship it",
   scheduleType: "ONCE",
-  scheduledAt: "2026-09-01T09:00",
+  scheduledAt: campaignFormFromDto(campaign).scheduledAt,
 };
 
 describe("campaign scheduling", () => {
