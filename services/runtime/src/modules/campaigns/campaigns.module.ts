@@ -3,6 +3,7 @@ import { GatewayModule } from '../gateway/gateway.module';
 import { MessagesModule } from '../messages/messages.module';
 import { GroupListsModule } from '../group-lists/group-lists.module';
 import { CampaignController } from './campaign.controller';
+import { CampaignLivePreflightTokenService } from './campaign-live-preflight-token.service';
 import { CampaignRunController } from './campaign-run.controller';
 import { CampaignRepository } from './campaign.repository';
 import { CampaignService } from './campaign.service';
@@ -14,7 +15,7 @@ import { CampaignRunProcessorService } from './campaign-run-processor.service';
 @Module({
   imports: [GatewayModule, GroupListsModule, MessagesModule],
   controllers: [CampaignController, CampaignRunController],
-  providers: [CampaignRepository, CampaignService, CampaignPreflightService, CampaignRunRepository, CampaignRunService, CampaignRunProcessorService],
+  providers: [CampaignRepository, CampaignService, CampaignLivePreflightTokenService, CampaignPreflightService, CampaignRunRepository, CampaignRunService, CampaignRunProcessorService],
   exports: [CampaignRepository, CampaignService, CampaignRunRepository, CampaignRunService, CampaignRunProcessorService],
 })
 export class CampaignsModule {}

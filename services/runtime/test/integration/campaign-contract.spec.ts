@@ -104,6 +104,22 @@ describe('campaign draft contract HTTP API', () => {
     });
   }
 
+  async function passingLiveLaunchInput(campaignId: string) {
+    const preflight = await jsonRequest(`/campaigns/${campaignId}/preflight`, {
+      method: 'POST', body: JSON.stringify({ executionMode: 'LIVE' }),
+    });
+    expect(preflight.response.status).toBe(200);
+    expect(preflight.body).toMatchObject({ status: 'PASS', executionMode: 'LIVE' });
+    expect(preflight.body.liveLaunchToken).toEqual(expect.any(String));
+    expect(new Date(preflight.body.liveLaunchTokenExpiresAt as string).getTime()).toBeGreaterThan(Date.now());
+    return {
+      executionMode: 'LIVE',
+      expectedCampaignRevision: preflight.body.campaignRevision as number,
+      expectedTargetsRevision: preflight.body.targetsRevision as number,
+      preflightToken: preflight.body.liveLaunchToken as string,
+    };
+  }
+
   it('canonicalizes scheduling and makes creation durably idempotent', async () => {
     const key = randomUUID();
     const first = await createCampaign({ scheduledAt: new Date(Date.now() + 60_000).toISOString() }, key);
@@ -243,12 +259,16 @@ describe('campaign draft contract HTTP API', () => {
   it('requires an ACTIVE campaign to cancel its LIVE run before deletion', async () => {
     const created = await createCampaign();
     const campaignId = created.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const launchInput = await passingLiveLaunchInput(campaignId);
     const run = await jsonRequest(`/campaigns/${campaignId}/runs`, {
       method: 'POST', headers: { 'idempotency-key': randomUUID() },
-      body: JSON.stringify({ executionMode: 'LIVE' }),
+      body: JSON.stringify(launchInput),
     });
     const activeDelete = await jsonRequest(
-      `/campaigns/${campaignId}?expectedRevision=1&expectedTargetsRevision=0`,
+      `/campaigns/${campaignId}?expectedRevision=1&expectedTargetsRevision=1`,
       { method: 'DELETE' },
     );
     expect(activeDelete.response.status).toBe(409);
@@ -259,7 +279,7 @@ describe('campaign draft contract HTTP API', () => {
     await jsonRequest(`/campaign-runs/${run.body.id as string}/cancel`, { method: 'POST' });
     expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('ARCHIVED');
     expect((await jsonRequest(
-      `/campaigns/${campaignId}?expectedRevision=1&expectedTargetsRevision=0`,
+      `/campaigns/${campaignId}?expectedRevision=1&expectedTargetsRevision=1`,
       { method: 'DELETE' },
     )).response.status).toBe(204);
   });
@@ -267,13 +287,17 @@ describe('campaign draft contract HTTP API', () => {
   it('serializes deletion against LIVE launch so exactly one state transition wins', async () => {
     const created = await createCampaign();
     const campaignId = created.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const launchInput = await passingLiveLaunchInput(campaignId);
     const [deletion, launch] = await Promise.all([
-      jsonRequest(`/campaigns/${campaignId}?expectedRevision=1&expectedTargetsRevision=0`, {
+      jsonRequest(`/campaigns/${campaignId}?expectedRevision=1&expectedTargetsRevision=1`, {
         method: 'DELETE',
       }),
       jsonRequest(`/campaigns/${campaignId}/runs`, {
         method: 'POST', headers: { 'idempotency-key': randomUUID() },
-        body: JSON.stringify({ executionMode: 'LIVE' }),
+        body: JSON.stringify(launchInput),
       }),
     ]);
     expect([
@@ -611,6 +635,10 @@ describe('campaign draft contract HTTP API', () => {
   it('rejects every new run when legacy data already contains a LIVE launch', async () => {
     const campaign = await createCampaign();
     const campaignId = campaign.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const liveLaunchInput = await passingLiveLaunchInput(campaignId);
     await pool.query(
       `INSERT INTO campaign_runs
          (campaign_id, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at)
@@ -618,11 +646,11 @@ describe('campaign draft contract HTTP API', () => {
       [campaignId, INTEGRATION_SESSION_ID],
     );
 
-    for (const executionMode of ['LIVE', 'DRY_RUN']) {
+    for (const input of [liveLaunchInput, { executionMode: 'DRY_RUN' }]) {
       const result = await jsonRequest(`/campaigns/${campaignId}/runs`, {
         method: 'POST',
         headers: { 'idempotency-key': randomUUID() },
-        body: JSON.stringify({ executionMode }),
+        body: JSON.stringify(input),
       });
       expect(result.response.status).toBe(409);
       expect(result.body.code).toBe('CAMPAIGN_RUN_LAUNCH_CONFLICT');
@@ -812,6 +840,41 @@ describe('campaign draft contract HTTP API', () => {
     expect([...first.body.data, ...second.body.data].map((run: { id: string }) => run.id)).toEqual(runIds);
   });
 
+  it('requires a signed revision-bound proof before creating a LIVE run', async () => {
+    const campaign = await createCampaign();
+    const campaignId = campaign.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const key = randomUUID();
+
+    const missingRevisions = await jsonRequest(`/campaigns/${campaignId}/runs`, {
+      method: 'POST', headers: { 'idempotency-key': key },
+      body: JSON.stringify({ executionMode: 'LIVE' }),
+    });
+    expect(missingRevisions.response.status).toBe(400);
+    expect(missingRevisions.body.code).toBe('CAMPAIGN_RUN_REVISION_REQUIRED');
+
+    const missingProof = await jsonRequest(`/campaigns/${campaignId}/runs`, {
+      method: 'POST', headers: { 'idempotency-key': key },
+      body: JSON.stringify({
+        executionMode: 'LIVE', expectedCampaignRevision: 1, expectedTargetsRevision: 1,
+      }),
+    });
+    expect(missingProof.response.status).toBe(409);
+    expect(missingProof.body.code).toBe('CAMPAIGN_RUN_PREFLIGHT_REQUIRED');
+
+    const launchInput = await passingLiveLaunchInput(campaignId);
+    const invalidProof = await jsonRequest(`/campaigns/${campaignId}/runs`, {
+      method: 'POST', headers: { 'idempotency-key': key },
+      body: JSON.stringify({ ...launchInput, preflightToken: `${launchInput.preflightToken.slice(0, -1)}x` }),
+    });
+    expect(invalidProof.response.status).toBe(409);
+    expect(invalidProof.body).toMatchObject({
+      code: 'CAMPAIGN_RUN_PREFLIGHT_INVALID', details: { reason: 'INVALID' },
+    });
+  });
+
   it('permits many DRAFT dry-runs but atomically allows only one revision-bound LIVE launch', async () => {
     const campaign = await createCampaign();
     const campaignId = campaign.body.id as string;
@@ -831,12 +894,11 @@ describe('campaign draft contract HTTP API', () => {
     expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('DRAFT');
 
     const keys = [randomUUID(), randomUUID()];
+    const launchInput = await passingLiveLaunchInput(campaignId);
     const launches = await Promise.all(keys.map(key => jsonRequest(`/campaigns/${campaignId}/runs`, {
       method: 'POST',
       headers: { 'idempotency-key': key },
-      body: JSON.stringify({
-        executionMode: 'LIVE', expectedCampaignRevision: 1, expectedTargetsRevision: 1,
-      }),
+      body: JSON.stringify(launchInput),
     })));
     expect(launches.map(result => result.response.status).sort()).toEqual([201, 409]);
     expect(launches.find(result => result.response.status === 409)?.body.code)
@@ -848,10 +910,17 @@ describe('campaign draft contract HTTP API', () => {
     const replay = await jsonRequest(`/campaigns/${campaignId}/runs`, {
       method: 'POST',
       headers: { 'idempotency-key': keys[winnerIndex]! },
-      body: JSON.stringify({ executionMode: 'LIVE' }),
+      body: JSON.stringify(launchInput),
     });
     expect(replay.response.status).toBe(200);
     expect(replay.body.id).toBe(winner.body.id);
+    const changedIntent = await jsonRequest(`/campaigns/${campaignId}/runs`, {
+      method: 'POST',
+      headers: { 'idempotency-key': keys[winnerIndex]! },
+      body: JSON.stringify({ ...launchInput, expectedTargetsRevision: 2 }),
+    });
+    expect(changedIntent.response.status).toBe(409);
+    expect(changedIntent.body.code).toBe('CAMPAIGN_RUN_IDEMPOTENCY_CONFLICT');
 
     await runPreparer.prepare(winner.body.id as string);
     expect((await jsonRequest(`/campaign-runs/${winner.body.id as string}`)).body.status).toBe('RUNNING');
@@ -872,14 +941,19 @@ describe('campaign draft contract HTTP API', () => {
     const campaign = await createCampaign({
       scheduleType: 'ONCE', scheduledAt: new Date(Date.now() + 60_000).toISOString(),
     });
+    const campaignId = campaign.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const launchInput = await passingLiveLaunchInput(campaignId);
     await pool.query(
       `UPDATE campaigns SET scheduled_at = now() - interval '1 minute' WHERE id = $1`,
-      [campaign.body.id],
+      [campaignId],
     );
-    const launch = await jsonRequest(`/campaigns/${campaign.body.id as string}/runs`, {
+    const launch = await jsonRequest(`/campaigns/${campaignId}/runs`, {
       method: 'POST',
       headers: { 'idempotency-key': randomUUID() },
-      body: JSON.stringify({ executionMode: 'LIVE' }),
+      body: JSON.stringify(launchInput),
     });
     expect(launch.response.status).toBe(409);
     expect(launch.body.code).toBe('CAMPAIGN_RUN_SCHEDULE_EXPIRED');
@@ -891,10 +965,11 @@ describe('campaign draft contract HTTP API', () => {
     await jsonRequest(`/campaigns/${campaignId}/targets`, {
       method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
     });
+    const launchInput = await passingLiveLaunchInput(campaignId);
     const run = await jsonRequest(`/campaigns/${campaignId}/runs`, {
       method: 'POST',
       headers: { 'idempotency-key': randomUUID() },
-      body: JSON.stringify({ executionMode: 'LIVE' }),
+      body: JSON.stringify(launchInput),
     });
     await runPreparer.prepare(run.body.id as string);
     await jsonRequest(`/campaign-runs/${run.body.id as string}/pause`, { method: 'POST' });
@@ -917,10 +992,11 @@ describe('campaign draft contract HTTP API', () => {
     await jsonRequest(`/campaigns/${campaignId}/targets`, {
       method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
     });
+    const launchInput = await passingLiveLaunchInput(campaignId);
     const run = await jsonRequest(`/campaigns/${campaignId}/runs`, {
       method: 'POST',
       headers: { 'idempotency-key': randomUUID() },
-      body: JSON.stringify({ executionMode: 'LIVE' }),
+      body: JSON.stringify(launchInput),
     });
     const runId = run.body.id as string;
     await runPreparer.prepare(runId);

@@ -36,6 +36,16 @@ export interface CampaignLifecycleDrift {
   multipleLive: number;
 }
 
+const runIntentChanged = (row: CampaignRunRow, input: {
+  executionMode: CampaignExecutionMode;
+  expectedCampaignRevision?: number;
+  expectedTargetsRevision?: number;
+}): boolean => row.execution_mode !== input.executionMode
+  || (input.expectedCampaignRevision !== undefined
+    && Number(row.campaign_revision) !== input.expectedCampaignRevision)
+  || (input.expectedTargetsRevision !== undefined
+    && Number(row.targets_revision) !== input.expectedTargetsRevision);
+
 
 @Injectable()
 export class CampaignRunRepository {
@@ -48,6 +58,25 @@ export class CampaignRunRepository {
   ) {
     this.deliveries = new CampaignDeliveryRepository(database, messageJobs);
     this.lifecycle = new CampaignRunLifecycleRepository(database);
+  }
+
+  async findIdempotent(campaignId: string, idempotencyKey: string): Promise<{
+    run: CampaignRunDto;
+    campaignRevision: number;
+    targetsRevision: number;
+    executionMode: CampaignExecutionMode;
+  } | null> {
+    const result = await this.database.query<CampaignRunRow>(
+      `${runSelect} WHERE cr.campaign_id = $1 AND cr.idempotency_key = $2`,
+      [campaignId, idempotencyKey],
+    );
+    const row = result.rows[0];
+    return row ? {
+      run: mapRun(row),
+      campaignRevision: Number(row.campaign_revision),
+      targetsRevision: Number(row.targets_revision),
+      executionMode: row.execution_mode,
+    } : null;
   }
 
   async create(input: {
@@ -102,7 +131,7 @@ export class CampaignRunRepository {
           ...empty,
           run: mapRun(run),
           campaignFound: true,
-          idempotencyConflict: run.execution_mode !== input.executionMode,
+          idempotencyConflict: runIntentChanged(run, input),
         };
       }
 
@@ -166,7 +195,7 @@ export class CampaignRunRepository {
           run: mapRun(run),
           created: false,
           campaignFound: true,
-          idempotencyConflict: run.execution_mode !== input.executionMode,
+          idempotencyConflict: runIntentChanged(run, input),
         };
       }
 

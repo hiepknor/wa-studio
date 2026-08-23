@@ -32,6 +32,10 @@ describe('campaign OpenAPI contract', () => {
     expect(contract.components.schemas.CampaignPreflightDto?.required).toEqual(expect.arrayContaining([
       'campaignRevision', 'targetsRevision', 'checks', 'targetIssues',
     ]));
+    expect(contract.components.schemas.CampaignPreflightDto?.properties).toEqual(expect.objectContaining({
+      liveLaunchToken: expect.objectContaining({ nullable: true }),
+      liveLaunchTokenExpiresAt: expect.objectContaining({ format: 'date-time', nullable: true }),
+    }));
     expect(contract.components.schemas.CampaignPreflightCheckDto?.properties?.code?.enum).toEqual([
       'CONTENT_VALID', 'TARGETS_VALID', 'SESSION_SENDABLE', 'GROUP_CAPABILITY', 'LIVE_SEND_ALLOWED',
     ]);
@@ -101,6 +105,7 @@ describe('campaign OpenAPI contract', () => {
     expect(contract.components.schemas.CreateCampaignRunDto?.properties).toEqual(expect.objectContaining({
       expectedCampaignRevision: expect.objectContaining({ minimum: 1 }),
       expectedTargetsRevision: expect.objectContaining({ minimum: 0 }),
+      preflightToken: expect.objectContaining({ minLength: 32, maxLength: 2048 }),
     }));
     expect(contract.components.schemas.CreateCampaignRunDto?.required).toEqual(['executionMode']);
   });

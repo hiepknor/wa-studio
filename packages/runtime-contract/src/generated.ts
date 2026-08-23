@@ -474,6 +474,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/health/operational": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["HealthController_operational"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/messages": {
         parameters: {
             query?: never;
@@ -903,6 +919,13 @@ export interface components {
             executionMode: "DRY_RUN" | "LIVE";
             /** Format: date-time */
             checkedAt: string;
+            /** @description Short-lived signed proof required to launch this reviewed LIVE snapshot. */
+            liveLaunchToken?: string | null;
+            /**
+             * Format: date-time
+             * @description Expiry of liveLaunchToken. Null for DRY_RUN or a blocked LIVE preflight.
+             */
+            liveLaunchTokenExpiresAt?: string | null;
             totalTargets: number;
             allowedTargets: number;
             deniedTargets: number;
@@ -920,6 +943,8 @@ export interface components {
             expectedCampaignRevision?: number;
             /** @description Campaign target revision to launch. A stale value returns HTTP 409. */
             expectedTargetsRevision?: number;
+            /** @description Signed token returned by the matching LIVE preflight. Required when executionMode is LIVE. */
+            preflightToken?: string;
         };
         CampaignRunProgressDto: {
             total: number;
@@ -1057,6 +1082,20 @@ export interface components {
             status: "not_ready";
             /** @enum {string} */
             reason: "Runtime dependency unavailable";
+        };
+        HealthOperationalDto: {
+            /** @enum {string} */
+            status: "operational" | "degraded";
+            /** @enum {string} */
+            service: "wa-runtime";
+            /** @example 0.1.0 */
+            version: string;
+            /** @example desktop-generation-1 */
+            instanceId: string;
+            dependencies: components["schemas"]["HealthDependenciesDto"] | null;
+            processes: components["schemas"]["RuntimeProcessHealthDto"];
+            /** @enum {string} */
+            reason?: "dependency_unavailable" | "background_process_degraded";
         };
         InboundMessageDto: {
             /** Format: uuid */
@@ -2697,6 +2736,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthNotReadyDto"];
+                };
+            };
+        };
+    };
+    HealthController_operational: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthOperationalDto"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthOperationalDto"];
                 };
             };
         };

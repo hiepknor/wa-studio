@@ -96,7 +96,9 @@ adapter. `BLOCK` takes precedence over `WARN`, which takes precedence over `PASS
 reasons are stable `TARGET_CAPABILITY_DENIED`, `TARGET_CAPABILITY_UNKNOWN` or
 `TARGET_CAPABILITY_STALE` codes; an invalidated capability is treated as unknown even when its stored
 status was previously allowed. The underlying capability remains a separate field. Reports include
-the campaign and target revisions they checked.
+the campaign and target revisions they checked. A passing LIVE report also includes a short-lived,
+signed `liveLaunchToken` and its expiry. A blocked LIVE report and every DRY_RUN report return no
+launch token.
 Preparation and resume compare observed capability revisions again before committing the decision.
 A changed revision causes a retry/conflict rather than applying stale policy, and preparation churn
 does not consume the operational failure-attempt budget.
@@ -130,16 +132,17 @@ atomically creates the run and snapshots:
 - each group's capability, reason and revision.
 - optional saved-list source provenance for the materialized target set.
 
-Repeating the same key and mode returns the existing run. Reusing the key with a different mode
-returns HTTP 409.
+Repeating the same key and complete launch intent returns the existing run. Reusing the key with a
+different mode or supplied revision returns HTTP 409.
 
 A campaign is one live send plan. While `DRAFT`, it may create multiple DRY_RUN snapshots without a
 status change. The first LIVE launch atomically changes the campaign to `ACTIVE`. Release A enforces at
 most one LIVE run in the repository transaction and audits historical drift; after that gate is clean,
-Release B adds the database unique index as the final invariant. New launches may send optional expected
-campaign/target revisions, and stale values return HTTP 409. A LIVE `ONCE` launch whose scheduled
-instant has passed is rejected. Idempotent replay of the winning key is checked before lifecycle
-rejection and therefore remains safe after launch.
+Release B adds the database unique index as the final invariant. LIVE requires both expected
+campaign/target revisions and the signed proof from the matching passing preflight; a missing,
+expired, tampered or cross-snapshot proof fails closed. A LIVE `ONCE` launch whose scheduled instant
+has passed is rejected. Exact idempotent replay of the winning key authenticates the same proof but
+may return the durable run after proof expiry because it cannot create new outbound work.
 
 ## Campaign deletion
 

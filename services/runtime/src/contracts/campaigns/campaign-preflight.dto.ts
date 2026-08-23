@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum } from 'class-validator';
 
 export enum CampaignExecutionMode {
@@ -75,6 +75,21 @@ export class CampaignPreflightDto {
 
   @ApiProperty({ format: 'date-time' })
   checkedAt!: Date;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Short-lived signed proof required to launch this reviewed LIVE snapshot.',
+  })
+  liveLaunchToken?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Expiry of liveLaunchToken. Null for DRY_RUN or a blocked LIVE preflight.',
+  })
+  liveLaunchTokenExpiresAt?: Date | null;
 
   @ApiProperty()
   totalTargets!: number;

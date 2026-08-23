@@ -244,13 +244,18 @@ export class CampaignService {
       throw new CampaignError(HttpStatus.NOT_FOUND, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
     }
     const { campaign, targets } = snapshot;
-    return this.preflights.evaluate({
+    const report = await this.preflights.evaluate({
       executionMode: dto.executionMode,
       sessionId: campaign.sessionId,
       text: campaign.text,
       targets,
       campaignRevision: campaign.revision,
       targetsRevision: campaign.targetsRevision,
+    });
+    return this.preflights.withLiveLaunchToken({
+      campaignId: campaign.id,
+      sessionId: campaign.sessionId,
+      report,
     });
   }
 

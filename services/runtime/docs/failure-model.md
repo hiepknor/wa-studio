@@ -111,3 +111,8 @@ campaign delivery keys. Terminal records are removed by configured operational r
 idempotency is guaranteed only while the original record remains within that retention window. Raw
 webhook envelopes and normalized events use shorter, independent lifetimes and multi-batch bounded
 draining as defined by [ADR 012](adr/012-event-ownership-and-bounded-storage.md).
+
+Campaign-run idempotency binds the key to execution mode and every supplied campaign/target
+revision. LIVE additionally requires a signed, expiring preflight proof for new work. An exact replay
+may authenticate that proof after expiry because it returns the existing durable run; it cannot
+re-enter preparation or create a second send intent.

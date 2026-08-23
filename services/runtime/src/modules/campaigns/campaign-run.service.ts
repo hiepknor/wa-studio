@@ -3,6 +3,10 @@ import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-con
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import type { CampaignExecutionMode } from '../../contracts/campaigns/campaign-preflight.dto';
 import type { CreateCampaignRunDto } from '../../contracts/campaigns/campaign-run.dto';
+import {
+  CampaignLivePreflightTokenService,
+  InvalidCampaignLivePreflightTokenError,
+} from './campaign-live-preflight-token.service';
 import { CampaignPreflightService } from './campaign-preflight.service';
 import { CampaignRunRepository } from './campaign-run.repository';
 import { CampaignService } from './campaign.service';
@@ -14,6 +18,7 @@ export class CampaignRunService {
     private readonly repository: CampaignRunRepository,
     private readonly campaigns: CampaignService,
     private readonly preflights: CampaignPreflightService,
+    private readonly liveTokens: CampaignLivePreflightTokenService,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
   ) {}
 
@@ -27,7 +32,34 @@ export class CampaignRunService {
       throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_RUN_IDEMPOTENCY_KEY_INVALID',
         'Idempotency-Key must not exceed 200 characters');
     }
-    await this.campaigns.get(campaignId);
+    const campaign = await this.campaigns.get(campaignId);
+    if (dto.executionMode === 'LIVE') {
+      if (dto.expectedCampaignRevision === undefined || dto.expectedTargetsRevision === undefined) {
+        throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_RUN_REVISION_REQUIRED',
+          'LIVE launch requires expectedCampaignRevision and expectedTargetsRevision');
+      }
+      if (!dto.preflightToken) {
+        throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_PREFLIGHT_REQUIRED',
+          'Run a passing LIVE preflight before launching');
+      }
+    }
+    const replay = await this.repository.findIdempotent(campaignId, idempotencyKey);
+    if (replay) {
+      if (replay.executionMode !== dto.executionMode
+        || (dto.expectedCampaignRevision !== undefined
+          && replay.campaignRevision !== dto.expectedCampaignRevision)
+        || (dto.expectedTargetsRevision !== undefined
+          && replay.targetsRevision !== dto.expectedTargetsRevision)) {
+        this.throwIdempotencyConflict();
+      }
+      if (dto.executionMode === 'LIVE') {
+        this.verifyLivePreflightToken(campaign, dto, true);
+      }
+      return { run: replay.run, created: false };
+    }
+    if (dto.executionMode === 'LIVE') {
+      this.verifyLivePreflightToken(campaign, dto, false);
+    }
     const result = await this.repository.create({
       campaignId,
       idempotencyKey,
@@ -39,8 +71,7 @@ export class CampaignRunService {
       throw new CampaignError(HttpStatus.NOT_FOUND, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
     }
     if (result.idempotencyConflict) {
-      throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_IDEMPOTENCY_CONFLICT',
-        'Idempotency-Key was already used with a different executionMode');
+      this.throwIdempotencyConflict();
     }
     if (result.campaignNotLaunchable) {
       throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_LAUNCH_CONFLICT',
@@ -62,6 +93,30 @@ export class CampaignRunService {
         'Campaign run could not be created');
     }
     return result;
+  }
+
+  private verifyLivePreflightToken(
+    campaign: { id: string; sessionId: string },
+    dto: CreateCampaignRunDto,
+    allowExpired: boolean,
+  ): void {
+    try {
+      this.liveTokens.verify(dto.preflightToken!, {
+        campaignId: campaign.id,
+        sessionId: campaign.sessionId,
+        campaignRevision: dto.expectedCampaignRevision!,
+        targetsRevision: dto.expectedTargetsRevision!,
+      }, new Date(), { allowExpired });
+    } catch (error) {
+      const reason = error instanceof InvalidCampaignLivePreflightTokenError ? error.reason : 'INVALID';
+      throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_PREFLIGHT_INVALID',
+        'LIVE preflight proof is invalid, expired, or belongs to a different snapshot', { reason });
+    }
+  }
+
+  private throwIdempotencyConflict(): never {
+    throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_IDEMPOTENCY_CONFLICT',
+      'Idempotency-Key was already used with a different launch intent');
   }
 
   async prepare(runId: string): Promise<void> {

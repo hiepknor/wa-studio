@@ -288,7 +288,7 @@ Clients should branch on HTTP semantics and display the server message:
 - 400: malformed input or missing idempotency header;
 - 401: absent or invalid Runtime key;
 - 404: resource is absent or outside the allowed session scope;
-- 409: idempotency conflict or invalid run-state transition;
+- 409: idempotency conflict, invalid run-state transition, or invalid/stale LIVE preflight proof;
 - 5xx: transient Runtime/infrastructure failure; retry only idempotent reads or writes carrying the
   same idempotency key.
 

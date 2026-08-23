@@ -1,15 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
-import type { CampaignExecutionMode } from '../../contracts/campaigns/campaign-preflight.dto';
+import type { CampaignExecutionMode, CampaignPreflightDto } from '../../contracts/campaigns/campaign-preflight.dto';
 import type { CampaignTargetDto } from '../../contracts/campaigns/campaign-target.dto';
 import { evaluateCampaignPreflight } from './campaign-preflight';
+import { CampaignLivePreflightTokenService } from './campaign-live-preflight-token.service';
 import { GatewayRepository } from '../gateway/gateway.repository';
 
 @Injectable()
 export class CampaignPreflightService {
   constructor(
     private readonly gateway: GatewayRepository,
+    private readonly liveTokens: CampaignLivePreflightTokenService,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
   ) {}
 
@@ -38,5 +40,21 @@ export class CampaignPreflightService {
       campaignRevision: input.campaignRevision,
       targetsRevision: input.targetsRevision,
     });
+  }
+
+  withLiveLaunchToken(input: {
+    campaignId: string;
+    sessionId: string;
+    report: CampaignPreflightDto;
+  }): CampaignPreflightDto {
+    if (input.report.executionMode !== 'LIVE' || input.report.status !== 'PASS') {
+      return { ...input.report, liveLaunchToken: null, liveLaunchTokenExpiresAt: null };
+    }
+    const issued = this.liveTokens.issue(input);
+    return {
+      ...input.report,
+      liveLaunchToken: issued.token,
+      liveLaunchTokenExpiresAt: issued.expiresAt,
+    };
   }
 }

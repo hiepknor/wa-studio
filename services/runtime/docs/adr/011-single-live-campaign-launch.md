@@ -16,9 +16,9 @@ idempotency keys, and the Campaign status enum has no implemented transition own
 2. A DRAFT remains editable and may create multiple DRY_RUN executions for review.
 3. A campaign may create at most one LIVE run. The first LIVE creation atomically snapshots the
    definition and targets and changes Campaign status from `DRAFT` to `ACTIVE`.
-4. A LIVE launch requires the expected campaign and target revisions. Omitted fields remain
-   temporarily accepted for backward compatibility, but Runtime binds the launch to the revisions
-   locked inside the creation transaction.
+4. A LIVE launch requires the expected campaign and target revisions. The temporary compatibility
+   window for omitted revisions ended with [ADR 016](016-reviewed-live-launch-proof.md); launches now
+   also require the signed proof from a recent passing LIVE preflight.
 5. A LIVE run may be `PREPARING`, `BLOCKED`, `SCHEDULED` or `RUNNING` while Campaign is `ACTIVE`.
    Pausing the live run sets Campaign to `PAUSED`; resuming sets it to `ACTIVE`.
 6. Terminal live-run completion or cancellation archives the one-send plan. Campaign `ARCHIVED`

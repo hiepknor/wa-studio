@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsOptional, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
 import { PageMetaDto } from '../common/pagination.dto';
 import { CampaignExecutionMode, CampaignPreflightDto } from './campaign-preflight.dto';
 import { CampaignTargetSourceDto } from './campaign-target.dto';
@@ -26,6 +26,18 @@ export class CreateCampaignRunDto {
   @IsInt()
   @Min(0)
   expectedTargetsRevision?: number;
+
+  @ApiProperty({
+    required: false,
+    minLength: 32,
+    maxLength: 2048,
+    description: 'Signed token returned by the matching LIVE preflight. Required when executionMode is LIVE.',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(32)
+  @MaxLength(2048)
+  preflightToken?: string;
 }
 
 export class CampaignRunProgressDto {

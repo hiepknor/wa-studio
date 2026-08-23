@@ -2641,6 +2641,42 @@
         ]
       }
     },
+    "/api/v1/health/operational": {
+      "get": {
+        "operationId": "HealthController_operational",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOperationalDto"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOperationalDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "tags": [
+          "health"
+        ]
+      }
+    },
     "/api/v1/messages": {
       "get": {
         "operationId": "InboxController_list",
@@ -4015,6 +4051,17 @@
             "format": "date-time",
             "type": "string"
           },
+          "liveLaunchToken": {
+            "type": "string",
+            "nullable": true,
+            "description": "Short-lived signed proof required to launch this reviewed LIVE snapshot."
+          },
+          "liveLaunchTokenExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Expiry of liveLaunchToken. Null for DRY_RUN or a blocked LIVE preflight."
+          },
           "totalTargets": {
             "type": "number"
           },
@@ -4075,6 +4122,12 @@
             "type": "integer",
             "minimum": 0,
             "description": "Campaign target revision to launch. A stale value returns HTTP 409."
+          },
+          "preflightToken": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 2048,
+            "description": "Signed token returned by the matching LIVE preflight. Required when executionMode is LIVE."
           }
         },
         "required": [
@@ -4534,6 +4587,59 @@
         "required": [
           "status",
           "reason"
+        ]
+      },
+      "HealthOperationalDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "operational",
+              "degraded"
+            ]
+          },
+          "service": {
+            "type": "string",
+            "enum": [
+              "wa-runtime"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "example": "0.1.0"
+          },
+          "instanceId": {
+            "type": "string",
+            "example": "desktop-generation-1"
+          },
+          "dependencies": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HealthDependenciesDto"
+              }
+            ]
+          },
+          "processes": {
+            "$ref": "#/components/schemas/RuntimeProcessHealthDto"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "dependency_unavailable",
+              "background_process_degraded"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "service",
+          "version",
+          "instanceId",
+          "dependencies",
+          "processes"
         ]
       },
       "InboundMessageDto": {
