@@ -8,6 +8,7 @@ import {
   EventInboxIngressController,
 } from './event-inbox.controller';
 import { EventInboxMaintenanceService } from './event-inbox-maintenance.service';
+import { EventInboxDeviceRepository } from './event-inbox-device.repository';
 import { EventInboxRepository } from './event-inbox.repository';
 
 @Module({
@@ -15,6 +16,7 @@ import { EventInboxRepository } from './event-inbox.repository';
   controllers: [EventInboxIngressController, EventInboxController, EventInboxHealthController],
   providers: [
     EventInboxRepository,
+    EventInboxDeviceRepository,
     EventInboxMaintenanceService,
     EventInboxTokenService,
     EventInboxOpenWAClient,

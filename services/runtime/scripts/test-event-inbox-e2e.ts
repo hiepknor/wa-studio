@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
 import { once } from 'node:events';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { Pool } from 'pg';
 import { migrateEventInboxDatabase } from '../src/core/event-inbox/event-inbox-migrations';
 import { parseEventInboxConfig } from '../src/core/event-inbox/event-inbox-config';
@@ -12,7 +13,7 @@ const apiKey = 'event-inbox-e2e-openwa-key';
 const masterSecret = 'event-inbox-e2e-master-secret-with-at-least-32-characters';
 
 async function main(): Promise<void> {
-  process.loadEnvFile();
+  if (existsSync('.env')) process.loadEnvFile();
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required for Event Inbox E2E');
   const database = new URL(process.env.DATABASE_URL);
   database.hostname = '127.0.0.1';
@@ -40,6 +41,7 @@ async function main(): Promise<void> {
     EVENT_INBOX_OPENWA_BASE_URL: openwaBaseUrl,
     EVENT_INBOX_ALLOWED_SESSION_IDS: sessionId,
     EVENT_INBOX_LEASE_SECONDS: '10',
+    EVENT_INBOX_V1_ACCEPT_UNTIL: new Date(Date.now() + 3_600_000).toISOString(),
   };
   const config = parseEventInboxConfig(environment);
   await migrateEventInboxDatabase(config);
@@ -51,8 +53,32 @@ async function main(): Promise<void> {
     });
     await waitUntilReady(eventInboxBaseUrl);
 
-    const pairing = await pair(eventInboxBaseUrl, openwaBaseUrl, randomUUID(), apiKey);
-    assert(pairing.protocolVersion === 1, 'pairing protocol drifted');
+    const legacyToken = issueLegacyDeviceToken(masterSecret, randomUUID(), [sessionId]);
+    await claim(eventInboxBaseUrl, legacyToken);
+
+    const deviceId = randomUUID();
+    const firstPairing = await pair(eventInboxBaseUrl, openwaBaseUrl, deviceId, apiKey);
+    assert(firstPairing.protocolVersion === 2, 'pairing protocol drifted');
+    await expectUnauthorized(eventInboxBaseUrl, legacyToken);
+    await postWebhook(
+      firstPairing.callbackUrl,
+      firstPairing.webhookSecret,
+      envelope('rotation-fence'),
+    );
+    const preRotationClaim = await claim(eventInboxBaseUrl, firstPairing.deviceToken);
+    assert(preRotationClaim.data.length === 1, 'pre-rotation device did not acquire a lease');
+    const pairing = await pair(eventInboxBaseUrl, openwaBaseUrl, deviceId, apiKey);
+    await expectUnauthorized(eventInboxBaseUrl, firstPairing.deviceToken);
+    const postRotationClaim = await claim(eventInboxBaseUrl, pairing.deviceToken);
+    assert(postRotationClaim.data.length === 1, 'rotation did not release the stale device lease');
+    assert(
+      postRotationClaim.data[0]!.receiptHandle !== preRotationClaim.data[0]!.receiptHandle,
+      'rotation reused a stale receipt fence',
+    );
+    const rotationAck = await inboxRequest(eventInboxBaseUrl, pairing.deviceToken, 'events/ack', {
+      receiptHandles: [postRotationClaim.data[0]!.receiptHandle],
+    });
+    assert(rotationAck.acknowledged === 1, 'rotated device could not ACK its fenced lease');
     assert(pairing.sessionIds.join(',') === sessionId, 'pairing session scope drifted');
     assert(pairing.callbackUrl === `${eventInboxBaseUrl}/api/v1/webhooks/openwa`, 'callback drifted');
     const rejectedPairing = await fetch(`${eventInboxBaseUrl}/api/v1/event-inbox/pair`, {
@@ -104,9 +130,25 @@ async function main(): Promise<void> {
     assert(empty.data.length === 0, 'dead event continued starving the queue');
     const health = await publicRequest(`${eventInboxBaseUrl}/api/v1/health/ready`);
     assert(health.pendingEvents === 0 && health.deadEvents === 1, 'health did not expose poison isolation');
+    assert(
+      health.activeDevices === 1 && health.legacyDevices === 1 && health.ownedSessions === 1,
+      'health did not expose the v1-to-v2 ownership cutover state',
+    );
+
+    const replacement = await pair(eventInboxBaseUrl, openwaBaseUrl, randomUUID(), apiKey);
+    await expectUnauthorized(eventInboxBaseUrl, pairing.deviceToken);
+    await claim(eventInboxBaseUrl, replacement.deviceToken);
+    const revoked = await inboxRequest(
+      eventInboxBaseUrl,
+      replacement.deviceToken,
+      'devices/revoke',
+      {},
+    );
+    assert(revoked.revoked === true, 'active Event Inbox device was not revoked');
+    await expectUnauthorized(eventInboxBaseUrl, replacement.deviceToken);
 
     process.stdout.write(
-      'Event Inbox E2E passed: OpenWA pairing, HMAC, dedup, lease fencing, retry, ACK and poison isolation.\n',
+      'Event Inbox E2E passed: v1 adoption, v2 rotation/takeover/revocation, HMAC, dedup, lease fencing, retry, ACK and poison isolation.\n',
     );
   } finally {
     if (inbox) await stop(inbox);
@@ -175,6 +217,24 @@ async function postWebhook(callbackUrl: string, secret: string, event: unknown) 
 
 function claim(baseUrl: string, token: string) {
   return inboxRequest(baseUrl, token, 'events/claim', { limit: 100, waitSeconds: 0 });
+}
+
+function issueLegacyDeviceToken(secret: string, deviceId: string, sessionIds: string[]): string {
+  const payload = Buffer.from(JSON.stringify({ version: 1, deviceId, sessionIds }), 'utf8')
+    .toString('base64url');
+  const signature = createHmac('sha256', secret)
+    .update(`device-token:v1:${payload}`)
+    .digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+async function expectUnauthorized(baseUrl: string, token: string): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/v1/event-inbox/events/claim`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ limit: 1, waitSeconds: 0 }),
+  });
+  assert(response.status === 401, `revoked Event Inbox token returned HTTP ${response.status}`);
 }
 
 async function inboxRequest(baseUrl: string, token: string, path: string, body: unknown) {

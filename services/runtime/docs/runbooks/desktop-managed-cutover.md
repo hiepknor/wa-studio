@@ -18,7 +18,7 @@ https://openwa.onio.cc/.well-known/wa-studio.
 
 Required pre-cutover checks:
 
-- Event Inbox local readiness returns protocolVersion 1 and zero stored events.
+- Event Inbox local readiness returns protocolVersion 2 and zero stored events.
 - Public discovery names exactly https://wa-events.onio.cc.
 - Legacy GET /api/v1/relay/events returns 404.
 - GET on pairing and delivery endpoints returns 404.

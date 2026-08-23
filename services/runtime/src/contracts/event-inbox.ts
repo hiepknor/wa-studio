@@ -35,7 +35,7 @@ export const eventInboxPairingRequestSchema = z.object({
 });
 
 export const eventInboxPairingResponseSchema = z.object({
-  protocolVersion: z.literal(1),
+  protocolVersion: z.literal(2),
   eventInboxBaseUrl: z.url(),
   callbackUrl: z.url(),
   deviceToken: z.string().min(32).max(4096),

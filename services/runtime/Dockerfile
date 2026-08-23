@@ -11,6 +11,7 @@ COPY services/runtime/tsconfig*.json services/runtime/
 COPY services/runtime/src services/runtime/src
 COPY services/runtime/scripts services/runtime/scripts
 COPY services/runtime/migrations services/runtime/migrations
+COPY services/runtime/event-inbox-migrations services/runtime/event-inbox-migrations
 RUN npm -w @wa/runtime run build
 
 FROM node:24-alpine AS runtime
@@ -27,5 +28,6 @@ RUN npm ci --omit=dev --workspace @wa/runtime --include-workspace-root \
 WORKDIR /workspace/services/runtime
 COPY --from=build /workspace/services/runtime/dist ./dist
 COPY services/runtime/migrations ./migrations
+COPY services/runtime/event-inbox-migrations ./event-inbox-migrations
 USER node
 CMD ["node", "dist/src/entrypoints/api.js"]

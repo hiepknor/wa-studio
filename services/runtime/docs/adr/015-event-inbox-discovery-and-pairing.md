@@ -13,9 +13,19 @@ small dedicated PostgreSQL database.
 Connect asks for two values: OpenWA Base URL and API key. Native code verifies the release, reads
 `/.well-known/wa-studio`, and sends a one-time pairing request to the discovered Event Inbox. Event
 Inbox validates the API key directly against the configured OpenWA origin without storing it, then
-returns a device bearer token, derived webhook secret, callback URL and authorized session IDs.
-Studio stores them in a protected local secret file schema v2 (`0700` directory / `0600` file); schema
-v1 has no compatibility path.
+returns a protocol-v2 device bearer token, derived webhook secret, callback URL and authorized
+session IDs. Studio stores them in the operating system secure credential store.
+
+Protocol v2 signs an expiry and monotonically increasing token generation. PostgreSQL is
+authoritative for that generation and for the single active device owner of each OpenWA session.
+Re-pairing the same device rotates its generation; pairing another device transfers session
+ownership. Both operations release stale leases, while generation checks fence stale ACK/NACK
+receipts. A device can revoke its current generation explicitly.
+
+Protocol-v1 tokens may be admitted only until the fixed UTC timestamp configured by
+`EVENT_INBOX_V1_ACCEPT_UNTIL`. During that bounded window a v1 device can adopt only an unowned
+session and can never take it back from v2. New Studio accepts discovery/pairing protocols 1 and 2
+so the desktop can roll out before the server; the v2 server issues only v2 tokens.
 
 OpenWA sends signed callbacks to Event Inbox. Runtime claims an ordered batch under a 60-second
 lease. Each event carries an opaque receipt bound to the claim lease and device. Runtime ACKs only
@@ -36,6 +46,8 @@ deterministic malformed/session-invalid events dead. Stale receipts cannot delet
 
 The server footprint is bounded and contains no business logic. Event delivery is at-least-once;
 local idempotency remains authoritative. Pairing rotates independently from Runtime API credentials.
-Master-secret rotation revokes device tokens and changes the derived webhook secret, so it requires
-an explicit Studio reconnect and OpenWA webhook reconciliation. Capacity exhaustion returns HTTP
-503 so OpenWA retries rather than accepting data that was not persisted.
+Pairing rotation, ownership transfer and explicit revocation invalidate device access without
+rotating the webhook secret. Master-secret rotation still revokes every signature and changes the
+derived webhook secret, so it requires an explicit Studio reconnect and OpenWA webhook
+reconciliation. Capacity exhaustion returns HTTP 503 so OpenWA retries rather than accepting data
+that was not persisted.

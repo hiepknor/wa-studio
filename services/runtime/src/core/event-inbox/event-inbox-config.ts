@@ -14,6 +14,11 @@ const schema = z.object({
   EVENT_INBOX_PORT: z.coerce.number().int().min(1).max(65535).default(34200),
   EVENT_INBOX_DATABASE_URL: z.url(),
   EVENT_INBOX_MASTER_SECRET: z.string().min(32).max(4096),
+  EVENT_INBOX_DEVICE_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(730).default(365),
+  EVENT_INBOX_V1_ACCEPT_UNTIL: z.preprocess(
+    value => value === '' ? undefined : value,
+    z.iso.datetime({ offset: true }).optional(),
+  ),
   EVENT_INBOX_PUBLIC_BASE_URL: originSchema,
   EVENT_INBOX_OPENWA_BASE_URL: originSchema,
   EVENT_INBOX_OPENWA_RELEASE_TAG: z.string().min(1).default('0.22.0'),

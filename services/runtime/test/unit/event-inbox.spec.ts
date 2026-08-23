@@ -7,6 +7,7 @@ import {
   EventInboxController,
   EventInboxIngressController,
 } from '../../src/modules/event-inbox/event-inbox.controller';
+import type { EventInboxDeviceRepository } from '../../src/modules/event-inbox/event-inbox-device.repository';
 import { encodeEventInboxReceipt } from '../../src/modules/event-inbox/event-inbox-receipt';
 import type { EventInboxRepository } from '../../src/modules/event-inbox/event-inbox.repository';
 
@@ -33,11 +34,38 @@ describe('Event Inbox boundary', () => {
       EVENT_INBOX_MAX_PAYLOAD_BYTES: 262_144,
       EVENT_INBOX_LEASE_SECONDS: 60,
       EVENT_INBOX_RETENTION_DAYS: 7,
+      EVENT_INBOX_DEVICE_TOKEN_TTL_DAYS: 365,
     });
     expect(() => parseEventInboxConfig({
       ...configEnvironment(),
       EVENT_INBOX_DATABASE_URL: 'redis://redis.test:6379',
     })).toThrow('must use PostgreSQL');
+  });
+
+  it('issues expiring v2 tokens and accepts v1 only inside an explicit fixed grace window', () => {
+    const tokens = new EventInboxTokenService(config());
+    const issuedAt = new Date();
+    const v2 = tokens.issueDeviceToken(
+      deviceId,
+      3,
+      issuedAt,
+      new Date(issuedAt.getTime() + 86_400_000),
+    );
+    expect(tokens.authenticate(`Bearer ${v2}`)).toMatchObject({
+      version: 2,
+      deviceId,
+      tokenGeneration: 3,
+    });
+
+    const legacy = issueLegacyDeviceToken(deviceId, [sessionId]);
+    expect(() => tokens.authenticate(`Bearer ${legacy}`))
+      .toThrow('Invalid Event Inbox device token');
+    const graceConfig = parseEventInboxConfig({
+      ...configEnvironment(),
+      EVENT_INBOX_V1_ACCEPT_UNTIL: '2099-01-01T00:00:00.000Z',
+    });
+    expect(new EventInboxTokenService(graceConfig).authenticate(`Bearer ${legacy}`))
+      .toMatchObject({ version: 1, deviceId, sessionIds: [sessionId] });
   });
 
   it('accepts only signed allowlisted OpenWA envelopes', async () => {
@@ -69,10 +97,27 @@ describe('Event Inbox boundary', () => {
       negativelyAcknowledge: vi.fn().mockResolvedValue({ retried: 0, dead: 1 }),
     };
     const openwa = { validateCredentials: vi.fn().mockResolvedValue([sessionId]) };
+    const devices = {
+      pair: vi.fn().mockResolvedValue({
+        deviceId,
+        tokenGeneration: 1,
+        issuedAt: new Date('2026-08-22T00:00:00Z'),
+        expiresAt: new Date('2027-08-22T00:00:00Z'),
+        sessionIds: [sessionId],
+      }),
+      authorize: vi.fn().mockResolvedValue({
+        deviceId,
+        tokenGeneration: 1,
+        tokenVersion: 2,
+        sessionIds: [sessionId],
+      }),
+      revoke: vi.fn().mockResolvedValue(true),
+    };
     const tokens = new EventInboxTokenService(config());
     const controller = new EventInboxController(
       repository as unknown as EventInboxRepository,
       tokens,
+      devices as unknown as EventInboxDeviceRepository,
       openwa as unknown as EventInboxOpenWAClient,
       config(),
     );
@@ -81,7 +126,7 @@ describe('Event Inbox boundary', () => {
     });
 
     expect(pairing).toMatchObject({
-      protocolVersion: 1,
+      protocolVersion: 2,
       eventInboxBaseUrl: 'http://127.0.0.1:34200',
       callbackUrl: 'http://127.0.0.1:34200/api/v1/webhooks/openwa',
       sessionIds: [sessionId],
@@ -94,6 +139,7 @@ describe('Event Inbox boundary', () => {
     await expect(controller.negativelyAcknowledge(authorization, { items: [{
       receiptHandle, disposition: 'dead', reason: 'invalid_event_payload',
     }] })).resolves.toEqual({ retried: 0, dead: 1 });
+    await expect(controller.revoke(authorization)).resolves.toEqual({ revoked: true });
     await expect(controller.claim('Bearer invalid', { limit: 10, waitSeconds: 0 }))
       .rejects.toThrow('Invalid Event Inbox device token');
   });
@@ -108,4 +154,12 @@ function configEnvironment(): NodeJS.ProcessEnv {
     EVENT_INBOX_OPENWA_BASE_URL: 'http://127.0.0.1:2785',
     EVENT_INBOX_ALLOWED_SESSION_IDS: sessionId,
   };
+}
+
+function issueLegacyDeviceToken(id: string, sessionIds: string[]): string {
+  const payload = Buffer.from(JSON.stringify({ version: 1, deviceId: id, sessionIds }), 'utf8')
+    .toString('base64url');
+  return `${payload}.${createHmac('sha256', masterSecret)
+    .update(`device-token:v1:${payload}`)
+    .digest('base64url')}`;
 }

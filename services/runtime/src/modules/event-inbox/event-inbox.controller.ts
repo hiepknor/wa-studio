@@ -26,6 +26,10 @@ import { eventInboxConfig, type EventInboxConfig } from '../../core/event-inbox/
 import { EventInboxTokenService } from '../../core/event-inbox/event-inbox-token.service';
 import { verifySha256Hmac } from '../../core/security/hmac-signature';
 import { EventInboxOpenWAClient } from '../../integrations/openwa/event-inbox-openwa.client';
+import {
+  EventInboxDeviceRepository,
+  type EventInboxDeviceAuthorization,
+} from './event-inbox-device.repository';
 import { decodeEventInboxReceipt } from './event-inbox-receipt';
 import { EventInboxRepository } from './event-inbox.repository';
 
@@ -79,6 +83,7 @@ export class EventInboxController {
   constructor(
     private readonly repository: EventInboxRepository,
     private readonly tokens: EventInboxTokenService,
+    private readonly devices: EventInboxDeviceRepository,
     private readonly openwa: EventInboxOpenWAClient,
     @Inject(EVENT_INBOX_CONFIG) private readonly config: EventInboxConfig = eventInboxConfig(),
   ) {}
@@ -97,14 +102,20 @@ export class EventInboxController {
     } catch {
       throw new UnauthorizedException('OpenWA credentials could not be verified');
     }
+    const device = await this.devices.pair(parsed.data.deviceId, sessionIds);
     return {
-      protocolVersion: 1 as const,
+      protocolVersion: 2 as const,
       eventInboxBaseUrl: this.config.EVENT_INBOX_PUBLIC_BASE_URL,
       callbackUrl: new URL(
         '/api/v1/webhooks/openwa',
         this.config.EVENT_INBOX_PUBLIC_BASE_URL,
       ).toString(),
-      deviceToken: this.tokens.issueDeviceToken(parsed.data.deviceId, sessionIds),
+      deviceToken: this.tokens.issueDeviceToken(
+        device.deviceId,
+        device.tokenGeneration,
+        device.issuedAt,
+        device.expiresAt,
+      ),
       webhookSecret: this.tokens.webhookSecret(),
       sessionIds,
     };
@@ -116,14 +127,15 @@ export class EventInboxController {
     @Headers('authorization') authorization: string | undefined,
     @Body() body: unknown,
   ) {
-    const claims = this.tokens.authenticate(authorization);
+    const device = await this.authenticate(authorization);
     const parsed = eventInboxClaimSchema.safeParse(body);
     if (!parsed.success) throw new UnprocessableEntityException('Invalid Event Inbox claim request');
     const deadline = Date.now() + parsed.data.waitSeconds * 1000;
     for (;;) {
       const data = await this.repository.claim(
-        claims.deviceId,
-        claims.sessionIds,
+        device.deviceId,
+        device.tokenGeneration,
+        device.sessionIds,
         parsed.data.limit,
       );
       if (data.length > 0 || Date.now() >= deadline) return { data };
@@ -137,7 +149,7 @@ export class EventInboxController {
     @Headers('authorization') authorization: string | undefined,
     @Body() body: unknown,
   ) {
-    const claims = this.tokens.authenticate(authorization);
+    const device = await this.authenticate(authorization);
     const parsed = eventInboxAckSchema.safeParse(body);
     if (!parsed.success) throw new UnprocessableEntityException('Invalid Event Inbox acknowledgement');
     const receipts = parsed.data.receiptHandles.map(decodeEventInboxReceipt);
@@ -146,7 +158,8 @@ export class EventInboxController {
     }
     return {
       acknowledged: await this.repository.acknowledge(
-        claims.deviceId,
+        device.deviceId,
+        device.tokenGeneration,
         receipts as Exclude<typeof receipts[number], null>[],
       ),
     };
@@ -158,7 +171,7 @@ export class EventInboxController {
     @Headers('authorization') authorization: string | undefined,
     @Body() body: unknown,
   ) {
-    const claims = this.tokens.authenticate(authorization);
+    const device = await this.authenticate(authorization);
     const parsed = eventInboxNackSchema.safeParse(body);
     if (!parsed.success) throw new UnprocessableEntityException('Invalid Event Inbox negative acknowledgement');
     const items = parsed.data.items.map(item => ({ ...item, receipt: decodeEventInboxReceipt(item.receiptHandle) }));
@@ -166,9 +179,28 @@ export class EventInboxController {
       throw new UnprocessableEntityException('Invalid Event Inbox receipt handle');
     }
     return this.repository.negativelyAcknowledge(
-      claims.deviceId,
+      device.deviceId,
+      device.tokenGeneration,
       items.map(item => ({ ...item, ...item.receipt! })),
     );
+  }
+
+  @Post('devices/revoke')
+  @HttpCode(200)
+  async revoke(@Headers('authorization') authorization: string | undefined) {
+    const device = await this.authenticate(authorization);
+    return {
+      revoked: await this.devices.revoke(device.deviceId, device.tokenGeneration),
+    };
+  }
+
+  private async authenticate(
+    authorization: string | undefined,
+  ): Promise<EventInboxDeviceAuthorization> {
+    const claims = this.tokens.authenticate(authorization);
+    const device = await this.devices.authorize(claims);
+    if (!device) throw new UnauthorizedException('Invalid Event Inbox device token');
+    return device;
   }
 }
 
@@ -178,7 +210,7 @@ export class EventInboxHealthController {
 
   @Get('live')
   live() {
-    return { status: 'ok', service: 'wa-event-inbox', protocolVersion: 1 };
+    return { status: 'ok', service: 'wa-event-inbox', protocolVersion: 2 };
   }
 
   @Get('ready')
@@ -186,7 +218,7 @@ export class EventInboxHealthController {
     return {
       status: 'ready',
       service: 'wa-event-inbox',
-      protocolVersion: 1,
+      protocolVersion: 2,
       ...await this.repository.readiness(),
     };
   }

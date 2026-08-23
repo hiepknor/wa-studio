@@ -7,8 +7,9 @@ business projections, Runtime API, or fallback Runtime.
 WA Studio discovers it from GET https://openwa.onio.cc/.well-known/wa-studio.
 
 Pairing validates the supplied OpenWA API key against the pinned OpenWA 0.22.0 gateway and returns
-a per-device bearer token, a derived webhook signing secret, callback URL, and authorized session
-scope. The OpenWA API key is never persisted by Event Inbox.
+an expiring protocol-v2 bearer token, a derived webhook signing secret, callback URL, and authorized
+session scope. The OpenWA API key is never persisted by Event Inbox. PostgreSQL fences token
+generations and permits exactly one active device owner per OpenWA session.
 
 ## Required environment
 
@@ -31,14 +32,18 @@ POSTGRES_USER=wa_event_inbox
 POSTGRES_PASSWORD=<random-48+-character-secret>
 EVENT_INBOX_DATABASE_URL=postgresql://wa_event_inbox:<url-encoded-password>@postgres:5432/wa_event_inbox
 EVENT_INBOX_MASTER_SECRET=<random-48+-character-secret>
+EVENT_INBOX_DEVICE_TOKEN_TTL_DAYS=365
+# Set once during the v1 -> v2 rollout, then remove after this fixed UTC instant passes.
+EVENT_INBOX_V1_ACCEPT_UNTIL=2026-09-30T00:00:00.000Z
 EVENT_INBOX_PUBLIC_BASE_URL=https://wa-events.onio.cc
 EVENT_INBOX_OPENWA_BASE_URL=https://openwa.onio.cc
 EVENT_INBOX_OPENWA_RELEASE_TAG=0.22.0
 EVENT_INBOX_ALLOWED_SESSION_IDS=<comma-separated-session-uuids>
 ~~~
 
-The master secret derives both OpenWA webhook signing material and stateless device-token
-signatures. Rotating it intentionally revokes all desktop pairings and requires reconnecting Studio.
+The master secret derives both OpenWA webhook signing material and device-token signatures.
+Rotating it intentionally revokes all desktop pairings and requires reconnecting Studio. Normal
+device rotation and revocation use the persisted generation fence and do not rotate this secret.
 
 ## Clean cutover
 
@@ -52,12 +57,16 @@ curl --fail https://wa-events.onio.cc/api/v1/health/ready
 curl --fail https://openwa.onio.cc/.well-known/wa-studio
 ~~~
 
-Only after both checks pass, reconnect WA Studio so it obtains schema-v2 local credentials and
-Runtime reconciles the existing OpenWA webhook to the derived secret. Verify a live callback drains
-to local PostgreSQL before removing the exact legacy wa-webhook-relay project and volume.
+Roll out a Studio build that accepts protocols 1 and 2 first. Then deploy Event Inbox v2 with one
+fixed `EVENT_INBOX_V1_ACCEPT_UNTIL` timestamp, update discovery to protocol 2, and reconnect Studio
+so it takes session ownership with a v2 token. Verify the old v1 token is rejected for that session
+and a live callback drains to local PostgreSQL. Remove the grace setting after its deadline; do not
+extend it on later restarts.
 
 ## Bounded storage
 
 The default profile enforces seven-day expiry, 100,000 stored events, 256 MiB aggregate payloads,
 256 KiB per callback, 60-second claims, 20 delivery attempts, poison-event isolation, and bounded
-container logs. Readiness reports stored, pending, leased, dead, and oldest-pending metrics.
+container logs. Readiness reports stored, pending, leased, dead, oldest-pending, active-device,
+legacy-device, and owned-session metrics. After the fixed v1 grace expires, maintenance removes
+inactive ownership fences and expired device records without allowing token-generation reuse.

@@ -6,6 +6,17 @@ import { EVENT_INBOX_CONFIG } from '../../core/event-inbox/event-inbox-config.mo
 import { eventInboxConfig, type EventInboxConfig } from '../../core/event-inbox/event-inbox-config';
 import { encodeEventInboxReceipt, type EventInboxReceipt } from './event-inbox-receipt';
 
+const ACTIVE_DEVICE_OWNERSHIP_SQL = `EXISTS (
+  SELECT 1 FROM event_inbox_session_owners AS owner
+  JOIN event_inbox_devices AS device
+    ON device.device_id = owner.device_id
+   AND device.token_generation = owner.token_generation
+   AND device.revoked_at IS NULL
+   AND device.token_expires_at > now()
+  WHERE owner.session_id = event_inbox_events.session_id
+    AND owner.device_id = $4::uuid AND owner.token_generation = $5
+)`;
+
 export type EventInboxInsertResult = 'created' | 'duplicate' | 'capacity';
 
 export interface EventInboxEnvelope {
@@ -23,6 +34,9 @@ export interface EventInboxReadiness {
   leasedEvents: number;
   deadEvents: number;
   oldestPendingAgeSeconds: number | null;
+  activeDevices: number;
+  legacyDevices: number;
+  ownedSessions: number;
   maxStoredEvents: number;
   maxStoredBytes: number;
 }
@@ -96,7 +110,12 @@ export class EventInboxRepository implements OnModuleDestroy {
     }
   }
 
-  async claim(deviceId: string, sessionIds: string[], limit: number): Promise<EventInboxEvent[]> {
+  async claim(
+    deviceId: string,
+    tokenGeneration: number,
+    sessionIds: string[],
+    limit: number,
+  ): Promise<EventInboxEvent[]> {
     const leaseId = randomUUID();
     const result = await this.pool.query<{
       idempotency_key: string;
@@ -104,21 +123,31 @@ export class EventInboxRepository implements OnModuleDestroy {
       signature: string;
     }>(
       `WITH candidates AS (
-         SELECT idempotency_key
-         FROM event_inbox_events
-         WHERE session_id = ANY($1::uuid[])
+         SELECT event.idempotency_key
+         FROM event_inbox_events AS event
+         JOIN event_inbox_session_owners AS owner
+           ON owner.session_id = event.session_id
+          AND owner.device_id = $4::uuid
+          AND owner.token_generation = $5
+         JOIN event_inbox_devices AS device
+           ON device.device_id = owner.device_id
+          AND device.token_generation = owner.token_generation
+          AND device.revoked_at IS NULL
+          AND device.token_expires_at > now()
+         WHERE event.session_id = ANY($1::uuid[])
            AND dead_at IS NULL
            AND expires_at > now()
            AND available_at <= now()
            AND (lease_expires_at IS NULL OR lease_expires_at <= now())
-         ORDER BY received_at, idempotency_key
-         FOR UPDATE SKIP LOCKED
+         ORDER BY received_at, event.idempotency_key
+         FOR UPDATE OF event SKIP LOCKED
          LIMIT $2
        )
        UPDATE event_inbox_events AS event
-       SET lease_id = $3::uuid,
+         SET lease_id = $3::uuid,
          lease_owner = $4::uuid,
-         lease_expires_at = now() + ($5::text || ' seconds')::interval,
+         lease_generation = $5,
+         lease_expires_at = now() + ($6::text || ' seconds')::interval,
          delivery_attempts = event.delivery_attempts + 1
        FROM candidates
        WHERE event.idempotency_key = candidates.idempotency_key
@@ -128,6 +157,7 @@ export class EventInboxRepository implements OnModuleDestroy {
         Math.min(limit, this.config.EVENT_INBOX_CLAIM_BATCH_MAX),
         leaseId,
         deviceId,
+        tokenGeneration,
         this.config.EVENT_INBOX_LEASE_SECONDS,
       ],
     );
@@ -139,7 +169,11 @@ export class EventInboxRepository implements OnModuleDestroy {
     }));
   }
 
-  async acknowledge(deviceId: string, receipts: EventInboxReceipt[]): Promise<number> {
+  async acknowledge(
+    deviceId: string,
+    tokenGeneration: number,
+    receipts: EventInboxReceipt[],
+  ): Promise<number> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -150,11 +184,23 @@ export class EventInboxRepository implements OnModuleDestroy {
          WHERE event.idempotency_key = receipt.idempotency_key
            AND event.lease_id = receipt.lease_id
            AND event.lease_owner = $3::uuid
+           AND event.lease_generation = $4
+           AND EXISTS (
+             SELECT 1 FROM event_inbox_session_owners AS owner
+             JOIN event_inbox_devices AS device
+               ON device.device_id = owner.device_id
+              AND device.token_generation = owner.token_generation
+              AND device.revoked_at IS NULL
+              AND device.token_expires_at > now()
+             WHERE owner.session_id = event.session_id
+               AND owner.device_id = $3::uuid AND owner.token_generation = $4
+           )
          RETURNING event.storage_bytes::text`,
         [
           receipts.map(receipt => receipt.idempotencyKey),
           receipts.map(receipt => receipt.leaseId),
           deviceId,
+          tokenGeneration,
         ],
       );
       await decrementUsage(client, result.rows);
@@ -170,6 +216,7 @@ export class EventInboxRepository implements OnModuleDestroy {
 
   async negativelyAcknowledge(
     deviceId: string,
+    tokenGeneration: number,
     items: Array<EventInboxNack & EventInboxReceipt>,
   ): Promise<{ retried: number; dead: number }> {
     const client = await this.pool.connect();
@@ -182,10 +229,19 @@ export class EventInboxRepository implements OnModuleDestroy {
           ? await client.query(
             `UPDATE event_inbox_events
              SET dead_at = now(), dead_reason = $1,
-               lease_id = NULL, lease_owner = NULL, lease_expires_at = NULL
+               lease_id = NULL, lease_owner = NULL, lease_generation = NULL,
+               lease_expires_at = NULL
              WHERE idempotency_key = $2 AND lease_id = $3::uuid AND lease_owner = $4::uuid
+               AND lease_generation = $5
+               AND ${ACTIVE_DEVICE_OWNERSHIP_SQL}
              RETURNING true AS dead`,
-            [item.reason ?? 'consumer_rejected', item.idempotencyKey, item.leaseId, deviceId],
+            [
+              item.reason ?? 'consumer_rejected',
+              item.idempotencyKey,
+              item.leaseId,
+              deviceId,
+              tokenGeneration,
+            ],
           )
           : await client.query<{ dead: boolean }>(
             `UPDATE event_inbox_events
@@ -193,10 +249,19 @@ export class EventInboxRepository implements OnModuleDestroy {
                dead_reason = CASE WHEN delivery_attempts >= $1 THEN 'max_delivery_attempts' ELSE NULL END,
                available_at = CASE WHEN delivery_attempts >= $1 THEN available_at
                  ELSE now() + (LEAST(300, power(2, GREATEST(0, delivery_attempts - 1)))::text || ' seconds')::interval END,
-               lease_id = NULL, lease_owner = NULL, lease_expires_at = NULL
+               lease_id = NULL, lease_owner = NULL, lease_generation = NULL,
+               lease_expires_at = NULL
              WHERE idempotency_key = $2 AND lease_id = $3::uuid AND lease_owner = $4::uuid
+               AND lease_generation = $5
+               AND ${ACTIVE_DEVICE_OWNERSHIP_SQL}
              RETURNING dead_at IS NOT NULL AS dead`,
-            [this.config.EVENT_INBOX_MAX_DELIVERY_ATTEMPTS, item.idempotencyKey, item.leaseId, deviceId],
+            [
+              this.config.EVENT_INBOX_MAX_DELIVERY_ATTEMPTS,
+              item.idempotencyKey,
+              item.leaseId,
+              deviceId,
+              tokenGeneration,
+            ],
           );
         if (result.rowCount) {
           if ((result.rows[0] as { dead?: boolean } | undefined)?.dead) dead += 1;
@@ -248,13 +313,32 @@ export class EventInboxRepository implements OnModuleDestroy {
       leased_events: string;
       dead_events: string;
       oldest_pending_age_seconds: string | null;
+      active_devices: string;
+      legacy_devices: string;
+      owned_sessions: string;
     }>(
       `SELECT usage.stored_events::text, usage.stored_bytes::text,
          count(event.*) FILTER (WHERE event.dead_at IS NULL)::text AS pending_events,
          count(event.*) FILTER (WHERE event.dead_at IS NULL AND event.lease_expires_at > now())::text AS leased_events,
          count(event.*) FILTER (WHERE event.dead_at IS NOT NULL)::text AS dead_events,
          EXTRACT(EPOCH FROM now() - min(event.received_at) FILTER (WHERE event.dead_at IS NULL))::text
-           AS oldest_pending_age_seconds
+           AS oldest_pending_age_seconds,
+         (SELECT count(*)::text FROM event_inbox_devices AS device
+          WHERE device.revoked_at IS NULL AND device.token_expires_at > now()
+            AND EXISTS (
+              SELECT 1 FROM event_inbox_session_owners AS owner
+              WHERE owner.device_id = device.device_id
+                AND owner.token_generation = device.token_generation
+            )) AS active_devices,
+         (SELECT count(*)::text FROM event_inbox_devices
+          WHERE token_version = 1 AND revoked_at IS NULL
+            AND token_expires_at > now()) AS legacy_devices,
+         (SELECT count(*)::text FROM event_inbox_session_owners AS owner
+          JOIN event_inbox_devices AS device
+            ON device.device_id = owner.device_id
+           AND device.token_generation = owner.token_generation
+          WHERE device.revoked_at IS NULL
+            AND device.token_expires_at > now()) AS owned_sessions
        FROM event_inbox_usage AS usage
        LEFT JOIN event_inbox_events AS event ON true
        WHERE usage.singleton = true
@@ -270,6 +354,9 @@ export class EventInboxRepository implements OnModuleDestroy {
       deadEvents: Number(usage.dead_events),
       oldestPendingAgeSeconds: usage.oldest_pending_age_seconds === null
         ? null : Math.max(0, Math.round(Number(usage.oldest_pending_age_seconds))),
+      activeDevices: Number(usage.active_devices),
+      legacyDevices: Number(usage.legacy_devices),
+      ownedSessions: Number(usage.owned_sessions),
       maxStoredEvents: this.config.EVENT_INBOX_MAX_STORED_EVENTS,
       maxStoredBytes: this.config.EVENT_INBOX_MAX_STORED_BYTES,
     };
