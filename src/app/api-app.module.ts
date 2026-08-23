@@ -14,6 +14,7 @@ import { HealthModule } from '../modules/health/health.module';
 import { InboxModule } from '../modules/inbox/inbox.module';
 import { MessagesModule } from '../modules/messages/messages.module';
 import { WebhooksModule } from '../modules/webhooks/webhooks.module';
+import { EventInboxConsumerModule } from '../modules/webhooks/event-inbox-consumer.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { WebhooksModule } from '../modules/webhooks/webhooks.module';
     InboxModule,
     MessagesModule,
     WebhooksModule,
+    EventInboxConsumerModule,
   ],
   providers: [
     RequestContextMiddleware,

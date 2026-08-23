@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { GatewayModule } from '../gateway/gateway.module';
-import { WebhookController } from './webhook.controller';
 import { WebhookRepository } from './webhook.repository';
 import { RuntimeEventRepository } from './runtime-event.repository';
 import { MessagesModule } from '../messages/messages.module';
@@ -11,14 +10,15 @@ import { OpenWAClient } from '../../integrations/openwa/openwa.client';
 import type { RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { WebhookRegistrationReconciliationTick } from './webhook-registration-reconciliation.tick';
+import { WebhookIngressService } from './webhook-ingress.service';
 
 @Module({
   imports: [GatewayModule, MessagesModule, ContactsModule, OpenWAModule],
-  controllers: [WebhookController],
   providers: [
     WebhookRepository,
     RuntimeEventRepository,
     WebhookProcessorService,
+    WebhookIngressService,
     {
       provide: WebhookRegistrationReconciliationTick,
       useFactory: (openwa: OpenWAClient, config: RuntimeConfig) => {
@@ -36,6 +36,7 @@ import { WebhookRegistrationReconciliationTick } from './webhook-registration-re
     WebhookRepository,
     RuntimeEventRepository,
     WebhookProcessorService,
+    WebhookIngressService,
     WebhookRegistrationReconciliationTick,
   ],
 })

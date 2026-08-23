@@ -19,10 +19,10 @@ describe('HealthController readiness', () => {
     expect(controller.live()).toEqual({ status: 'ok', service: 'wa-runtime', version: '0.1.0' });
   });
 
-  it('requires PostgreSQL and Redis and reports healthy background processes', async () => {
+  it('reports the selected Redis queue backend and healthy background processes', async () => {
     const database = { query: vi.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] }) };
     const queues = {
-      readiness: vi.fn().mockResolvedValue({ redis: true }),
+      readiness: vi.fn().mockResolvedValue({ backend: 'redis', ready: true }),
       runtimeProcessHealth: vi.fn().mockResolvedValue({ worker: 'healthy', scheduler: 'healthy' }),
     };
     const controller = new HealthController(
@@ -32,7 +32,11 @@ describe('HealthController readiness', () => {
 
     await expect(controller.ready()).resolves.toMatchObject({
       status: 'ready',
-      dependencies: { postgres: true, redis: true },
+      dependencies: {
+        postgres: true,
+        queue: { backend: 'redis', ready: true },
+        redis: true,
+      },
       processes: { worker: 'healthy', scheduler: 'healthy' },
     });
   });
@@ -40,7 +44,7 @@ describe('HealthController readiness', () => {
   it('remains ready and reports degraded background processes when heartbeats are missing', async () => {
     const database = { query: vi.fn().mockResolvedValue({ rows: [] }) };
     const queues = {
-      readiness: vi.fn().mockResolvedValue({ redis: true }),
+      readiness: vi.fn().mockResolvedValue({ backend: 'postgres', ready: true }),
       runtimeProcessHealth: vi.fn().mockResolvedValue({ worker: 'degraded', scheduler: 'degraded' }),
     };
     const controller = new HealthController(
@@ -50,12 +54,15 @@ describe('HealthController readiness', () => {
 
     await expect(controller.ready()).resolves.toMatchObject({
       status: 'ready',
-      dependencies: { postgres: true, redis: true },
+      dependencies: {
+        postgres: true,
+        queue: { backend: 'postgres', ready: true },
+      },
       processes: { worker: 'degraded', scheduler: 'degraded' },
     });
   });
 
-  it('returns unavailable when Redis is unavailable', async () => {
+  it('returns unavailable when the selected queue backend is unavailable', async () => {
     vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const database = { query: vi.fn().mockResolvedValue({ rows: [] }) };
     const queues = {

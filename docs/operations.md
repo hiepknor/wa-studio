@@ -12,6 +12,12 @@
 Development and production must not share credentials, databases, Redis instances, webhook secrets,
 session IDs or Docker volumes.
 
+The target production topology is the desktop-managed model in
+[ADR 015](adr/015-event-inbox-discovery-and-pairing.md). WA Studio owns Runtime business
+execution and PostgreSQL on the trusted desktop. The public VPS retains OpenWA `0.22.0` plus the
+bounded Event Inbox described in [its deployment guide](../deploy/event-inbox/README.md). The server topology
+below remains a development and controlled rollback profile; it is not the steady-state target.
+
 Set `WA_RUNTIME_DB_PASSWORD` to an independently generated staging/production secret and use the
 same URL-encoded credential in `DATABASE_URL`. The Compose defaults are development-only.
 

@@ -5,7 +5,9 @@ import { HealthLiveDto, HealthNotReadyDto, HealthReadyDto } from '../../contract
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { DatabaseService } from '../../core/database/database.service';
-import { QueueService, type RuntimeProcessHealth } from '../../core/queue/queue.service';
+import { QueueService } from '../../core/queue/queue.service';
+import type { QueueReadiness, RuntimeProcessHealth } from '../../core/queue/queue-transport';
+import { RUNTIME_SERVICE, RUNTIME_VERSION } from '../../core/release/runtime-release';
 
 @ApiTags('health')
 @Controller('health')
@@ -22,7 +24,7 @@ export class HealthController {
   @Get('live')
   @ApiOkResponse({ type: HealthLiveDto })
   live(): HealthLiveDto {
-    return { status: 'ok', service: 'wa-runtime', version: '0.1.0' };
+    return { status: 'ok', service: RUNTIME_SERVICE, version: RUNTIME_VERSION };
   }
 
   @Public()
@@ -31,9 +33,10 @@ export class HealthController {
   @ApiServiceUnavailableResponse({ type: HealthNotReadyDto })
   async ready(): Promise<HealthReadyDto> {
     let processes: RuntimeProcessHealth;
+    let queue: QueueReadiness;
     try {
       await this.database.query('SELECT 1');
-      await this.queues.readiness();
+      queue = await this.queues.readiness();
       processes = await this.queues.runtimeProcessHealth();
     } catch (error) {
       this.logger.error({ event: 'runtime.readiness.failed', error });
@@ -44,7 +47,11 @@ export class HealthController {
     }
     return {
       status: 'ready',
-      dependencies: { postgres: true, redis: true },
+      dependencies: {
+        postgres: true,
+        queue,
+        ...(queue.backend === 'redis' ? { redis: true as const } : {}),
+      },
       processes,
       liveSendsEnabled: this.config.ALLOW_LIVE_SENDS,
       openwaRelease: this.config.OPENWA_RELEASE_TAG,

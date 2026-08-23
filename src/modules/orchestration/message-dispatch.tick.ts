@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { QueueService } from '../../core/queue/queue.service';
+import { MESSAGE_SEND_QUEUE } from '../../core/queue/queue.constants';
 import { MessageJobRepository } from '../messages/message-job.repository';
 
 @Injectable()
@@ -24,7 +25,7 @@ export class MessageDispatchTick {
     const jobs = await this.messages.claimDue(100);
     for (const job of jobs) {
       try {
-        await this.queues.messageSend.add('send-text', { messageJobId: job.id }, {
+        await this.queues.publish(MESSAGE_SEND_QUEUE, 'send-text', { messageJobId: job.id }, {
           jobId: job.id, attempts: 1, removeOnComplete: 1000, removeOnFail: 5000,
         });
       } catch (error) {

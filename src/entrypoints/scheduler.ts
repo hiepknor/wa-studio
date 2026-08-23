@@ -4,7 +4,7 @@ import { SchedulerAppModule } from '../app/scheduler-app.module';
 import { SchedulerRunnerService } from '../modules/orchestration/scheduler-runner.service';
 import { JsonLogger } from '../core/observability/json-logger';
 
-async function bootstrap(): Promise<void> {
+export async function runScheduler(): Promise<void> {
   const app = await NestFactory.createApplicationContext(SchedulerAppModule, { logger: new JsonLogger('scheduler') });
   try {
     await app.get(SchedulerRunnerService).run();
@@ -13,7 +13,9 @@ async function bootstrap(): Promise<void> {
   }
 }
 
-bootstrap().catch(error => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  runScheduler().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

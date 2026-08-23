@@ -9,3 +9,5 @@ coverage/
 volumes/
 # Legacy local OpenWA config retained temporarily during migration to the OpenWA repository.
 infra/openwa-dev.env
+deploy/relay/relay.env
+deploy/relay/wa-studio-relay-pairing.json

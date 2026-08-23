@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { stableQueueJobId } from '../../core/queue/queue-job-id';
 import { QueueService } from '../../core/queue/queue.service';
+import { WEBHOOK_QUEUE } from '../../core/queue/queue.constants';
 import { WebhookRepository } from '../webhooks/webhook.repository';
 
 @Injectable()
@@ -18,7 +19,7 @@ export class WebhookDispatchTick {
     const events = await this.webhooks.listDispatchable(100);
     for (const event of events) {
       try {
-        await this.queues.webhookIngress.add('process-openwa-webhook', event, {
+        await this.queues.publish(WEBHOOK_QUEUE, 'process-openwa-webhook', event, {
           jobId: stableQueueJobId('webhook', event.idempotencyKey),
           attempts: 1,
           removeOnComplete: true,

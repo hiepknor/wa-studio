@@ -27,5 +27,9 @@ describe('health OpenAPI contract', () => {
       worker: { enum: ['healthy', 'degraded'] },
       scheduler: { enum: ['healthy', 'degraded'] },
     });
+    expect(contract.components.schemas.HealthQueueDependencyDto?.properties).toMatchObject({
+      backend: { enum: ['redis', 'postgres'] },
+      ready: { enum: [true] },
+    });
   });
 });

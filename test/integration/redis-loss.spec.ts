@@ -3,6 +3,7 @@ import IORedis from 'ioredis';
 import type { Pool } from 'pg';
 import { DatabaseService } from '../../src/core/database/database.service';
 import { QueueService } from '../../src/core/queue/queue.service';
+import { RedisQueueTransport } from '../../src/core/queue/redis-queue.transport';
 import { stableQueueJobId } from '../../src/core/queue/queue-job-id';
 import {
   runtimeHeartbeatKey,
@@ -21,13 +22,15 @@ describe('Redis loss recovery', () => {
   let database: DatabaseService;
   let messages: MessageJobRepository;
   let queues: QueueService;
+  let queueTransport: RedisQueueTransport;
   let redis: IORedis;
 
   beforeAll(() => {
     pool = integrationPool();
     database = new DatabaseService();
     messages = new MessageJobRepository(database);
-    queues = new QueueService();
+    queueTransport = new RedisQueueTransport();
+    queues = new QueueService(queueTransport);
     redis = new IORedis(process.env.REDIS_URL!);
   });
   beforeEach(async () => { await resetIntegrationDatabase(pool); await redis.flushall(); });
@@ -51,17 +54,17 @@ describe('Redis loss recovery', () => {
     });
     const tick = new MessageDispatchTick(messages, queues);
     await tick.run();
-    expect(await queues.messageSend.getJob(created.job.id)).not.toBeUndefined();
+    expect(await queueTransport.messageSend.getJob(created.job.id)).not.toBeUndefined();
 
     await redis.flushall();
-    expect(await queues.messageSend.getJob(created.job.id)).toBeUndefined();
+    expect(await queueTransport.messageSend.getJob(created.job.id)).toBeUndefined();
     await pool.query(
       `UPDATE message_jobs SET updated_at = now() - interval '3 minutes' WHERE id = $1`, [created.job.id],
     );
 
     await tick.run();
 
-    expect(await queues.messageSend.getJob(created.job.id)).not.toBeUndefined();
+    expect(await queueTransport.messageSend.getJob(created.job.id)).not.toBeUndefined();
     expect(await messages.find(created.job.id)).toMatchObject({ status: 'QUEUED' });
   });
 
@@ -73,11 +76,11 @@ describe('Redis loss recovery', () => {
       deliveryId: 'delivery-1', data: { status: 'ready' },
     };
     await webhooks.insert(envelope);
-    expect(await queues.webhookIngress.getJob(stableQueueJobId('webhook', envelope.idempotencyKey))).toBeUndefined();
+    expect(await queueTransport.webhookIngress.getJob(stableQueueJobId('webhook', envelope.idempotencyKey))).toBeUndefined();
 
     await new WebhookDispatchTick(webhooks, queues).run();
 
-    expect(await queues.webhookIngress.getJob(stableQueueJobId('webhook', envelope.idempotencyKey))).not.toBeUndefined();
+    expect(await queueTransport.webhookIngress.getJob(stableQueueJobId('webhook', envelope.idempotencyKey))).not.toBeUndefined();
   });
 
   it('publishes process and scheduler telemetry in the WA Runtime namespace', async () => {

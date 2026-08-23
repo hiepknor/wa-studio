@@ -23,17 +23,18 @@ describe('GatewayDispatchTick', () => {
     const intents = {
       recoverExpired: vi.fn().mockResolvedValue(0), listDispatchable: vi.fn().mockResolvedValue([]),
     } as unknown as GatewayGroupIntentRepository;
-    const add = vi.fn().mockResolvedValue(undefined);
-    const queues = { gatewaySync: { add } } as unknown as QueueService;
+    const publish = vi.fn().mockResolvedValue(undefined);
+    const queues = { publish } as unknown as QueueService;
 
     await new GatewayDispatchTick(gateway, syncItems, intents, queues).run();
 
-    expect(add).toHaveBeenCalledWith(
+    expect(publish).toHaveBeenCalledWith(
+      'gateway-sync',
       'reconcile-session-group',
       expect.objectContaining({ itemId: 'item-1' }),
       expect.objectContaining({ delay: expect.any(Number) }),
     );
-    const delay = add.mock.calls[0]![2].delay as number;
+    const delay = publish.mock.calls[0]![3].delay as number;
     expect(delay).toBeGreaterThan(1_000);
     expect(delay).toBeLessThanOrEqual(1_500);
   });

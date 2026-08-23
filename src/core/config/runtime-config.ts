@@ -5,12 +5,17 @@ const booleanFromEnv = (defaultValue: boolean) => z
   .optional()
   .transform(value => value === undefined ? defaultValue : value === 'true');
 
+const desktopLoopbackHosts = new Set(['127.0.0.1', '::1']);
+
 const schema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    RUNTIME_PROFILE: z.enum(['server', 'desktop-managed']).default('server'),
+    RUNTIME_BIND_HOST: z.string().trim().min(1).optional(),
+    QUEUE_BACKEND: z.enum(['redis', 'postgres']).default('redis'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3100),
     DATABASE_URL: z.string().url(),
-    REDIS_URL: z.string().url(),
+    REDIS_URL: z.string().url().optional(),
     RUNTIME_API_KEY: z.string().min(32),
     ENABLE_RUNTIME_DOCS: z
       .enum(['true', 'false'])
@@ -24,6 +29,10 @@ const schema = z
     OPENWA_WEBHOOK_CALLBACK_URL: z.url().optional(),
     OPENWA_WEBHOOK_RECONCILIATION_INTERVAL_MS: z.coerce.number().int()
       .min(60_000).max(86_400_000).default(300_000),
+    EVENT_INBOX_BASE_URL: z.url().optional(),
+    EVENT_INBOX_DEVICE_TOKEN: z.string().min(32).max(4096).optional(),
+    EVENT_INBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(250).max(60_000).default(2_000),
+    EVENT_INBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(100),
     OPENWA_ALLOWED_SESSION_IDS: z
       .string()
       .min(1)
@@ -84,6 +93,21 @@ const schema = z
     CONTACT_MEMBER_IDENTITY_BACKFILL_MAX_BATCHES: z.coerce.number().int().min(1).max(100).default(20),
   })
   .superRefine((value, context) => {
+    if (value.QUEUE_BACKEND === 'redis' && !value.REDIS_URL) {
+      context.addIssue({
+        code: 'custom',
+        path: ['REDIS_URL'],
+        message: 'REDIS_URL is required when QUEUE_BACKEND=redis',
+      });
+    }
+    if (value.RUNTIME_PROFILE === 'desktop-managed' && value.RUNTIME_BIND_HOST
+      && !desktopLoopbackHosts.has(value.RUNTIME_BIND_HOST)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RUNTIME_BIND_HOST'],
+        message: 'desktop-managed Runtime must bind to a loopback address',
+      });
+    }
     if (value.OUTBOUND_MAX_DELAY_MS < value.OUTBOUND_MIN_DELAY_MS) {
       context.addIssue({
         code: 'custom',
@@ -109,21 +133,46 @@ const schema = z
         message: 'OPENWA_WEBHOOK_CALLBACK_URL is required when webhook reconciliation is enabled',
       });
     }
-    if (value.OPENWA_WEBHOOK_CALLBACK_URL
-      && new URL(value.OPENWA_WEBHOOK_CALLBACK_URL).protocol !== 'https:') {
-      context.addIssue({
-        code: 'custom', path: ['OPENWA_WEBHOOK_CALLBACK_URL'],
-        message: 'OPENWA_WEBHOOK_CALLBACK_URL must use HTTPS',
-      });
-    }
     if (value.OPENWA_WEBHOOK_CALLBACK_URL) {
       const callback = new URL(value.OPENWA_WEBHOOK_CALLBACK_URL);
+      const loopback = ['127.0.0.1', '::1', 'localhost'].includes(callback.hostname);
+      if (callback.protocol !== 'https:' && !(value.NODE_ENV !== 'production'
+        && callback.protocol === 'http:' && loopback)) {
+        context.addIssue({
+          code: 'custom', path: ['OPENWA_WEBHOOK_CALLBACK_URL'],
+          message: 'OPENWA_WEBHOOK_CALLBACK_URL must use HTTPS outside loopback development',
+        });
+      }
       const path = callback.pathname.replace(/\/+$/u, '');
       if (path !== '/api/v1/webhooks/openwa' || callback.search || callback.hash
         || callback.username || callback.password) {
         context.addIssue({
           code: 'custom', path: ['OPENWA_WEBHOOK_CALLBACK_URL'],
           message: 'OPENWA_WEBHOOK_CALLBACK_URL must target /api/v1/webhooks/openwa without credentials, query or fragment',
+        });
+      }
+    }
+    if (Boolean(value.EVENT_INBOX_BASE_URL) !== Boolean(value.EVENT_INBOX_DEVICE_TOKEN)) {
+      context.addIssue({
+        code: 'custom', path: ['EVENT_INBOX_DEVICE_TOKEN'],
+        message: 'EVENT_INBOX_BASE_URL and EVENT_INBOX_DEVICE_TOKEN must be configured together',
+      });
+    }
+    if (value.EVENT_INBOX_BASE_URL) {
+      const inbox = new URL(value.EVENT_INBOX_BASE_URL);
+      const loopback = ['127.0.0.1', '::1', 'localhost'].includes(inbox.hostname);
+      if (inbox.protocol !== 'https:' && !(value.NODE_ENV !== 'production'
+        && inbox.protocol === 'http:' && loopback)) {
+        context.addIssue({
+          code: 'custom', path: ['EVENT_INBOX_BASE_URL'],
+          message: 'EVENT_INBOX_BASE_URL must use HTTPS outside loopback development',
+        });
+      }
+      if (!['', '/'].includes(inbox.pathname) || inbox.search || inbox.hash
+        || inbox.username || inbox.password) {
+        context.addIssue({
+          code: 'custom', path: ['EVENT_INBOX_BASE_URL'],
+          message: 'EVENT_INBOX_BASE_URL must be an origin without credentials, path, query or fragment',
         });
       }
     }
@@ -173,7 +222,11 @@ const schema = z
 
 type ParsedRuntimeConfig = z.infer<typeof schema>;
 
-export type RuntimeConfig = Omit<ParsedRuntimeConfig, 'RUNTIME_INBOX_RETENTION_DAYS'> & {
+export type RuntimeConfig = Omit<
+  ParsedRuntimeConfig,
+  'RUNTIME_BIND_HOST' | 'RUNTIME_INBOX_RETENTION_DAYS'
+> & {
+  RUNTIME_BIND_HOST: string;
   RUNTIME_INBOX_RETENTION_DAYS: number;
   enableRuntimeDocs: boolean;
 };
@@ -184,6 +237,8 @@ export function parseRuntimeConfig(environment: NodeJS.ProcessEnv): RuntimeConfi
   const parsed = schema.parse(environment);
   return {
     ...parsed,
+    RUNTIME_BIND_HOST: parsed.RUNTIME_BIND_HOST
+      ?? (parsed.RUNTIME_PROFILE === 'desktop-managed' ? '127.0.0.1' : '0.0.0.0'),
     RUNTIME_INBOX_RETENTION_DAYS:
       parsed.RUNTIME_INBOX_RETENTION_DAYS ?? parsed.RUNTIME_EVENT_RETENTION_DAYS,
     enableRuntimeDocs: parsed.ENABLE_RUNTIME_DOCS ?? parsed.NODE_ENV !== 'production',

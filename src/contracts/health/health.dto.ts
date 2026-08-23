@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class HealthLiveDto {
   @ApiProperty({ enum: ['ok'] })
@@ -11,12 +11,23 @@ export class HealthLiveDto {
   version!: string;
 }
 
+export class HealthQueueDependencyDto {
+  @ApiProperty({ enum: ['redis', 'postgres'] })
+  backend!: 'redis' | 'postgres';
+
+  @ApiProperty({ enum: [true] })
+  ready!: true;
+}
+
 export class HealthDependenciesDto {
   @ApiProperty({ enum: [true] })
   postgres!: true;
 
-  @ApiProperty({ enum: [true] })
-  redis!: true;
+  @ApiProperty({ type: HealthQueueDependencyDto })
+  queue!: HealthQueueDependencyDto;
+
+  @ApiPropertyOptional({ enum: [true], description: 'Present for the legacy Redis queue backend.' })
+  redis?: true;
 }
 
 export class RuntimeProcessHealthDto {

@@ -1,0 +1,121 @@
+name: wa-event-inbox
+
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-event-inbox: &event-inbox
+  image: ${WA_EVENT_INBOX_IMAGE:?WA_EVENT_INBOX_IMAGE must be an immutable image digest}
+  environment:
+    NODE_ENV: production
+    EVENT_INBOX_BIND_HOST: 0.0.0.0
+    EVENT_INBOX_PORT: 34200
+    EVENT_INBOX_DATABASE_URL: ${EVENT_INBOX_DATABASE_URL:?EVENT_INBOX_DATABASE_URL is required}
+    EVENT_INBOX_MASTER_SECRET: ${EVENT_INBOX_MASTER_SECRET:?EVENT_INBOX_MASTER_SECRET is required}
+    EVENT_INBOX_PUBLIC_BASE_URL: ${EVENT_INBOX_PUBLIC_BASE_URL:?EVENT_INBOX_PUBLIC_BASE_URL is required}
+    EVENT_INBOX_OPENWA_BASE_URL: ${EVENT_INBOX_OPENWA_BASE_URL:?EVENT_INBOX_OPENWA_BASE_URL is required}
+    EVENT_INBOX_OPENWA_RELEASE_TAG: ${EVENT_INBOX_OPENWA_RELEASE_TAG:-0.22.0}
+    EVENT_INBOX_ALLOWED_SESSION_IDS: ${EVENT_INBOX_ALLOWED_SESSION_IDS:?EVENT_INBOX_ALLOWED_SESSION_IDS is required}
+    EVENT_INBOX_RETENTION_DAYS: ${EVENT_INBOX_RETENTION_DAYS:-7}
+    EVENT_INBOX_MAX_STORED_EVENTS: ${EVENT_INBOX_MAX_STORED_EVENTS:-100000}
+    EVENT_INBOX_MAX_STORED_BYTES: ${EVENT_INBOX_MAX_STORED_BYTES:-268435456}
+    EVENT_INBOX_MAX_PAYLOAD_BYTES: ${EVENT_INBOX_MAX_PAYLOAD_BYTES:-262144}
+    EVENT_INBOX_CLAIM_BATCH_MAX: ${EVENT_INBOX_CLAIM_BATCH_MAX:-100}
+    EVENT_INBOX_LEASE_SECONDS: ${EVENT_INBOX_LEASE_SECONDS:-60}
+    EVENT_INBOX_MAX_DELIVERY_ATTEMPTS: ${EVENT_INBOX_MAX_DELIVERY_ATTEMPTS:-20}
+    EVENT_INBOX_CLEANUP_INTERVAL_MS: ${EVENT_INBOX_CLEANUP_INTERVAL_MS:-300000}
+    EVENT_INBOX_CLEANUP_BATCH_SIZE: ${EVENT_INBOX_CLEANUP_BATCH_SIZE:-1000}
+    EVENT_INBOX_CLEANUP_MAX_BATCHES: ${EVENT_INBOX_CLEANUP_MAX_BATCHES:-10}
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 64
+  mem_limit: 128m
+  cpus: 0.50
+  logging: *bounded-logging
+  networks:
+    - event-inbox-internal
+
+services:
+  postgres:
+    image: ${WA_EVENT_INBOX_POSTGRES_IMAGE:?WA_EVENT_INBOX_POSTGRES_IMAGE must be a PostgreSQL 17.10 image digest}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - max_connections=20
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - max_wal_size=128MB
+      - -c
+      - min_wal_size=32MB
+      - -c
+      - wal_keep_size=0
+    shm_size: 64m
+    volumes:
+      - event-inbox-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.75
+    logging: *bounded-logging
+    networks:
+      - event-inbox-internal
+
+  migrate:
+    <<: *event-inbox
+    restart: "no"
+    command: ["node", "dist/src/entrypoints/event-inbox-migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  event-inbox:
+    <<: *event-inbox
+    restart: unless-stopped
+    command: ["node", "dist/src/entrypoints/event-inbox.js"]
+    ports:
+      - "127.0.0.1:34200:34200"
+    networks:
+      - event-inbox-internal
+      - event-inbox-edge
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:34200/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    stop_grace_period: 20s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+volumes:
+  event-inbox-postgres-data:
+    name: wa-event-inbox_postgres-data
+
+networks:
+  event-inbox-internal:
+    internal: true
+  event-inbox-edge:
+    driver: bridge

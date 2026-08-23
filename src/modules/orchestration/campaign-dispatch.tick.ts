@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { QueueService } from '../../core/queue/queue.service';
+import { CAMPAIGN_QUEUE } from '../../core/queue/queue.constants';
 import { CampaignRunRepository } from '../campaigns/campaign-run.repository';
 
 @Injectable()
@@ -17,7 +18,7 @@ export class CampaignDispatchTick {
     const preparing = await this.runs.listPreparing(100);
     for (const run of preparing) {
       try {
-        await this.queues.campaign.add('prepare-run', { runId: run.id }, {
+        await this.queues.publish(CAMPAIGN_QUEUE, 'prepare-run', { runId: run.id }, {
           jobId: `prepare-run-${run.id}`, attempts: 1,
           removeOnComplete: true, removeOnFail: true,
         });

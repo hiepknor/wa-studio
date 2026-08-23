@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { stableQueueJobId } from '../../core/queue/queue-job-id';
 import { QueueService } from '../../core/queue/queue.service';
+import { GATEWAY_SYNC_QUEUE } from '../../core/queue/queue.constants';
 import { GatewayRepository } from '../gateway/gateway.repository';
 import { GatewaySyncItemRepository } from '../gateway/gateway-sync-item.repository';
 import { GatewayGroupIntentRepository } from '../gateway/gateway-group-intent.repository';
@@ -55,7 +56,7 @@ export class GatewayDispatchTick {
     const syncRuns = await this.gateway.listPendingSyncRuns(100);
     for (const run of syncRuns) {
       try {
-        await this.queues.gatewaySync.add('full-session-sync', { syncRunId: run.id, sessionId: run.sessionId }, {
+        await this.queues.publish(GATEWAY_SYNC_QUEUE, 'full-session-sync', { syncRunId: run.id, sessionId: run.sessionId }, {
           jobId: run.id, attempts: 1, removeOnComplete: true, removeOnFail: true,
         });
       } catch (error) {
@@ -70,7 +71,7 @@ export class GatewayDispatchTick {
     const items = await this.syncItems.listDispatchable(100);
     for (const item of items) {
       try {
-        await this.queues.gatewaySync.add('reconcile-session-group', {
+        await this.queues.publish(GATEWAY_SYNC_QUEUE, 'reconcile-session-group', {
           itemId: item.id,
           syncRunId: item.syncRunId,
           sessionId: item.sessionId,
@@ -94,7 +95,7 @@ export class GatewayDispatchTick {
     const refreshes = await this.gateway.listGroupsNeedingCapabilityRefresh(100);
     for (const refresh of refreshes) {
       try {
-        await this.queues.gatewaySync.add('refresh-group-capability', {
+        await this.queues.publish(GATEWAY_SYNC_QUEUE, 'refresh-group-capability', {
           sessionId: refresh.sessionId,
           groupId: refresh.groupId,
           expectedRevision: refresh.revision,
@@ -117,7 +118,7 @@ export class GatewayDispatchTick {
     const intents = await this.groupIntents.listDispatchable(100);
     for (const intent of intents) {
       try {
-        await this.queues.gatewaySync.add('reconcile-targeted-group', intent, {
+        await this.queues.publish(GATEWAY_SYNC_QUEUE, 'reconcile-targeted-group', intent, {
           jobId: stableQueueJobId(
             'targeted-group-reconciliation',
             `${intent.sessionId}:${intent.groupId}:${intent.requestedRevision}`,

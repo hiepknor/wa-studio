@@ -7,7 +7,7 @@ import { runtimeConfig } from '../core/config/runtime-config';
 import { createOpenApiDocument } from '../core/openapi';
 import { JsonLogger } from '../core/observability/json-logger';
 
-async function bootstrap(): Promise<void> {
+export async function runApi(): Promise<void> {
   const config = runtimeConfig();
   const app = await NestFactory.create(ApiAppModule, { rawBody: true, logger: new JsonLogger('api') });
   app.setGlobalPrefix('api/v1');
@@ -25,10 +25,12 @@ async function bootstrap(): Promise<void> {
     SwaggerModule.setup('api/v1/docs', app, document, { jsonDocumentUrl: 'api/v1/openapi.json' });
   }
 
-  await app.listen(config.PORT, '0.0.0.0');
+  await app.listen(config.PORT, config.RUNTIME_BIND_HOST);
 }
 
-bootstrap().catch(error => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  runApi().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

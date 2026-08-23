@@ -1,5 +1,4 @@
 import 'reflect-metadata';
-import { createHmac } from 'node:crypto';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ValidationPipe } from '@nestjs/common';
@@ -71,17 +70,16 @@ describe('HTTP session authorization', () => {
     });
   });
 
-  it('rejects a validly signed webhook for a disallowed session', async () => {
+  it('does not expose OpenWA webhook ingress on the local Runtime API', async () => {
     const body = JSON.stringify({
       event: 'session.status', timestamp: '2026-08-11T00:00:00.000Z',
       sessionId: DISALLOWED_SESSION_ID, idempotencyKey: 'disallowed-webhook',
       deliveryId: 'delivery-disallowed', data: { status: 'ready' },
     });
-    const signature = `sha256=${createHmac('sha256', process.env.OPENWA_WEBHOOK_SECRET!).update(body).digest('hex')}`;
     const response = await fetch(`${baseUrl}/webhooks/openwa`, {
-      method: 'POST', headers: { 'content-type': 'application/json', 'x-openwa-signature': signature }, body,
+      method: 'POST', headers: { 'content-type': 'application/json' }, body,
     });
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(404);
     expect((await pool.query('SELECT count(*)::int AS count FROM webhook_events')).rows[0].count).toBe(0);
   });
 

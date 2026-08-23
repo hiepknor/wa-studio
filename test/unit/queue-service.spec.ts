@@ -7,6 +7,10 @@ const connections: Array<{
   ping: ReturnType<typeof vi.fn>;
   mget: ReturnType<typeof vi.fn>;
 }> = [];
+const queueInstances: Array<{
+  name: string;
+  add: ReturnType<typeof vi.fn>;
+}> = [];
 
 vi.mock('ioredis', () => ({
   default: class RedisMock {
@@ -24,7 +28,12 @@ vi.mock('ioredis', () => ({
 
 vi.mock('bullmq', () => ({
   Queue: class QueueMock {
+    add = vi.fn().mockResolvedValue(undefined);
     close = vi.fn().mockResolvedValue(undefined);
+
+    constructor(readonly name: string) {
+      queueInstances.push(this);
+    }
   },
 }));
 
@@ -35,7 +44,28 @@ vi.mock('../../src/core/config/runtime-config', () => ({
 describe('QueueService Redis connection logging', () => {
   afterEach(() => {
     connections.length = 0;
+    queueInstances.length = 0;
     vi.restoreAllMocks();
+  });
+
+  it('routes transport-neutral publications to the selected Redis queue', async () => {
+    const { QueueService } = await import('../../src/core/queue/queue.service');
+    const service = new QueueService();
+
+    await service.publish(
+      'gateway-sync',
+      'full-session-sync',
+      { syncRunId: 'run-1' },
+      { jobId: 'run-1', attempts: 1 },
+    );
+
+    const gateway = queueInstances.find(queue => queue.name === 'gateway-sync');
+    expect(gateway?.add).toHaveBeenCalledWith(
+      'full-session-sync',
+      { syncRunId: 'run-1' },
+      { jobId: 'run-1', attempts: 1 },
+    );
+    await service.onApplicationShutdown();
   });
 
   it('attaches structured error handlers without exposing the Redis URL', async () => {
@@ -61,7 +91,7 @@ describe('QueueService Redis connection logging', () => {
     const { QueueService } = await import('../../src/core/queue/queue.service');
     const service = new QueueService();
 
-    await expect(service.readiness()).resolves.toEqual({ redis: true });
+    await expect(service.readiness()).resolves.toEqual({ backend: 'redis', ready: true });
     await expect(service.runtimeProcessHealth()).resolves.toEqual({
       worker: 'degraded', scheduler: 'degraded',
     });

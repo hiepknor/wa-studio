@@ -6,33 +6,11 @@ import {
   WEBHOOK_QUEUE,
 } from '../../src/core/queue/queue.constants';
 
-const workerRecords = vi.hoisted(() => [] as Array<{
+const workerRecords = [] as Array<{
   name: string;
-  options: { concurrency: number };
+  concurrency: number;
   close: ReturnType<typeof vi.fn>;
-}>);
-const redisDisconnect = vi.hoisted(() => vi.fn());
-
-vi.mock('bullmq', () => ({
-  Worker: class WorkerMock {
-    readonly close = vi.fn().mockResolvedValue(undefined);
-    readonly on = vi.fn();
-
-    constructor(
-      readonly name: string,
-      _processor: unknown,
-      readonly options: { concurrency: number },
-    ) {
-      workerRecords.push({ name, options, close: this.close });
-    }
-  },
-}));
-
-vi.mock('ioredis', () => ({
-  default: class RedisMock {
-    disconnect = redisDisconnect;
-  },
-}));
+}>;
 
 vi.mock('../../src/core/config/runtime-config', () => ({
   runtimeConfig: () => ({
@@ -49,8 +27,14 @@ import { WorkerRunnerService } from '../../src/modules/orchestration/worker-runn
 describe('WorkerRunnerService', () => {
   it('uses the validated per-queue concurrency configuration', async () => {
     workerRecords.length = 0;
-    redisDisconnect.mockReset();
-    const queues = { publishHeartbeat: vi.fn().mockResolvedValue(undefined) };
+    const queues = {
+      publishHeartbeat: vi.fn().mockResolvedValue(undefined),
+      startWorker: vi.fn((name: string, concurrency: number) => {
+        const close = vi.fn().mockResolvedValue(undefined);
+        workerRecords.push({ name, concurrency, close });
+        return { close };
+      }),
+    };
     const processor = { process: vi.fn() };
     const runner = new WorkerRunnerService(
       processor as never,
@@ -66,13 +50,12 @@ describe('WorkerRunnerService', () => {
     process.emit('SIGTERM');
     await running;
 
-    expect(workerRecords.map(worker => [worker.name, worker.options.concurrency])).toEqual([
+    expect(workerRecords.map(worker => [worker.name, worker.concurrency])).toEqual([
       [MESSAGE_SEND_QUEUE, 3],
       [WEBHOOK_QUEUE, 11],
       [GATEWAY_SYNC_QUEUE, 4],
       [CAMPAIGN_QUEUE, 5],
     ]);
     expect(workerRecords.every(worker => worker.close.mock.calls.length === 1)).toBe(true);
-    expect(redisDisconnect).toHaveBeenCalledOnce();
   });
 });

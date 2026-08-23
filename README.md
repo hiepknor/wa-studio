@@ -21,24 +21,28 @@ Live delivery is disabled by default and requires both a `LIVE` run and
 
 ## Architecture
 
+The production target is local-first: WA Studio supervises the bundled Runtime roles, PostgreSQL and
+PostgreSQL durable queue on the operator's device. The VPS keeps OpenWA `0.22.0` unchanged and runs
+only a bounded Event Inbox so an offline/NATed desktop does not lose acknowledged callbacks.
+
 ```text
-Client applications (Desktop / Mobile / Web / integrations)
-    |
-    | Runtime API v1 + X-Runtime-Key
-    v
-WA Runtime API ----------- PostgreSQL (source of truth)
-           |                       ^
-           v                       |
-       Redis/BullMQ --> scheduler/worker --> OpenWA Gateway
+WA Studio desktop -> loopback Runtime API/worker/scheduler -> embedded PostgreSQL
                                               |
-                                              | signed webhooks
                                               v
-                                      Runtime webhook ingress
+                                      OpenWA Gateway 0.22.0
+                                              |
+                                              | signed webhook
+                                              v
+                            VPS Event Inbox + bounded PostgreSQL
+                                              |
+                                              | claim lease + receipt ACK/NACK
+                                              v
+                                    local Runtime ingress
 ```
 
-The API, scheduler and worker are separate processes using the same image. Redis transports work;
-PostgreSQL owns durable business state. See [Architecture](docs/architecture.md) for component and
-data-flow details.
+The server profile remains available for development and staging only. New production installs use
+the desktop-managed profile and do not require Redis. See [ADR 015](docs/adr/015-event-inbox-discovery-and-pairing.md)
+for the target topology and failure analysis.
 
 ## Quick start with Docker
 
@@ -97,6 +101,8 @@ The exact lifecycle and state meanings are documented in
 - [Campaign lifecycle](docs/campaign-lifecycle.md) — capabilities, preflight, runs and deliveries.
 - [Development](docs/development.md) — local OpenWA, configuration, tests and contract generation.
 - [Operations](docs/operations.md) — production safety, deploy, recovery, backup and upgrade.
+- [Event Inbox deployment](deploy/event-inbox/README.md) — immutable image, discovery, pairing, leases and disk bounds.
+- [Desktop installation runbook](docs/runbooks/desktop-managed-cutover.md) — clean local initialization and direct retirement of the old Runtime.
 - [Failure model](docs/failure-model.md) — durable dispatch, leases, retry and ambiguous delivery semantics.
 - [Observability](docs/observability.md) — JSON logs, correlation IDs, health checks and manual diagnosis.
 - [Latest local acceptance](docs/acceptance/2026-08-12-multiprocess-local.md) — two-worker concurrency, Redis recovery, dry-run load and group-member smoke evidence.

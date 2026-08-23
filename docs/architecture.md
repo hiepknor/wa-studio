@@ -27,6 +27,29 @@ those clients are introduced, add an identity/access layer (or trusted backend-f
 issues short-lived user tokens and enforces tenant, role and action scopes. This authentication
 evolution must not change the campaign domain contract.
 
+## Production deployment boundary
+
+The steady-state deployment packages WA Studio and the three Runtime roles as one desktop product.
+The native shell binds Runtime to loopback, supervises its processes and embedded PostgreSQL, and
+keeps credentials in a protected local secret file. Queue transport is PostgreSQL in this profile;
+Redis is not installed on the desktop.
+
+```text
+OpenWA 0.22.0 --signed POST--> public Event Inbox --durable row--> bounded PostgreSQL
+                                                                  |
+WA Studio <--loopback--> local Runtime <--claim/lease/ACK/NACK-----+
+                              |
+                              +--> embedded PostgreSQL queue and business state
+```
+
+Event Inbox is not a second Runtime. It has no campaign, send, sync or Runtime API endpoints. It
+validates OpenWA credentials only during pairing, never stores the API key, and preserves the exact
+raw callback until local ingress commits. A claim creates a fenced lease; a receipt ACK deletes it,
+a retry NACK applies bounded backoff, and a deterministic poison event moves to the dead set so it
+cannot starve later work. Count, byte, age, request and log bounds keep the VPS footprint finite. See
+[ADR 015](adr/015-event-inbox-discovery-and-pairing.md) and the detailed
+[post-deployment system model](post-deployment-system-model.md).
+
 ## Runtime processes
 
 The same image runs three long-lived processes and one one-shot migration process.
@@ -39,7 +62,8 @@ The same image runs three long-lived processes and one one-shot migration proces
 | `migrate` | Applies checksum-verified ordered SQL migrations under a global advisory lock | `schema_migrations` and schema |
 
 The API can restart without losing campaign work. The scheduler reconstructs pending work from
-PostgreSQL, and BullMQ job IDs make re-enqueueing safe.
+PostgreSQL. PostgreSQL queue IDs make re-enqueueing safe in the desktop-managed profile; BullMQ job
+IDs provide the equivalent transport idempotency in the legacy server profile.
 
 Message, webhook, gateway, campaign and retention scheduler ticks use independent recursive timers.
 Each tick has its own cadence and timeout, cannot overlap itself and backs off exponentially after a

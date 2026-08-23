@@ -1,6 +1,4 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { Worker } from 'bullmq';
-import IORedis from 'ioredis';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { withCorrelationContext } from '../../core/observability/correlation-context';
@@ -29,50 +27,49 @@ export class WorkerRunnerService {
 
   async run(): Promise<void> {
     const config = this.config;
-    const connection = new IORedis(config.REDIS_URL, { maxRetriesPerRequest: null });
-    const messageWorker = new Worker<MessageSendQueuePayload>(
+    const messageWorker = this.queues.startWorker<MessageSendQueuePayload>(
       MESSAGE_SEND_QUEUE,
-      job => this.runJob('message_send', job.name, String(job.id), {
-        messageJobId: job.data.messageJobId,
-      }, () => this.messageProcessor.process(job.data)),
-      { connection, concurrency: config.MESSAGE_WORKER_CONCURRENCY },
+      config.MESSAGE_WORKER_CONCURRENCY,
+      job => this.runJob('message_send', job.name, job.id, {
+        messageJobId: job.payload.messageJobId,
+      }, () => this.messageProcessor.process(job.payload)),
+      error => this.logger.error({ event: 'worker.connection.error', queue: MESSAGE_SEND_QUEUE, error }),
     );
-    const webhookWorker = new Worker<{ idempotencyKey: string }>(
+    const webhookWorker = this.queues.startWorker<{ idempotencyKey: string }>(
       WEBHOOK_QUEUE,
-      job => this.runJob('webhook_ingress', job.name, String(job.id), {
-        webhookIdempotencyKey: job.data.idempotencyKey,
-      }, () => this.webhookProcessor.process(job.data.idempotencyKey)),
-      { connection, concurrency: config.WEBHOOK_WORKER_CONCURRENCY },
+      config.WEBHOOK_WORKER_CONCURRENCY,
+      job => this.runJob('webhook_ingress', job.name, job.id, {
+        webhookIdempotencyKey: job.payload.idempotencyKey,
+      }, () => this.webhookProcessor.process(job.payload.idempotencyKey)),
+      error => this.logger.error({ event: 'worker.connection.error', queue: WEBHOOK_QUEUE, error }),
     );
-    const gatewayWorker = new Worker<FullGatewaySyncPayload | GroupCapabilityRefreshPayload | GroupReconciliationPayload | TargetedGroupReconciliationPayload>(
+    const gatewayWorker = this.queues.startWorker<FullGatewaySyncPayload | GroupCapabilityRefreshPayload | GroupReconciliationPayload | TargetedGroupReconciliationPayload>(
       GATEWAY_SYNC_QUEUE,
-      job => this.runJob('gateway_sync', job.name, String(job.id), {
-        sessionId: job.data.sessionId,
-        ...('syncRunId' in job.data ? { syncRunId: job.data.syncRunId } : {}),
-      }, () => this.gatewayProcessor.process(job.name, job.data)),
-      { connection, concurrency: config.GATEWAY_WORKER_CONCURRENCY },
+      config.GATEWAY_WORKER_CONCURRENCY,
+      job => this.runJob('gateway_sync', job.name, job.id, {
+        sessionId: job.payload.sessionId,
+        ...('syncRunId' in job.payload ? { syncRunId: job.payload.syncRunId } : {}),
+      }, () => this.gatewayProcessor.process(job.name, job.payload)),
+      error => this.logger.error({ event: 'worker.connection.error', queue: GATEWAY_SYNC_QUEUE, error }),
     );
-    const campaignWorker = new Worker<{ runId: string }>(
+    const campaignWorker = this.queues.startWorker<{ runId: string }>(
       CAMPAIGN_QUEUE,
-      job => this.runJob('campaign', job.name, String(job.id), {
-        campaignRunId: job.data.runId,
-      }, () => this.campaignProcessor.process(job.data.runId)),
-      { connection, concurrency: config.CAMPAIGN_WORKER_CONCURRENCY },
+      config.CAMPAIGN_WORKER_CONCURRENCY,
+      job => this.runJob('campaign', job.name, job.id, {
+        campaignRunId: job.payload.runId,
+      }, () => this.campaignProcessor.process(job.payload.runId)),
+      error => this.logger.error({ event: 'worker.connection.error', queue: CAMPAIGN_QUEUE, error }),
     );
     const workers = [messageWorker, webhookWorker, gatewayWorker, campaignWorker];
     const heartbeat = setInterval(() => void this.publishHeartbeat(), RUNTIME_HEARTBEAT_INTERVAL_MS);
     heartbeat.unref();
     await this.publishHeartbeat();
-    for (const worker of workers) {
-      worker.on('error', error => this.logger.error({ event: 'worker.connection.error', queue: worker.name, error }));
-    }
     await new Promise<void>(resolve => {
       process.once('SIGTERM', resolve);
       process.once('SIGINT', resolve);
     });
     await Promise.all(workers.map(worker => worker.close()));
     clearInterval(heartbeat);
-    connection.disconnect();
   }
 
   private async publishHeartbeat(): Promise<void> {
@@ -86,11 +83,11 @@ export class WorkerRunnerService {
   private runJob<T>(
     queue: string,
     jobName: string,
-    bullJobId: string,
+    queueJobId: string,
     context: Record<string, string>,
     operation: () => Promise<T>,
   ): Promise<T> {
-    return withCorrelationContext({ bullJobId, ...context }, async () => {
+    return withCorrelationContext({ queueJobId, ...context }, async () => {
       try {
         return await operation();
       } catch (error) {
