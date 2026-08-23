@@ -8,10 +8,9 @@ import { createServer as createNetServer } from "node:net";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 
-const studioRoot = resolve(import.meta.dirname, "..");
-const runtimeRoot = resolve(
-  process.env.WA_RUNTIME_DIR ?? resolve(studioRoot, "../wa-runtime"),
-);
+const workspaceRoot = resolve(import.meta.dirname, "..");
+const studioRoot = resolve(workspaceRoot, "apps/studio");
+const runtimeRoot = resolve(workspaceRoot, "services/runtime");
 const runtimeRequire = createRequire(resolve(runtimeRoot, "package.json"));
 const { Pool } = runtimeRequire("pg");
 
@@ -39,7 +38,10 @@ const appBinary = resolve(
 );
 
 async function main() {
-  process.loadEnvFile(resolve(runtimeRoot, ".env"));
+  const runtimeEnvFile = resolve(
+    process.env.WA_RUNTIME_ENV_FILE ?? resolve(runtimeRoot, ".env"),
+  );
+  if (existsSync(runtimeEnvFile)) process.loadEnvFile(runtimeEnvFile);
   const useExternalPostgres = process.argv.includes("--external-postgres");
   const withEventInbox = process.argv.includes("--with-event-inbox");
   const oneShot = process.argv.includes("--one-shot");

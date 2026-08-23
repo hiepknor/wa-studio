@@ -16,6 +16,12 @@
     "check:studio": "npm -w @wa/studio run check",
     "contract:generate": "npm -w @wa/runtime run contract:generate && npm -w @wa/runtime-contract run generate",
     "contract:check": "npm run contract:generate && git diff --exit-code -- packages/runtime-contract",
+    "sidecar:prepare": "node tooling/prepare-runtime-sidecar.mjs",
+    "dev": "npm run sidecar:prepare && npm -w @wa/studio run tauri -- dev",
+    "build:desktop": "npm run sidecar:prepare && npm -w @wa/studio run tauri -- build",
+    "test:managed-runtime": "node tooling/run-managed-runtime-e2e.mjs",
+    "test:managed-runtime:external-db": "node tooling/run-managed-runtime-e2e.mjs --external-postgres",
+    "test:managed-runtime:event-inbox": "node tooling/run-managed-runtime-e2e.mjs --with-event-inbox --one-shot",
     "test:integration": "npm -w @wa/runtime run test:integration",
     "codegraph:sync": "codegraph sync"
   }

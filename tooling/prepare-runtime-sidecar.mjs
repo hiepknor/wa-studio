@@ -1,12 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, cpSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const studioRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const runtimeRoot = resolve(
-  process.env.WA_RUNTIME_DIR ?? resolve(studioRoot, "../wa-runtime"),
-);
+const workspaceRoot = resolve(import.meta.dirname, "..");
+const studioRoot = resolve(workspaceRoot, "apps/studio");
+const runtimeRoot = resolve(workspaceRoot, "services/runtime");
 const targetTriple = execFileSync("rustc", ["--print", "host-tuple"], {
   encoding: "utf8",
 }).trim();
@@ -26,8 +24,8 @@ const migrationDestination = resolve(
   "runtime-migrations",
 );
 
-execFileSync("npm", ["run", "desktop:sidecar"], {
-  cwd: runtimeRoot,
+execFileSync("npm", ["-w", "@wa/runtime", "run", "desktop:sidecar"], {
+  cwd: workspaceRoot,
   stdio: "inherit",
 });
 mkdirSync(dirname(destination), { recursive: true });
