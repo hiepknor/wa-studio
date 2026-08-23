@@ -12,7 +12,7 @@ interface Schema {
 }
 
 const contract = JSON.parse(readFileSync(
-  resolve(process.cwd(), 'contracts/runtime/v1/openapi.json'), 'utf8',
+  resolve(process.cwd(), '../../packages/runtime-contract/openapi.json'), 'utf8',
 )) as {
   components: { schemas: Record<string, Schema> };
   paths: Record<string, Record<string, { parameters?: Array<{ name: string; required?: boolean }> }>>;

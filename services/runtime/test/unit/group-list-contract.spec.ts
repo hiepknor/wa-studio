@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const contract = JSON.parse(readFileSync(
-  resolve(process.cwd(), 'contracts/runtime/v1/openapi.json'),
+  resolve(process.cwd(), '../../packages/runtime-contract/openapi.json'),
   'utf8',
 )) as {
   components: { schemas: Record<string, Record<string, any>> };

@@ -16,12 +16,12 @@ This boundary lets future web and mobile clients use the same WA Runtime contrac
 
 ## Source of truth
 
-- `contracts/wa-runtime/v1/openapi.json` is the pinned WA Runtime v1 contract snapshot copied byte-for-byte from Runtime HEAD `82643397742fc687d555a8e6510e0367c080fa8d` (OpenAPI `1.0.0`, SHA-256 `3c2548daa0234839fd97329f0877eca0ec4c6baf0019ec51ba74e48dce3bae9c`).
-- `src/shared/api/generated/runtime.ts` is generated; do not edit it by hand.
-- `src/shared/api/runtime-client.ts` owns URL normalization, authentication headers, transport, and error mapping.
+- `packages/runtime-contract/openapi.json` is the generated WA Runtime v1 contract snapshot (OpenAPI `1.0.0`).
+- `packages/runtime-contract/src/generated.ts` is generated; do not edit it by hand.
+- `apps/studio/src/shared/api/runtime-client.ts` owns URL normalization, authentication headers, transport, and error mapping.
 - Feature modules consume the typed client and must not redefine Runtime DTOs.
 
-When WA Runtime changes, update the snapshot from a released WA Runtime revision, run `npm run contract:generate`, then fix compile/test failures in affected feature modules. Additive API changes should not force UI changes; breaking changes require a new contract version or an explicit coordinated migration.
+When WA Runtime changes, run `npm run contract:generate` from the monorepo root, review the generated snapshot, then fix compile/test failures in affected feature modules. Additive API changes should not force UI changes; breaking changes require a new contract version or an explicit coordinated migration.
 
 ## Feature slices
 

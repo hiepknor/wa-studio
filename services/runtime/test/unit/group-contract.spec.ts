@@ -8,7 +8,7 @@ interface Parameter {
 }
 
 const contract = JSON.parse(readFileSync(
-  resolve(process.cwd(), 'contracts/runtime/v1/openapi.json'), 'utf8',
+  resolve(process.cwd(), '../../packages/runtime-contract/openapi.json'), 'utf8',
 )) as {
   paths: Record<string, Record<string, { parameters?: Parameter[]; responses?: Record<string, unknown> }>>;
 };

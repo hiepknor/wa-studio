@@ -245,7 +245,7 @@ Reviewed OpenWA snapshot
 ```
 
 `src/contracts` is the human-maintained public contract source. The generated
-`contracts/runtime/v1/openapi.json` is committed for review but must not be edited manually.
+`packages/runtime-contract/openapi.json` is committed for review but must not be edited manually.
 Database rows, BullMQ payloads and raw webhook bodies are internal and may change without exposing
 those shapes to consumers.
 

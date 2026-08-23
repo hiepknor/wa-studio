@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { components, paths } from "./generated/runtime";
-import openapiSnapshot from "../../../contracts/wa-runtime/v1/openapi.json?raw";
+import type { components, paths } from "@wa/runtime-contract";
+import openapiSnapshot from "@wa/runtime-contract/openapi.json?raw";
 
 type UpdateCampaignDto = components["schemas"]["UpdateCampaignDto"];
 type CampaignListQuery = NonNullable<

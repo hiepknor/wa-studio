@@ -10,11 +10,12 @@
     "node": ">=24"
   },
   "scripts": {
-    "check": "npm run check:runtime && npm run check:studio",
+    "check": "npm run contract:check && npm run check:runtime && npm run check:studio",
     "check:runtime": "npm -w @wa/runtime run check",
     "check:runtime:all": "npm -w @wa/runtime run check:all",
     "check:studio": "npm -w @wa/studio run check",
-    "contract:check": "npm -w @wa/runtime run contract:check",
+    "contract:generate": "npm -w @wa/runtime run contract:generate && npm -w @wa/runtime-contract run generate",
+    "contract:check": "npm run contract:generate && git diff --exit-code -- packages/runtime-contract",
     "test:integration": "npm -w @wa/runtime run test:integration",
     "codegraph:sync": "codegraph sync"
   }

@@ -92,7 +92,7 @@ The recommended first end-to-end flow for any management client is:
 
 The exact lifecycle and state meanings are documented in
 [Campaign lifecycle](docs/campaign-lifecycle.md). The complete machine-readable contract is
-[contracts/runtime/v1/openapi.json](contracts/runtime/v1/openapi.json).
+[packages/runtime-contract/openapi.json](../../packages/runtime-contract/openapi.json).
 
 ## Documentation
 

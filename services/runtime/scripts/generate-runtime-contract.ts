@@ -1,7 +1,16 @@
 import 'reflect-metadata';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
+
+function contractOutputPath(): string {
+  const outputIndex = process.argv.indexOf('--output');
+  const output = outputIndex >= 0 ? process.argv[outputIndex + 1] : undefined;
+  if (!output || output.startsWith('-')) {
+    throw new Error('Runtime contract generation requires --output <path>');
+  }
+  return resolve(process.cwd(), output);
+}
 
 async function main(): Promise<void> {
   Object.assign(process.env, {
@@ -20,10 +29,10 @@ async function main(): Promise<void> {
   ]);
   const app = await NestFactory.create(AppModule, { logger: false });
   app.setGlobalPrefix('api/v1');
-  const targetDirectory = resolve(process.cwd(), 'contracts/runtime/v1');
-  await mkdir(targetDirectory, { recursive: true });
+  const targetPath = contractOutputPath();
+  await mkdir(dirname(targetPath), { recursive: true });
   await writeFile(
-    resolve(targetDirectory, 'openapi.json'),
+    targetPath,
     `${JSON.stringify(createOpenApiDocument(app), null, 2)}\n`,
     'utf8',
   );

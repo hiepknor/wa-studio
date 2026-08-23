@@ -1,7 +1,7 @@
 import createClient from "openapi-fetch";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
-import type { components, paths } from "./generated/runtime";
+import type { components, paths } from "@wa/runtime-contract";
 
 export type RuntimeSession = components["schemas"]["SessionDto"];
 export type RuntimeSyncRun = components["schemas"]["SyncRunDto"];

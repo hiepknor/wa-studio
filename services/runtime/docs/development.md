@@ -156,11 +156,11 @@ profile. Worker and scheduler may be restarted while the command is running to e
 
 ## Contract workflow
 
-Public DTOs live under `src/contracts`. After a DTO or controller change:
+Public DTOs live under `src/contracts`. After a DTO or controller change, run from the monorepo root:
 
 ```bash
 npm run contract:generate
-git diff -- contracts/runtime/v1/openapi.json
+git diff -- packages/runtime-contract
 npm run contract:check
 ```
 

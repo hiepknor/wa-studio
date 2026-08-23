@@ -5,7 +5,7 @@
 The public Runtime contract is generated from Nest controllers and DTOs under `src/contracts`:
 
 ```text
-source DTO/controller -> contracts/runtime/v1/openapi.json -> platform-specific generated clients
+source DTO/controller -> packages/runtime-contract/openapi.json -> platform-specific generated clients
 ```
 
 The generated OpenAPI document is the integration contract for WA Studio and future desktop,
@@ -317,11 +317,11 @@ every enum addition as a reviewed consumer change.
 
 ## Review and generation
 
-With host-reachable environment variables loaded:
+From the monorepo root, with host-reachable environment variables loaded:
 
 ```bash
 npm run contract:generate
-git diff -- contracts/runtime/v1/openapi.json
+git diff -- packages/runtime-contract
 npm run contract:check
 ```
 
