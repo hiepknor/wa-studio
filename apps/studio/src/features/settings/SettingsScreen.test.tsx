@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { RuntimeConnectionContext } from "@/app/RuntimeConnectionState";
 import type { RuntimeConnectionContextValue } from "@/app/RuntimeConnectionState";
+import { ToastProvider } from "@/shared/ui/Toast";
 import { SettingsScreen } from "./SettingsScreen";
 
 function getDiagnostics() {
@@ -65,33 +66,35 @@ describe("SettingsScreen", () => {
     ]);
     const restoreBackup = vi.fn().mockResolvedValue(undefined);
     render(
-      <RuntimeConnectionContext.Provider value={context()}>
-        <SettingsScreen
-          getDiagnostics={getDiagnostics}
-          getUpdateState={vi.fn().mockResolvedValue({
-            currentVersion: "0.2.0",
-            disabledReason: "Test build",
-            enabled: false,
-            pending: null,
-          })}
-          getProvisioningProfile={vi.fn().mockResolvedValue(null)}
-          listBackups={listBackups}
-          restoreBackup={restoreBackup}
-          subscribeUpdateProgress={vi.fn().mockResolvedValue(vi.fn())}
-        />
-      </RuntimeConnectionContext.Provider>,
+      <ToastProvider>
+        <RuntimeConnectionContext.Provider value={context()}>
+          <SettingsScreen
+            getDiagnostics={getDiagnostics}
+            getUpdateState={vi.fn().mockResolvedValue({
+              currentVersion: "0.2.0",
+              disabledReason: "Test build",
+              enabled: false,
+              pending: null,
+            })}
+            getProvisioningProfile={vi.fn().mockResolvedValue(null)}
+            listBackups={listBackups}
+            restoreBackup={restoreBackup}
+            subscribeUpdateProgress={vi.fn().mockResolvedValue(vi.fn())}
+          />
+        </RuntimeConnectionContext.Provider>
+      </ToastProvider>,
     );
 
+    await user.click(screen.getByRole("tab", { name: "Backups & recovery" }));
     await user.click(await screen.findByRole("button", { name: "Restore" }));
-    expect(screen.getByRole("dialog")).toHaveTextContent("one PostgreSQL transaction");
+    expect(screen.getByRole("dialog")).toHaveTextContent("creates a safety backup first");
     await user.click(screen.getByRole("button", { name: "Restore backup" }));
 
     expect(restoreBackup).toHaveBeenCalledWith(
       "pre-migration-v0.1.0-1787312262148.dump.age",
     );
-    expect(await screen.findByText("Settings operation completed")).toBeInTheDocument();
-    expect(screen.getAllByText("Fresh")).toHaveLength(2);
-    expect(screen.getByText("Local recovery posture")).toBeInTheDocument();
+    expect(await screen.findByText("Backup restored")).toBeInTheDocument();
+    expect(screen.getByText("Your local data")).toBeInTheDocument();
   });
 
   it("checks and explicitly confirms a signed update that pauses Runtime", async () => {
@@ -116,20 +119,23 @@ describe("SettingsScreen", () => {
     const installUpdate = vi.fn().mockResolvedValue(undefined);
 
     render(
-      <RuntimeConnectionContext.Provider value={context()}>
-        <SettingsScreen
-          checkUpdate={checkUpdate}
-          getDiagnostics={getDiagnostics}
-          getUpdateState={getUpdateState}
-          getProvisioningProfile={vi.fn().mockResolvedValue(null)}
-          installUpdate={installUpdate}
-          listBackups={vi.fn().mockResolvedValue([])}
-          subscribeUpdateProgress={vi.fn().mockResolvedValue(vi.fn())}
-        />
-      </RuntimeConnectionContext.Provider>,
+      <ToastProvider>
+        <RuntimeConnectionContext.Provider value={context()}>
+          <SettingsScreen
+            checkUpdate={checkUpdate}
+            getDiagnostics={getDiagnostics}
+            getUpdateState={getUpdateState}
+            getProvisioningProfile={vi.fn().mockResolvedValue(null)}
+            installUpdate={installUpdate}
+            listBackups={vi.fn().mockResolvedValue([])}
+            subscribeUpdateProgress={vi.fn().mockResolvedValue(vi.fn())}
+          />
+        </RuntimeConnectionContext.Provider>
+      </ToastProvider>,
     );
 
-    await screen.findByText("0.2.0");
+    await user.click(screen.getByRole("tab", { name: "Updates" }));
+    await screen.findByText("Release details");
     await user.click(screen.getByRole("button", { name: "Check for updates" }));
     expect(await screen.findByText("Runtime reliability improvements.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Install update" }));
@@ -145,36 +151,64 @@ describe("SettingsScreen", () => {
     const exportRecoveryArchive = vi.fn().mockResolvedValue("wa-runtime-recovery.dump.age");
     const listBackups = vi.fn().mockResolvedValue([]);
     render(
-      <RuntimeConnectionContext.Provider value={context()}>
-        <SettingsScreen
-          createBackup={createBackup}
-          exportRecoveryArchive={exportRecoveryArchive}
-          getDiagnostics={getDiagnostics}
-          getUpdateState={vi.fn().mockResolvedValue({
-            currentVersion: "0.2.0",
-            disabledReason: "Test build",
-            enabled: false,
-            pending: null,
-          })}
-          getProvisioningProfile={vi.fn().mockResolvedValue(null)}
-          listBackups={listBackups}
-          subscribeUpdateProgress={vi.fn().mockResolvedValue(vi.fn())}
-        />
-      </RuntimeConnectionContext.Provider>,
+      <ToastProvider>
+        <RuntimeConnectionContext.Provider value={context()}>
+          <SettingsScreen
+            createBackup={createBackup}
+            exportRecoveryArchive={exportRecoveryArchive}
+            getDiagnostics={getDiagnostics}
+            getUpdateState={vi.fn().mockResolvedValue({
+              currentVersion: "0.2.0",
+              disabledReason: "Test build",
+              enabled: false,
+              pending: null,
+            })}
+            getProvisioningProfile={vi.fn().mockResolvedValue(null)}
+            listBackups={listBackups}
+            subscribeUpdateProgress={vi.fn().mockResolvedValue(vi.fn())}
+          />
+        </RuntimeConnectionContext.Provider>
+      </ToastProvider>,
     );
 
+    await user.click(screen.getByRole("tab", { name: "Backups & recovery" }));
     await user.click(await screen.findByRole("button", { name: "Create backup" }));
     expect(createBackup).toHaveBeenCalledOnce();
     expect(listBackups).toHaveBeenCalledTimes(2);
 
-    await user.type(screen.getByLabelText("Recovery passphrase"), "recovery-passphrase-2026");
+    await user.click(screen.getByRole("button", { name: /Export archive/u }));
+    await user.type(screen.getByLabelText("New recovery passphrase"), "recovery-passphrase-2026");
     await user.type(
-      screen.getByLabelText("Confirm passphrase for export"),
+      screen.getByLabelText("Confirm passphrase"),
       "recovery-passphrase-2026",
     );
     await user.click(screen.getByRole("button", { name: "Export archive" }));
 
     expect(exportRecoveryArchive).toHaveBeenCalledWith("recovery-passphrase-2026");
-    expect(await screen.findByText(/was exported and verified/u)).toBeInTheDocument();
+    expect(await screen.findByText("Recovery archive exported")).toBeInTheDocument();
+  });
+
+  it("opens with an accessible task-based overview", async () => {
+    render(
+      <ToastProvider>
+        <RuntimeConnectionContext.Provider value={context()}>
+          <SettingsScreen
+            getDiagnostics={getDiagnostics}
+            getUpdateState={vi.fn().mockResolvedValue({
+              currentVersion: "0.2.0",
+              disabledReason: null,
+              enabled: true,
+              pending: null,
+            })}
+            listBackups={vi.fn().mockResolvedValue([])}
+            subscribeUpdateProgress={vi.fn().mockResolvedValue(vi.fn())}
+          />
+        </RuntimeConnectionContext.Provider>
+      </ToastProvider>,
+    );
+
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { name: "WA Runtime is ready" })).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "settings-overview-tab");
   });
 });

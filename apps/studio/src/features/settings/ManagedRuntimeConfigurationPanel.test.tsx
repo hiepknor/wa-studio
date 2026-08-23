@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { ToastProvider } from "@/shared/ui/Toast";
 import { ManagedRuntimeConfigurationPanel } from "./ManagedRuntimeConfigurationPanel";
 
 const profile = {
@@ -18,21 +19,24 @@ describe("ManagedRuntimeConfigurationPanel", () => {
     const saveProfile = vi.fn().mockResolvedValue({ ...profile, allowLiveSends: true });
 
     render(
-      <ManagedRuntimeConfigurationPanel
-        getProfile={getProfile}
-        phase="ready"
-        saveProfile={saveProfile}
-      />,
+      <ToastProvider>
+        <ManagedRuntimeConfigurationPanel
+          getProfile={getProfile}
+          phase="ready"
+          saveProfile={saveProfile}
+        />
+      </ToastProvider>,
     );
 
     await screen.findByDisplayValue("https://openwa.onio.cc");
-    expect(screen.getByText(/1 OpenWA session/)).toHaveTextContent("https://wa-events.onio.cc");
+    expect(screen.getByText("1 session(s)")).toBeInTheDocument();
+    expect(screen.getByText("https://wa-events.onio.cc")).toBeInTheDocument();
     expect(screen.queryByLabelText("Webhook relay base URL")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("OpenWA API key"), "replacement-openwa-key");
-    await user.click(screen.getByRole("checkbox", { name: /Allow live sends/ }));
+    await user.click(screen.getByRole("switch", { name: /Allow live sends/ }));
     await user.click(screen.getByRole("button", { name: "Verify and restart Runtime" }));
 
-    expect(screen.getByRole("dialog")).toHaveTextContent("real OpenWA sends");
+    expect(screen.getByRole("dialog")).toHaveTextContent("real OpenWA deliveries");
     await user.click(screen.getByRole("button", { name: "Enable live sends and restart" }));
 
     expect(saveProfile).toHaveBeenCalledWith({
@@ -40,7 +44,7 @@ describe("ManagedRuntimeConfigurationPanel", () => {
       openwaApiKey: "replacement-openwa-key",
       openwaBaseUrl: "https://openwa.onio.cc",
     });
-    expect(await screen.findByText("Configuration saved")).toBeInTheDocument();
+    expect(await screen.findByText("Connection updated")).toBeInTheDocument();
     expect(screen.getByLabelText("OpenWA API key")).toHaveValue("");
   });
 
@@ -48,11 +52,13 @@ describe("ManagedRuntimeConfigurationPanel", () => {
     const user = userEvent.setup();
     const saveProfile = vi.fn().mockResolvedValue(profile);
     render(
-      <ManagedRuntimeConfigurationPanel
-        getProfile={vi.fn().mockResolvedValue(profile)}
-        phase="ready"
-        saveProfile={saveProfile}
-      />,
+      <ToastProvider>
+        <ManagedRuntimeConfigurationPanel
+          getProfile={vi.fn().mockResolvedValue(profile)}
+          phase="ready"
+          saveProfile={saveProfile}
+        />
+      </ToastProvider>,
     );
 
     await screen.findByDisplayValue("https://openwa.onio.cc");
