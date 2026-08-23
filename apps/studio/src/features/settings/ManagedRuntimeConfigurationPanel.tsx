@@ -11,7 +11,10 @@ import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
+import { SwitchField } from "@/shared/ui/SwitchField";
 import { TextField } from "@/shared/ui/TextField";
+import { useToast } from "@/shared/ui/Toast";
+import { SettingsSection } from "./SettingsSection";
 
 interface ManagedRuntimeConfigurationPanelProps {
   getProfile?: typeof getManagedRuntimeProvisioningProfile;
@@ -24,6 +27,7 @@ export function ManagedRuntimeConfigurationPanel({
   phase,
   saveProfile = reconfigureManagedRuntime,
 }: ManagedRuntimeConfigurationPanelProps) {
+  const { notify } = useToast();
   const [profile, setProfile] = useState<ManagedRuntimeProvisioningProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [baseUrl, setBaseUrl] = useState("");
@@ -32,7 +36,6 @@ export function ManagedRuntimeConfigurationPanel({
   const [candidate, setCandidate] = useState<ManagedRuntimeProvisioningInput | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -57,7 +60,6 @@ export function ManagedRuntimeConfigurationPanel({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    setNotice(null);
     setCandidate({
       allowLiveSends,
       openwaApiKey: apiKey,
@@ -76,7 +78,11 @@ export function ManagedRuntimeConfigurationPanel({
       setAllowLiveSends(saved.allowLiveSends);
       setApiKey("");
       setCandidate(null);
-      setNotice("OpenWA credentials were verified and the local Runtime is restarting.");
+      notify({
+        description: "The credentials were verified. WA Runtime is restarting with the updated connection.",
+        title: "Connection updated",
+        tone: "success",
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update Runtime settings.");
     } finally {
@@ -85,83 +91,106 @@ export function ManagedRuntimeConfigurationPanel({
   }
 
   const editable = profile !== null && (phase === "ready" || phase === "degraded");
+  const dirty = profile !== null && (
+    baseUrl !== profile.openwaBaseUrl
+    || allowLiveSends !== profile.allowLiveSends
+    || apiKey.length > 0
+  );
 
   return (
-    <section aria-labelledby="runtime-configuration-title" className="settings-update-card">
-      <header className="settings-backup-header">
-        <div>
-          <span className="settings-card-label">Gateway connection</span>
-          <h3 id="runtime-configuration-title">OpenWA 0.22.0 profile</h3>
-          <p>Changes are probed against OpenWA before the protected local store is replaced or the local stack restarts.</p>
-        </div>
-        <Badge tone={profile ? "success" : "neutral"}>
-          {loading ? "Loading" : profile ? "Protected local store" : "Developer managed"}
-        </Badge>
-      </header>
-      <form className="settings-configuration-form stack stack-md" onSubmit={submit}>
-        {!loading && !profile && (
-          <InlineAlert title="Profile is not editable" tone="neutral">
-            This Runtime uses developer environment provisioning rather than the production local secret store.
-          </InlineAlert>
-        )}
-        <div className="settings-configuration-grid">
-          <TextField
-            disabled={!editable || saving}
-            id="settings-openwa-url"
-            label="OpenWA base URL"
-            monospace
-            onChange={event => setBaseUrl(event.currentTarget.value)}
-            required
-            type="url"
-            value={baseUrl}
-          />
-          <TextField
-            autoComplete="new-password"
-            description="Re-entered for every change; the saved key is never exposed to Studio."
-            disabled={!editable || saving}
-            id="settings-openwa-key"
-            label="OpenWA API key"
-            monospace
-            onChange={event => setApiKey(event.currentTarget.value)}
-            required
-            type="password"
-            value={apiKey}
-          />
-        </div>
-        {profile && (
-          <InlineAlert title="Automatic Event Inbox pairing" tone="neutral">
-            {profile.openwaAllowedSessionIds.length} OpenWA session(s) · {profile.eventInboxBaseUrl}
-          </InlineAlert>
-        )}
-        <label className="settings-live-send-toggle">
-          <input
+    <div className="settings-panel-stack">
+      {error && <InlineAlert title="Connection settings failed">{error}</InlineAlert>}
+
+      <SettingsSection
+        action={<Badge tone={profile ? "success" : "neutral"}>{loading ? "Loading" : profile ? "Connected" : "Developer managed"}</Badge>}
+        description="WA Runtime uses this endpoint and credential to reach your OpenWA service."
+        kicker="Gateway connection"
+        title="OpenWA profile"
+        titleId="runtime-configuration-title"
+      >
+        <form className="settings-configuration-form" onSubmit={submit}>
+          {!loading && !profile && (
+            <InlineAlert title="This profile is not editable" tone="neutral">
+              This Runtime is provisioned from the developer environment instead of the local app profile.
+            </InlineAlert>
+          )}
+
+          <div className="settings-field-grid">
+            <TextField
+              disabled={!editable || saving}
+              id="settings-openwa-url"
+              label="OpenWA base URL"
+              monospace
+              onChange={event => setBaseUrl(event.currentTarget.value)}
+              required
+              type="url"
+              value={baseUrl}
+            />
+            <TextField
+              autoComplete="new-password"
+              description="Required for every change. The saved key is never shown in Studio."
+              disabled={!editable || saving}
+              id="settings-openwa-key"
+              label="OpenWA API key"
+              monospace
+              onChange={event => setApiKey(event.currentTarget.value)}
+              required
+              type="password"
+              value={apiKey}
+            />
+          </div>
+
+          {profile && (
+            <div className="settings-connection-summary">
+              <div>
+                <span>Event Inbox</span>
+                <strong>Paired automatically</strong>
+                <small>{profile.eventInboxBaseUrl}</small>
+              </div>
+              <div>
+                <span>Session scope</span>
+                <strong>{profile.openwaAllowedSessionIds.length} session(s)</strong>
+                <small>Renewed when the connection changes</small>
+              </div>
+            </div>
+          )}
+
+          <SwitchField
             checked={allowLiveSends}
+            description="Keep this off while validating campaigns. Turning it on allows real OpenWA deliveries after restart."
             disabled={!editable || saving}
+            id="settings-live-sends"
+            label="Allow live sends"
             onChange={event => setAllowLiveSends(event.currentTarget.checked)}
-            type="checkbox"
           />
-          <span><strong>Allow live sends</strong><small>Keep disabled until dry-run validation is complete.</small></span>
-        </label>
-        {error && <InlineAlert title="Configuration failed">{error}</InlineAlert>}
-        {notice && <InlineAlert title="Configuration saved" tone="success">{notice}</InlineAlert>}
-        <div className="settings-update-actions">
-          <Button disabled={!editable || saving} loading={saving} type="submit" variant="primary">
-            Verify and restart Runtime
-          </Button>
-        </div>
-      </form>
+
+          <div className="settings-form-actions">
+            <div className="settings-action-copy">
+              <strong>{dirty ? "Unsaved connection changes" : "Connection is saved"}</strong>
+              <span>WA Studio verifies the endpoint and Event Inbox pairing before applying changes.</span>
+            </div>
+            <Button
+              disabled={!editable || !dirty || apiKey.length === 0 || saving}
+              loading={saving}
+              type="submit"
+              variant="primary"
+            >
+              Verify and restart Runtime
+            </Button>
+          </div>
+        </form>
+      </SettingsSection>
+
       <ConfirmationDialog
         body={candidate?.allowLiveSends ? (
           <>
-            This enables real OpenWA sends after the local Runtime restarts. The new endpoint,
-            credential, release tag, discovery document, and Event Inbox pairing will be verified first. Existing
-            Local secret settings remain unchanged if verification fails.
+            This enables real OpenWA deliveries after WA Runtime restarts. WA Studio verifies the
+            new endpoint, credential, release, and Event Inbox pairing before applying the change.
           </>
         ) : (
           <>
-            WA Studio will verify OpenWA 0.22.0 and automatically renew its Event Inbox pairing;
-            atomically replace the local profile; then restart only the local Runtime stack.
-            OpenWA code is not changed.
+            WA Studio will verify the OpenWA endpoint and credential, renew Event Inbox pairing,
+            save the profile, then restart WA Runtime. OpenWA itself is unchanged.
           </>
         )}
         busy={saving}
@@ -173,6 +202,6 @@ export function ManagedRuntimeConfigurationPanel({
         open={candidate !== null}
         title={candidate?.allowLiveSends ? "Enable live sends?" : "Update Runtime connection?"}
       />
-    </section>
+    </div>
   );
 }
