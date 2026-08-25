@@ -794,6 +794,8 @@ export interface components {
             groupName: string;
             isActive: boolean;
             participantsCount: number | null;
+            /** Format: date-time */
+            syncedAt: string;
             sendCapability: components["schemas"]["GroupSendCapabilityDto"];
         };
         GroupListMembershipDto: {

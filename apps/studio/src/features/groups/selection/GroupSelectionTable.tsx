@@ -3,7 +3,10 @@ import { Badge } from "@/shared/ui/Badge";
 import { GroupCapabilityStatus } from "../GroupCapabilityStatus";
 import "./group-selection.css";
 
-export interface GroupSelectionRow extends RuntimeGroupListGroup {}
+export interface GroupSelectionRow extends Pick<
+  RuntimeGroupListGroup,
+  "groupId" | "groupName" | "isActive" | "participantsCount" | "sendCapability"
+> {}
 
 export interface GroupSelectionTableProps {
   caption?: string;

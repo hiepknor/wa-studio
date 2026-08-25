@@ -25,6 +25,7 @@ interface GroupListGroupRow {
   group_name: string;
   is_active: boolean;
   participants_count: number | null;
+  synced_at: Date;
   send_capability: 'ALLOWED' | 'DENIED' | 'UNKNOWN';
   send_capability_reason: string;
   capability_checked_at: Date | null;
@@ -72,6 +73,7 @@ const mapGroup = (row: GroupListGroupRow): GroupListGroupDto => ({
   groupName: row.group_name,
   isActive: row.is_active,
   participantsCount: row.participants_count,
+  syncedAt: row.synced_at,
   sendCapability: {
     status: row.send_capability,
     reason: row.send_capability_reason,
@@ -371,7 +373,7 @@ export class GroupListRepository {
   }
 
   private groupMembershipSelect(): string {
-    return `SELECT gli.group_id, g.name AS group_name, g.is_active, g.participants_count,
+    return `SELECT gli.group_id, g.name AS group_name, g.is_active, g.participants_count, g.synced_at,
       g.send_capability, g.send_capability_reason, g.capability_checked_at,
       g.capability_invalidated_at, g.capability_revision
     FROM group_list_items gli

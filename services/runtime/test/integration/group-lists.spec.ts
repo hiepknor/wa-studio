@@ -252,8 +252,10 @@ describe('saved group lists HTTP API', () => {
     ]);
     expect(replaced.body.data).toEqual(expect.arrayContaining([
       expect.objectContaining({ groupId: 'denied@g.us', isActive: false, participantsCount: 50,
+        syncedAt: expect.any(String),
         sendCapability: expect.objectContaining({ status: 'DENIED' }) }),
       expect.objectContaining({ groupId: 'unknown@g.us', isActive: true, participantsCount: null,
+        syncedAt: expect.any(String),
         sendCapability: expect.objectContaining({ status: 'UNKNOWN' }) }),
     ]));
 

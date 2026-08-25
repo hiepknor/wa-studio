@@ -63,6 +63,9 @@ export class GroupListGroupDto {
   @ApiProperty({ type: Number, nullable: true })
   participantsCount!: number | null;
 
+  @ApiProperty({ format: 'date-time' })
+  syncedAt!: Date;
+
   @ApiProperty({ type: GroupSendCapabilityDto })
   sendCapability!: GroupSendCapabilityDto;
 }

@@ -51,9 +51,10 @@ describe('saved group-list OpenAPI contract', () => {
     expect(membership.properties.data).toMatchObject({ type: 'array', maxItems: 1000 });
     const group = contract.components.schemas.GroupListGroupDto!;
     expect(group.required).toEqual([
-      'groupId', 'groupName', 'isActive', 'participantsCount', 'sendCapability',
+      'groupId', 'groupName', 'isActive', 'participantsCount', 'syncedAt', 'sendCapability',
     ]);
     expect(group.properties.participantsCount).toMatchObject({ type: 'number', nullable: true });
+    expect(group.properties.syncedAt).toMatchObject({ type: 'string', format: 'date-time' });
   });
 
   it('publishes stable saved-list metadata and filter-before-pagination query semantics', () => {

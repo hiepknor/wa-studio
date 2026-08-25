@@ -3903,6 +3903,10 @@
             "type": "number",
             "nullable": true
           },
+          "syncedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
           "sendCapability": {
             "$ref": "#/components/schemas/GroupSendCapabilityDto"
           }
@@ -3912,6 +3916,7 @@
           "groupName",
           "isActive",
           "participantsCount",
+          "syncedAt",
           "sendCapability"
         ]
       },
