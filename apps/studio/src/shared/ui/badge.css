@@ -5,14 +5,14 @@
   padding: 0 8px;
   border: 1px solid transparent;
   border-radius: 6px;
-  background: rgb(255 255 255 / 5%);
-  color: #c5c8d1;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
   font-size: 10px;
   font-weight: 550;
   line-height: 1;
   text-transform: uppercase;
 }
 
-.ui-badge-success { border-color: rgb(86 211 100 / 17%); background: var(--ok-soft); color: #83df8d; }
-.ui-badge-warning { border-color: rgb(227 179 65 / 18%); background: var(--warning-soft); color: #ecc768; }
-.ui-badge-danger { border-color: rgb(244 112 103 / 18%); background: var(--danger-soft); color: #ff9e97; }
+.ui-badge-success { border-color: var(--state-success-border); background: var(--ok-soft); color: var(--state-success); }
+.ui-badge-warning { border-color: var(--state-warning-border); background: var(--warning-soft); color: var(--state-warning); }
+.ui-badge-danger { border-color: var(--state-danger-border); background: var(--danger-soft); color: var(--state-danger); }

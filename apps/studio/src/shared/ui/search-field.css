@@ -2,8 +2,8 @@
 .search-field-toolbar { width: clamp(280px, 34vw, 420px); }
 .search-field-contained { width: 100%; }
 .search-field .text-field-control input {
-  border-color: rgb(255 255 255 / 9%);
-  background: rgb(8 9 13 / 55%);
+  border-color: var(--border-strong);
+  background: var(--surface-control);
   font-size: 11px;
 }
 @media (max-width: 760px) {

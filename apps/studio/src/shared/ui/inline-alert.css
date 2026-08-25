@@ -7,8 +7,8 @@
   padding: 8px 11px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: rgb(255 255 255 / 2.5%);
-  color: #d5d7dd;
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
   font-size: 12px;
 }
 .inline-alert-copy { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
@@ -16,7 +16,7 @@
 .inline-alert-copy span { min-width: 0; overflow: hidden; opacity: .78; text-overflow: ellipsis; white-space: nowrap; }
 .inline-alert-action { flex: 0 0 auto; }
 .inline-alert-neutral { color: var(--muted); }
-.inline-alert-danger { border-color: rgb(244 112 103 / 25%); background: var(--danger-soft); color: #ffaaa4; }
-.inline-alert-info { border-color: rgb(143 130 245 / 25%); background: rgb(126 108 246 / 9%); color: #c4bcff; }
-.inline-alert-warning { border-color: rgb(227 179 65 / 22%); background: var(--warning-soft); color: #f1cf77; }
-.inline-alert-success { border-color: rgb(86 211 100 / 22%); background: var(--ok-soft); color: #8de596; }
+.inline-alert-danger { border-color: var(--state-danger-border); background: var(--danger-soft); color: var(--state-danger); }
+.inline-alert-info { border-color: var(--state-info-border); background: var(--state-info-surface); color: var(--state-info); }
+.inline-alert-warning { border-color: var(--state-warning-border); background: var(--warning-soft); color: var(--state-warning); }
+.inline-alert-success { border-color: var(--state-success-border); background: var(--ok-soft); color: var(--state-success); }

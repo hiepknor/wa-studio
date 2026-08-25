@@ -1,6 +1,6 @@
 .ui-field {
   --field-control-font-size: 12px;
-  --field-control-height: 36px;
+  --field-control-height: var(--control-height);
   --field-control-padding-inline: 11px;
 }
 .ui-field-xs {
@@ -18,7 +18,7 @@
   flex-direction: column;
   gap: 7px;
 }
-.text-field-label { color: #737987; font-size: 9px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.text-field-label { color: var(--text-tertiary); font-size: 9px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
 .text-field-label-hidden {
   position: absolute;
   width: 1px;
@@ -37,7 +37,7 @@
   width: 100%;
   border: 1px solid var(--border-strong);
   border-radius: 7px;
-  background: #0d0f14;
+  background: var(--surface-control);
   color: var(--foreground);
   font-family: var(--font-ui);
   font-size: var(--field-control-font-size);
@@ -53,45 +53,48 @@
 .text-field-control textarea::placeholder { color: var(--dim); opacity: 1; }
 .text-field-control input:hover,
 .text-field-control select:hover,
-.text-field-control textarea:hover { border-color: rgb(255 255 255 / 18%); }
-.text-field-control input:focus,
-.text-field-control select:focus,
-.text-field-control textarea:focus {
+.text-field-control textarea:hover { border-color: var(--border-strong); }
+.text-field-control input:focus-visible,
+.text-field-control select:focus-visible,
+.text-field-control textarea:focus-visible {
   border-color: var(--focus-border);
-  background: #0b0d12;
-  box-shadow: var(--focus-ring);
+  outline: var(--focus-width) solid var(--focus-outer-color);
+  outline-offset: var(--focus-offset);
+  box-shadow: none;
 }
 .text-field-control input:disabled,
 .text-field-control select:disabled,
 .text-field-control textarea:disabled {
-  border-color: rgb(255 255 255 / 7%);
-  background: #0b0d11;
-  color: #777c89;
+  border-color: var(--border-subtle);
+  background: var(--surface-disabled);
+  color: var(--text-disabled);
   cursor: not-allowed;
   opacity: .78;
 }
 .text-field-control input:read-only:not(:disabled),
-.text-field-control textarea:read-only:not(:disabled) { background: #101218; }
+.text-field-control textarea:read-only:not(:disabled) { background: var(--surface-raised); }
 .text-field[data-invalid="true"] .text-field-control input,
 .text-field[data-invalid="true"] .text-field-control textarea {
-  border-color: rgb(255 126 118 / 72%);
+  border-color: var(--state-danger-border);
 }
-.text-field[data-invalid="true"] .text-field-control input:focus,
-.text-field[data-invalid="true"] .text-field-control textarea:focus {
+.text-field[data-invalid="true"] .text-field-control input:focus-visible,
+.text-field[data-invalid="true"] .text-field-control textarea:focus-visible {
   border-color: var(--danger-focus-border);
-  box-shadow: var(--danger-focus-ring);
+  outline: var(--focus-width) solid var(--focus-outer-color);
+  outline-offset: var(--focus-offset);
+  box-shadow: none;
 }
 .text-field-icon {
   position: absolute;
   z-index: 1;
   top: 50%;
   left: 11px;
-  color: #7569d6;
+  color: var(--text-tertiary);
   pointer-events: none;
   transform: translateY(-50%);
 }
-.text-field-control:focus-within .text-field-icon { color: #aaa0ff; }
+.text-field-control:focus-within .text-field-icon { color: var(--text-secondary); }
 .text-field-message,
 .text-field-description { min-height: 16px; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .text-field-description { color: var(--dim); }
-.text-field-error { color: #ffaaa4; }
+.text-field-error { color: var(--state-danger); }

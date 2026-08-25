@@ -8,6 +8,7 @@ import { SelectMenu } from "./SelectMenu";
 
 const selectMenuCss = readFileSync("src/shared/ui/select-menu.css", "utf8");
 const textFieldCss = readFileSync("src/shared/ui/text-field.css", "utf8");
+const tokensCss = readFileSync("src/styles/tokens.css", "utf8");
 
 const OPTIONS = [
   { description: "No scheduled timestamp.", label: "Immediate", value: "IMMEDIATE" },
@@ -32,12 +33,14 @@ function ControlledSelectMenu({ onChange = vi.fn() }: { onChange?: (value: strin
 
 describe("SelectMenu", () => {
   it("derives dropdown height from the shared field control token", () => {
+    expect(tokensCss).toContain("--control-height: 34px");
     expect(textFieldCss).toContain("--field-control-font-size: 10px");
     expect(textFieldCss).toContain("--field-control-font-size: 12px");
     expect(textFieldCss).toContain("--field-control-height: 28px");
-    expect(textFieldCss).toContain("--field-control-height: 36px");
+    expect(textFieldCss).toContain("--field-control-height: var(--control-height)");
     expect(textFieldCss).toContain("--field-control-height: 42px");
     expect(textFieldCss).toContain("height: var(--field-control-height)");
+    expect(selectMenuCss).toContain(".select-menu.ui-field { --field-control-height: var(--control-height); }");
     expect(selectMenuCss).toContain("height: var(--field-control-height)");
     expect(selectMenuCss).toContain("font-size: var(--field-control-font-size)");
     expect(selectMenuCss).not.toMatch(/height:\s*(?:36|42)px/);

@@ -1,1 +1,1 @@
-export const DRAWER_DOCK_MIN_WIDTH = 1400;
+export const DRAWER_DOCK_MIN_WIDTH = 1120;

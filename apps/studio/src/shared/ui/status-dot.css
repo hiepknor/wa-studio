@@ -7,7 +7,7 @@
 
 .status-dot-sm { width: 5px; height: 5px; }
 .status-dot-md { width: 6px; height: 6px; }
-.status-dot-glow { box-shadow: 0 0 7px color-mix(in srgb, currentColor 46%, transparent); }
+.status-dot-glow { box-shadow: none; }
 
 .status-tone-neutral { color: var(--muted); }
 .status-tone-info { color: var(--accent-hover); }

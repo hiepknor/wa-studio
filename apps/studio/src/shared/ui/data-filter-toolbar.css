@@ -2,27 +2,28 @@
 .data-filter-toolbar-row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .data-filter-controls { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .data-filter-result-summary { flex: 0 0 auto; color: var(--dim); font-family: var(--font-mono); font-size: 9px; white-space: nowrap; }
-.data-filter-panel { width: min(620px, 100%); align-self: flex-start; border: 1px solid var(--border); border-radius: 8px; background: #0d0f14; box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%), 0 12px 28px rgb(0 0 0 / 14%); }
+.data-filter-panel { width: min(620px, 100%); align-self: flex-start; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-chrome); box-shadow: none; }
 .data-filter-panel-header { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 11px; }
 .data-filter-panel-header > div { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
-.data-filter-panel-header strong { color: #d9dce4; font-size: 11px; }
+.data-filter-panel-header strong { color: var(--text-primary); font-size: 11px; }
 .data-filter-panel-header span { color: var(--dim); font-size: 9px; }
 .data-filter-panel-close { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--dim); }
-.data-filter-panel-close:hover { background: rgb(255 255 255 / 5%); color: var(--foreground); }
-.data-filter-panel-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 4px 10px 10px; border-top: 1px solid rgb(255 255 255 / 6%); }
+.data-filter-panel-close:hover { background: var(--surface-hover); color: var(--foreground); }
+.data-filter-panel-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 4px 10px 10px; border-top: 1px solid var(--border-subtle); }
 .data-filter-panel fieldset { min-width: 0; margin: 0; padding: 9px 10px 5px; border: 0; }
-.data-filter-panel fieldset + fieldset { border-left: 1px solid rgb(255 255 255 / 6%); }
-.data-filter-panel legend { margin-bottom: 7px; color: #777c8b; font-size: 9px; font-weight: 650; letter-spacing: .055em; text-transform: uppercase; }
+.data-filter-panel fieldset + fieldset { border-left: 1px solid var(--border-subtle); }
+.data-filter-panel legend { margin-bottom: 7px; color: var(--text-tertiary); font-size: 9px; font-weight: 650; letter-spacing: .055em; text-transform: uppercase; }
 .data-filter-options { display: flex; flex-wrap: wrap; gap: 6px; }
-.data-filter-options label { position: relative; min-height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid rgb(255 255 255 / 8%); border-radius: 6px; color: #adb1bc; font-size: 10px; cursor: pointer; }
-.data-filter-options label:has(input:checked) { border-color: rgb(143 130 245 / 34%); background: var(--accent-soft); color: #ddd9ff; }
+.data-filter-options label { position: relative; min-height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-secondary); font-size: 10px; cursor: pointer; }
+.data-filter-options label:has(input:checked) { border-color: var(--border-strong); background: var(--surface-active); color: var(--text-primary); }
+.data-filter-options label:has(input:focus-visible) { border-color: var(--focus-inner-border); outline: var(--focus-width) solid var(--focus-outer-color); outline-offset: var(--focus-offset); }
 .data-filter-options input { position: absolute; opacity: 0; pointer-events: none; }
-.data-filter-check { width: 12px; height: 12px; display: grid; place-items: center; border: 1px solid #545966; border-radius: 3px; color: transparent; }
-.data-filter-options input:checked + .data-filter-check { border-color: #8f82f5; background: #7568dd; color: white; }
-.data-filter-options-single input { position: static; width: 12px; height: 12px; margin: 0; opacity: 1; accent-color: #7568dd; pointer-events: auto; }
-.data-filter-summary { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px 6px 11px; border-top: 1px solid rgb(255 255 255 / 6%); }
+.data-filter-check { width: 12px; height: 12px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 3px; color: transparent; }
+.data-filter-options input:checked + .data-filter-check { border-color: var(--focus-inner-border); background: var(--accent); color: var(--text-primary); }
+.data-filter-options-single input { position: static; width: 12px; height: 12px; margin: 0; opacity: 1; accent-color: var(--accent-hover); pointer-events: auto; }
+.data-filter-summary { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px 6px 11px; border-top: 1px solid var(--border-subtle); }
 .data-filter-chips { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
-.data-filter-chip { min-height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid rgb(143 130 245 / 28%); border-radius: 6px; background: rgb(126 108 246 / 8%); color: #c9c3ff; font-size: 9px; white-space: nowrap; }
+.data-filter-chip { min-height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface-active); color: var(--text-secondary); font-size: 9px; white-space: nowrap; }
 .data-filter-summary-empty { color: var(--dim); font-size: 9px; }
 @container data-filter-toolbar (max-width: 620px) {
   .data-filter-toolbar-row { align-items: stretch; }
@@ -30,5 +31,5 @@
   .data-filter-controls > .search-field { flex: 1 1 180px; }
   .data-filter-result-summary { align-self: center; }
   .data-filter-panel-body { grid-template-columns: 1fr; }
-  .data-filter-panel fieldset + fieldset { border-left: 0; border-top: 1px solid rgb(255 255 255 / 6%); }
+  .data-filter-panel fieldset + fieldset { border-left: 0; border-top: 1px solid var(--border-subtle); }
 }
