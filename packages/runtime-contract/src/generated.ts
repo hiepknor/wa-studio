@@ -323,6 +323,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/campaign-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search and filter durable campaign runs in one allowlisted session */
+        get: operations["CampaignRunController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/campaign-runs/{id}": {
         parameters: {
             query?: never;
@@ -499,6 +516,23 @@ export interface paths {
         };
         /** List normalized inbound group messages */
         get: operations["InboxController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the retained operational activity timeline for one allowlisted session */
+        get: operations["ActivityController_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -966,6 +1000,7 @@ export interface components {
             id: string;
             /** Format: uuid */
             campaignId: string;
+            campaignNameSnapshot: string;
             /** Format: uuid */
             sessionId: string;
             /** @enum {string} */
@@ -976,6 +1011,8 @@ export interface components {
             text: string;
             targetSource: components["schemas"]["CampaignTargetSourceDto"] | null;
             preflight: components["schemas"]["CampaignPreflightDto"] | null;
+            campaignRevision: number;
+            targetsRevision: number;
             totalTargets: number;
             progress: components["schemas"]["CampaignRunProgressDto"];
             /** Format: date-time */
@@ -986,6 +1023,8 @@ export interface components {
             completedAt: string | null;
             /** Format: date-time */
             createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         PageMetaDto: {
             total: number;
@@ -994,6 +1033,36 @@ export interface components {
         };
         CampaignRunListDto: {
             data: components["schemas"]["CampaignRunDto"][];
+            meta: components["schemas"]["PageMetaDto"];
+        };
+        CampaignRunSummaryDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            campaignId: string;
+            campaignNameSnapshot: string;
+            /** Format: uuid */
+            sessionId: string;
+            /** @enum {string} */
+            executionMode: "DRY_RUN" | "LIVE";
+            /** @enum {string} */
+            status: "PREPARING" | "BLOCKED" | "SCHEDULED" | "RUNNING" | "PAUSED" | "COMPLETED" | "PARTIAL_FAILED" | "CANCELLED" | "FAILED";
+            statusReason: string | null;
+            totalTargets: number;
+            progress: components["schemas"]["CampaignRunProgressDto"];
+            /** Format: date-time */
+            scheduledAt: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            completedAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CampaignRunSummaryListDto: {
+            data: components["schemas"]["CampaignRunSummaryDto"][];
             meta: components["schemas"]["PageMetaDto"];
         };
         CampaignDeliveryDto: {
@@ -1005,7 +1074,8 @@ export interface components {
             groupName: string;
             /** Format: uuid */
             messageJobId: string | null;
-            status: string;
+            /** @enum {string} */
+            status: "PENDING" | "MATERIALIZED" | "PROCESSING" | "DRY_RUN_COMPLETED" | "ACCEPTED" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "UNKNOWN" | "BLOCKED_CAPABILITY_CHANGED" | "CANCELLED";
             failureReason: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -1112,6 +1182,51 @@ export interface components {
         InboundMessageListDto: {
             data: components["schemas"]["InboundMessageDto"][];
             meta: components["schemas"]["PageMetaDto"];
+        };
+        ActivitySubjectDto: {
+            type: string;
+            id: string;
+            labelSnapshot: string;
+        };
+        ActivityRelatedDto: {
+            /** Format: uuid */
+            campaignId: string | null;
+            /** Format: uuid */
+            runId: string | null;
+            /** Format: uuid */
+            syncRunId: string | null;
+            groupId: string | null;
+        };
+        ActivityEventDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            sessionId: string;
+            eventType: string;
+            eventVersion: number;
+            /** @enum {string} */
+            category: "RUN" | "CAMPAIGN" | "SYNC" | "SESSION";
+            /** @enum {string} */
+            severity: "INFO" | "SUCCESS" | "WARNING" | "ERROR";
+            /** @enum {string} */
+            origin: "STUDIO" | "RUNTIME" | "GATEWAY";
+            subject: components["schemas"]["ActivitySubjectDto"];
+            related: components["schemas"]["ActivityRelatedDto"];
+            correlationId: string | null;
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            occurredAt: string;
+        };
+        ActivityPageMetaDto: {
+            limit: number;
+            nextCursor: string | null;
+            retentionDays: number;
+        };
+        ActivityPageDto: {
+            data: components["schemas"]["ActivityEventDto"][];
+            meta: components["schemas"]["ActivityPageMetaDto"];
         };
     };
     responses: never;
@@ -2424,6 +2539,62 @@ export interface operations {
             };
         };
     };
+    CampaignRunController_list: {
+        parameters: {
+            query: {
+                limit?: number;
+                offset?: number;
+                /** @description Allowlisted Gateway session that owns the runs */
+                sessionId: string;
+                /** @description Trimmed case-insensitive literal substring search on campaign snapshot name, or exact campaign/run UUID. */
+                query?: string;
+                status?: ("PREPARING" | "BLOCKED" | "SCHEDULED" | "RUNNING" | "PAUSED" | "COMPLETED" | "PARTIAL_FAILED" | "CANCELLED" | "FAILED")[];
+                executionMode?: ("DRY_RUN" | "LIVE")[];
+                /** @description Inclusive lower bound on run creation time. */
+                from?: string;
+                /** @description Exclusive upper bound on run creation time. */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRunSummaryListDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
     CampaignRunController_get: {
         parameters: {
             query?: never;
@@ -2474,6 +2645,9 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                /** @description Trimmed case-insensitive literal substring search on group snapshot name or group ID. */
+                query?: string;
+                status?: ("PENDING" | "MATERIALIZED" | "PROCESSING" | "DRY_RUN_COMPLETED" | "ACCEPTED" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "UNKNOWN" | "BLOCKED_CAPABILITY_CHANGED" | "CANCELLED")[];
             };
             header?: never;
             path: {
@@ -2787,6 +2961,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboundMessageListDto"];
+                };
+            };
+        };
+    };
+    ActivityController_list: {
+        parameters: {
+            query: {
+                sessionId: string;
+                /** @description Literal search on subject label, subject ID, or correlation ID. */
+                query?: string;
+                category?: ("RUN" | "CAMPAIGN" | "SYNC" | "SESSION")[];
+                severity?: ("INFO" | "SUCCESS" | "WARNING" | "ERROR")[];
+                from?: string;
+                to?: string;
+                /** @description Opaque cursor returned by the previous page. */
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityPageDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
         };

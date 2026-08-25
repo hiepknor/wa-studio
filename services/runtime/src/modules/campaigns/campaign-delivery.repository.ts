@@ -1,9 +1,13 @@
-import type { CampaignDeliveryDto } from '../../contracts/campaigns/campaign-delivery.dto';
+import type {
+  CampaignDeliveryDto,
+  CampaignDeliveryStatus,
+} from '../../contracts/campaigns/campaign-delivery.dto';
 import type { CampaignExecutionMode } from '../../contracts/campaigns/campaign-preflight.dto';
 import { DatabaseService } from '../../core/database/database.service';
 import type { GroupSendCapabilityStatus } from '../gateway/group-capability';
 import { messageRequestHash } from '../messages/message-idempotency';
 import { MessageJobRepository } from '../messages/message-job.repository';
+import { appendCampaignRunActivity } from './campaign-run-activity';
 
 interface DeliveryRow {
   id: string;
@@ -11,7 +15,7 @@ interface DeliveryRow {
   group_id: string;
   group_name: string;
   message_job_id: string | null;
-  status: string;
+  status: CampaignDeliveryStatus;
   failure_reason: string | null;
   created_at: Date;
   updated_at: Date;
@@ -89,6 +93,13 @@ export class CampaignDeliveryRepository {
            WHERE id = $1 AND status = 'ACTIVE'`,
           [run.campaign_id],
         );
+        await appendCampaignRunActivity(client, {
+          runId,
+          eventType: 'campaign_run.paused',
+          severity: 'WARNING',
+          origin: 'RUNTIME',
+          metadata: { reason: 'SESSION_NOT_SENDABLE' },
+        });
         return 0;
       }
 
@@ -159,18 +170,36 @@ export class CampaignDeliveryRepository {
     });
   }
 
-  async list(runId: string, limit: number, offset: number) {
-    const [rows, count] = await Promise.all([
-      this.database.query<DeliveryRow>(
-        `SELECT cd.*, crt.group_name FROM campaign_deliveries cd
-         JOIN campaign_run_targets crt ON crt.run_id = cd.run_id AND crt.group_id = cd.group_id
-         WHERE cd.run_id = $1 ORDER BY cd.created_at, cd.id LIMIT $2 OFFSET $3`,
-        [runId, limit, offset],
-      ),
-      this.database.query<{ count: string }>(
-        'SELECT count(*)::text AS count FROM campaign_deliveries WHERE run_id = $1', [runId],
-      ),
-    ]);
-    return { data: rows.rows.map(mapDelivery), total: Number(count.rows[0]?.count ?? 0) };
+  async list(input: {
+    runId: string;
+    query?: string;
+    statuses?: CampaignDeliveryStatus[];
+    limit: number;
+    offset: number;
+  }) {
+    const normalizedQuery = input.query?.trim();
+    const searchPattern = normalizedQuery
+      ? `%${normalizedQuery.replace(/[\\%_]/g, '\\$&')}%`
+      : null;
+    const statuses = input.statuses?.length ? input.statuses : null;
+    return this.database.transaction(async client => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const values = [input.runId, searchPattern, statuses];
+      const joins = `FROM campaign_deliveries cd
+        JOIN campaign_run_targets crt ON crt.run_id = cd.run_id AND crt.group_id = cd.group_id`;
+      const predicate = `cd.run_id = $1
+        AND ($2::text IS NULL OR crt.group_name ILIKE $2 ESCAPE '\\' OR cd.group_id ILIKE $2 ESCAPE '\\')
+        AND ($3::campaign_delivery_status[] IS NULL OR cd.status = ANY($3))`;
+      const rows = await client.query<DeliveryRow>(
+        `SELECT cd.*, crt.group_name ${joins} WHERE ${predicate}
+         ORDER BY lower(crt.group_name), cd.group_id, cd.id LIMIT $4 OFFSET $5`,
+        [...values, input.limit, input.offset],
+      );
+      const count = await client.query<{ count: string }>(
+        `SELECT count(*)::text AS count ${joins} WHERE ${predicate}`,
+        values,
+      );
+      return { data: rows.rows.map(mapDelivery), total: Number(count.rows[0]?.count ?? 0) };
+    });
   }
 }

@@ -5,6 +5,7 @@ import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { DatabaseService } from '../../core/database/database.service';
 
 export interface RetentionResult {
+  activityEvents: number;
   campaignRuns: number;
   messageJobs: number;
   inboundMessages: number;
@@ -34,7 +35,7 @@ export class DataRetentionTick {
   async run(): Promise<void> {
     const started = performance.now();
     const result = await this.cleanup();
-    const deleted = result.campaignRuns + result.messageJobs + result.inboundMessages + result.runtimeEvents
+    const deleted = result.activityEvents + result.campaignRuns + result.messageJobs + result.inboundMessages + result.runtimeEvents
       + result.webhookEvents + result.syncRuns + result.contactObservations;
     this.logger.log({
       event: 'data.retention.completed', deleted, durationMs: Math.round(performance.now() - started), ...result,
@@ -44,6 +45,7 @@ export class DataRetentionTick {
   async cleanup(options: RetentionOptions = {}): Promise<RetentionResult> {
     const now = options.now ?? new Date();
     const operationalCutoff = new Date(now.valueOf() - this.config.RUNTIME_RETENTION_DAYS * 86_400_000);
+    const activityCutoff = new Date(now.valueOf() - this.config.RUNTIME_ACTIVITY_RETENTION_DAYS * 86_400_000);
     const eventCutoff = new Date(now.valueOf() - this.config.RUNTIME_EVENT_RETENTION_DAYS * 86_400_000);
     const inboxCutoff = new Date(now.valueOf() - this.config.RUNTIME_INBOX_RETENTION_DAYS * 86_400_000);
     const webhookCutoff = new Date(now.valueOf() - this.config.RUNTIME_RAW_WEBHOOK_RETENTION_DAYS * 86_400_000);
@@ -54,6 +56,7 @@ export class DataRetentionTick {
     const maxBatches = options.maxBatches ?? this.config.RUNTIME_RETENTION_MAX_BATCHES_PER_RUN;
     const deadline = performance.now() + (options.timeBudgetMs ?? this.config.RUNTIME_RETENTION_TIME_BUDGET_MS);
     const total: RetentionResult = {
+      activityEvents: 0,
       campaignRuns: 0, messageJobs: 0, inboundMessages: 0, runtimeEvents: 0, webhookEvents: 0, syncRuns: 0,
       contactObservations: 0,
       batches: 0, capacityExhausted: false,
@@ -66,6 +69,7 @@ export class DataRetentionTick {
         break;
       }
       const current = await this.database.transaction(async client => ({
+        activityEvents: await this.deleteActivityEvents(client, activityCutoff, limit),
         campaignRuns: await this.deleteCampaignRuns(client, operationalCutoff, limit),
         messageJobs: await this.deleteMessageJobs(client, operationalCutoff, limit),
         inboundMessages: await this.deleteInboundMessages(client, inboxCutoff, limit),
@@ -79,6 +83,7 @@ export class DataRetentionTick {
         ),
       }));
       total.batches += 1;
+      total.activityEvents += current.activityEvents;
       total.campaignRuns += current.campaignRuns;
       total.messageJobs += current.messageJobs;
       total.inboundMessages += current.inboundMessages;
@@ -93,6 +98,18 @@ export class DataRetentionTick {
     }
     if (!drained && total.batches === maxBatches) total.capacityExhausted = true;
     return total;
+  }
+
+  private async deleteActivityEvents(client: PoolClient, cutoff: Date, limit: number): Promise<number> {
+    return this.count(await client.query(
+      `WITH candidates AS (
+         SELECT id FROM activity_events
+         WHERE created_at < $1 ORDER BY created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED
+       )
+       DELETE FROM activity_events event USING candidates
+       WHERE event.id = candidates.id`,
+      [cutoff, limit],
+    ));
   }
 
   private async deleteCampaignRuns(client: PoolClient, cutoff: Date, limit: number): Promise<number> {

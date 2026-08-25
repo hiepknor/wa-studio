@@ -2170,6 +2170,166 @@
         ]
       }
     },
+    "/api/v1/campaign-runs": {
+      "get": {
+        "operationId": "CampaignRunController_list",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          },
+          {
+            "name": "offset",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 0,
+              "default": 0,
+              "type": "number"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "query",
+            "description": "Allowlisted Gateway session that owns the runs",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "query",
+            "required": false,
+            "in": "query",
+            "description": "Trimmed case-insensitive literal substring search on campaign snapshot name, or exact campaign/run UUID.",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "PREPARING",
+                  "BLOCKED",
+                  "SCHEDULED",
+                  "RUNNING",
+                  "PAUSED",
+                  "COMPLETED",
+                  "PARTIAL_FAILED",
+                  "CANCELLED",
+                  "FAILED"
+                ]
+              }
+            }
+          },
+          {
+            "name": "executionMode",
+            "required": false,
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "DRY_RUN",
+                  "LIVE"
+                ]
+              }
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "Inclusive lower bound on run creation time.",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Exclusive upper bound on run creation time.",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRunSummaryListDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Search and filter durable campaign runs in one allowlisted session",
+        "tags": [
+          "campaign-runs"
+        ]
+      }
+    },
     "/api/v1/campaign-runs/{id}": {
       "get": {
         "operationId": "CampaignRunController_get",
@@ -2267,6 +2427,43 @@
               "minimum": 0,
               "default": 0,
               "type": "number"
+            }
+          },
+          {
+            "name": "query",
+            "required": false,
+            "in": "query",
+            "description": "Trimmed case-insensitive literal substring search on group snapshot name or group ID.",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "PENDING",
+                  "MATERIALIZED",
+                  "PROCESSING",
+                  "DRY_RUN_COMPLETED",
+                  "ACCEPTED",
+                  "SENT",
+                  "DELIVERED",
+                  "READ",
+                  "FAILED",
+                  "UNKNOWN",
+                  "BLOCKED_CAPABILITY_CHANGED",
+                  "CANCELLED"
+                ]
+              }
             }
           }
         ],
@@ -2741,6 +2938,150 @@
         "summary": "List normalized inbound group messages",
         "tags": [
           "messages"
+        ]
+      }
+    },
+    "/api/v1/activity": {
+      "get": {
+        "operationId": "ActivityController_list",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "query",
+            "required": false,
+            "in": "query",
+            "description": "Literal search on subject label, subject ID, or correlation ID.",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "required": false,
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "RUN",
+                  "CAMPAIGN",
+                  "SYNC",
+                  "SESSION"
+                ]
+              }
+            }
+          },
+          {
+            "name": "severity",
+            "required": false,
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "INFO",
+                  "SUCCESS",
+                  "WARNING",
+                  "ERROR"
+                ]
+              }
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "Opaque cursor returned by the previous page.",
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityPageDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read the retained operational activity timeline for one allowlisted session",
+        "tags": [
+          "activity"
         ]
       }
     }
@@ -4204,6 +4545,9 @@
             "type": "string",
             "format": "uuid"
           },
+          "campaignNameSnapshot": {
+            "type": "string"
+          },
           "sessionId": {
             "type": "string",
             "format": "uuid"
@@ -4254,6 +4598,14 @@
               }
             ]
           },
+          "campaignRevision": {
+            "type": "number",
+            "minimum": 1
+          },
+          "targetsRevision": {
+            "type": "number",
+            "minimum": 0
+          },
           "totalTargets": {
             "type": "number"
           },
@@ -4277,11 +4629,16 @@
           "createdAt": {
             "format": "date-time",
             "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "campaignId",
+          "campaignNameSnapshot",
           "sessionId",
           "executionMode",
           "status",
@@ -4289,12 +4646,15 @@
           "text",
           "targetSource",
           "preflight",
+          "campaignRevision",
+          "targetsRevision",
           "totalTargets",
           "progress",
           "scheduledAt",
           "startedAt",
           "completedAt",
-          "createdAt"
+          "createdAt",
+          "updatedAt"
         ]
       },
       "PageMetaDto": {
@@ -4334,6 +4694,113 @@
           "meta"
         ]
       },
+      "CampaignRunSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignNameSnapshot": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "executionMode": {
+            "type": "string",
+            "enum": [
+              "DRY_RUN",
+              "LIVE"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PREPARING",
+              "BLOCKED",
+              "SCHEDULED",
+              "RUNNING",
+              "PAUSED",
+              "COMPLETED",
+              "PARTIAL_FAILED",
+              "CANCELLED",
+              "FAILED"
+            ]
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "totalTargets": {
+            "type": "number"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/CampaignRunProgressDto"
+          },
+          "scheduledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "campaignId",
+          "campaignNameSnapshot",
+          "sessionId",
+          "executionMode",
+          "status",
+          "statusReason",
+          "totalTargets",
+          "progress",
+          "scheduledAt",
+          "startedAt",
+          "completedAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "CampaignRunSummaryListDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CampaignRunSummaryDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMetaDto"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
       "CampaignDeliveryDto": {
         "type": "object",
         "properties": {
@@ -4357,7 +4824,21 @@
             "nullable": true
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "MATERIALIZED",
+              "PROCESSING",
+              "DRY_RUN_COMPLETED",
+              "ACCEPTED",
+              "SENT",
+              "DELIVERED",
+              "READ",
+              "FAILED",
+              "UNKNOWN",
+              "BLOCKED_CAPABILITY_CHANGED",
+              "CANCELLED"
+            ]
           },
           "failureReason": {
             "type": "string",
@@ -4694,6 +5175,172 @@
           },
           "meta": {
             "$ref": "#/components/schemas/PageMetaDto"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "ActivitySubjectDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "labelSnapshot": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "labelSnapshot"
+        ]
+      },
+      "ActivityRelatedDto": {
+        "type": "object",
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "syncRunId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "groupId": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "campaignId",
+          "runId",
+          "syncRunId",
+          "groupId"
+        ]
+      },
+      "ActivityEventDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "eventVersion": {
+            "type": "number",
+            "minimum": 1
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "RUN",
+              "CAMPAIGN",
+              "SYNC",
+              "SESSION"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "INFO",
+              "SUCCESS",
+              "WARNING",
+              "ERROR"
+            ]
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "STUDIO",
+              "RUNTIME",
+              "GATEWAY"
+            ]
+          },
+          "subject": {
+            "$ref": "#/components/schemas/ActivitySubjectDto"
+          },
+          "related": {
+            "$ref": "#/components/schemas/ActivityRelatedDto"
+          },
+          "correlationId": {
+            "type": "string",
+            "nullable": true
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "eventType",
+          "eventVersion",
+          "category",
+          "severity",
+          "origin",
+          "subject",
+          "related",
+          "correlationId",
+          "metadata",
+          "occurredAt"
+        ]
+      },
+      "ActivityPageMetaDto": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number"
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          },
+          "retentionDays": {
+            "type": "number",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "limit",
+          "nextCursor",
+          "retentionDays"
+        ]
+      },
+      "ActivityPageDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityEventDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ActivityPageMetaDto"
           }
         },
         "required": [

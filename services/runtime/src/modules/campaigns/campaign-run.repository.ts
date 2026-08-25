@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { CampaignExecutionMode, CampaignPreflightDto } from '../../contracts/campaigns/campaign-preflight.dto';
-import type { CampaignRunDto } from '../../contracts/campaigns/campaign-run.dto';
+import type { CampaignDeliveryStatus } from '../../contracts/campaigns/campaign-delivery.dto';
+import type { CampaignRunDto, CampaignRunStatus } from '../../contracts/campaigns/campaign-run.dto';
 import type { CampaignScheduleType } from '../../contracts/campaigns/create-campaign.dto';
 import type { CampaignTargetDto } from '../../contracts/campaigns/campaign-target.dto';
 import { DatabaseService } from '../../core/database/database.service';
@@ -16,8 +17,10 @@ import {
   campaignRunSelect as runSelect,
   capabilitySnapshotChanged,
   mapCampaignRun as mapRun,
+  mapCampaignRunSummary,
   mapPreflightTarget,
 } from './campaign-run.persistence';
+import { appendCampaignRunActivity } from './campaign-run-activity';
 
 export interface ClaimedCampaignPreparation {
   leaseToken: string;
@@ -99,6 +102,7 @@ export class CampaignRunRepository {
     return this.database.transaction(async client => {
       const campaignResult = await client.query<{
         id: string;
+        name: string;
         session_id: string;
         payload: { text: string };
         schedule_type: CampaignScheduleType;
@@ -110,7 +114,7 @@ export class CampaignRunRepository {
         target_source_group_list_name_snapshot: string | null;
         target_source_membership_revision: string | number | null;
         target_source_applied_at: Date | null;
-      }>(`SELECT id, session_id, payload, schedule_type, scheduled_at, status, revision, targets_revision
+      }>(`SELECT id, name, session_id, payload, schedule_type, scheduled_at, status, revision, targets_revision
              , target_source_group_list_id, target_source_group_list_name_snapshot,
                target_source_membership_revision, target_source_applied_at
            FROM campaigns WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [input.campaignId]);
@@ -169,13 +173,13 @@ export class CampaignRunRepository {
         : new Date();
       const inserted = await client.query<{ id: string }>(
          `INSERT INTO campaign_runs
-           (campaign_id, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at,
+           (campaign_id, campaign_name_snapshot, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at,
             campaign_revision, targets_revision, target_source_group_list_id,
             target_source_group_list_name_snapshot, target_source_membership_revision,
             target_source_applied_at)
-         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13)
          ON CONFLICT DO NOTHING RETURNING id`,
-        [campaign.id, campaign.session_id, input.idempotencyKey, input.executionMode,
+        [campaign.id, campaign.name, campaign.session_id, input.idempotencyKey, input.executionMode,
           JSON.stringify(campaign.payload), scheduledAt, campaign.revision, campaign.targets_revision,
           campaign.target_source_group_list_id, campaign.target_source_group_list_name_snapshot,
           campaign.target_source_membership_revision,
@@ -218,6 +222,13 @@ export class CampaignRunRepository {
           [campaign.id],
         );
       }
+      await appendCampaignRunActivity(client, {
+        runId,
+        eventType: 'campaign_run.created',
+        severity: 'INFO',
+        origin: 'STUDIO',
+        dedupeKey: `campaign-run:${runId}:created`,
+      });
       const result = await client.query<CampaignRunRow>(`${runSelect} WHERE cr.id = $1`, [runId]);
       return {
         ...empty, run: mapRun(result.rows[0]!), created: true, campaignFound: true,
@@ -241,6 +252,57 @@ export class CampaignRunRepository {
         'SELECT count(*)::text AS count FROM campaign_runs WHERE campaign_id = $1', [campaignId],
       );
       return { data: rows.rows.map(mapRun), total: Number(count.rows[0]?.count ?? 0) };
+    });
+  }
+
+  async list(input: {
+    sessionId: string;
+    query?: string;
+    exactId?: string;
+    statuses?: CampaignRunStatus[];
+    executionModes?: CampaignExecutionMode[];
+    from?: Date;
+    to?: Date;
+    limit: number;
+    offset: number;
+  }) {
+    const normalizedQuery = input.query?.trim();
+    const searchPattern = normalizedQuery
+      ? `%${normalizedQuery.replace(/[\\%_]/g, '\\$&')}%`
+      : null;
+    const statuses = input.statuses?.length ? input.statuses : null;
+    const executionModes = input.executionModes?.length ? input.executionModes : null;
+    return this.database.transaction(async client => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const values = [
+        input.sessionId,
+        searchPattern,
+        input.exactId ?? null,
+        statuses,
+        executionModes,
+        input.from ?? null,
+        input.to ?? null,
+      ];
+      const predicate = `cr.session_id = $1
+        AND ($2::text IS NULL OR cr.campaign_name_snapshot ILIKE $2 ESCAPE '\\'
+          OR cr.id = $3::uuid OR cr.campaign_id = $3::uuid)
+        AND ($4::campaign_run_status[] IS NULL OR cr.status = ANY($4))
+        AND ($5::campaign_execution_mode[] IS NULL OR cr.execution_mode = ANY($5))
+        AND ($6::timestamptz IS NULL OR cr.created_at >= $6)
+        AND ($7::timestamptz IS NULL OR cr.created_at < $7)`;
+      const rows = await client.query<CampaignRunRow>(
+        `${runSelect} WHERE ${predicate}
+         ORDER BY cr.created_at DESC, cr.id ASC LIMIT $8 OFFSET $9`,
+        [...values, input.limit, input.offset],
+      );
+      const count = await client.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM campaign_runs cr WHERE ${predicate}`,
+        values,
+      );
+      return {
+        data: rows.rows.map(mapCampaignRunSummary),
+        total: Number(count.rows[0]?.count ?? 0),
+      };
     });
   }
 
@@ -310,7 +372,7 @@ export class CampaignRunRepository {
 
   async recoverExpiredPreparations(): Promise<number> {
     return this.database.transaction(async client => {
-      const result = await client.query<{ campaign_id: string; execution_mode: CampaignExecutionMode; status: string }>(
+      const result = await client.query<{ id: string; campaign_id: string; execution_mode: CampaignExecutionMode; status: string }>(
         `UPDATE campaign_runs SET
          status = CASE WHEN preparation_attempt_count >= 3 THEN 'FAILED'::campaign_run_status
            ELSE 'PREPARING'::campaign_run_status END,
@@ -323,7 +385,7 @@ export class CampaignRunRepository {
        WHERE status = 'PREPARING' AND (
          (preparation_lease_token IS NOT NULL AND preparation_lease_expires_at < now())
          OR (preparation_lease_token IS NULL AND preparation_attempt_count >= 3)
-       ) RETURNING campaign_id, execution_mode, status`,
+       ) RETURNING id, campaign_id, execution_mode, status`,
       );
       const failedLiveCampaignIds = result.rows
         .filter(row => row.execution_mode === 'LIVE' && row.status === 'FAILED')
@@ -334,6 +396,15 @@ export class CampaignRunRepository {
            WHERE id = ANY($1::uuid[]) AND status IN ('ACTIVE','PAUSED')`,
           [failedLiveCampaignIds],
         );
+      }
+      for (const run of result.rows.filter(row => row.status === 'FAILED')) {
+        await appendCampaignRunActivity(client, {
+          runId: run.id,
+          eventType: 'campaign_run.failed',
+          severity: 'ERROR',
+          origin: 'RUNTIME',
+          metadata: { reason: 'PREPARATION_FAILED' },
+        });
       }
       return result.rowCount ?? 0;
     });
@@ -400,6 +471,13 @@ export class CampaignRunRepository {
            WHERE id = $1`,
           [runId, report.status, report.policyVersion, JSON.stringify(report)],
         );
+        await appendCampaignRunActivity(client, {
+          runId,
+          eventType: 'campaign_run.blocked',
+          severity: 'WARNING',
+          origin: 'RUNTIME',
+          metadata: { preflightStatus: report.status, policyVersion: report.policyVersion },
+        });
         return 'APPLIED';
       }
 
@@ -427,6 +505,13 @@ export class CampaignRunRepository {
         [runId, startsNow ? 'RUNNING' : 'SCHEDULED', report.status,
           report.policyVersion, JSON.stringify(report)],
       );
+      await appendCampaignRunActivity(client, {
+        runId,
+        eventType: startsNow ? 'campaign_run.started' : 'campaign_run.scheduled',
+        severity: 'INFO',
+        origin: 'RUNTIME',
+        metadata: { preflightStatus: report.status, policyVersion: report.policyVersion },
+      });
       return 'APPLIED';
     });
   }
@@ -438,6 +523,7 @@ export class CampaignRunRepository {
   ): Promise<CampaignPreparationResult> {
     return this.database.transaction(async client => {
       const result = await client.query<{
+        id: string;
         status: 'PREPARING' | 'FAILED';
         campaign_id: string;
         execution_mode: CampaignExecutionMode;
@@ -454,7 +540,7 @@ export class CampaignRunRepository {
          updated_at = now()
        WHERE id = $1 AND status = 'PREPARING' AND preparation_lease_token = $2
          AND preparation_lease_expires_at > now()
-       RETURNING status, campaign_id, execution_mode`,
+       RETURNING id, status, campaign_id, execution_mode`,
         [runId, leaseToken, error],
       );
       const row = result.rows[0];
@@ -464,6 +550,15 @@ export class CampaignRunRepository {
            WHERE id = $1 AND status IN ('ACTIVE','PAUSED')`,
           [row.campaign_id],
         );
+      }
+      if (row?.status === 'FAILED') {
+        await appendCampaignRunActivity(client, {
+          runId: row.id,
+          eventType: 'campaign_run.failed',
+          severity: 'ERROR',
+          origin: 'RUNTIME',
+          metadata: { reason: 'PREPARATION_FAILED' },
+        });
       }
       return row?.status ?? 'LOST_OWNERSHIP';
     });
@@ -509,7 +604,13 @@ export class CampaignRunRepository {
     return this.deliveries.materializePending(runId, maxBuffered);
   }
 
-  async listDeliveries(runId: string, limit: number, offset: number) {
-    return this.deliveries.list(runId, limit, offset);
+  async listDeliveries(input: {
+    runId: string;
+    query?: string;
+    statuses?: CampaignDeliveryStatus[];
+    limit: number;
+    offset: number;
+  }) {
+    return this.deliveries.list(input);
   }
 }

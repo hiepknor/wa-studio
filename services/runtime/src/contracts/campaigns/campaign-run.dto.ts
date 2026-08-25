@@ -4,6 +4,18 @@ import { PageMetaDto } from '../common/pagination.dto';
 import { CampaignExecutionMode, CampaignPreflightDto } from './campaign-preflight.dto';
 import { CampaignTargetSourceDto } from './campaign-target.dto';
 
+export enum CampaignRunStatus {
+  PREPARING = 'PREPARING',
+  BLOCKED = 'BLOCKED',
+  SCHEDULED = 'SCHEDULED',
+  RUNNING = 'RUNNING',
+  PAUSED = 'PAUSED',
+  COMPLETED = 'COMPLETED',
+  PARTIAL_FAILED = 'PARTIAL_FAILED',
+  CANCELLED = 'CANCELLED',
+  FAILED = 'FAILED',
+}
+
 export class CreateCampaignRunDto {
   @ApiProperty({ enum: CampaignExecutionMode, default: CampaignExecutionMode.DRY_RUN })
   @IsEnum(CampaignExecutionMode)
@@ -63,14 +75,17 @@ export class CampaignRunDto {
   @ApiProperty({ format: 'uuid' })
   campaignId!: string;
 
+  @ApiProperty()
+  campaignNameSnapshot!: string;
+
   @ApiProperty({ format: 'uuid' })
   sessionId!: string;
 
   @ApiProperty({ enum: CampaignExecutionMode })
   executionMode!: CampaignExecutionMode;
 
-  @ApiProperty({ enum: ['PREPARING', 'BLOCKED', 'SCHEDULED', 'RUNNING', 'PAUSED', 'COMPLETED', 'PARTIAL_FAILED', 'CANCELLED', 'FAILED'] })
-  status!: string;
+  @ApiProperty({ enum: CampaignRunStatus })
+  status!: CampaignRunStatus;
 
   @ApiProperty({ type: String, nullable: true })
   statusReason!: string | null;
@@ -83,6 +98,12 @@ export class CampaignRunDto {
 
   @ApiProperty({ type: CampaignPreflightDto, nullable: true })
   preflight!: CampaignPreflightDto | null;
+
+  @ApiProperty({ minimum: 1 })
+  campaignRevision!: number;
+
+  @ApiProperty({ minimum: 0 })
+  targetsRevision!: number;
 
   @ApiProperty()
   totalTargets!: number;
@@ -101,6 +122,31 @@ export class CampaignRunDto {
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
+
+  @ApiProperty({ format: 'date-time' })
+  updatedAt!: Date;
+}
+
+export class CampaignRunSummaryDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid' }) campaignId!: string;
+  @ApiProperty() campaignNameSnapshot!: string;
+  @ApiProperty({ format: 'uuid' }) sessionId!: string;
+  @ApiProperty({ enum: CampaignExecutionMode }) executionMode!: CampaignExecutionMode;
+  @ApiProperty({ enum: CampaignRunStatus }) status!: CampaignRunStatus;
+  @ApiProperty({ type: String, nullable: true }) statusReason!: string | null;
+  @ApiProperty() totalTargets!: number;
+  @ApiProperty({ type: CampaignRunProgressDto }) progress!: CampaignRunProgressDto;
+  @ApiProperty({ format: 'date-time' }) scheduledAt!: Date;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true }) startedAt!: Date | null;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true }) completedAt!: Date | null;
+  @ApiProperty({ format: 'date-time' }) createdAt!: Date;
+  @ApiProperty({ format: 'date-time' }) updatedAt!: Date;
+}
+
+export class CampaignRunSummaryListDto {
+  @ApiProperty({ type: [CampaignRunSummaryDto] }) data!: CampaignRunSummaryDto[];
+  @ApiProperty({ type: PageMetaDto }) meta!: PageMetaDto;
 }
 
 export class CampaignRunListDto {

@@ -97,6 +97,18 @@ describe('campaign OpenAPI contract', () => {
   });
 
   it('publishes typed errors for campaign-run operations', () => {
+    const listRuns = contract.paths['/api/v1/campaign-runs']?.get as Record<string, any>;
+    const runParameters = new Map<string, Record<string, any>>(
+      (listRuns.parameters ?? []).map((parameter: Record<string, any>) => [parameter.name, parameter]),
+    );
+    expect(runParameters.get('sessionId')).toMatchObject({ required: true, in: 'query' });
+    expect(runParameters.get('query')?.schema).toMatchObject({ type: 'string', maxLength: 200 });
+    expect(runParameters.get('status')).toMatchObject({ style: 'form', explode: false });
+    expect(runParameters.get('executionMode')).toMatchObject({ style: 'form', explode: false });
+    expect(listRuns.responses).toHaveProperty('200');
+    expect(contract.components.schemas.CampaignRunSummaryDto?.required).toEqual(expect.arrayContaining([
+      'campaignNameSnapshot', 'executionMode', 'status', 'progress', 'createdAt', 'updatedAt',
+    ]));
     const createRun = contract.paths['/api/v1/campaigns/{id}/runs']?.post as Record<string, any>;
     expect(createRun.responses).toHaveProperty('400');
     expect(createRun.responses).toHaveProperty('409');
@@ -108,6 +120,13 @@ describe('campaign OpenAPI contract', () => {
       preflightToken: expect.objectContaining({ minLength: 32, maxLength: 2048 }),
     }));
     expect(contract.components.schemas.CreateCampaignRunDto?.required).toEqual(['executionMode']);
+
+    const deliveries = contract.paths['/api/v1/campaign-runs/{id}/deliveries']?.get as Record<string, any>;
+    const deliveryParameters = new Map<string, Record<string, any>>(
+      (deliveries.parameters ?? []).map((parameter: Record<string, any>) => [parameter.name, parameter]),
+    );
+    expect(deliveryParameters.get('query')?.schema).toMatchObject({ type: 'string', maxLength: 200 });
+    expect(deliveryParameters.get('status')).toMatchObject({ style: 'form', explode: false });
   });
 
   it('publishes comma-separated campaign list filters and the bounded search query', () => {

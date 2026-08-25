@@ -641,8 +641,10 @@ describe('campaign draft contract HTTP API', () => {
     const liveLaunchInput = await passingLiveLaunchInput(campaignId);
     await pool.query(
       `INSERT INTO campaign_runs
-         (campaign_id, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at)
-       VALUES ($1, $2, 'legacy-live', 'LIVE', '{"text":"hello"}', now())`,
+         (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+          payload_snapshot, scheduled_at)
+       VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
+         'legacy-live', 'LIVE', '{"text":"hello"}', now())`,
       [campaignId, INTEGRATION_SESSION_ID],
     );
 
@@ -825,9 +827,10 @@ describe('campaign draft contract HTTP API', () => {
     ];
     await pool.query(
       `INSERT INTO campaign_runs
-         (id, campaign_id, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at,
-          created_at, updated_at)
-       SELECT id, $1, $2, 'run-' || ordinal, 'DRY_RUN', '{"text":"hello"}'::jsonb, now(),
+         (id, campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+          payload_snapshot, scheduled_at, created_at, updated_at)
+       SELECT id, $1, $2, (SELECT name FROM campaigns WHERE id = $1),
+         'run-' || ordinal, 'DRY_RUN', '{"text":"hello"}'::jsonb, now(),
          '2030-01-01T00:00:00Z'::timestamptz, '2030-01-01T00:00:00Z'::timestamptz
        FROM unnest($3::uuid[]) WITH ORDINALITY AS input(id, ordinal)`,
       [campaignId, INTEGRATION_SESSION_ID, runIds],
@@ -1056,8 +1059,10 @@ describe('campaign draft contract HTTP API', () => {
     };
     const insertLive = (campaignId: string, key: string, status: string) => pool.query(
       `INSERT INTO campaign_runs
-         (campaign_id, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at, status)
-       VALUES ($1, $2, $3, 'LIVE', '{"text":"hello"}', now(), $4::campaign_run_status)`,
+         (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+          payload_snapshot, scheduled_at, status)
+       VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
+         $3, 'LIVE', '{"text":"hello"}', now(), $4::campaign_run_status)`,
       [campaignId, INTEGRATION_SESSION_ID, key, status],
     );
     await insertLive(await insertCampaign('Draft drift', 'DRAFT'), 'drift-draft', 'PREPARING');

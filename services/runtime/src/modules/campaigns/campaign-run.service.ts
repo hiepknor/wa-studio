@@ -1,8 +1,11 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { isUUID } from 'class-validator';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import type { CampaignExecutionMode } from '../../contracts/campaigns/campaign-preflight.dto';
 import type { CreateCampaignRunDto } from '../../contracts/campaigns/campaign-run.dto';
+import type { CampaignRunQueryDto } from '../../contracts/campaigns/campaign-run-query.dto';
+import type { CampaignDeliveryQueryDto } from '../../contracts/campaigns/campaign-delivery-query.dto';
 import {
   CampaignLivePreflightTokenService,
   InvalidCampaignLivePreflightTokenError,
@@ -158,10 +161,41 @@ export class CampaignRunService {
     return { data: result.data, meta: { total: result.total, limit, offset } };
   }
 
-  async deliveries(runId: string, limit: number, offset: number) {
+  async listWorkspace(query: CampaignRunQueryDto) {
+    if (!this.config.OPENWA_ALLOWED_SESSION_IDS.includes(query.sessionId)) {
+      throw new CampaignError(HttpStatus.NOT_FOUND, 'CAMPAIGN_RUN_SESSION_NOT_FOUND', 'Session not found');
+    }
+    const from = query.from ? new Date(query.from) : undefined;
+    const to = query.to ? new Date(query.to) : undefined;
+    if (from && to && from >= to) {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_RUN_TIME_RANGE_INVALID',
+        'from must be earlier than to', { field: 'to' });
+    }
+    const normalizedQuery = query.query?.trim();
+    const result = await this.repository.list({
+      sessionId: query.sessionId,
+      query: normalizedQuery || undefined,
+      exactId: normalizedQuery && isUUID(normalizedQuery) ? normalizedQuery : undefined,
+      statuses: query.status,
+      executionModes: query.executionMode,
+      from,
+      to,
+      limit: query.limit,
+      offset: query.offset,
+    });
+    return { data: result.data, meta: { total: result.total, limit: query.limit, offset: query.offset } };
+  }
+
+  async deliveries(runId: string, query: CampaignDeliveryQueryDto) {
     await this.get(runId);
-    const result = await this.repository.listDeliveries(runId, limit, offset);
-    return { data: result.data, meta: { total: result.total, limit, offset } };
+    const result = await this.repository.listDeliveries({
+      runId,
+      query: query.query,
+      statuses: query.status,
+      limit: query.limit,
+      offset: query.offset,
+    });
+    return { data: result.data, meta: { total: result.total, limit: query.limit, offset: query.offset } };
   }
 
   async pause(id: string) {

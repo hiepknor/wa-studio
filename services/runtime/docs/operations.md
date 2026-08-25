@@ -160,8 +160,9 @@ session's send rate. Increase one step at a time from the defaults while observi
 pressure, queue age and OpenWA 429/5xx responses. Keep the outbound maximum delay at or below 60
 seconds so the session and message processing leases remain bounded.
 
-Terminal operational rows are retained for `RUNTIME_RETENTION_DAYS` (90 days by default), normalized
-events for `RUNTIME_EVENT_RETENTION_DAYS` (30 days), inbox message bodies for
+Terminal operational rows are retained for `RUNTIME_RETENTION_DAYS` (90 days by default), the
+sanitized Activity ledger for `RUNTIME_ACTIVITY_RETENTION_DAYS` (90 days), normalized events for
+`RUNTIME_EVENT_RETENTION_DAYS` (30 days), inbox message bodies for
 `RUNTIME_INBOX_RETENTION_DAYS` (equal to event retention when omitted; 7 days in the staging
 template), and raw webhook envelopes for `RUNTIME_RAW_WEBHOOK_RETENTION_DAYS` (7 days). The event
 retention is the effective webhook idempotency window. Backups remain governed by their own

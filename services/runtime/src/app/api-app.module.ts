@@ -15,6 +15,7 @@ import { InboxModule } from '../modules/inbox/inbox.module';
 import { MessagesModule } from '../modules/messages/messages.module';
 import { WebhooksModule } from '../modules/webhooks/webhooks.module';
 import { EventInboxConsumerModule } from '../modules/webhooks/event-inbox-consumer.module';
+import { ActivityModule } from '../modules/activity/activity.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { EventInboxConsumerModule } from '../modules/webhooks/event-inbox-consum
     MessagesModule,
     WebhooksModule,
     EventInboxConsumerModule,
+    ActivityModule,
   ],
   providers: [
     RequestContextMiddleware,

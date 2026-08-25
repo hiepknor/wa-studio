@@ -2,6 +2,7 @@ import type { SyncRunDto, SyncRunPhase, SyncRunStatus } from '../../contracts/se
 import { GatewaySyncMode } from '../../contracts/sessions/sync-request.dto';
 import { DatabaseService } from '../../core/database/database.service';
 import { GatewaySyncModeConflictError } from './gateway-sync.types';
+import { appendGatewaySyncActivity } from './gateway-sync-activity';
 
 interface SyncRunRow {
   id: string;
@@ -79,7 +80,15 @@ export class GatewaySyncRunRepository {
       }
       const result = await client.query<{ id: string }>(
         `INSERT INTO sync_runs (session_id, sync_type) VALUES ($1, $2) RETURNING id`, [sessionId, mode]);
-      return result.rows[0]!.id;
+      const createdId = result.rows[0]!.id;
+      await appendGatewaySyncActivity(client, {
+        syncRunId: createdId,
+        eventType: 'sync.requested',
+        severity: 'INFO',
+        origin: 'STUDIO',
+        dedupeKey: `sync-run:${createdId}:requested`,
+      });
+      return createdId;
     });
     const run = await this.find(id);
     if (!run) throw new Error('Created sync run was not found');
@@ -136,19 +145,31 @@ export class GatewaySyncRunRepository {
   }
 
   async recoverExpired(): Promise<number> {
-    const result = await this.database.query(
-      `UPDATE sync_runs SET
-         status = CASE WHEN attempt_count >= 3 THEN 'FAILED'::gateway_sync_status
-           ELSE 'PENDING'::gateway_sync_status END,
-         sync_epoch = CASE WHEN attempt_count >= 3 THEN sync_epoch ELSE NULL END,
-         next_attempt_at = CASE WHEN attempt_count >= 3 THEN next_attempt_at ELSE now() END,
-         lease_token = NULL, lease_expires_at = NULL,
-         error = 'Recovered expired sync lease',
-         completed_at = CASE WHEN attempt_count >= 3 THEN now() ELSE NULL END,
-         updated_at = now()
-       WHERE status = 'RUNNING' AND lease_expires_at < now()`,
-    );
-    return result.rowCount ?? 0;
+    return this.database.transaction(async client => {
+      const result = await client.query<{ id: string; status: 'PENDING' | 'FAILED' }>(
+        `UPDATE sync_runs SET
+           status = CASE WHEN attempt_count >= 3 THEN 'FAILED'::gateway_sync_status
+             ELSE 'PENDING'::gateway_sync_status END,
+           sync_epoch = CASE WHEN attempt_count >= 3 THEN sync_epoch ELSE NULL END,
+           next_attempt_at = CASE WHEN attempt_count >= 3 THEN next_attempt_at ELSE now() END,
+           lease_token = NULL, lease_expires_at = NULL,
+           error = 'Recovered expired sync lease',
+           completed_at = CASE WHEN attempt_count >= 3 THEN now() ELSE NULL END,
+           updated_at = now()
+         WHERE status = 'RUNNING' AND lease_expires_at < now()
+         RETURNING id, status`,
+      );
+      for (const sync of result.rows.filter(row => row.status === 'FAILED')) {
+        await appendGatewaySyncActivity(client, {
+          syncRunId: sync.id,
+          eventType: 'sync.failed',
+          severity: 'ERROR',
+          origin: 'GATEWAY',
+          metadata: { reason: 'LEASE_EXPIRED' },
+        });
+      }
+      return result.rowCount ?? 0;
+    });
   }
 
   async claim(id: string): Promise<ClaimedSyncRun | null> {
@@ -191,6 +212,13 @@ export class GatewaySyncRunRepository {
         'UPDATE gateway_sync_fences SET current_epoch = $2::bigint, updated_at = now() WHERE session_id = $1',
         [sessionId, syncEpoch],
       );
+      await appendGatewaySyncActivity(client, {
+        syncRunId: id,
+        eventType: row.attempt_count === 1 ? 'sync.started' : 'sync.retry_started',
+        severity: row.attempt_count === 1 ? 'INFO' : 'WARNING',
+        origin: 'GATEWAY',
+        metadata: { attemptNumber: row.attempt_count },
+      });
       return { sessionId, leaseToken: row.lease_token, attemptNumber: row.attempt_count, syncEpoch };
     });
   }
@@ -205,14 +233,26 @@ export class GatewaySyncRunRepository {
   }
 
   async complete(id: string, leaseToken: string, groups: number, members: number): Promise<boolean> {
-    const result = await this.database.query(
-      `UPDATE sync_runs SET status = 'COMPLETED', groups_synced = $3, members_synced = $4,
-         error = NULL, lease_token = NULL, lease_expires_at = NULL,
-         completed_at = now(), updated_at = now()
-       WHERE id = $1 AND status = 'RUNNING' AND lease_token = $2 AND lease_expires_at > now()`,
-      [id, leaseToken, groups, members],
-    );
-    return result.rowCount === 1;
+    return this.database.transaction(async client => {
+      const result = await client.query(
+        `UPDATE sync_runs SET status = 'COMPLETED', groups_synced = $3, members_synced = $4,
+           error = NULL, lease_token = NULL, lease_expires_at = NULL,
+           completed_at = now(), updated_at = now()
+         WHERE id = $1 AND status = 'RUNNING' AND lease_token = $2 AND lease_expires_at > now()
+         RETURNING id`,
+        [id, leaseToken, groups, members],
+      );
+      if (result.rowCount) {
+        await appendGatewaySyncActivity(client, {
+          syncRunId: id,
+          eventType: 'sync.completed',
+          severity: 'SUCCESS',
+          origin: 'GATEWAY',
+          metadata: { groupsSynced: groups, membersSynced: members },
+        });
+      }
+      return result.rowCount === 1;
+    });
   }
 
   async failAttempt(
@@ -222,8 +262,9 @@ export class GatewaySyncRunRepository {
     members: number,
     error: string,
   ): Promise<SyncAttemptResult> {
-    const result = await this.database.query<{ status: 'PENDING' | 'FAILED' }>(
-      `UPDATE sync_runs SET
+    return this.database.transaction(async client => {
+      const result = await client.query<{ status: 'PENDING' | 'FAILED' }>(
+        `UPDATE sync_runs SET
          status = CASE WHEN attempt_count >= 3 THEN 'FAILED'::gateway_sync_status
            ELSE 'PENDING'::gateway_sync_status END,
          sync_epoch = CASE WHEN attempt_count >= 3 THEN sync_epoch ELSE NULL END,
@@ -234,9 +275,19 @@ export class GatewaySyncRunRepository {
          completed_at = CASE WHEN attempt_count >= 3 THEN now() ELSE NULL END,
          updated_at = now()
        WHERE id = $1 AND status = 'RUNNING' AND lease_token = $2 AND lease_expires_at > now()
-       RETURNING status`,
-      [id, leaseToken, groups, members, error],
-    );
-    return result.rows[0]?.status ?? 'LOST_OWNERSHIP';
+         RETURNING status`,
+        [id, leaseToken, groups, members, error],
+      );
+      if (result.rows[0]?.status === 'FAILED') {
+        await appendGatewaySyncActivity(client, {
+          syncRunId: id,
+          eventType: 'sync.failed',
+          severity: 'ERROR',
+          origin: 'GATEWAY',
+          metadata: { groupsSynced: groups, membersSynced: members },
+        });
+      }
+      return result.rows[0]?.status ?? 'LOST_OWNERSHIP';
+    });
   }
 }

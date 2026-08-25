@@ -5,6 +5,7 @@ import type { SessionDto } from '../../contracts/sessions/session.dto';
 import type { SyncRunDto } from '../../contracts/sessions/sync-run.dto';
 import { GatewaySyncMode } from '../../contracts/sessions/sync-request.dto';
 import { DatabaseService } from '../../core/database/database.service';
+import { appendActivityEvent } from '../../core/activity/activity-writer';
 import {
   type OpenWAGroup,
   type OpenWAGroupSummary,
@@ -115,15 +116,59 @@ export class GatewayRepository {
       session.connectedAt ?? null, session.lastActive ?? null, session.engineLoaded,
       session.lastError ?? null, session.restriction == null ? null : JSON.stringify(session.restriction),
       session.createdAt, session.updatedAt];
-    if (syncFence) {
-      return this.database.transaction(async client => {
-        await this.fences.assertSyncWriteOwnership(client, session.id, syncFence);
-        const result = await client.query<SessionRow>(sql, values);
-        return mapSession(result.rows[0]!);
-      });
-    }
-    const result = await this.database.query<SessionRow>(sql, values);
-    return mapSession(result.rows[0]!);
+    return this.database.transaction(async client => {
+      if (syncFence) await this.fences.assertSyncWriteOwnership(client, session.id, syncFence);
+      const previous = await client.query<Pick<SessionRow, 'status' | 'engine_loaded' | 'restriction'>>(
+        'SELECT status, engine_loaded, restriction FROM gateway_sessions WHERE id = $1 FOR UPDATE',
+        [session.id],
+      );
+      const result = await client.query<SessionRow>(sql, values);
+      const current = result.rows[0]!;
+      const before = previous.rows[0];
+      if (!before) {
+        await appendActivityEvent(client, {
+          sessionId: current.id,
+          eventType: 'session.discovered',
+          category: 'SESSION',
+          severity: current.status === 'ready' && current.engine_loaded && current.restriction == null
+            ? 'SUCCESS'
+            : 'INFO',
+          origin: 'GATEWAY',
+          subjectType: 'SESSION',
+          subjectId: current.id,
+          subjectLabelSnapshot: current.name,
+          metadata: {
+            status: current.status,
+            engineLoaded: current.engine_loaded,
+            restricted: current.restriction != null,
+          },
+          dedupeKey: `session:${current.id}:discovered`,
+        });
+      } else if (before.status !== current.status
+        || before.engine_loaded !== current.engine_loaded
+        || (before.restriction == null) !== (current.restriction == null)) {
+        const sendable = current.status === 'ready' && current.engine_loaded && current.restriction == null;
+        await appendActivityEvent(client, {
+          sessionId: current.id,
+          eventType: 'session.health_changed',
+          category: 'SESSION',
+          severity: sendable
+            ? 'SUCCESS'
+            : ['failed', 'disconnected'].includes(current.status) ? 'ERROR' : 'WARNING',
+          origin: 'GATEWAY',
+          subjectType: 'SESSION',
+          subjectId: current.id,
+          subjectLabelSnapshot: current.name,
+          metadata: {
+            previousStatus: before.status,
+            status: current.status,
+            engineLoaded: current.engine_loaded,
+            restricted: current.restriction != null,
+          },
+        });
+      }
+      return mapSession(current);
+    });
   }
 
   async listSessions(allowedIds: string[]): Promise<SessionDto[]> {

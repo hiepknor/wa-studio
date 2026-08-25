@@ -50,6 +50,7 @@ const schema = z
     GATEWAY_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(1),
     CAMPAIGN_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(2),
     RUNTIME_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(90),
+    RUNTIME_ACTIVITY_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(90),
     RUNTIME_EVENT_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(30),
     RUNTIME_INBOX_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).optional(),
     RUNTIME_RAW_WEBHOOK_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(7),

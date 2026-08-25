@@ -79,16 +79,26 @@ describe('data retention', () => {
     );
     await pool.query(
       `INSERT INTO campaign_runs
-         (campaign_id, session_id, idempotency_key, execution_mode, status, payload_snapshot, scheduled_at, updated_at)
-       VALUES ($1,$2,$3,'DRY_RUN','COMPLETED','{"text":"hello"}',now(),$4),
-              ($1,$2,$5,'DRY_RUN','RUNNING','{"text":"hello"}',now(),$4)`,
+         (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+          status, payload_snapshot, scheduled_at, updated_at)
+       VALUES ($1,$2,'retention',$3,'DRY_RUN','COMPLETED','{"text":"hello"}',now(),$4),
+              ($1,$2,'retention',$5,'DRY_RUN','RUNNING','{"text":"hello"}',now(),$4)`,
       [campaign.rows[0]!.id, INTEGRATION_SESSION_ID, randomUUID(), old, randomUUID()],
+    );
+    await pool.query(
+      `INSERT INTO activity_events
+         (session_id, event_type, category, severity, origin, subject_type, subject_id,
+          subject_label_snapshot, occurred_at, created_at)
+       VALUES ($1,'session.discovered','SESSION','INFO','GATEWAY','SESSION',$1,'Old session',$2,$2),
+              ($1,'session.health_changed','SESSION','SUCCESS','GATEWAY','SESSION',$1,'Current session',now(),now())`,
+      [INTEGRATION_SESSION_ID, old],
     );
 
     const result = await new DataRetentionTick(database).cleanup();
 
     expect(result).toEqual({
-      campaignRuns: 1, messageJobs: 1, inboundMessages: 0, runtimeEvents: 1, webhookEvents: 1, syncRuns: 1,
+      activityEvents: 1, campaignRuns: 1, messageJobs: 1, inboundMessages: 0,
+      runtimeEvents: 1, webhookEvents: 1, syncRuns: 1,
       contactObservations: 0,
       batches: 1, capacityExhausted: false,
     });
@@ -98,6 +108,7 @@ describe('data retention', () => {
     await expectCount('webhook_events', 1);
     await expectCount('sync_runs', 1);
     await expectCount('campaign_runs', 1);
+    await expectCount('activity_events', 1);
   });
 
   it('drains more than one delete batch without one long transaction', async () => {

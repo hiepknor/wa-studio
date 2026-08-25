@@ -17,6 +17,12 @@ type CampaignTargetListDto = components["schemas"]["CampaignTargetListDto"];
 type ApplyGroupListTargetsDto = components["schemas"]["ApplyGroupListTargetsDto"];
 type CreateCampaignRunDto = components["schemas"]["CreateCampaignRunDto"];
 type CampaignRunDto = components["schemas"]["CampaignRunDto"];
+type CampaignRunListQuery = NonNullable<
+  paths["/api/v1/campaign-runs"]["get"]["parameters"]["query"]
+>;
+type ActivityListQuery = NonNullable<
+  paths["/api/v1/activity"]["get"]["parameters"]["query"]
+>;
 type GroupListDeleteQuery = NonNullable<
   paths["/api/v1/group-lists/{id}"]["delete"]["parameters"]["query"]
 >;
@@ -32,7 +38,7 @@ describe("authoritative WA Runtime contract", () => {
     );
     const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(checksum)
-      .toBe("27dde4c34f9840e004f85651b6ddf7e266c372f448c95a0741ae84a3191798b9");
+      .toBe("0d2a3341275e904a2688521b4a4db4836cef9674798cfe2abcbd28945db5a1bb");
   });
 
   it("generates nullable scheduledAt for UpdateCampaignDto", () => {
@@ -53,6 +59,27 @@ describe("authoritative WA Runtime contract", () => {
     };
     expect(query.status).toEqual(["DRAFT", "PAUSED"]);
     expect(query.scheduleType).toEqual(["IMMEDIATE", "ONCE"]);
+  });
+
+  it("generates the durable Runs and cursor-based Activity queries", () => {
+    const runs: CampaignRunListQuery = {
+      sessionId: "00000000-0000-4000-8000-000000000001",
+      query: "release",
+      status: ["RUNNING", "PARTIAL_FAILED"],
+      executionMode: ["LIVE"],
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-09-01T00:00:00.000Z",
+    };
+    const activity: ActivityListQuery = {
+      sessionId: runs.sessionId,
+      query: "release",
+      category: ["RUN", "SYNC"],
+      severity: ["WARNING", "ERROR"],
+      cursor: "opaque-cursor",
+    };
+
+    expect(runs.executionMode).toEqual(["LIVE"]);
+    expect(activity.category).toEqual(["RUN", "SYNC"]);
   });
 
   it("generates participant bounds for the authoritative group-list query", () => {

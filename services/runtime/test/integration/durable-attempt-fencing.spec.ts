@@ -42,8 +42,10 @@ describe('durable attempt fencing', () => {
     );
     const run = await pool.query<{ id: string }>(
       `INSERT INTO campaign_runs
-         (campaign_id, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at)
-       VALUES ($1, $2, 'fencing-run', 'DRY_RUN', '{"text":"hello"}', now()) RETURNING id`,
+         (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+          payload_snapshot, scheduled_at)
+       VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
+         'fencing-run', 'DRY_RUN', '{"text":"hello"}', now()) RETURNING id`,
       [campaign.rows[0]!.id, INTEGRATION_SESSION_ID],
     );
     const runId = run.rows[0]!.id;
@@ -77,10 +79,12 @@ describe('durable attempt fencing', () => {
     );
     await pool.query(
       `INSERT INTO campaign_runs
-         (campaign_id, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at,
-          preparation_attempt_count, preparation_lease_token, preparation_lease_expires_at)
-       VALUES ($1, $2, 'terminal-recovery', 'LIVE', '{"text":"hello"}', now(), 3,
-         gen_random_uuid(), now() - interval '1 second')`,
+         (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+          payload_snapshot, scheduled_at, preparation_attempt_count, preparation_lease_token,
+          preparation_lease_expires_at)
+       VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
+         'terminal-recovery', 'LIVE', '{"text":"hello"}', now(), 3, gen_random_uuid(),
+         now() - interval '1 second')`,
       [campaign.rows[0]!.id, INTEGRATION_SESSION_ID],
     );
 

@@ -44,7 +44,16 @@ export class CampaignHttpExceptionFilter implements ExceptionFilter {
     if (messages.some(message => /\bscheduleType\b/u.test(message))) {
       return { code: 'CAMPAIGN_FILTER_SCHEDULE_TYPE_INVALID', field: 'scheduleType' };
     }
-    if (messages.some(message => /\bquery\b/u.test(message))) {
+    if (messages.some(message => /\bexecutionMode\b/u.test(message))) {
+      return { code: 'CAMPAIGN_RUN_FILTER_MODE_INVALID', field: 'executionMode' };
+    }
+    if (messages.some(message => /^from\b/u.test(message))) {
+      return { code: 'CAMPAIGN_RUN_TIME_RANGE_INVALID', field: 'from' };
+    }
+    if (messages.some(message => /^to\b/u.test(message))) {
+      return { code: 'CAMPAIGN_RUN_TIME_RANGE_INVALID', field: 'to' };
+    }
+    if (messages.some(message => /^query\b/u.test(message))) {
       return { code: 'CAMPAIGN_QUERY_INVALID', field: 'query' };
     }
     return null;

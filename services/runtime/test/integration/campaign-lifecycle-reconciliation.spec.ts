@@ -30,8 +30,10 @@ describe('campaign lifecycle reconciliation', () => {
     );
     await pool.query(
       `INSERT INTO campaign_runs
-         (campaign_id, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at, status)
-       VALUES ($1, $2, 'legacy-terminal', 'LIVE', '{"text":"hello"}', now(), 'COMPLETED')`,
+         (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+          payload_snapshot, scheduled_at, status)
+       VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
+         'legacy-terminal', 'LIVE', '{"text":"hello"}', now(), 'COMPLETED')`,
       [campaign.rows[0]!.id, INTEGRATION_SESSION_ID],
     );
     const client = await pool.connect();
@@ -64,8 +66,10 @@ describe('campaign lifecycle reconciliation', () => {
     );
     const insert = (key: string) => pool.query(
       `INSERT INTO campaign_runs
-         (campaign_id, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at)
-       VALUES ($1, $2, $3, 'LIVE', '{"text":"hello"}', now())`,
+         (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+          payload_snapshot, scheduled_at)
+       VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
+         $3, 'LIVE', '{"text":"hello"}', now())`,
       [campaign.rows[0]!.id, INTEGRATION_SESSION_ID, key],
     );
     await insert('first-live');
@@ -100,8 +104,10 @@ describe('campaign lifecycle reconciliation', () => {
       );
       await pool.query(
         `INSERT INTO campaign_runs
-           (campaign_id, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at, status)
-         VALUES ($1, $2, $3, 'LIVE', '{"text":"hello"}', now(), 'BLOCKED')`,
+           (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+            payload_snapshot, scheduled_at, status)
+         VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
+           $3, 'LIVE', '{"text":"hello"}', now(), 'BLOCKED')`,
         [campaign.rows[0]!.id, INTEGRATION_SESSION_ID, `blocked-${status.toLowerCase()}`],
       );
     }

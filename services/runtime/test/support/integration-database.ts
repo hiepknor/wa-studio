@@ -10,7 +10,7 @@ export function integrationPool(): Pool {
 
 export async function resetIntegrationDatabase(pool: Pool): Promise<void> {
   await pool.query(
-    `TRUNCATE runtime_queue_jobs, runtime_process_heartbeats, runtime_scheduler_tick_states,
+    `TRUNCATE activity_events, runtime_queue_jobs, runtime_process_heartbeats, runtime_scheduler_tick_states,
        webhook_events, runtime_events, outbound_session_leases, message_jobs,
        gateway_sync_items, sync_runs, gateway_sync_rate_limits, gateway_sync_fences,
        campaigns, gateway_sessions

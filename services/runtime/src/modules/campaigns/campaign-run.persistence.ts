@@ -1,16 +1,22 @@
 import type { PoolClient } from 'pg';
 import type { CampaignExecutionMode, CampaignPreflightDto } from '../../contracts/campaigns/campaign-preflight.dto';
-import type { CampaignRunDto, CampaignRunProgressDto } from '../../contracts/campaigns/campaign-run.dto';
+import type {
+  CampaignRunDto,
+  CampaignRunProgressDto,
+  CampaignRunStatus,
+  CampaignRunSummaryDto,
+} from '../../contracts/campaigns/campaign-run.dto';
 import type { CampaignTargetDto } from '../../contracts/campaigns/campaign-target.dto';
 import type { GroupSendCapabilityStatus } from '../gateway/group-capability';
 
 export interface CampaignRunRow {
   id: string;
   campaign_id: string;
+  campaign_name_snapshot: string;
   session_id: string;
   idempotency_key: string;
   execution_mode: CampaignExecutionMode;
-  status: string;
+  status: CampaignRunStatus;
   status_reason: string | null;
   payload_snapshot: { text: string };
   campaign_revision: string | number;
@@ -24,6 +30,7 @@ export interface CampaignRunRow {
   started_at: Date | null;
   completed_at: Date | null;
   created_at: Date;
+  updated_at: Date;
   target_count: string | number;
   delivery_counts: Record<string, number>;
 }
@@ -77,6 +84,7 @@ export const campaignRunSelect = `
 export const mapCampaignRun = (row: CampaignRunRow): CampaignRunDto => ({
   id: row.id,
   campaignId: row.campaign_id,
+  campaignNameSnapshot: row.campaign_name_snapshot,
   sessionId: row.session_id,
   executionMode: row.execution_mode,
   status: row.status,
@@ -95,12 +103,32 @@ export const mapCampaignRun = (row: CampaignRunRow): CampaignRunDto => ({
       }
     : null,
   preflight: row.preflight_report,
+  campaignRevision: Number(row.campaign_revision),
+  targetsRevision: Number(row.targets_revision),
   totalTargets: Number(row.target_count),
   progress: mapProgress(row.delivery_counts),
   scheduledAt: row.scheduled_at,
   startedAt: row.started_at,
   completedAt: row.completed_at,
   createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+export const mapCampaignRunSummary = (row: CampaignRunRow): CampaignRunSummaryDto => ({
+  id: row.id,
+  campaignId: row.campaign_id,
+  campaignNameSnapshot: row.campaign_name_snapshot,
+  sessionId: row.session_id,
+  executionMode: row.execution_mode,
+  status: row.status,
+  statusReason: row.status_reason,
+  totalTargets: Number(row.target_count),
+  progress: mapProgress(row.delivery_counts),
+  scheduledAt: row.scheduled_at,
+  startedAt: row.started_at,
+  completedAt: row.completed_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
 });
 
 export const mapPreflightTarget = (row: PreflightTargetRow): CampaignTargetDto => ({

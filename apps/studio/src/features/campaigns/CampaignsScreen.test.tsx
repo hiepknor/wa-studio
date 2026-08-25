@@ -136,6 +136,7 @@ function campaignRun(
   return {
     id: `${executionMode.toLocaleLowerCase()}-run-id`,
     campaignId: campaign.id,
+    campaignNameSnapshot: campaign.name,
     sessionId: session.id,
     executionMode,
     status,
@@ -143,12 +144,15 @@ function campaignRun(
     text: campaign.text,
     targetSource: null,
     preflight: report(executionMode, "PASS"),
+    campaignRevision: campaign.revision,
+    targetsRevision: campaign.targetsRevision,
     totalTargets: 1,
     progress: { total: 1, pending: 0, materialized: 0, processing: 0, dryRunCompleted: executionMode === "DRY_RUN" ? 1 : 0, accepted: 0, sent: 0, delivered: 0, read: 0, failed: 0, unknown: 0, blocked: 0, cancelled: 0 },
     scheduledAt: "2026-08-14T03:00:00.000Z",
     startedAt: "2026-08-14T03:00:00.000Z",
     completedAt: status === "COMPLETED" ? "2026-08-14T03:01:00.000Z" : null,
     createdAt: "2026-08-14T03:00:00.000Z",
+    updatedAt: "2026-08-14T03:01:00.000Z",
   };
 }
 

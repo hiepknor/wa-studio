@@ -1,11 +1,12 @@
 import { Controller, Get, Param, ParseUUIDPipe, Post, Query, UseFilters } from '@nestjs/common';
 import {
   ApiBadRequestResponse, ApiConflictResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation,
-  ApiSecurity, ApiTags,
+  ApiQuery, ApiSecurity, ApiTags,
 } from '@nestjs/swagger';
 import { CampaignDeliveryListDto } from '../../contracts/campaigns/campaign-delivery.dto';
-import { CampaignRunDto } from '../../contracts/campaigns/campaign-run.dto';
-import { PaginationQueryDto } from '../../contracts/common/pagination.dto';
+import { CampaignDeliveryQueryDto } from '../../contracts/campaigns/campaign-delivery-query.dto';
+import { CampaignRunDto, CampaignRunSummaryListDto } from '../../contracts/campaigns/campaign-run.dto';
+import { CampaignRunQueryDto } from '../../contracts/campaigns/campaign-run-query.dto';
 import { RuntimeErrorDto } from '../../contracts/common/runtime-error.dto';
 import { CampaignHttpExceptionFilter } from './campaign-http-exception.filter';
 import { CampaignRunService } from './campaign-run.service';
@@ -20,6 +21,13 @@ import { CampaignRunService } from './campaign-run.service';
 export class CampaignRunController {
   constructor(private readonly runs: CampaignRunService) {}
 
+  @Get()
+  @ApiQuery({ name: 'status', required: false, isArray: true, style: 'form', explode: false })
+  @ApiQuery({ name: 'executionMode', required: false, isArray: true, style: 'form', explode: false })
+  @ApiOperation({ summary: 'Search and filter durable campaign runs in one allowlisted session' })
+  @ApiOkResponse({ type: CampaignRunSummaryListDto })
+  list(@Query() query: CampaignRunQueryDto) { return this.runs.listWorkspace(query); }
+
   @Get(':id')
   @ApiOperation({ summary: 'Read a durable campaign run' })
   @ApiOkResponse({ type: CampaignRunDto })
@@ -28,8 +36,9 @@ export class CampaignRunController {
   @Get(':id/deliveries')
   @ApiOperation({ summary: 'List per-group deliveries for a campaign run' })
   @ApiOkResponse({ type: CampaignDeliveryListDto })
-  deliveries(@Param('id', ParseUUIDPipe) id: string, @Query() query: PaginationQueryDto) {
-    return this.runs.deliveries(id, query.limit, query.offset);
+  @ApiQuery({ name: 'status', required: false, isArray: true, style: 'form', explode: false })
+  deliveries(@Param('id', ParseUUIDPipe) id: string, @Query() query: CampaignDeliveryQueryDto) {
+    return this.runs.deliveries(id, query);
   }
 
   @Post(':id/pause')

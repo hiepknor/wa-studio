@@ -8,6 +8,7 @@ import {
   capabilitySnapshotChanged,
   mapCampaignRun,
 } from './campaign-run.persistence';
+import { appendCampaignRunActivity } from './campaign-run-activity';
 
 export type CampaignResumeResult = CampaignRunDto | 'STALE_INPUT' | null;
 
@@ -15,17 +16,33 @@ export class CampaignRunLifecycleRepository {
   constructor(private readonly database: DatabaseService) {}
 
   async activateDue(): Promise<number> {
-    const result = await this.database.query(
-      `UPDATE campaign_runs SET status = 'RUNNING', status_reason = NULL,
-         started_at = COALESCE(started_at, now()), updated_at = now()
-       WHERE status = 'SCHEDULED' AND scheduled_at <= now()`,
-    );
-    return result.rowCount ?? 0;
+    return this.database.transaction(async client => {
+      const result = await client.query<{ id: string }>(
+        `UPDATE campaign_runs SET status = 'RUNNING', status_reason = NULL,
+           started_at = COALESCE(started_at, now()), updated_at = now()
+         WHERE status = 'SCHEDULED' AND scheduled_at <= now()
+         RETURNING id`,
+      );
+      for (const run of result.rows) {
+        await appendCampaignRunActivity(client, {
+          runId: run.id,
+          eventType: 'campaign_run.started',
+          severity: 'INFO',
+          origin: 'RUNTIME',
+        });
+      }
+      return result.rowCount ?? 0;
+    });
   }
 
   async finalize(limit: number): Promise<number> {
     return this.database.transaction(async client => {
-      const result = await client.query<{ campaign_id: string; execution_mode: CampaignExecutionMode }>(
+      const result = await client.query<{
+        id: string;
+        status: 'COMPLETED' | 'PARTIAL_FAILED';
+        campaign_id: string;
+        execution_mode: CampaignExecutionMode;
+      }>(
         `WITH finalizable AS (
          SELECT cr.id,
            bool_or(cd.status IN ('FAILED','UNKNOWN','BLOCKED_CAPABILITY_CHANGED','CANCELLED')) AS has_failure
@@ -43,7 +60,7 @@ export class CampaignRunLifecycleRepository {
          status_reason = CASE WHEN f.has_failure THEN 'ONE_OR_MORE_DELIVERIES_FAILED' ELSE NULL END,
          completed_at = now(), updated_at = now()
        FROM finalizable f WHERE cr.id = f.id
-       RETURNING cr.campaign_id, cr.execution_mode`,
+       RETURNING cr.id, cr.status, cr.campaign_id, cr.execution_mode`,
         [limit],
       );
       const liveCampaignIds = result.rows
@@ -55,6 +72,16 @@ export class CampaignRunLifecycleRepository {
            WHERE id = ANY($1::uuid[]) AND status IN ('ACTIVE','PAUSED')`,
           [liveCampaignIds],
         );
+      }
+      for (const run of result.rows) {
+        await appendCampaignRunActivity(client, {
+          runId: run.id,
+          eventType: run.status === 'COMPLETED'
+            ? 'campaign_run.completed'
+            : 'campaign_run.partial_failed',
+          severity: run.status === 'COMPLETED' ? 'SUCCESS' : 'WARNING',
+          origin: 'RUNTIME',
+        });
       }
       return result.rowCount ?? 0;
     });
@@ -76,18 +103,37 @@ export class CampaignRunLifecycleRepository {
           [transition.campaign_id],
         );
       }
+      await appendCampaignRunActivity(client, {
+        runId: id,
+        eventType: 'campaign_run.paused',
+        severity: 'WARNING',
+        origin: 'STUDIO',
+        metadata: { reason: 'MANUAL_PAUSE' },
+      });
       const result = await client.query<CampaignRunRow>(`${campaignRunSelect} WHERE cr.id = $1`, [id]);
       return mapCampaignRun(result.rows[0]!);
     });
   }
 
   async recordBlockedResume(id: string, report: CampaignPreflightDto): Promise<void> {
-    await this.database.query(
-      `UPDATE campaign_runs SET status = 'BLOCKED', status_reason = 'PREFLIGHT_BLOCKED', preflight_status = $2,
-         preflight_policy_version = $3, preflight_report = $4::jsonb, updated_at = now()
-       WHERE id = $1 AND status IN ('PAUSED','BLOCKED')`,
-      [id, report.status, report.policyVersion, JSON.stringify(report)],
-    );
+    await this.database.transaction(async client => {
+      const result = await client.query(
+        `UPDATE campaign_runs SET status = 'BLOCKED', status_reason = 'PREFLIGHT_BLOCKED', preflight_status = $2,
+           preflight_policy_version = $3, preflight_report = $4::jsonb, updated_at = now()
+         WHERE id = $1 AND status IN ('PAUSED','BLOCKED')
+         RETURNING id`,
+        [id, report.status, report.policyVersion, JSON.stringify(report)],
+      );
+      if (result.rowCount) {
+        await appendCampaignRunActivity(client, {
+          runId: id,
+          eventType: 'campaign_run.blocked',
+          severity: 'WARNING',
+          origin: 'STUDIO',
+          metadata: { reason: 'PREFLIGHT_BLOCKED', policyVersion: report.policyVersion },
+        });
+      }
+    });
   }
 
   async resume(
@@ -140,6 +186,13 @@ export class CampaignRunLifecycleRepository {
           [run.campaign_id],
         );
       }
+      await appendCampaignRunActivity(client, {
+        runId: id,
+        eventType: 'campaign_run.resumed',
+        severity: 'INFO',
+        origin: 'STUDIO',
+        metadata: { resumedStatus: status },
+      });
       const result = await client.query<CampaignRunRow>(`${campaignRunSelect} WHERE cr.id = $1`, [id]);
       return mapCampaignRun(result.rows[0]!);
     });
@@ -186,6 +239,13 @@ export class CampaignRunLifecycleRepository {
           [run.campaign_id],
         );
       }
+      await appendCampaignRunActivity(client, {
+        runId: id,
+        eventType: 'campaign_run.cancelled',
+        severity: 'WARNING',
+        origin: 'STUDIO',
+        metadata: { reason: 'CANCELLED_BY_OPERATOR' },
+      });
       const result = await client.query<CampaignRunRow>(`${campaignRunSelect} WHERE cr.id = $1`, [id]);
       return mapCampaignRun(result.rows[0]!);
     });
