@@ -6,6 +6,7 @@ import { sessionIdentityLabel } from "@/shared/presentation/session";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
+import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
 import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
@@ -38,7 +39,7 @@ interface SessionsScreenProps {
 }
 
 export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
-  const { connected, refreshSessions, selectedSessionId, selectSession } = useRuntimeConnection();
+  const { connected, disconnect, refreshSessions, selectedSessionId, selectSession } = useRuntimeConnection();
   const toast = useToast();
   if (!connected) throw new Error("SessionsScreen requires a Runtime connection");
 
@@ -49,6 +50,7 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceFilter[]>([]);
   const [reloading, setReloading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [disconnectConfirmationOpen, setDisconnectConfirmationOpen] = useState(false);
 
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const filteredSessions = useMemo(() => connected.sessions.filter((session) => {
@@ -93,14 +95,24 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
     <div className="sessions-screen stack stack-lg">
       <PageHeader
         actions={(
-          <Button
-            aria-label={reloading ? "Reloading sessions" : "Reload sessions"}
-            aria-busy={reloading || undefined}
-            icon="refresh"
-            onClick={() => void reloadSessions()}
-          >
-            {reloading ? "Reloading…" : "Reload"}
-          </Button>
+          <div className="sessions-header-actions">
+            <Button
+              aria-label={reloading ? "Reloading sessions" : "Reload sessions"}
+              aria-busy={reloading || undefined}
+              icon="refresh"
+              onClick={() => void reloadSessions()}
+            >
+              {reloading ? "Reloading…" : "Reload"}
+            </Button>
+            <Button
+              aria-label="Disconnect workspace"
+              icon="disconnect"
+              onClick={() => setDisconnectConfirmationOpen(true)}
+              variant="danger"
+            >
+              Disconnect
+            </Button>
+          </div>
         )}
         description="Manage available Gateway sessions and choose the workspace context."
         title="Sessions"
@@ -172,6 +184,18 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
           </table>
         </div>
       </div>
+      <ConfirmationDialog
+        body="WA Studio will detach this window from the local workspace. Runtime and active syncs continue in the background."
+        confirmLabel="Disconnect"
+        confirmVariant="danger"
+        onCancel={() => setDisconnectConfirmationOpen(false)}
+        onConfirm={() => {
+          setDisconnectConfirmationOpen(false);
+          disconnect();
+        }}
+        open={disconnectConfirmationOpen}
+        title="Disconnect workspace?"
+      />
     </div>
   );
 }

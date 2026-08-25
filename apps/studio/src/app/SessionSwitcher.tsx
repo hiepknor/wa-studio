@@ -1,12 +1,20 @@
-import { KeyboardEvent, useEffect, useId, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 
 import type { RuntimeSession } from "@/shared/api/runtime-client";
 import { sessionIdentityLabel } from "@/shared/presentation/session";
 import { AppIcon } from "@/shared/ui/AppIcon";
+import { DateTime } from "@/shared/ui/DateTime";
 import type { FeedbackTone } from "@/shared/ui/feedback-tone";
 import { StatusDot } from "@/shared/ui/StatusDot";
 
 interface SessionSwitcherProps {
+  onManageSessions: () => void;
   onSelect: (sessionId: string) => void;
   selectedSessionId: string | null;
   sessions: RuntimeSession[];
@@ -34,18 +42,29 @@ function SessionStatus({ className, status }: { className: string; status: strin
 }
 
 export function SessionSwitcher({
+  onManageSessions,
   onSelect,
   selectedSessionId,
   sessions,
 }: SessionSwitcherProps) {
   const listboxId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const typeaheadRef = useRef({ query: "", timestamp: 0 });
-  const selectedIndex = sessions.findIndex((session) => session.id === selectedSessionId);
-  const selectedSession = selectedIndex >= 0 ? sessions[selectedIndex] : null;
+  const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
   const [open, setOpen] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(Math.max(selectedIndex, 0));
+  const [query, setQuery] = useState("");
+  const filteredSessions = sessions.filter((session) => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    if (!normalizedQuery) return true;
+    return [session.name, session.id, sessionIdentityLabel(session)]
+      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+  });
+  const selectedFilteredIndex = filteredSessions.findIndex(
+    (session) => session.id === selectedSessionId,
+  );
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const highlightedSession = filteredSessions[highlightedIndex] ?? null;
 
   useEffect(() => {
     if (!open) return;
@@ -57,25 +76,48 @@ export function SessionSwitcher({
   }, [open]);
 
   useEffect(() => {
-    if (open) setHighlightedIndex(Math.max(selectedIndex, 0));
-  }, [open, selectedIndex]);
+    if (!open) return;
+    setHighlightedIndex(Math.max(selectedFilteredIndex, 0));
+  }, [open, selectedFilteredIndex]);
 
-  function close() {
-    setOpen(false);
-    triggerRef.current?.focus();
+  useEffect(() => {
+    if (!open) return;
+    searchRef.current?.focus();
+  }, [open]);
+
+  function openSelector(initialIndex?: number) {
+    setQuery("");
+    setHighlightedIndex(
+      initialIndex ?? Math.max(sessions.findIndex((session) => session.id === selectedSessionId), 0),
+    );
+    setOpen(true);
   }
 
-  function choose(index: number) {
-    const session = sessions[index];
+  function close(restoreFocus = true) {
+    setOpen(false);
+    setQuery("");
+    if (restoreFocus) triggerRef.current?.focus();
+  }
+
+  function choose(session: RuntimeSession | null) {
     if (!session) return;
     onSelect(session.id);
     close();
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (sessions.length === 0) return;
+    if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown") {
+      event.preventDefault();
+      openSelector();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      openSelector(sessions.length - 1);
+    }
+  }
 
-    if (event.key === "Escape" && open) {
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
       event.preventDefault();
       close();
       return;
@@ -84,111 +126,132 @@ export function SessionSwitcher({
       setOpen(false);
       return;
     }
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      if (open) choose(highlightedIndex);
-      else setOpen(true);
-      return;
-    }
+    if (filteredSessions.length === 0) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      if (!open) {
-        setOpen(true);
-        return;
-      }
       setHighlightedIndex((current) =>
-        nextIndex(current, event.key === "ArrowDown" ? 1 : -1, sessions.length),
+        nextIndex(current, event.key === "ArrowDown" ? 1 : -1, filteredSessions.length),
       );
       return;
     }
     if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
-      setOpen(true);
-      setHighlightedIndex(event.key === "Home" ? 0 : sessions.length - 1);
+      setHighlightedIndex(event.key === "Home" ? 0 : filteredSessions.length - 1);
       return;
     }
-    if (event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) {
-      const now = Date.now();
-      const previous = typeaheadRef.current;
-      const query = `${now - previous.timestamp < 700 ? previous.query : ""}${event.key}`
-        .toLocaleLowerCase();
-      typeaheadRef.current = { query, timestamp: now };
-      const match = sessions.findIndex((session) =>
-        session.name.toLocaleLowerCase().startsWith(query),
-      );
-      if (match >= 0) {
-        event.preventDefault();
-        setOpen(true);
-        setHighlightedIndex(match);
-      }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      choose(highlightedSession);
     }
   }
 
   return (
     <div className="workspace-session-switcher" ref={rootRef}>
-      <span className="workspace-session-label">Active session</span>
+      <span className="workspace-session-label" id={`${listboxId}-label`}>Active session</span>
       <button
-        aria-activedescendant={open ? `${listboxId}-option-${highlightedIndex}` : undefined}
         aria-controls={listboxId}
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label="Active session"
         className="workspace-session-trigger"
         disabled={sessions.length === 0}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={handleKeyDown}
+        onClick={() => open ? close(false) : openSelector()}
+        onKeyDown={handleTriggerKeyDown}
         ref={triggerRef}
-        role="combobox"
         type="button"
       >
         {selectedSession ? (
           <span className="workspace-session-value">
-            <span>{selectedSession.name}</span>
-            <SessionStatus
-              className="workspace-session-state"
-              status={selectedSession.status}
-            />
+            <AppIcon name="sessions" size="sm" />
+            <span id={`${listboxId}-value`}>{selectedSession.name}</span>
           </span>
         ) : (
-          <span className="workspace-session-placeholder">No session</span>
+          <span className="workspace-session-placeholder" id={`${listboxId}-value`}>
+            No session
+          </span>
         )}
         <AppIcon className="workspace-session-chevron" name="chevron-down" size="xs" />
       </button>
 
       {open && (
-        <div aria-label="Gateway sessions" className="workspace-session-options" id={listboxId} role="listbox">
-          <div className="workspace-session-options-label" role="presentation">
-            Gateway sessions <span>{sessions.length}</span>
+        <div className="workspace-session-options">
+          <div className="workspace-session-search focus-owner">
+            <AppIcon name="search" size="sm" />
+            <input
+              aria-activedescendant={highlightedSession
+                ? `${listboxId}-option-${sessions.indexOf(highlightedSession)}`
+                : undefined}
+              aria-autocomplete="list"
+              aria-controls={listboxId}
+              aria-expanded="true"
+              aria-label="Search sessions"
+              autoComplete="off"
+              onChange={(event) => {
+                setQuery(event.currentTarget.value);
+                setHighlightedIndex(0);
+              }}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search sessions"
+              ref={searchRef}
+              role="combobox"
+              type="search"
+              value={query}
+            />
           </div>
-          {sessions.map((session, index) => {
-            const selected = session.id === selectedSessionId;
-            const highlighted = index === highlightedIndex;
-            const identity = sessionIdentityLabel(session);
-            return (
-              <div
-                aria-selected={selected}
-                className="workspace-session-option"
-                data-highlighted={highlighted || undefined}
-                id={`${listboxId}-option-${index}`}
-                key={session.id}
-                onClick={() => choose(index)}
-                onMouseEnter={() => setHighlightedIndex(index)}
-                role="option"
-              >
-                <span className="workspace-session-option-copy">
-                  <strong>{session.name}</strong>
-                  <small title={identity}>{identity}</small>
-                </span>
-                <SessionStatus
-                  className="workspace-session-option-status"
-                  status={session.status}
-                />
-                <span aria-hidden="true" className="workspace-session-check">
-                  {selected && <AppIcon name="check" size="sm" />}
-                </span>
+          <div aria-label="Gateway sessions" className="workspace-session-list" id={listboxId} role="listbox">
+            {filteredSessions.length === 0 && (
+              <div className="workspace-session-empty" role="option" aria-disabled="true">
+                No sessions match this search
               </div>
-            );
-          })}
+            )}
+            {filteredSessions.map((session, index) => {
+              const selected = session.id === selectedSessionId;
+              const highlighted = index === highlightedIndex;
+              const identity = sessionIdentityLabel(session);
+              return (
+                <button
+                  aria-selected={selected}
+                  className="workspace-session-option"
+                  data-highlighted={highlighted || undefined}
+                  id={`${listboxId}-option-${sessions.indexOf(session)}`}
+                  key={session.id}
+                  onClick={() => choose(session)}
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  role="option"
+                  tabIndex={-1}
+                  type="button"
+                >
+                  <span aria-hidden="true" className="workspace-session-check">
+                    {selected && <AppIcon name="check" size="sm" />}
+                  </span>
+                  <span className="workspace-session-option-copy">
+                    <strong>{session.name}</strong>
+                    <span className="workspace-session-option-meta">
+                      <span className="workspace-session-identity" title={identity}>{identity}</span>
+                      <span>Last activity <DateTime fallback="unknown" value={session.lastActiveAt} /></span>
+                    </span>
+                  </span>
+                  <SessionStatus
+                    className="workspace-session-option-status"
+                    status={session.status}
+                  />
+                </button>
+              );
+            })}
+          </div>
+          <div className="workspace-session-panel-action">
+            <button
+              className="workspace-session-manage"
+              onClick={() => {
+                close(false);
+                onManageSessions();
+              }}
+              type="button"
+            >
+              <AppIcon name="settings" size="sm" />
+              <span>Manage sessions</span>
+            </button>
+          </div>
         </div>
       )}
     </div>

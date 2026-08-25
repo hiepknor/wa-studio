@@ -1,3 +1,4 @@
 .sessions-screen { min-width: 0; }
+.sessions-header-actions { display: flex; align-items: center; gap: var(--space-2); }
 .sessions-list-panel { min-width: 0; }
 .sessions-table-scroll th { white-space: nowrap; }

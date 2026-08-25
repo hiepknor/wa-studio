@@ -13,38 +13,45 @@ export interface WorkspacePageDefinition {
 }
 
 export interface WorkspaceSectionDefinition {
-  id: "operate" | "system";
+  id: "workspaces" | "operations";
   label: string;
   pages: readonly WorkspacePageDefinition[];
 }
 
-export const DEFAULT_WORKSPACE_PAGE: WorkspacePageId = "sessions";
+export const DEFAULT_WORKSPACE_PAGE: WorkspacePageId = "groups";
+
+export const SETTINGS_WORKSPACE_PAGE: WorkspacePageDefinition = {
+  available: true,
+  id: "settings",
+  label: "Settings",
+};
 
 export const WORKSPACE_SECTIONS: readonly WorkspaceSectionDefinition[] = [
   {
-    id: "operate",
-    label: "Operate",
+    id: "workspaces",
+    label: "Workspaces",
     pages: [
+      { available: true, id: "sessions", label: "Sessions" },
       { available: true, id: "groups", label: "Groups" },
       { available: true, id: "campaigns", label: "Campaigns" },
-      { available: false, id: "runs", label: "Runs" },
-      { available: false, id: "activity", label: "Activity" },
     ],
   },
   {
-    id: "system",
-    label: "System",
+    id: "operations",
+    label: "Operations",
     pages: [
-      { available: true, id: "sessions", label: "Sessions" },
-      { available: true, id: "settings", label: "Settings" },
+      { available: true, id: "runs", label: "Runs" },
+      { available: true, id: "activity", label: "Activity" },
     ],
   },
 ];
 
 export function findWorkspacePage(pageId: WorkspacePageId): WorkspacePageDefinition {
-  const page = WORKSPACE_SECTIONS.flatMap((section) => section.pages).find(
-    (candidate) => candidate.id === pageId,
-  );
+  const page = pageId === SETTINGS_WORKSPACE_PAGE.id
+    ? SETTINGS_WORKSPACE_PAGE
+    : WORKSPACE_SECTIONS.flatMap((section) => section.pages).find(
+      (candidate) => candidate.id === pageId,
+    );
   if (!page) throw new Error(`Unknown workspace page: ${pageId}`);
   return page;
 }

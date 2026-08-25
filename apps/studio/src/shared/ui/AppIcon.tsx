@@ -3,6 +3,7 @@ import {
   CircleAlert,
   Check,
   ChevronDown,
+  ChevronRight,
   Copy,
   CloudDownload,
   Ellipsis,
@@ -32,6 +33,7 @@ export type AppIconName =
   | "campaigns"
   | "check"
   | "chevron-down"
+  | "chevron-right"
   | "circle-alert"
   | "close"
   | "copy"
@@ -65,6 +67,7 @@ const ICONS: Record<AppIconName, LucideIcon> = {
   campaigns: Send,
   check: Check,
   "chevron-down": ChevronDown,
+  "chevron-right": ChevronRight,
   "circle-alert": CircleAlert,
   close: X,
   copy: Copy,
