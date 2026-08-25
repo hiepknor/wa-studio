@@ -932,4 +932,93 @@ describe("WorkspaceShell", () => {
       longName,
     );
   });
+
+  it("guards workspace navigation while a group list draft is dirty", async () => {
+    const user = userEvent.setup();
+    const fakeApi = {
+      getSessionSyncRun: vi.fn(),
+      listGroupLists: vi.fn().mockResolvedValue({
+        data: [],
+        meta: { total: 0, limit: 50, offset: 0 },
+      }),
+      listGroups: vi.fn().mockResolvedValue({
+        data: [],
+        meta: { total: 0, limit: 20, offset: 0 },
+      }),
+      listSessions: vi.fn(),
+      requestSessionSync: vi.fn(),
+    } as unknown as RuntimeApi;
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 1,
+          readySessions: 1,
+          sessions: [session],
+        })}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
+    await user.click(await screen.findByRole("combobox", { name: "Group scope" }));
+    await user.click(screen.getByRole("button", { name: /New list/ }));
+    const metadata = screen.getByRole("dialog", { name: "Create group list" });
+    await user.type(within(metadata).getByRole("textbox", { name: "Name" }), "Guarded draft");
+    await user.click(within(metadata).getByRole("button", { name: "Continue" }));
+
+    await user.click(screen.getByRole("button", { name: "Campaigns" }));
+    const guard = screen.getByRole("dialog", { name: "Leave group list draft?" });
+    await user.click(within(guard).getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByRole("button", { name: "Groups" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("New list draft")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Campaigns" }));
+    await user.click(screen.getByRole("button", { name: "Discard and continue" }));
+    expect(await screen.findByRole("button", { name: "Campaigns" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("guards active-session changes while a group list draft is dirty", async () => {
+    const user = userEvent.setup();
+    const fakeApi = {
+      getSessionSyncRun: vi.fn(),
+      listGroupLists: vi.fn().mockResolvedValue({
+        data: [],
+        meta: { total: 0, limit: 50, offset: 0 },
+      }),
+      listGroups: vi.fn().mockResolvedValue({
+        data: [],
+        meta: { total: 0, limit: 20, offset: 0 },
+      }),
+      listSessions: vi.fn(),
+      requestSessionSync: vi.fn(),
+    } as unknown as RuntimeApi;
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => fakeApi}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 2,
+          readySessions: 1,
+          sessions: [session, standbySession],
+        })}
+      >
+        <WorkspaceHarness />
+      </RuntimeConnectionProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
+    await user.click(await screen.findByRole("combobox", { name: "Group scope" }));
+    await user.click(screen.getByRole("button", { name: /New list/ }));
+    const metadata = screen.getByRole("dialog", { name: "Create group list" });
+    await user.type(within(metadata).getByRole("textbox", { name: "Name" }), "Session guard");
+    await user.click(within(metadata).getByRole("button", { name: "Continue" }));
+
+    await user.click(screen.getByRole("button", { name: "Active session" }));
+    const listbox = screen.getByRole("listbox", { name: "Gateway sessions" });
+    await user.click(within(listbox).getByRole("option", { name: /standby-session/ }));
+    expect(screen.getByRole("dialog", { name: "Leave group list draft?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Active session" })).toHaveTextContent("dev-session");
+
+    await user.click(screen.getByRole("button", { name: "Discard and continue" }));
+    expect(screen.getByRole("button", { name: "Active session" })).toHaveTextContent("standby-session");
+  });
 });

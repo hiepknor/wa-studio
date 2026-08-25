@@ -1,5 +1,12 @@
 import { createPortal } from "react-dom";
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useId,
+  useRef,
+} from "react";
 
 import { Button } from "./Button";
 import "./modal-dialog.css";
@@ -19,6 +26,7 @@ interface ModalDialogProps {
   description?: ReactNode;
   eyebrow?: ReactNode;
   footer?: ReactNode;
+  initialFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   open: boolean;
   title: ReactNode;
@@ -30,6 +38,7 @@ export function ModalDialog({
   description,
   eyebrow,
   footer,
+  initialFocusRef,
   onClose,
   open,
   title,
@@ -51,7 +60,9 @@ export function ModalDialog({
     const previousOverflow = document.body.style.overflow;
     siblings.forEach(({ element }) => { element.inert = true; });
     document.body.style.overflow = "hidden";
-    const frame = window.requestAnimationFrame(() => closeRef.current?.focus());
+    const frame = window.requestAnimationFrame(() => {
+      (initialFocusRef?.current ?? closeRef.current)?.focus();
+    });
 
     return () => {
       window.cancelAnimationFrame(frame);
@@ -59,7 +70,7 @@ export function ModalDialog({
       document.body.style.overflow = previousOverflow;
       if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
     };
-  }, [open]);
+  }, [initialFocusRef, open]);
 
   function requestClose() {
     if (!closeDisabled) onClose();

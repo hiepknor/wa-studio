@@ -141,6 +141,11 @@
   --session-selector-list-height: 244px;
   --session-selector-viewport-offset: 176px;
   --selector-popover-offset: 2px;
+  --group-scope-trigger-width: 220px;
+  --group-scope-panel-width: 360px;
+  --group-scope-list-height: 244px;
+  --group-list-dialog-width: 520px;
+  --group-table-selection-width: 40px;
   --app-min-width: 960px;
   --detail-label-width: 132px;
   --run-progress-width: 176px;

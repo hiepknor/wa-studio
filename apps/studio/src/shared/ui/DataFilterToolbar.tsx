@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useRef, type ReactNode, type Ref } from "react";
 
 import { Button } from "./Button";
 import { SearchField } from "./SearchField";
@@ -10,12 +10,14 @@ interface DataFilterToolbarProps {
   filterCount: number;
   filtersOpen: boolean;
   idPrefix: string;
+  leading?: ReactNode;
   loading?: boolean;
   onCloseFilters: () => void;
   onSearchChange: (value: string) => void;
   onToggleFilters: () => void;
   resultSummary: ReactNode;
   searchLabel: string;
+  searchInputRef?: Ref<HTMLInputElement>;
   searchPlaceholder: string;
   searchValue: string;
 }
@@ -26,12 +28,14 @@ export function DataFilterToolbar({
   filterCount,
   filtersOpen,
   idPrefix,
+  leading,
   loading = false,
   onCloseFilters,
   onSearchChange,
   onToggleFilters,
   resultSummary,
   searchLabel,
+  searchInputRef,
   searchPlaceholder,
   searchValue,
 }: DataFilterToolbarProps) {
@@ -54,8 +58,10 @@ export function DataFilterToolbar({
     >
       <div className="data-filter-toolbar-row">
         <div className="data-filter-controls">
+          {leading}
           <SearchField
             id={`${idPrefix}-search`}
+            inputRef={searchInputRef}
             label={searchLabel}
             loading={loading}
             onChange={onSearchChange}

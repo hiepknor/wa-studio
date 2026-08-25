@@ -22,9 +22,11 @@ import {
 import { AppIcon, type AppIconName } from "@/shared/ui/AppIcon";
 import { BrandMark } from "@/shared/ui/BrandMark";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
+import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { StatusDot } from "@/shared/ui/StatusDot";
 import type { FeedbackTone } from "@/shared/ui/feedback-tone";
 import studioPackage from "../../package.json";
+import { WorkspaceNavigationGuardProvider } from "./WorkspaceNavigationGuard";
 
 const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
   activity: "activity",
@@ -44,6 +46,10 @@ interface WorkspaceLocation {
   eventId?: string;
   runId?: string;
 }
+
+type PendingNavigation =
+  | { kind: "location"; location: WorkspaceLocation }
+  | { kind: "session"; sessionId: string };
 
 const WORKSPACE_VIEW_STORAGE_KEY = "wa-studio-view";
 const WORKSPACE_RAIL_STORAGE_KEY = "wa-studio-rail-collapsed";
@@ -135,6 +141,8 @@ export function WorkspaceShell({
     page: storedWorkspacePage(),
   }));
   const [railCollapsed, setRailCollapsed] = useState(storedRailCollapsed);
+  const [navigationDirty, setNavigationDirty] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const activePage = location.page;
   const [openwaBaseUrl, setOpenwaBaseUrl] = useState<string | null>(null);
 
@@ -152,6 +160,16 @@ export function WorkspaceShell({
     };
   }, [getProvisioningProfile, managedRuntime.phase]);
 
+  useEffect(() => {
+    if (!navigationDirty) return;
+    function preventUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    window.addEventListener("beforeunload", preventUnload);
+    return () => window.removeEventListener("beforeunload", preventUnload);
+  }, [navigationDirty]);
+
   if (!connected) throw new Error("WorkspaceShell requires a Runtime connection");
 
   const selectedSession =
@@ -160,13 +178,39 @@ export function WorkspaceShell({
   const activePageLabel = findWorkspacePage(activePage).label;
   const runtime = runtimeStatus(managedRuntime.phase);
 
-  function navigate(nextLocation: WorkspaceLocation) {
+  function performNavigation(nextLocation: WorkspaceLocation) {
     setLocation(nextLocation);
     try {
       window.localStorage.setItem(WORKSPACE_VIEW_STORAGE_KEY, nextLocation.page);
     } catch {
       // Navigation does not depend on persistence being available.
     }
+  }
+
+  function navigate(nextLocation: WorkspaceLocation) {
+    if (navigationDirty && nextLocation.page !== activePage) {
+      setPendingNavigation({ kind: "location", location: nextLocation });
+      return;
+    }
+    performNavigation(nextLocation);
+  }
+
+  function requestSession(sessionId: string) {
+    if (sessionId === selectedSessionId) return;
+    if (navigationDirty) {
+      setPendingNavigation({ kind: "session", sessionId });
+      return;
+    }
+    selectSession(sessionId);
+  }
+
+  function confirmNavigation() {
+    const pending = pendingNavigation;
+    if (!pending) return;
+    setPendingNavigation(null);
+    setNavigationDirty(false);
+    if (pending.kind === "location") performNavigation(pending.location);
+    else selectSession(pending.sessionId);
   }
 
   function toggleRail() {
@@ -183,6 +227,7 @@ export function WorkspaceShell({
 
   return (
     <DrawerProvider className="workspace-frame">
+      <WorkspaceNavigationGuardProvider onDirtyChange={setNavigationDirty}>
       <main
         className={`workspace${railCollapsed ? " workspace-rail-collapsed" : ""}`}
         data-rail-collapsed={railCollapsed || undefined}
@@ -263,7 +308,7 @@ export function WorkspaceShell({
             <div className="workspace-toolbar-actions">
               <SessionSwitcher
                 onManageSessions={() => navigate({ page: "sessions" })}
-                onSelect={selectSession}
+                onSelect={requestSession}
                 selectedSessionId={selectedSessionId}
                 sessions={connected.sessions}
               />
@@ -299,6 +344,17 @@ export function WorkspaceShell({
 
         <DrawerHost className="workspace-drawer-host" />
       </main>
+      </WorkspaceNavigationGuardProvider>
+      <ConfirmationDialog
+        body="Unsaved group list details or staged membership will be discarded before leaving this workspace. Runtime data is not changed."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard and continue"
+        confirmVariant="danger"
+        onCancel={() => setPendingNavigation(null)}
+        onConfirm={confirmNavigation}
+        open={Boolean(pendingNavigation)}
+        title="Leave group list draft?"
+      />
     </DrawerProvider>
   );
 }

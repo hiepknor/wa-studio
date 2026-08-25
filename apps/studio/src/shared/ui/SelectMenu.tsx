@@ -33,6 +33,7 @@ interface SelectMenuProps<T extends string> {
   id?: string;
   invalid?: boolean;
   label: ReactNode;
+  labelHidden?: boolean;
   name?: string;
   onChange: (value: T) => void;
   options: readonly SelectMenuOption<T>[];
@@ -81,6 +82,7 @@ export function SelectMenu<T extends string>({
   id,
   invalid = false,
   label,
+  labelHidden = false,
   name,
   onChange,
   options,
@@ -210,7 +212,7 @@ export function SelectMenu<T extends string>({
 
   return (
     <div className={`text-field ${fieldSizeClassName(size)} select-menu ${containerClassName}`.trim()} ref={rootRef}>
-      <span className="text-field-label" id={labelId}>{label}</span>
+      <span className={`text-field-label ${labelHidden ? "text-field-label-hidden" : ""}`.trim()} id={labelId}>{label}</span>
       <div className="select-menu-control">
         <button
           aria-controls={listboxId}
