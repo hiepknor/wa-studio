@@ -223,7 +223,7 @@ function CampaignActionsMenu({
   );
 }
 
-export function CampaignsScreen() {
+export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => void } = {}) {
   const { connected, selectedSessionId } = useRuntimeConnection();
   const toast = useToast();
   if (!connected) throw new Error("CampaignsScreen requires a Runtime connection");
@@ -1359,6 +1359,7 @@ export function CampaignsScreen() {
                   mutation={runMutation}
                   onAction={changeRunState}
                   onReload={() => void loadRuns(campaign.id, editorEpochRef.current, true)}
+                  onOpenRun={onOpenRun}
                   runs={runs}
                 />
               </>}
@@ -1408,6 +1409,7 @@ function CampaignRunsPanel({
   mutation,
   onAction,
   onReload,
+  onOpenRun,
   runs,
 }: {
   campaignStatus: RuntimeCampaign["status"];
@@ -1415,6 +1417,7 @@ function CampaignRunsPanel({
   mutation: string | null;
   onAction: (run: RuntimeCampaignRun, action: "pause" | "resume" | "cancel") => void;
   onReload: () => void;
+  onOpenRun?: (runId: string) => void;
   runs: RuntimeCampaignRun[];
 }) {
   const terminal = new Set<RuntimeCampaignRun["status"]>([
@@ -1435,6 +1438,7 @@ function CampaignRunsPanel({
         {run.statusReason && <small>{run.statusReason}</small>}
       </div>
       <div className="campaign-run-card-actions">
+        {onOpenRun && <Button disabled={Boolean(mutation)} onClick={() => onOpenRun(run.id)} size="sm" variant="ghost">Open in Runs</Button>}
         {(run.status === "RUNNING" || run.status === "SCHEDULED") && <Button disabled={Boolean(mutation)} loading={mutation === `pause:${run.id}`} onClick={() => onAction(run, "pause")} size="sm">Pause</Button>}
         {(run.status === "PAUSED" || run.status === "BLOCKED") && <Button disabled={Boolean(mutation)} loading={mutation === `resume:${run.id}`} onClick={() => onAction(run, "resume")} size="sm">Resume</Button>}
         {!terminal.has(run.status) && <Button disabled={Boolean(mutation)} loading={mutation === `cancel:${run.id}`} onClick={() => onAction(run, "cancel")} size="sm" variant="ghost">Cancel</Button>}

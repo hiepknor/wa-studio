@@ -28,15 +28,26 @@ export type RuntimeCampaignTargetSource = components["schemas"]["CampaignTargetS
 export type RuntimeCampaignPreflight = components["schemas"]["CampaignPreflightDto"];
 export type RuntimeCampaignRun = components["schemas"]["CampaignRunDto"];
 export type RuntimeCampaignRunPage = components["schemas"]["CampaignRunListDto"];
+export type RuntimeCampaignRunSummary = components["schemas"]["CampaignRunSummaryDto"];
+export type RuntimeCampaignRunSummaryPage = components["schemas"]["CampaignRunSummaryListDto"];
+export type RuntimeCampaignDelivery = components["schemas"]["CampaignDeliveryDto"];
+export type RuntimeCampaignDeliveryPage = components["schemas"]["CampaignDeliveryListDto"];
 export type RuntimeCreateCampaignRun = components["schemas"]["CreateCampaignRunDto"];
 export type RuntimeCampaignExecutionMode =
   components["schemas"]["CampaignPreflightRequestDto"]["executionMode"];
 export type RuntimeError = components["schemas"]["RuntimeErrorDto"];
+export type RuntimeActivityEvent = components["schemas"]["ActivityEventDto"];
+export type RuntimeActivityPage = components["schemas"]["ActivityPageDto"];
 
 type RuntimeGroupDirectoryQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
 type RuntimeCampaignListQuery = NonNullable<
   paths["/api/v1/campaigns"]["get"]["parameters"]["query"]
 >;
+type RuntimeRunListQuery = paths["/api/v1/campaign-runs"]["get"]["parameters"]["query"];
+type RuntimeDeliveryListQuery = NonNullable<
+  paths["/api/v1/campaign-runs/{id}/deliveries"]["get"]["parameters"]["query"]
+>;
+type RuntimeActivityListQuery = paths["/api/v1/activity"]["get"]["parameters"]["query"];
 export type RuntimeGroupCapabilityStatus = NonNullable<
   RuntimeGroupDirectoryQuery["capabilityStatus"]
 >[number];
@@ -49,6 +60,10 @@ export type RuntimeCampaignStatus = NonNullable<
 export type RuntimeCampaignScheduleType = NonNullable<
   RuntimeCampaignListQuery["scheduleType"]
 >[number];
+export type RuntimeCampaignRunStatus = NonNullable<RuntimeRunListQuery["status"]>[number];
+export type RuntimeCampaignDeliveryStatus = NonNullable<RuntimeDeliveryListQuery["status"]>[number];
+export type RuntimeActivityCategory = NonNullable<RuntimeActivityListQuery["category"]>[number];
+export type RuntimeActivitySeverity = NonNullable<RuntimeActivityListQuery["severity"]>[number];
 
 export interface RuntimeGroupDirectoryInput {
   sessionId: string;
@@ -84,6 +99,36 @@ export interface RuntimeCampaignListInput {
   query?: string;
   statuses?: RuntimeCampaignStatus[];
   scheduleTypes?: RuntimeCampaignScheduleType[];
+}
+
+export interface RuntimeCampaignRunListInput {
+  sessionId: string;
+  limit?: number;
+  offset?: number;
+  query?: string;
+  statuses?: RuntimeCampaignRunStatus[];
+  executionModes?: RuntimeCampaignExecutionMode[];
+  from?: string;
+  to?: string;
+}
+
+export interface RuntimeCampaignDeliveryListInput {
+  runId: string;
+  limit?: number;
+  offset?: number;
+  query?: string;
+  statuses?: RuntimeCampaignDeliveryStatus[];
+}
+
+export interface RuntimeActivityListInput {
+  sessionId: string;
+  limit?: number;
+  query?: string;
+  categories?: RuntimeActivityCategory[];
+  severities?: RuntimeActivitySeverity[];
+  from?: string;
+  to?: string;
+  cursor?: string;
 }
 
 export interface RuntimeConnectionInput {
@@ -675,6 +720,104 @@ export class RuntimeApi {
     if (!result.response.ok || !result.data) {
       throw runtimeRequestError(
         "Could not load campaign runs",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async listRuns({
+    sessionId,
+    limit = 50,
+    offset = 0,
+    query,
+    statuses,
+    executionModes,
+    from,
+    to,
+  }: RuntimeCampaignRunListInput): Promise<RuntimeCampaignRunSummaryPage> {
+    const normalizedQuery = query?.trim();
+    const result = await this.client.GET("/api/v1/campaign-runs", {
+      params: { query: {
+        sessionId,
+        limit,
+        offset,
+        ...(normalizedQuery ? { query: normalizedQuery } : {}),
+        ...(statuses?.length ? { status: statuses } : {}),
+        ...(executionModes?.length ? { executionMode: executionModes } : {}),
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
+      } },
+      querySerializer: { array: { style: "form", explode: false } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load campaign runs",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async listCampaignDeliveries({
+    runId,
+    limit = 50,
+    offset = 0,
+    query,
+    statuses,
+  }: RuntimeCampaignDeliveryListInput): Promise<RuntimeCampaignDeliveryPage> {
+    const normalizedQuery = query?.trim();
+    const result = await this.client.GET("/api/v1/campaign-runs/{id}/deliveries", {
+      params: {
+        path: { id: runId },
+        query: {
+          limit,
+          offset,
+          ...(normalizedQuery ? { query: normalizedQuery } : {}),
+          ...(statuses?.length ? { status: statuses } : {}),
+        },
+      },
+      querySerializer: { array: { style: "form", explode: false } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load run deliveries",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async listActivity({
+    sessionId,
+    limit = 50,
+    query,
+    categories,
+    severities,
+    from,
+    to,
+    cursor,
+  }: RuntimeActivityListInput): Promise<RuntimeActivityPage> {
+    const normalizedQuery = query?.trim();
+    const result = await this.client.GET("/api/v1/activity", {
+      params: { query: {
+        sessionId,
+        limit,
+        ...(normalizedQuery ? { query: normalizedQuery } : {}),
+        ...(categories?.length ? { category: categories } : {}),
+        ...(severities?.length ? { severity: severities } : {}),
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
+        ...(cursor ? { cursor } : {}),
+      } },
+      querySerializer: { array: { style: "form", explode: false } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load operational activity",
         result.response.status,
         result.error,
       );

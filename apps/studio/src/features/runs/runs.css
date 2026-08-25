@@ -1,0 +1,50 @@
+.runs-list-panel { min-height: 0; }
+.runs-table-scroll table { table-layout: fixed; }
+.runs-table-scroll th:nth-child(1) { width: auto; }
+.runs-table-scroll th:nth-child(2) { width: var(--table-state-width); }
+.runs-table-scroll th:nth-child(3) { width: var(--run-progress-width); }
+.runs-table-scroll th:nth-child(4) { width: var(--run-mode-width); }
+.runs-table-scroll th:nth-child(5) { width: var(--table-date-width); }
+.runs-table-scroll th:nth-child(6) { width: var(--table-action-width); }
+.runs-status-reason { display: block; margin-top: 4px; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.runs-progress-cell { display: grid; gap: 5px; }
+.runs-progress-cell progress,
+.runs-progress-summary progress { width: 100%; height: var(--progress-track-height); accent-color: var(--text-secondary); }
+.runs-progress-cell span { color: var(--text-secondary); font-size: var(--font-size-xs); }
+.data-row-action { display: inline-grid; width: 34px; height: 34px; padding: 0; place-items: center; border: 0; border-radius: var(--radius-sm); color: var(--text-secondary); background: transparent; }
+.data-row-action:hover { color: var(--text-primary); background: var(--surface-hover); }
+.runs-inspector-section { display: grid; gap: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); }
+.runs-inspector-section:first-child { padding-top: 0; border-top: 0; }
+.runs-inspector-section h3 { margin: 0; font-size: var(--font-size-sm); font-weight: 500; }
+.runs-inspector-status { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.runs-inspector-section > p { margin: 0; color: var(--text-secondary); }
+.runs-progress-summary { display: grid; gap: var(--space-2); }
+.runs-progress-summary strong { font-size: var(--font-size-sm); font-weight: 500; }
+.runs-progress-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--border-subtle); border-left: 1px solid var(--border-subtle); }
+.runs-progress-grid div { min-width: 0; padding: var(--space-2); border-right: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); }
+.runs-progress-grid dt { overflow: hidden; color: var(--text-tertiary); font-size: var(--font-size-xs); text-overflow: ellipsis; white-space: nowrap; }
+.runs-progress-grid dd { margin: 3px 0 0; font-variant-numeric: tabular-nums; }
+.runs-detail-list { display: grid; gap: 0; margin: 0; }
+.runs-detail-list > div { display: grid; grid-template-columns: minmax(var(--detail-label-width), 0.7fr) minmax(0, 1.3fr); gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--border-subtle); }
+.runs-detail-list dt { color: var(--text-tertiary); }
+.runs-detail-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.runs-message-snapshot { border-top: 1px solid var(--border-subtle); padding-top: var(--space-3); }
+.runs-message-snapshot summary { cursor: pointer; font-weight: 500; }
+.runs-message-snapshot p { margin: var(--space-3) 0 0; color: var(--text-secondary); white-space: pre-wrap; }
+.runs-inspector-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 100%; }
+.runs-inspector-actions > span { color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.runs-inspector-actions > div { display: flex; gap: var(--space-2); }
+.run-deliveries-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) var(--table-state-width); align-items: end; gap: var(--space-2); }
+.run-deliveries-toolbar .search-field { width: 100%; }
+.run-deliveries-toolbar .ui-field-label { display: none; }
+.run-deliveries-table { border: 1px solid var(--border-subtle); }
+.run-deliveries-table table { table-layout: fixed; }
+.run-deliveries-table th:last-child { width: var(--detail-label-width); }
+.runs-delivery-failure { color: var(--state-danger); font-size: var(--font-size-xs); }
+
+@media (max-width: 70rem) {
+  .runs-mode-column { display: none; }
+  .runs-table-scroll th:nth-child(2) { width: var(--detail-label-width); }
+  .runs-table-scroll th:nth-child(3) { width: var(--table-state-width); }
+  .runs-table-scroll th:nth-child(5) { width: var(--table-date-width); }
+}

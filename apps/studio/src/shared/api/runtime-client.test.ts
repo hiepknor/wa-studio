@@ -92,7 +92,7 @@ describe("RuntimeApi", () => {
   });
 
   it("trims campaign search and serializes multi-value filters comma-separated", async () => {
-    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+    const runtimeFetch = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({
       data: [], meta: { total: 0, limit: 20, offset: 40 },
     }));
     const api = new RuntimeApi(
@@ -129,6 +129,73 @@ describe("RuntimeApi", () => {
     expect(request.url).not.toContain("query=");
     expect(request.url).not.toContain("status=");
     expect(request.url).not.toContain("scheduleType=");
+  });
+
+  it("serializes the global Runs directory and delivery filters", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({
+      data: [], meta: { total: 0, limit: 20, offset: 40 },
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await api.listRuns({
+      sessionId: "session id",
+      limit: 20,
+      offset: 40,
+      query: "  launch_%\\  ",
+      statuses: ["RUNNING", "FAILED"],
+      executionModes: ["DRY_RUN", "LIVE"],
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-09-01T00:00:00.000Z",
+    });
+    await api.listCampaignDeliveries({
+      runId: "run id",
+      limit: 25,
+      offset: 50,
+      query: "  group_%\\  ",
+      statuses: ["SENT", "FAILED"],
+    });
+
+    expect((runtimeFetch.mock.calls[0][0] as Request).url).toBe(
+      "http://127.0.0.1:3100/api/v1/campaign-runs?sessionId=session%20id&limit=20&offset=40&query=launch_%25%5C&status=RUNNING,FAILED&executionMode=DRY_RUN,LIVE&from=2026-08-01T00%3A00%3A00.000Z&to=2026-09-01T00%3A00%3A00.000Z",
+    );
+    expect((runtimeFetch.mock.calls[1][0] as Request).url).toBe(
+      "http://127.0.0.1:3100/api/v1/campaign-runs/run%20id/deliveries?limit=25&offset=50&query=group_%25%5C&status=SENT,FAILED",
+    );
+  });
+
+  it("serializes the Activity cursor timeline without empty criteria", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({
+      data: [], meta: { limit: 50, nextCursor: null, retentionDays: 90 },
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      runtimeFetch,
+    );
+
+    await api.listActivity({
+      sessionId: "session-id",
+      query: "  release event  ",
+      categories: ["RUN", "SYNC"],
+      severities: ["WARNING", "ERROR"],
+      cursor: "opaque cursor",
+    });
+    await api.listActivity({
+      sessionId: "session-id",
+      query: "   ",
+      categories: [],
+      severities: [],
+    });
+
+    expect((runtimeFetch.mock.calls[0][0] as Request).url).toBe(
+      "http://127.0.0.1:3100/api/v1/activity?sessionId=session-id&limit=50&query=release%20event&category=RUN,SYNC&severity=WARNING,ERROR&cursor=opaque%20cursor",
+    );
+    const emptyCriteriaUrl = (runtimeFetch.mock.calls[1][0] as Request).url;
+    expect(emptyCriteriaUrl).toBe(
+      "http://127.0.0.1:3100/api/v1/activity?sessionId=session-id&limit=50",
+    );
   });
 
   it("keeps the caller-owned Idempotency-Key stable across create retries and accepts HTTP 200 replay", async () => {
