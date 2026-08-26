@@ -135,7 +135,7 @@ describe("SettingsScreen", () => {
     );
 
     await user.click(screen.getByRole("tab", { name: "Updates" }));
-    await screen.findByText("Release details");
+    await screen.findByRole("heading", { name: "Updates" });
     await user.click(screen.getByRole("button", { name: "Check for updates" }));
     expect(await screen.findByText("Runtime reliability improvements.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Install update" }));
@@ -209,6 +209,9 @@ describe("SettingsScreen", () => {
 
     expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("heading", { name: "WA Runtime is ready" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Settings sections" })).toHaveAttribute("aria-orientation", "vertical");
     expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "settings-overview-tab");
+    expect(document.querySelector(".settings-status-hero")).not.toBeInTheDocument();
+    expect(document.querySelector(".settings-summary-card")).not.toBeInTheDocument();
   });
 });

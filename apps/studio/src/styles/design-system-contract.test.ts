@@ -54,6 +54,12 @@ const searchFieldCss = readFileSync("src/shared/ui/search-field.css", "utf8");
 const selectMenuCss = readFileSync("src/shared/ui/select-menu.css", "utf8");
 const switchCss = readFileSync("src/shared/ui/switch-field.css", "utf8");
 const textFieldCss = readFileSync("src/shared/ui/text-field.css", "utf8");
+const settingsCss = readFileSync("src/features/settings/settings.css", "utf8");
+const settingsScreenSource = readFileSync("src/features/settings/SettingsScreen.tsx", "utf8");
+const settingsOverviewSource = readFileSync(
+  "src/features/settings/SettingsOverviewPanel.tsx",
+  "utf8",
+);
 
 describe("WARP design-system contract", () => {
   it("locks the warm foundation and operational geometry", () => {
@@ -372,6 +378,20 @@ describe("WARP design-system contract", () => {
     expect(switchCss).toContain("transform: translateX(var(--switch-travel))");
     expect(focusCss).toContain(".switch-field input:focus-visible + .switch-field-control");
     expect(focusCss).toContain("outline-offset: var(--focus-offset)");
+  });
+
+  it("locks the accepted WARP Settings anatomy", () => {
+    expect(tokensCss).toContain("--settings-nav-width: 172px");
+    expect(tokensCss).toContain("--setting-row-min-height: 62px");
+    expect(tokensCss).toContain("--copy-line-settings: 58ch");
+    expect(settingsScreenSource).toContain('orientation="vertical"');
+    expect(settingsCss).toContain("grid-template-columns: var(--settings-nav-width) minmax(0, 1fr)");
+    expect(settingsCss).toContain("min-height: var(--setting-row-min-height)");
+    expect(settingsCss).toContain("border-radius: 0");
+    expect(settingsCss).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(settingsOverviewSource).not.toContain("settings-status-hero");
+    expect(settingsOverviewSource).not.toContain("settings-summary-card");
+    expect(settingsCss).not.toContain("box-shadow");
   });
 
   it("keeps component CSS token-driven, flat, and free of colored focus effects", () => {

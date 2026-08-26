@@ -14,6 +14,7 @@ import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { SwitchField } from "@/shared/ui/SwitchField";
 import { TextField } from "@/shared/ui/TextField";
 import { useToast } from "@/shared/ui/Toast";
+import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 
 interface ManagedRuntimeConfigurationPanelProps {
@@ -99,7 +100,10 @@ export function ManagedRuntimeConfigurationPanel({
 
   return (
     <div className="settings-panel-stack">
-      {error && <InlineAlert title="Connection settings failed">{error}</InlineAlert>}
+      <InlineAlert className="settings-notice" title="WA Runtime service settings" tone="info">
+        Changes here affect the managed WA Runtime connection, not WA Studio product preferences.
+      </InlineAlert>
+      {error && <InlineAlert className="settings-notice" title="Connection settings failed">{error}</InlineAlert>}
 
       <SettingsSection
         action={<Badge tone={profile ? "success" : "neutral"} variant={loading ? "label" : "status"}>{loading ? "Loading" : profile ? "Connected" : "Developer managed"}</Badge>}
@@ -142,21 +146,22 @@ export function ManagedRuntimeConfigurationPanel({
 
           {profile && (
             <div className="settings-connection-summary">
-              <div>
-                <span>Event Inbox</span>
-                <strong>Paired automatically</strong>
-                <small>{profile.eventInboxBaseUrl}</small>
-              </div>
-              <div>
-                <span>Session scope</span>
-                <strong>{profile.openwaAllowedSessionIds.length} session(s)</strong>
-                <small>Renewed when the connection changes</small>
-              </div>
+              <SettingsRow
+                action={<Badge tone="success" variant="status">Paired</Badge>}
+                description={profile.eventInboxBaseUrl}
+                label="Event Inbox"
+              />
+              <SettingsRow
+                action={<span className="settings-row-value">{profile.openwaAllowedSessionIds.length} session(s)</span>}
+                description="Renewed when the connection changes."
+                label="Session scope"
+              />
             </div>
           )}
 
           <SwitchField
             checked={allowLiveSends}
+            className="settings-switch-row"
             description="Keep this off while validating campaigns. Turning it on allows real OpenWA deliveries after restart."
             disabled={!editable || saving}
             id="settings-live-sends"

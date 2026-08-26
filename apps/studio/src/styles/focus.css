@@ -54,7 +54,7 @@ html[data-focus-modality="keyboard"] :is(
   .workspace-session-manage,
   .select-menu-trigger:not([aria-invalid="true"]),
   .group-scope-trigger,
-  .settings-choice-card
+  .settings-operation-row
 ):focus-visible,
 html[data-focus-modality="keyboard"] :is(
   input:not([type="checkbox"]):not([type="radio"]):not([aria-invalid="true"]),

@@ -1,12 +1,12 @@
 import { useState } from "react";
 
 import type { AppUpdateProgress, AppUpdateSnapshot } from "@/shared/native/app-updates";
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { useToast } from "@/shared/ui/Toast";
+import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 
 interface AppUpdateSettingsProps {
@@ -90,13 +90,6 @@ export function AppUpdateSettings({
 
   const pending = updateState?.pending;
   const enabled = updateState?.enabled ?? false;
-  const statusTitle = pending
-    ? `WA Studio ${pending.version} is available`
-    : !updateState
-      ? "Inspecting the update channel"
-      : enabled
-        ? "WA Studio is up to date"
-        : "Updates are unavailable";
   const statusDescription = pending
     ? "Review the release notes, then install when local work can pause briefly."
     : !updateState
@@ -104,25 +97,12 @@ export function AppUpdateSettings({
       : enabled
         ? "Updates are downloaded from the embedded HTTPS channel and verified before installation."
         : updateState.disabledReason ?? "This build is not connected to a signed release channel.";
-  const statusTone = pending ? "warning" : updateState && enabled ? "success" : "neutral";
 
   return (
     <div className="settings-panel-stack">
       {(loadError || operationError) && (
-        <InlineAlert title="Update operation failed">{operationError ?? loadError}</InlineAlert>
+        <InlineAlert className="settings-notice" title="Update operation failed">{operationError ?? loadError}</InlineAlert>
       )}
-
-      <section aria-labelledby="settings-update-status-title" className={`settings-status-hero settings-status-hero-${statusTone}`}>
-        <div className="settings-status-hero-icon"><AppIcon name="sync" size="lg" /></div>
-        <div className="settings-status-hero-copy">
-          <span className="settings-card-label">Signed release channel</span>
-          <h3 id="settings-update-status-title">{statusTitle}</h3>
-          <p>{statusDescription}</p>
-        </div>
-        <Badge tone={enabled ? pending ? "warning" : "success" : "neutral"} variant="status">
-          {enabled ? pending ? "Update available" : "Channel ready" : "Disabled"}
-        </Badge>
-      </section>
 
       <SettingsSection
         action={(
@@ -137,20 +117,30 @@ export function AppUpdateSettings({
           </Button>
         )}
         description="WA Studio updates the desktop app and its managed WA Runtime together."
-        kicker="Software updates"
-        title="Release details"
+        kicker="WA Studio"
+        title="Updates"
         titleId="settings-update-details-title"
       >
         <div className="settings-update-layout">
-          <dl className="settings-detail-grid settings-update-detail-grid">
-            <div><dt>Installed version</dt><dd>{updateState?.currentVersion ?? "Inspecting…"}</dd></div>
-            <div><dt>Available version</dt><dd>{pending?.version ?? "None"}</dd></div>
-            <div><dt>Release date</dt><dd>{pending?.date ?? "—"}</dd></div>
-            <div><dt>Channel</dt><dd>{enabled ? "Signed HTTPS" : "Unavailable"}</dd></div>
-          </dl>
+          <SettingsRow
+            action={<Badge tone={enabled ? pending ? "warning" : "success" : "neutral"} variant="status">
+              {enabled ? pending ? "Update available" : "Channel ready" : "Disabled"}
+            </Badge>}
+            description={statusDescription}
+            label="Signed release channel"
+          />
+          <SettingsRow action={<span className="settings-row-value">{updateState?.currentVersion ?? "Inspecting…"}</span>} label="WA Studio" />
+          <SettingsRow
+            action={<Badge tone={runtimeReady ? "success" : "warning"} variant="status">{runtimeReady ? "Ready" : "Unavailable"}</Badge>}
+            description="The managed Runtime release is bundled and installed with WA Studio."
+            label="WA Runtime"
+          />
+          <SettingsRow action={<span className="settings-row-value">{pending?.version ?? "None"}</span>} label="Available version" />
+          <SettingsRow action={<span className="settings-row-value">{pending?.date ?? "—"}</span>} label="Release date" />
+          <SettingsRow action={<Badge tone={enabled ? "info" : "neutral"}>{enabled ? "Signed HTTPS" : "Unavailable"}</Badge>} label="Channel" />
 
           {updateState?.disabledReason && (
-            <InlineAlert title="Updates are unavailable" tone="neutral">
+            <InlineAlert className="settings-update-notice" title="Updates are unavailable" tone="neutral">
               {updateState.disabledReason}
             </InlineAlert>
           )}
@@ -163,22 +153,27 @@ export function AppUpdateSettings({
           )}
 
           {progress && installing && (
-            <InlineAlert indicator title="Update in progress" tone="warning">
+            <InlineAlert className="settings-update-notice" indicator title="Update in progress" tone="warning">
               {progressLabel(progress)}
             </InlineAlert>
           )}
 
           {pending && (
-            <div className="settings-form-actions">
-              <Button
-                disabled={!runtimeReady || installing}
-                onClick={() => setConfirming(true)}
-                variant="primary"
-              >
-                Install update
-              </Button>
-              {!runtimeReady && <span className="settings-action-hint">WA Runtime must be ready before installing.</span>}
-            </div>
+            <SettingsRow
+              action={(
+                <Button
+                  disabled={!runtimeReady || installing}
+                  onClick={() => setConfirming(true)}
+                  variant="primary"
+                >
+                  Install update
+                </Button>
+              )}
+              description={!runtimeReady
+                ? "WA Runtime must be ready before installing."
+                : "Installation pauses local Runtime work, creates a backup, and restarts WA Studio."}
+              label="Install behavior"
+            />
           )}
         </div>
       </SettingsSection>

@@ -5,6 +5,7 @@ import type {
   ManagedRuntimeDiagnostics,
   ProtectionFreshness,
 } from "@/shared/native/managed-runtime";
+import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -12,6 +13,7 @@ import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { TextField } from "@/shared/ui/TextField";
 import { useToast } from "@/shared/ui/Toast";
+import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
 
 interface BackupRecoverySettingsProps {
@@ -182,7 +184,10 @@ export function BackupRecoverySettings({
 
   return (
     <div className="settings-panel-stack">
-      {error && <InlineAlert title="Recovery operation failed">{error}</InlineAlert>}
+      <InlineAlert className="settings-notice" title="WA Runtime recovery controls" tone="warning">
+        Restoring a recovery point replaces local Runtime data and briefly pauses managed services.
+      </InlineAlert>
+      {error && <InlineAlert className="settings-notice" title="Recovery operation failed">{error}</InlineAlert>}
 
       <SettingsSection
         action={<Badge tone={protection.tone} variant="status">{protection.label}</Badge>}
@@ -191,27 +196,25 @@ export function BackupRecoverySettings({
         title="Your local data"
         titleId="settings-protection-title"
       >
-        <dl className="settings-detail-grid settings-protection-grid">
-          <div>
-            <dt>Latest recovery point</dt>
-            <dd>{diagnostics?.latestRecoveryPointAtMs
-              ? <DateTime value={new Date(diagnostics.latestRecoveryPointAtMs).toISOString()} />
-              : "Never"}</dd>
-          </div>
-          <div><dt>Recovery points</dt><dd>{diagnostics?.recoveryPointCount ?? 0}</dd></div>
-          <div>
-            <dt>Integrity</dt>
-            <dd><Badge tone={protectionPresentation(diagnostics?.integrityFreshness).tone} variant="status">
-              {protectionPresentation(diagnostics?.integrityFreshness).label}
-            </Badge></dd>
-          </div>
-          <div>
-            <dt>Last verified</dt>
-            <dd>{diagnostics?.lastIntegrityCheckAtMs
-              ? <DateTime value={new Date(diagnostics.lastIntegrityCheckAtMs).toISOString()} />
-              : "Never"}</dd>
-          </div>
-        </dl>
+        <SettingsRow
+          action={<span className="settings-row-value">{diagnostics?.latestRecoveryPointAtMs
+            ? <DateTime value={new Date(diagnostics.latestRecoveryPointAtMs).toISOString()} />
+            : "Never"}</span>}
+          label="Latest recovery point"
+        />
+        <SettingsRow action={<span className="settings-row-value">{diagnostics?.recoveryPointCount ?? 0}</span>} label="Recovery points" />
+        <SettingsRow
+          action={<Badge tone={protectionPresentation(diagnostics?.integrityFreshness).tone} variant="status">
+            {protectionPresentation(diagnostics?.integrityFreshness).label}
+          </Badge>}
+          label="Integrity"
+        />
+        <SettingsRow
+          action={<span className="settings-row-value">{diagnostics?.lastIntegrityCheckAtMs
+            ? <DateTime value={new Date(diagnostics.lastIntegrityCheckAtMs).toISOString()} />
+            : "Never"}</span>}
+          label="Last verified"
+        />
       </SettingsSection>
 
       <SettingsSection
@@ -285,22 +288,28 @@ export function BackupRecoverySettings({
         {recoveryFlow === null ? (
           <div className="settings-recovery-choice-grid">
             <button
-              className="settings-choice-card"
+              className="settings-operation-row"
               disabled={!runtimeReady}
               onClick={() => setRecoveryFlow("export")}
               type="button"
             >
-              <span className="settings-choice-card-title">Export archive</span>
-              <span>Encrypt a portable copy with a new passphrase.</span>
+              <span className="settings-operation-row-copy">
+                <strong>Export archive</strong>
+                <small>Encrypt a portable copy with a new passphrase.</small>
+              </span>
+              <AppIcon name="chevron-right" />
             </button>
             <button
-              className="settings-choice-card"
+              className="settings-operation-row"
               disabled={!runtimeReady}
               onClick={() => setRecoveryFlow("import")}
               type="button"
             >
-              <span className="settings-choice-card-title">Import archive</span>
-              <span>Replace local Runtime data from a portable archive.</span>
+              <span className="settings-operation-row-copy">
+                <strong>Import archive</strong>
+                <small>Replace local Runtime data from a portable archive.</small>
+              </span>
+              <AppIcon name="chevron-right" />
             </button>
           </div>
         ) : recoveryFlow === "export" ? (
