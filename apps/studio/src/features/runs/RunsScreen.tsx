@@ -8,7 +8,6 @@ import type {
   RuntimeCampaignRunSummary,
   RuntimeCampaignRunSummaryPage,
 } from "@/shared/api/runtime-client";
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -21,7 +20,9 @@ import { TablePagination } from "@/shared/ui/TablePagination";
 import { Tabs } from "@/shared/ui/Tabs";
 import { WorkspaceDrawer } from "@/shared/ui/WorkspaceDrawer";
 import { RunsListToolbar } from "./RunsListToolbar";
+import { RunsTable } from "./RunsTable";
 import {
+  deliveryTone,
   resolvedTargets,
   RUN_TERMINAL_STATUSES,
   runStatusLabel,
@@ -65,6 +66,7 @@ export function RunsScreen({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState<RuntimeCampaignRunSummaryPage | null>(null);
   const [listLoading, setListLoading] = useState(false);
+  const [listRefreshing, setListRefreshing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId);
   const [run, setRun] = useState<RuntimeCampaignRun | null>(null);
@@ -112,10 +114,16 @@ export function RunsScreen({
   const loadRuns = useCallback(async (state: RunsListState, background = false) => {
     if (!selectedSessionId) {
       setPage(null);
+      setListLoading(false);
+      setListRefreshing(false);
       return;
     }
     const request = ++listRequestRef.current;
-    if (!background) setListLoading(true);
+    if (background) setListRefreshing(true);
+    else {
+      setListLoading(true);
+      setListRefreshing(false);
+    }
     setListError(null);
     try {
       const result = await api.listRuns({
@@ -137,7 +145,10 @@ export function RunsScreen({
         setListError(errorMessage(error, "Could not load campaign runs."));
       }
     } finally {
-      if (request === listRequestRef.current && !background) setListLoading(false);
+      if (request === listRequestRef.current) {
+        setListLoading(false);
+        setListRefreshing(false);
+      }
     }
   }, [api, selectedSessionId]);
 
@@ -151,15 +162,16 @@ export function RunsScreen({
     setFiltersOpen(false);
   }, [selectedSessionId]);
 
+  useEffect(() => { void loadRuns(listState); }, [listState, loadRuns]);
+
+  const hasActiveRun = page?.data.some((candidate) => !RUN_TERMINAL_STATUSES.has(candidate.status)) ?? false;
   useEffect(() => {
-    void loadRuns(listState);
-    const hasActiveRun = page?.data.some((candidate) => !RUN_TERMINAL_STATUSES.has(candidate.status));
     if (!hasActiveRun) return;
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void loadRuns(listState, true);
     }, 4_000);
     return () => window.clearInterval(interval);
-  }, [listState, loadRuns, page?.data]);
+  }, [hasActiveRun, listState, loadRuns]);
 
   useEffect(() => {
     if (!initialRunId) return;
@@ -274,6 +286,14 @@ export function RunsScreen({
   const lastItem = Math.min(offset + (page?.data.length ?? 0), total);
   const hasCriteria = Boolean(listState.query || listState.statuses.length || listState.executionModes.length);
   const currentRun = run ?? selectedSummary;
+  const runs = page?.data ?? [];
+  const emptyMessage = !selectedSessionId
+    ? "Select a session to view runs."
+    : listError && runs.length === 0
+      ? "Campaign runs are unavailable."
+      : hasCriteria
+        ? "No runs match this search or filters."
+        : "No campaign runs yet. Launch a reviewed run from Campaigns.";
 
   return (
     <div className="runs-screen stack stack-lg">
@@ -294,30 +314,15 @@ export function RunsScreen({
           total={total}
         />
         {listError && <InlineAlert action={<Button onClick={() => void loadRuns(listState)} size="sm">Retry</Button>} className="data-table-error" title="Could not load runs">{listError}</InlineAlert>}
-        <div className="data-table-scroll runs-table-scroll">
-          <table>
-            <caption>Campaign runs for the active session</caption>
-            <thead><tr><th scope="col">Campaign</th><th scope="col">State</th><th scope="col">Progress</th><th className="runs-mode-column" scope="col">Mode</th><th scope="col">Updated</th><th aria-label="Open" className="data-column-actions" scope="col" /></tr></thead>
-            <tbody>
-              {!selectedSessionId ? <tr><td className="data-table-empty" colSpan={6}>Select a session to view runs.</td></tr>
-                : !page && listLoading ? <tr><td className="data-table-empty" colSpan={6}>Loading campaign runs…</td></tr>
-                : !page && listError ? <tr><td className="data-table-empty" colSpan={6}>Campaign runs are unavailable.</td></tr>
-                : !page?.data.length ? <tr><td className="data-table-empty" colSpan={6}>{hasCriteria ? "No runs match this search or filters." : "No campaign runs yet. Launch a reviewed run from Campaigns."}</td></tr>
-                : page.data.map((item) => {
-                  const resolved = resolvedTargets(item);
-                  return <tr data-selected={item.id === selectedRunId || undefined} key={item.id}>
-                    <td className="data-cell-primary"><div className="stack stack-xs"><button className="data-primary-action" onClick={() => selectRun(item)} type="button">{item.campaignNameSnapshot}</button><span className="data-identifier">Run {shortId(item.id)} · Campaign {shortId(item.campaignId)}</span></div></td>
-                    <td><Badge tone={runTone(item.status)}>{runStatusLabel(item.status)}</Badge>{item.statusReason && <span className="runs-status-reason">{item.statusReason.replace(/_/g, " ").toLocaleLowerCase()}</span>}</td>
-                    <td><div className="runs-progress-cell"><progress max={Math.max(1, item.totalTargets)} value={resolved} /><span>{resolved}/{item.totalTargets}{item.progress.failed || item.progress.blocked ? ` · ${item.progress.failed + item.progress.blocked} attention` : ""}</span></div></td>
-                    <td className="runs-mode-column">{item.executionMode === "LIVE" ? "Live" : "Dry run"}</td>
-                    <td><DateTime value={item.updatedAt} /></td>
-                    <td className="data-cell-action"><button aria-label={`Open run ${shortId(item.id)}`} className="data-row-action" onClick={() => selectRun(item)} type="button"><AppIcon name="chevron-right" size="sm" /></button></td>
-                  </tr>;
-                })}
-            </tbody>
-          </table>
-        </div>
-        <TablePagination limit={limit} loading={listLoading} offset={offset} onOffsetChange={(nextOffset) => setListState((current) => ({ ...current, offset: nextOffset }))} total={total} />
+        <RunsTable
+          emptyMessage={emptyMessage}
+          loading={listLoading}
+          onInspect={selectRun}
+          runs={runs}
+          selectedRunId={selectedRunId}
+          updating={listRefreshing}
+        />
+        {total > 0 && <TablePagination label={`${total} durable ${total === 1 ? "run" : "runs"}`} limit={limit} loading={listLoading || listRefreshing} offset={offset} onOffsetChange={(nextOffset) => setListState((current) => ({ ...current, offset: nextOffset }))} total={total} />}
       </div>
 
       <WorkspaceDrawer
@@ -375,7 +380,7 @@ function RunOverview({ run }: { run: RuntimeCampaignRun }) {
   ] as const;
   return <div aria-labelledby="run-inspector-overview-tab" className="runs-inspector stack stack-lg" id="run-inspector-overview-panel" role="tabpanel">
     <section className="runs-inspector-section">
-      <div className="runs-inspector-status"><Badge tone={runTone(run.status)}>{runStatusLabel(run.status)}</Badge><Badge tone="neutral">{run.executionMode === "LIVE" ? "Live" : "Dry run"}</Badge></div>
+      <div className="runs-inspector-status"><Badge tone={runTone(run.status)} variant="status">{runStatusLabel(run.status)}</Badge><Badge tone="neutral">{run.executionMode === "LIVE" ? "Live" : "Dry run"}</Badge></div>
       {run.statusReason && <p>{run.statusReason.replace(/_/g, " ").toLocaleLowerCase()}</p>}
       <div className="runs-progress-summary"><progress max={Math.max(1, run.totalTargets)} value={resolved} /><strong>{resolved} of {run.totalTargets} targets resolved</strong></div>
       <dl className="runs-progress-grid">{progressRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
@@ -444,16 +449,23 @@ function RunDeliveries({
         label="Delivery status"
         onChange={onFilterChange}
         options={[{ label: "All statuses", value: "ALL" }, ...DELIVERY_STATUSES.map((status) => ({ label: runStatusLabel(status), value: status }))]}
-        size="sm"
         value={deliveryFilter}
       />
     </div>
     {error && <InlineAlert action={<Button onClick={onRetry} size="sm">Retry</Button>} title="Could not load deliveries">{error}</InlineAlert>}
-    <div className="run-deliveries-table data-table-scroll"><table><caption>Per-group deliveries for this run</caption><thead><tr><th scope="col">Group</th><th scope="col">State</th></tr></thead><tbody>
-      {!page && loading ? <tr><td className="data-table-empty" colSpan={2}>Loading deliveries…</td></tr>
-        : !page?.data.length ? <tr><td className="data-table-empty" colSpan={2}>{inputQuery || deliveryFilter !== "ALL" ? "No deliveries match these criteria." : "No deliveries have been materialized yet."}</td></tr>
-        : page.data.map((delivery) => <tr key={delivery.id}><td className="data-cell-primary"><div className="stack stack-xs"><strong>{delivery.groupName}</strong><span className="data-identifier">{delivery.groupId}</span>{delivery.failureReason && <span className="runs-delivery-failure">{delivery.failureReason}</span>}</div></td><td><Badge tone={delivery.status === "FAILED" || delivery.status === "UNKNOWN" || delivery.status === "BLOCKED_CAPABILITY_CHANGED" ? "danger" : delivery.status === "PENDING" || delivery.status === "PROCESSING" || delivery.status === "MATERIALIZED" ? "warning" : "neutral"}>{runStatusLabel(delivery.status)}</Badge></td></tr>)}
-    </tbody></table></div>
-    <TablePagination limit={page?.meta.limit ?? 20} loading={loading} offset={page?.meta.offset ?? 0} onOffsetChange={onOffsetChange} total={total} />
+    <div
+      aria-busy={loading}
+      aria-label="Per-group deliveries for this run"
+      aria-live={page?.data.length ? undefined : "polite"}
+      className="run-delivery-list"
+      data-updating={(loading && Boolean(page?.data.length)) || undefined}
+      role={page?.data.length ? "list" : "status"}
+    >
+      {!page && loading ? <div className="run-delivery-state">Loading deliveries…</div>
+        : error && !page?.data.length ? <div className="run-delivery-state">Deliveries are unavailable.</div>
+          : !page?.data.length ? <div className="run-delivery-state">{inputQuery || deliveryFilter !== "ALL" ? "No deliveries match these criteria." : "No deliveries have been materialized yet."}</div>
+            : page.data.map((delivery) => <div className="run-delivery-block" key={delivery.id} role="listitem"><span><strong title={delivery.groupName}>{delivery.groupName}</strong><small className="data-identifier" title={delivery.groupId}>{delivery.groupId}</small>{delivery.failureReason && <small className="runs-delivery-failure" title={delivery.failureReason}>{delivery.failureReason}</small>}</span><Badge tone={deliveryTone(delivery.status)} variant="status">{runStatusLabel(delivery.status)}</Badge></div>)}
+    </div>
+    {total > 0 && <TablePagination label={`${total} ${total === 1 ? "delivery" : "deliveries"}`} limit={page?.meta.limit ?? 20} loading={loading} offset={page?.meta.offset ?? 0} onOffsetChange={onOffsetChange} total={total} />}
   </div>;
 }

@@ -45,10 +45,13 @@ function Harness({ onOpenGroups }: { onOpenGroups: () => void }) {
   return <SessionsScreen onOpenGroups={onOpenGroups} />;
 }
 
-function renderSessions(overrides: Partial<RuntimeApi> = {}) {
+function renderSessions(
+  overrides: Partial<RuntimeApi> = {},
+  sessions: RuntimeSession[] = [readySession, failedSession],
+) {
   const onOpenGroups = vi.fn();
   const api = {
-    listSessions: vi.fn().mockResolvedValue([readySession, failedSession]),
+    listSessions: vi.fn().mockResolvedValue(sessions),
     ...overrides,
   } as unknown as RuntimeApi;
   render(
@@ -56,9 +59,9 @@ function renderSessions(overrides: Partial<RuntimeApi> = {}) {
       <RuntimeConnectionProvider
         createApi={() => api}
         probeConnection={vi.fn().mockResolvedValue({
-          readySessions: 1,
-          sessionCount: 2,
-          sessions: [readySession, failedSession],
+          readySessions: sessions.filter((session) => session.status === "ready").length,
+          sessionCount: sessions.length,
+          sessions,
         })}
       >
         <Harness onOpenGroups={onOpenGroups} />
@@ -87,6 +90,34 @@ describe("SessionsScreen", () => {
     expect(screen.getByText("failed-id")).toHaveClass("data-secondary-text");
     expect(screen.getByText("Ready")).toHaveClass("ui-badge-success");
     expect(screen.getByText("Failed")).toHaveClass("ui-badge-danger");
+    expect(screen.getByText("2 sessions")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
+  it("uses the shared table anatomy and paginates the local session directory", async () => {
+    const user = userEvent.setup();
+    const sessions = Array.from({ length: 21 }, (_, index) => ({
+      ...readySession,
+      id: `session-${index + 1}`,
+      name: `Gateway ${index + 1}`,
+      phone: `849000${String(index + 1).padStart(4, "0")}`,
+    }));
+    renderSessions({}, sessions);
+    await connect(user);
+
+    const table = screen.getByRole("table", { name: "WA Runtime sessions" });
+    expect(table).toHaveClass("sessions-table");
+    expect(table.querySelector(".sessions-column-workspace")).toBeInTheDocument();
+    expect(within(table).getAllByRole("row")).toHaveLength(21);
+    expect(screen.getByText("21 sessions")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Gateway 21")).toBeInTheDocument();
+    expect(screen.queryByText("Gateway 1")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
   });
 
   it("uses the shared search and filter interaction without an empty-table reset action", async () => {

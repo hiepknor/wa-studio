@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import type { RuntimeActivityEvent } from "@/shared/api/runtime-client";
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { DateTime } from "@/shared/ui/DateTime";
@@ -14,6 +13,7 @@ import {
   initialActivityListState,
   type ActivityListState,
 } from "./ActivityToolbar";
+import { ActivityTable } from "./ActivityTable";
 import {
   activityCategoryLabel,
   activitySeverityLabel,
@@ -145,7 +145,6 @@ export function ActivityScreen({
     <PageHeader description="Review retained operational changes from Studio, Runtime, and the Gateway without exposing raw logs or message bodies." title="Activity" titleId="activity-title" />
     <div className="activity-list-panel data-table-container">
       <ActivityToolbar
-        actions={<Button disabled={loading} icon="refresh" onClick={() => { setLoadedOlder(false); void load(); }} size="sm">Refresh</Button>}
         count={events.length}
         filtersOpen={filtersOpen}
         loading={loading}
@@ -155,18 +154,17 @@ export function ActivityScreen({
         state={state}
       />
       {error && <InlineAlert action={<Button onClick={() => void load()} size="sm">Retry</Button>} className="data-table-error" title="Could not load activity">{error}</InlineAlert>}
-      <div className="activity-table-scroll data-table-scroll"><table><caption>Retained operational activity for the active session</caption><thead><tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">Subject</th><th scope="col">Outcome</th><th aria-label="Open" className="data-column-actions" scope="col" /></tr></thead><tbody>
-        {!selectedSessionId ? <tr><td className="data-table-empty" colSpan={5}>Select a session to view activity.</td></tr>
-          : loading && !events.length ? <tr><td className="data-table-empty" colSpan={5}>Loading operational activity…</td></tr>
-          : !events.length ? <tr><td className="data-table-empty" colSpan={5}>{hasCriteria ? "No activity matches this search or filters." : "No retained operational activity yet."}</td></tr>
-          : events.map((event) => <tr data-selected={event.id === selectedEventId || undefined} key={event.id}>
-            <td><DateTime value={event.occurredAt} /></td>
-            <td className="data-cell-primary"><div className="stack stack-xs"><button className="data-primary-action" onClick={() => selectEvent(event)} type="button">{activityTitle(event)}</button><span className="data-identifier">{event.eventType} · v{event.eventVersion}</span></div></td>
-            <td><div className="stack stack-xs"><strong>{event.subject.labelSnapshot}</strong><span className="data-identifier">{event.subject.id}</span></div></td>
-            <td><Badge tone={activityTone(event.severity)}>{activitySeverityLabel(event.severity)}</Badge></td>
-            <td className="data-cell-action"><button aria-label={`Inspect ${activityTitle(event)}`} className="data-row-action" onClick={() => selectEvent(event)} type="button"><AppIcon name="chevron-right" size="sm" /></button></td>
-          </tr>)}
-      </tbody></table></div>
+      <ActivityTable
+        activeEventId={selectedEventId}
+        emptyMessage={!selectedSessionId
+          ? "Select a session to view activity."
+          : hasCriteria
+            ? "No activity matches this search or filters."
+            : "No retained operational activity yet."}
+        events={events}
+        loading={loading}
+        onInspect={selectEvent}
+      />
       <div className="activity-load-more"><span>{retentionDays ? `Activity is retained for ${retentionDays} days.` : "Retention is Runtime controlled."}</span>{nextCursor && <Button disabled={loadingOlder} loading={loadingOlder} onClick={() => void load({ append: true, cursor: nextCursor })}>Load older</Button>}</div>
     </div>
     <WorkspaceDrawer
@@ -186,7 +184,7 @@ export function ActivityScreen({
 function ActivityInspector({ event }: { event: RuntimeActivityEvent }) {
   const metadata = Object.entries(event.metadata);
   return <div className="activity-inspector stack stack-lg">
-    <section className="activity-inspector-section"><div className="activity-inspector-badges"><Badge tone="neutral">{activityCategoryLabel(event.category)}</Badge><Badge tone={activityTone(event.severity)}>{activitySeverityLabel(event.severity)}</Badge></div><p>{event.subject.labelSnapshot}</p></section>
+    <section className="activity-inspector-section"><div className="activity-inspector-badges"><Badge tone="neutral">{activityCategoryLabel(event.category)}</Badge><Badge tone={activityTone(event.severity)} variant="status">{activitySeverityLabel(event.severity)}</Badge></div><p>{event.subject.labelSnapshot}</p></section>
     <section className="activity-inspector-section"><h3>Event</h3><dl className="activity-detail-list">
       <div><dt>Type</dt><dd className="data-identifier">{event.eventType}</dd></div>
       <div><dt>Occurred</dt><dd><DateTime value={event.occurredAt} /></dd></div>

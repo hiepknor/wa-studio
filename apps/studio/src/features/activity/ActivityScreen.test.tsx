@@ -108,6 +108,25 @@ describe("ActivityScreen", () => {
 
     expect(await screen.findByText("Campaign run completed")).toBeInTheDocument();
     expect(screen.getByText("Activity is retained for 90 days.")).toBeInTheDocument();
+    const table = screen.getByRole("table", { name: "Retained operational activity for the active session" });
+    expect(table).toHaveClass("activity-table");
+    const columns = table.querySelectorAll("colgroup col");
+    expect(columns).toHaveLength(5);
+    expect(columns[0]).toHaveClass("activity-column-event");
+    expect(columns[1]).toHaveClass("activity-column-subject");
+    expect(columns[2]).toHaveClass("activity-column-outcome");
+    expect(columns[3]).toHaveClass("activity-column-occurred");
+    expect(columns[4]).toHaveClass("activity-column-action");
+    expect(within(table).getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Event",
+      "Subject",
+      "Outcome",
+      "Occurred",
+      "",
+    ]);
+    expect(within(table).getByRole("columnheader", { name: "Occurred" })).toHaveClass("data-column-time");
+    expect(within(table).getByText("Product release")).toHaveClass("activity-subject-name");
+    expect(within(table).getByRole("button", { name: "Inspect Campaign run completed" })).toBeInTheDocument();
     expect(listActivity).toHaveBeenCalledWith({
       sessionId: session.id,
       limit: 50,
@@ -134,5 +153,6 @@ describe("ActivityScreen", () => {
       cursor: "older-cursor",
     }));
     expect(await screen.findByText("Campaign run created")).toBeInTheDocument();
+    expect(screen.getByText("Info")).toHaveClass("ui-badge-info");
   });
 });

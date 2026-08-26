@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
+import { FilterOption } from "@/shared/ui/FilterOption";
 import type {
   RuntimeCampaignExecutionMode,
   RuntimeCampaignRunStatus,
@@ -59,22 +60,14 @@ export function RunsListToolbar({
         <section aria-label="Run filters" className="data-filter-panel" id="runs-list-filter-panel">
           <header className="data-filter-panel-header">
             <div><strong>Filter runs</strong><span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span></div>
-            <button aria-label="Close run filters" className="data-filter-panel-close" onClick={closeFilters} type="button"><AppIcon name="close" size="xs" /></button>
+            <Button aria-label="Close run filters" className="data-filter-panel-close" icon="close" onClick={closeFilters} variant="ghost" />
           </header>
           <div className="data-filter-panel-body">
             <fieldset><legend>Status</legend><div className="data-filter-options">
-              {STATUS_OPTIONS.map((status) => <label key={status}>
-                <input checked={state.statuses.includes(status)} onChange={() => setState((current) => ({ ...current, offset: 0, statuses: toggleRunFilter(current.statuses, status) }))} type="checkbox" />
-                <span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span>
-                <span>{runStatusLabel(status)}</span>
-              </label>)}
+              {STATUS_OPTIONS.map((status) => <FilterOption checked={state.statuses.includes(status)} key={status} onChange={() => setState((current) => ({ ...current, offset: 0, statuses: toggleRunFilter(current.statuses, status) }))}>{runStatusLabel(status)}</FilterOption>)}
             </div></fieldset>
             <fieldset><legend>Execution</legend><div className="data-filter-options">
-              {MODE_OPTIONS.map((mode) => <label key={mode}>
-                <input checked={state.executionModes.includes(mode)} onChange={() => setState((current) => ({ ...current, offset: 0, executionModes: toggleRunFilter(current.executionModes, mode) }))} type="checkbox" />
-                <span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span>
-                <span>{mode === "LIVE" ? "Live" : "Dry run"}</span>
-              </label>)}
+              {MODE_OPTIONS.map((mode) => <FilterOption checked={state.executionModes.includes(mode)} key={mode} onChange={() => setState((current) => ({ ...current, offset: 0, executionModes: toggleRunFilter(current.executionModes, mode) }))}>{mode === "LIVE" ? "Live" : "Dry run"}</FilterOption>)}
             </div></fieldset>
           </div>
           <div aria-label="Selected run filters" className="data-filter-summary">

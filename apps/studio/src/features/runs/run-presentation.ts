@@ -1,8 +1,10 @@
 import type {
+  RuntimeCampaignDeliveryStatus,
   RuntimeCampaignRun,
   RuntimeCampaignRunStatus,
   RuntimeCampaignRunSummary,
 } from "@/shared/api/runtime-client";
+import type { FeedbackTone } from "@/shared/ui/feedback-tone";
 
 export const RUN_TERMINAL_STATUSES = new Set<RuntimeCampaignRunStatus>([
   "COMPLETED",
@@ -39,6 +41,17 @@ export function runTone(status: RuntimeCampaignRunStatus) {
     return "danger" as const;
   }
   return "neutral" as const;
+}
+
+export function deliveryTone(status: RuntimeCampaignDeliveryStatus): FeedbackTone {
+  if (status === "FAILED" || status === "UNKNOWN" || status === "BLOCKED_CAPABILITY_CHANGED") {
+    return "danger";
+  }
+  if (status === "PENDING" || status === "MATERIALIZED" || status === "PROCESSING") {
+    return "info";
+  }
+  if (status === "CANCELLED") return "neutral";
+  return "success";
 }
 
 export function resolvedTargets(

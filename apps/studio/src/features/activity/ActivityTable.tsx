@@ -1,0 +1,82 @@
+import type { RuntimeActivityEvent } from "@/shared/api/runtime-client";
+import { Badge } from "@/shared/ui/Badge";
+import { Button } from "@/shared/ui/Button";
+import { DateTime } from "@/shared/ui/DateTime";
+import {
+  activitySeverityLabel,
+  activityTitle,
+  activityTone,
+} from "./activity-presentation";
+
+interface ActivityTableProps {
+  activeEventId: string | null;
+  emptyMessage: string;
+  events: readonly RuntimeActivityEvent[];
+  loading: boolean;
+  onInspect: (event: RuntimeActivityEvent) => void;
+}
+
+export function ActivityTable({
+  activeEventId,
+  emptyMessage,
+  events,
+  loading,
+  onInspect,
+}: ActivityTableProps) {
+  const tableMessage = loading && events.length === 0
+    ? "Loading operational activity…"
+    : events.length === 0
+      ? emptyMessage
+      : null;
+
+  return (
+    <div
+      aria-busy={loading}
+      className="activity-table-scroll data-table-scroll"
+      data-updating={(loading && events.length > 0) || undefined}
+    >
+      <table className="activity-table data-table">
+        <caption>Retained operational activity for the active session</caption>
+        <colgroup>
+          <col className="activity-column-event" />
+          <col className="activity-column-subject" />
+          <col className="activity-column-outcome" />
+          <col className="activity-column-occurred" />
+          <col className="activity-column-action" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col">Event</th>
+            <th className="activity-subject-col" scope="col">Subject</th>
+            <th className="data-cell-status" scope="col">Outcome</th>
+            <th className="data-column-time" scope="col">Occurred</th>
+            <th aria-label="Inspect" className="data-column-actions" scope="col" />
+          </tr>
+        </thead>
+        <tbody>
+          {tableMessage ? (
+            <tr><td className="data-table-empty" colSpan={5}>{tableMessage}</td></tr>
+          ) : events.map((event) => (
+            <tr data-selected={event.id === activeEventId || undefined} key={event.id}>
+              <td className="data-cell-primary">
+                <div className="stack stack-xs">
+                  <button className="data-primary-action" onClick={() => onInspect(event)} type="button">{activityTitle(event)}</button>
+                  <span className="data-identifier">{event.eventType} · v{event.eventVersion}</span>
+                </div>
+              </td>
+              <td className="activity-subject-col priority-low">
+                <span className="activity-subject-name" title={event.subject.labelSnapshot}>{event.subject.labelSnapshot}</span>
+                <span className="data-identifier" title={event.subject.id}>{event.subject.id}</span>
+              </td>
+              <td className="data-cell-status"><Badge tone={activityTone(event.severity)} variant="status">{activitySeverityLabel(event.severity)}</Badge></td>
+              <td className="data-cell-time"><DateTime value={event.occurredAt} variant="relative" /></td>
+              <td className="data-cell-action">
+                <Button aria-label={`Inspect ${activityTitle(event)}`} icon="chevron-right" onClick={() => onInspect(event)} variant="ghost" />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

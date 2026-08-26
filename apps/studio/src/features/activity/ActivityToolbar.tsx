@@ -1,4 +1,4 @@
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 
 import type {
   RuntimeActivityCategory,
@@ -7,6 +7,7 @@ import type {
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
+import { FilterOption as FilterOptionControl } from "@/shared/ui/FilterOption";
 import {
   activityCategoryLabel,
   activitySeverityLabel,
@@ -34,7 +35,6 @@ function toggle<T extends string>(values: T[], value: T): T[] {
 }
 
 export function ActivityToolbar({
-  actions,
   count,
   filtersOpen,
   loading,
@@ -43,7 +43,6 @@ export function ActivityToolbar({
   setState,
   state,
 }: {
-  actions?: ReactNode;
   count: number;
   filtersOpen: boolean;
   loading: boolean;
@@ -54,7 +53,6 @@ export function ActivityToolbar({
 }) {
   const filterCount = state.categories.length + state.severities.length;
   return <DataFilterToolbar
-    actions={actions}
     filterCount={filterCount}
     filtersOpen={filtersOpen}
     idPrefix="activity-list"
@@ -68,7 +66,7 @@ export function ActivityToolbar({
     searchValue={state.inputQuery}
   >
     {(closeFilters) => filtersOpen && <section aria-label="Activity filters" className="data-filter-panel" id="activity-list-filter-panel">
-      <header className="data-filter-panel-header"><div><strong>Filter activity</strong><span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span></div><button aria-label="Close activity filters" className="data-filter-panel-close" onClick={closeFilters} type="button"><AppIcon name="close" size="xs" /></button></header>
+      <header className="data-filter-panel-header"><div><strong>Filter activity</strong><span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span></div><Button aria-label="Close activity filters" className="data-filter-panel-close" icon="close" onClick={closeFilters} variant="ghost" /></header>
       <div className="data-filter-panel-body">
         <fieldset><legend>Category</legend><div className="data-filter-options">{CATEGORIES.map((category) => <FilterOption checked={state.categories.includes(category)} key={category} label={activityCategoryLabel(category)} onChange={() => setState((current) => ({ ...current, categories: toggle(current.categories, category) }))} />)}</div></fieldset>
         <fieldset><legend>Outcome</legend><div className="data-filter-options">{SEVERITIES.map((severity) => <FilterOption checked={state.severities.includes(severity)} key={severity} label={activitySeverityLabel(severity)} onChange={() => setState((current) => ({ ...current, severities: toggle(current.severities, severity) }))} />)}</div></fieldset>
@@ -79,7 +77,7 @@ export function ActivityToolbar({
 }
 
 function FilterOption({ checked, label, onChange }: { checked: boolean; label: string; onChange: () => void }) {
-  return <label><input checked={checked} onChange={onChange} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{label}</span></label>;
+  return <FilterOptionControl checked={checked} onChange={onChange}>{label}</FilterOptionControl>;
 }
 
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {

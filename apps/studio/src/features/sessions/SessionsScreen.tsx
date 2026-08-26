@@ -1,30 +1,22 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
-import type { RuntimeSession } from "@/shared/api/runtime-client";
-import { sessionIdentityLabel } from "@/shared/presentation/session";
 import { AppIcon } from "@/shared/ui/AppIcon";
-import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
-import { DateTime } from "@/shared/ui/DateTime";
+import { FilterOption } from "@/shared/ui/FilterOption";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
-import type { FeedbackTone } from "@/shared/ui/feedback-tone";
+import { TablePagination } from "@/shared/ui/TablePagination";
 import { useToast } from "@/shared/ui/Toast";
+import { SessionsTable } from "./SessionsTable";
 import "./sessions.css";
 
+const SESSIONS_PAGE_SIZE = 20;
 const STATUS_OPTIONS = ["ready", "initializing", "authenticating", "disconnected", "failed"] as const;
 type EngineFilter = "loaded" | "not-loaded";
 type WorkspaceFilter = "selected" | "not-selected";
-
-function statusTone(status: string): FeedbackTone {
-  if (status === "ready") return "success";
-  if (status === "failed" || status === "disconnected") return "danger";
-  if (status === "initializing" || status === "authenticating") return "warning";
-  return "neutral";
-}
 
 function statusLabel(status: string): string {
   return status.replace(/(^|[-_])(\w)/g, (_, __, letter: string) => ` ${letter.toUpperCase()}`).trim();
@@ -48,6 +40,7 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
   const [statuses, setStatuses] = useState<string[]>([]);
   const [engines, setEngines] = useState<EngineFilter[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceFilter[]>([]);
+  const [offset, setOffset] = useState(0);
   const [reloading, setReloading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [disconnectConfirmationOpen, setDisconnectConfirmationOpen] = useState(false);
@@ -71,6 +64,19 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
 
   const filterCount = statuses.length + engines.length + workspaces.length;
   const hasCriteria = Boolean(normalizedSearch || filterCount);
+  const pageSessions = filteredSessions.slice(offset, offset + SESSIONS_PAGE_SIZE);
+  const footerLabel = filteredSessions.length === 0
+    ? hasCriteria ? "No matching sessions" : "No sessions"
+    : `${filteredSessions.length} ${hasCriteria ? "matching " : ""}${filteredSessions.length === 1 ? "session" : "sessions"}`;
+
+  useEffect(() => {
+    setOffset(0);
+  }, [engines, normalizedSearch, statuses, workspaces]);
+
+  useEffect(() => {
+    if (offset < filteredSessions.length || offset === 0) return;
+    setOffset(Math.max(0, Math.floor(Math.max(0, filteredSessions.length - 1) / SESSIONS_PAGE_SIZE) * SESSIONS_PAGE_SIZE));
+  }, [filteredSessions.length, offset]);
 
   async function reloadSessions() {
     setReloading(true);
@@ -136,17 +142,17 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
           <section aria-label="Session filters" className="data-filter-panel" id="session-list-filter-panel">
             <header className="data-filter-panel-header">
               <div><strong>Filter sessions</strong><span>{filterCount ? `${filterCount} applied` : "Local filters"}</span></div>
-              <button aria-label="Close session filters" className="data-filter-panel-close" onClick={closeFilters} type="button"><AppIcon name="close" size="xs" /></button>
+              <Button aria-label="Close session filters" className="data-filter-panel-close" icon="close" onClick={closeFilters} variant="ghost" />
             </header>
             <div className="data-filter-panel-body">
               <fieldset><legend>Runtime status</legend><div className="data-filter-options">
-                {STATUS_OPTIONS.map((status) => <label key={status}><input checked={statuses.includes(status)} onChange={() => setStatuses((current) => toggleValue(current, status))} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{statusLabel(status)}</span></label>)}
+                {STATUS_OPTIONS.map((status) => <FilterOption checked={statuses.includes(status)} key={status} onChange={() => setStatuses((current) => toggleValue(current, status))}>{statusLabel(status)}</FilterOption>)}
               </div></fieldset>
               <fieldset><legend>Engine</legend><div className="data-filter-options">
-                {([ ["loaded", "Loaded"], ["not-loaded", "Not loaded"] ] as const).map(([value, label]) => <label key={value}><input checked={engines.includes(value)} onChange={() => setEngines((current) => toggleValue(current, value))} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{label}</span></label>)}
+                {([ ["loaded", "Loaded"], ["not-loaded", "Not loaded"] ] as const).map(([value, label]) => <FilterOption checked={engines.includes(value)} key={value} onChange={() => setEngines((current) => toggleValue(current, value))}>{label}</FilterOption>)}
               </div></fieldset>
               <fieldset><legend>Workspace</legend><div className="data-filter-options">
-                {([ ["selected", "Selected"], ["not-selected", "Not selected"] ] as const).map(([value, label]) => <label key={value}><input checked={workspaces.includes(value)} onChange={() => setWorkspaces((current) => toggleValue(current, value))} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{label}</span></label>)}
+                {([ ["selected", "Selected"], ["not-selected", "Not selected"] ] as const).map(([value, label]) => <FilterOption checked={workspaces.includes(value)} key={value} onChange={() => setWorkspaces((current) => toggleValue(current, value))}>{label}</FilterOption>)}
               </div></fieldset>
             </div>
             <div className="data-filter-summary"><div className="data-filter-chips">
@@ -158,31 +164,24 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
 
         {sessionsError && <InlineAlert action={<Button onClick={() => void reloadSessions()} size="sm">Retry</Button>} className="data-table-error" title="Could not reload sessions">{sessionsError}</InlineAlert>}
 
-        <div className="data-table-scroll sessions-table-scroll">
-          <table>
-            <caption>WA Runtime sessions</caption>
-            <thead><tr><th scope="col">Session</th><th scope="col">Runtime status</th><th scope="col">Engine</th><th scope="col">Last data sync</th><th className="align-end" scope="col">Workspace</th></tr></thead>
-            <tbody>
-              {!connected.sessions.length ? <tr><td className="data-table-empty" colSpan={5}>No allowlisted sessions are available from WA Runtime.</td></tr>
-                : !filteredSessions.length ? <tr><td className="data-table-empty" colSpan={5}>No sessions match this search or filters.</td></tr>
-                : filteredSessions.map((session: RuntimeSession) => <tr data-selected={session.id === selectedSessionId || undefined} key={session.id}>
-                  <td className="data-cell-primary"><div className="stack stack-xs"><strong className="data-primary-text" title={session.name}>{session.name}</strong><span className="data-secondary-text" title={`Session ID: ${session.id}`}>{sessionIdentityLabel(session)}</span></div></td>
-                  <td className="data-cell-status"><Badge tone={statusTone(session.status)}>{statusLabel(session.status)}</Badge></td>
-                  <td className="data-cell-status"><Badge tone={session.engineLoaded ? "success" : "warning"}>{session.engineLoaded ? "Loaded" : "Not loaded"}</Badge></td>
-                  <td className="data-cell-time"><DateTime fallback="Not synced" value={session.syncedAt} /></td>
-                  <td className="data-cell-action">
-                    {!session.syncedAt && onOpenGroups ? (
-                      <Button onClick={() => { selectSession(session.id); onOpenGroups(); }} size="sm" variant="ghost">Open Groups</Button>
-                    ) : session.id === selectedSessionId ? (
-                      <Badge tone="neutral">Selected</Badge>
-                    ) : (
-                      <Button onClick={() => selectSession(session.id)} size="sm" variant="ghost">Use session</Button>
-                    )}
-                  </td>
-                </tr>)}
-            </tbody>
-          </table>
-        </div>
+        <SessionsTable
+          emptyMessage={!connected.sessions.length
+            ? "No allowlisted sessions are available from WA Runtime."
+            : "No sessions match this search or filters."}
+          loading={reloading}
+          onOpenGroups={onOpenGroups}
+          onSelectSession={selectSession}
+          selectedSessionId={selectedSessionId}
+          sessions={pageSessions}
+        />
+        <TablePagination
+          label={footerLabel}
+          limit={SESSIONS_PAGE_SIZE}
+          loading={reloading}
+          offset={offset}
+          onOffsetChange={setOffset}
+          total={filteredSessions.length}
+        />
       </div>
       <ConfirmationDialog
         body="WA Studio will detach this window from the local workspace. Runtime and active syncs continue in the background."

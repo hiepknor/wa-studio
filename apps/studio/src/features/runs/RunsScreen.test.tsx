@@ -141,6 +141,17 @@ describe("RunsScreen", () => {
       statuses: [],
       executionModes: [],
     }));
+    expect(api.listRuns).toHaveBeenCalledTimes(1);
+
+    const runsTable = screen.getByRole("table", { name: "Campaign runs for the active session" });
+    const columns = runsTable.querySelectorAll("col");
+    expect(columns).toHaveLength(6);
+    expect(columns[3]).toHaveClass("runs-column-mode");
+    expect(columns[3]).not.toHaveClass("priority-low");
+    expect(runsTable.querySelector(".date-time-relative")).toBeInTheDocument();
+    expect(within(runsTable).getByRole("progressbar", { name: "1 of 2 targets resolved" })).toBeInTheDocument();
+    expect(within(runsTable).getByRole("button", { name: "Inspect run 11111111" })).toBeInTheDocument();
+    expect(screen.getByText("1 durable run")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Product release" }));
     const inspector = await screen.findByRole("dialog", { name: "Product release" });
@@ -149,6 +160,11 @@ describe("RunsScreen", () => {
 
     await user.click(within(inspector).getByRole("tab", { name: /Deliveries/ }));
     expect(await within(inspector).findByText("Release group")).toBeInTheDocument();
+    const deliveries = within(inspector).getByRole("list", { name: "Per-group deliveries for this run" });
+    expect(within(deliveries).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(deliveries).getByText("Sent")).toHaveClass("ui-badge-success");
+    expect(within(inspector).getByText("1 delivery")).toBeInTheDocument();
+    expect(within(inspector).getByRole("combobox", { name: "Delivery status" }).closest(".ui-field")).toHaveClass("ui-field-sm");
     expect(api.listCampaignDeliveries).toHaveBeenCalledWith({
       runId: run.id,
       limit: 20,

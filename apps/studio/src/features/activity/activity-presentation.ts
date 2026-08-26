@@ -44,5 +44,5 @@ export function activityTone(severity: RuntimeActivitySeverity) {
   if (severity === "SUCCESS") return "success" as const;
   if (severity === "WARNING") return "warning" as const;
   if (severity === "ERROR") return "danger" as const;
-  return "neutral" as const;
+  return "info" as const;
 }
