@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
+import { FilterOption } from "@/shared/ui/FilterOption";
 import {
   activeCampaignFilterCount,
   CAMPAIGN_SCHEDULE_OPTIONS,
@@ -72,14 +73,14 @@ function CampaignFilterPanel({ onClose, setState, state }: CampaignFilterPanelPr
     <section aria-label="Campaign filters" className="data-filter-panel" id="campaign-list-filter-panel">
       <header className="data-filter-panel-header">
         <div><strong>Filter campaigns</strong><span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span></div>
-        <button aria-label="Close campaign filters" className="data-filter-panel-close" onClick={onClose} type="button"><AppIcon name="close" size="xs" /></button>
+        <Button aria-label="Close campaign filters" className="data-filter-panel-close" icon="close" onClick={onClose} variant="ghost" />
       </header>
       <div className="data-filter-panel-body">
         <fieldset><legend>Status</legend><div className="data-filter-options">
-          {CAMPAIGN_STATUS_OPTIONS.map((option) => <label key={option.value}><input checked={state.statuses.includes(option.value)} onChange={() => setState((current) => ({ ...current, offset: 0, statuses: toggleCampaignFilter(current.statuses, option.value, CAMPAIGN_STATUS_OPTIONS) }))} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{option.label}</span></label>)}
+          {CAMPAIGN_STATUS_OPTIONS.map((option) => <FilterOption checked={state.statuses.includes(option.value)} key={option.value} onChange={() => setState((current) => ({ ...current, offset: 0, statuses: toggleCampaignFilter(current.statuses, option.value, CAMPAIGN_STATUS_OPTIONS) }))}>{option.label}</FilterOption>)}
         </div></fieldset>
         <fieldset><legend>Schedule</legend><div className="data-filter-options">
-          {CAMPAIGN_SCHEDULE_OPTIONS.map((option) => <label key={option.value}><input checked={state.scheduleTypes.includes(option.value)} onChange={() => setState((current) => ({ ...current, offset: 0, scheduleTypes: toggleCampaignFilter(current.scheduleTypes, option.value, CAMPAIGN_SCHEDULE_OPTIONS) }))} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{option.label}</span></label>)}
+          {CAMPAIGN_SCHEDULE_OPTIONS.map((option) => <FilterOption checked={state.scheduleTypes.includes(option.value)} key={option.value} onChange={() => setState((current) => ({ ...current, offset: 0, scheduleTypes: toggleCampaignFilter(current.scheduleTypes, option.value, CAMPAIGN_SCHEDULE_OPTIONS) }))}>{option.label}</FilterOption>)}
         </div></fieldset>
       </div>
       <CampaignFilterSummary setState={setState} state={state} />

@@ -126,8 +126,10 @@ function statusTone(status: "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED") {
   return "neutral" as const;
 }
 
-function statusLabel(status: "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED") {
-  return status.charAt(0) + status.slice(1).toLocaleLowerCase();
+function statusLabel(status: string) {
+  return status.split("_").map((part) => (
+    part.charAt(0) + part.slice(1).toLocaleLowerCase()
+  )).join(" ");
 }
 
 function reportTone(status: "PASS" | "WARN" | "BLOCK") {
@@ -1191,9 +1193,9 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         />
         {visibleListError && <InlineAlert action={<Button onClick={() => void loadCampaigns(listStateRef.current)} size="sm">Retry</Button>} className="data-table-error" title="Could not load campaigns">{visibleListError}</InlineAlert>}
         <div className="data-table-scroll">
-          <table>
+          <table className="data-table">
             <caption>Campaigns for the active session</caption>
-            <thead><tr><th scope="col">Campaign</th><th scope="col">Status</th><th scope="col">Schedule</th><th scope="col">Targets</th><th aria-label="Actions" className="data-column-actions" scope="col" /></tr></thead>
+            <thead><tr><th scope="col">Campaign</th><th scope="col">Status</th><th className="data-column-time" scope="col">Schedule</th><th className="data-column-number" scope="col">Targets</th><th aria-label="Actions" className="data-column-actions" scope="col" /></tr></thead>
             <tbody>
               {!selectedSessionId ? <tr><td className="data-table-empty" colSpan={5}>Select a session to view campaigns.</td></tr>
                 : !visiblePage && listPending ? <tr><td className="data-table-empty" colSpan={5}>Loading campaigns…</td></tr>
@@ -1201,9 +1203,9 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                 : !visiblePage?.data.length ? <tr><td className="data-table-empty" colSpan={5}>{hasListCriteria ? "No campaigns match this search or filters." : "No campaigns yet. Create a draft to get started."}</td></tr>
                 : visiblePage.data.map((item) => <tr key={item.id}>
                   <td className="data-cell-primary"><div className="stack stack-xs"><button className="data-primary-action" onClick={() => openCampaign(item)} title={`Open ${item.name}`} type="button">{item.name}</button><span className="data-identifier">{item.id}</span></div></td>
-                  <td><Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge></td>
-                  <td>{item.scheduleType === "IMMEDIATE" ? "Immediate" : <DateTime value={item.scheduledAt} />}</td>
-                  <td>{item.targetCount}</td>
+                  <td><Badge tone={statusTone(item.status)} variant="status">{statusLabel(item.status)}</Badge></td>
+                  <td className="data-cell-time">{item.scheduleType === "IMMEDIATE" ? "Immediate" : <DateTime value={item.scheduledAt} />}</td>
+                  <td className="data-cell-number">{item.targetCount}</td>
                   <td className="data-cell-action"><CampaignActionsMenu campaign={item} disabledReason={campaignDeleteDisabledReason(item)} onDelete={requestCampaignDelete} onOpen={openCampaign} /></td>
                 </tr>)}
             </tbody>
@@ -1262,7 +1264,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                   { label: "Schedule", value: form.scheduleType === "IMMEDIATE" ? "Immediate" : "Once" },
                   { label: "Message", value: `${form.text.length} chars` },
                 ]}
-                status={!campaign ? <Badge>New draft</Badge> : detailsDirty ? <Badge tone="warning">Unsaved changes</Badge> : <Badge tone="success">Saved</Badge>}
+                status={!campaign ? <Badge variant="status">New draft</Badge> : detailsDirty ? <Badge tone="warning" variant="status">Unsaved changes</Badge> : <Badge tone="success" variant="status">Saved</Badge>}
                 title={campaign ? "Persisted details" : "New campaign draft"}
                 titleId="campaign-details-card-title"
               >
@@ -1296,7 +1298,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                     { label: "Staged", value: targetDiff.selectedCount },
                     { label: "Revision", value: `r${targetsRevision}` },
                   ]}
-                  status={targetsDirty ? <Badge tone="warning">Unsaved changes</Badge> : undefined}
+                  status={targetsDirty ? <Badge tone="warning" variant="status">Unsaved changes</Badge> : undefined}
                   title={targetSource ? `From group list: ${targetSource.groupListNameSnapshot}` : "Custom selection"}
                   titleId="campaign-target-snapshot-title"
                 >
@@ -1320,7 +1322,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                   headingLevel="h4"
                   pageNote={!groupDirectory.loading && groupDirectory.groups.length === 0 && targetRows.length > 0 ? groupDirectory.hasCriteria ? "No additional synchronized groups match this search or filters. Selected and saved targets remain visible above." : "No additional synchronized groups are available. Selected and saved targets remain visible above." : undefined}
                   pagination={{ limit: groupDirectory.pageSize, loading: groupDirectory.loading, offset: groupDirectory.offset, onOffsetChange: groupDirectory.setOffset, total: groupDirectory.total }}
-                  summary={targetDiff.selectedCount >= 900 ? <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"}>{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge> : undefined}
+                  summary={targetDiff.selectedCount >= 900 ? <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"} variant="status">{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge> : undefined}
                   table={{ caption: "Groups available to the campaign target selection", disabled: !editable || targetsLoading || targetsSaving, emptyMessage: groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found.", loading: groupDirectory.loading || targetsLoading, onToggle: toggleTarget, onTogglePage: toggleAllPageTargets, pageIds: groupPageIds, pinnedIds: pinnedTargetIds, rows: targetRows, selectedIds: draftTargetIdSet, unknownParticipantsTitle: "Participant count is unavailable in the saved target snapshot." }}
                   title="Browse groups"
                   titleId="campaign-target-group-directory-title"
@@ -1431,7 +1433,7 @@ function CampaignRunsPanel({
     {!loading && !runs.length && <p className="campaign-run-empty">No campaign runs yet.</p>}
     {runs.map((run) => <article className="campaign-run-card" key={run.id}>
       <div className="campaign-run-card-main">
-        <div><Badge tone={runTone(run.status)}>{run.status}</Badge><Badge tone="neutral">{run.executionMode}</Badge></div>
+        <div><Badge tone={runTone(run.status)} variant="status">{statusLabel(run.status)}</Badge><Badge tone="neutral">{executionModeLabel(run.executionMode)}</Badge></div>
         <strong>{run.totalTargets} target snapshot</strong>
         <span><DateTime value={run.createdAt} /> · {run.id}</span>
         {run.targetSource && <small>From saved list: {run.targetSource.groupListNameSnapshot} · membership r{run.targetSource.membershipRevision} · applied <DateTime value={run.targetSource.appliedAt} /></small>}
@@ -1454,7 +1456,7 @@ function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; 
       {stale && <InlineAlert title="Preflight result is stale" tone="warning">Campaign details or targets changed. Run preflight again.</InlineAlert>}
       <header className="preflight-result-header">
         <span className="preflight-result-icon"><AppIcon name={presentation.icon} size="lg" /></span>
-        <div className="preflight-result-copy"><span>Runtime decision</span><div><h4>{presentation.title}</h4><Badge tone={reportTone(report.status)}>{report.status}</Badge></div><p>{presentation.description}</p></div>
+        <div className="preflight-result-copy"><span>Runtime decision</span><div><h4>{presentation.title}</h4><Badge tone={reportTone(report.status)} variant="status">{statusLabel(report.status)}</Badge></div><p>{presentation.description}</p></div>
       </header>
       <dl className="preflight-context">
         <div><dt>Mode</dt><dd>{executionModeLabel(report.executionMode)}</dd></div>
@@ -1472,8 +1474,8 @@ function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; 
         </dl>
       </section>
       <div className="preflight-columns">
-        <section className="preflight-evidence-panel"><header><div><h4>Policy checks</h4><p>Each check contributes to Runtime's decision.</p></div><Badge tone="neutral">{report.checks.length}</Badge></header><ul>{report.checks.map((check) => <li key={check.code}><Badge className="preflight-check-status" tone={reportTone(check.status)}>{preflightCheckStatusLabel(check.status)}</Badge><span className="preflight-evidence-copy"><strong>{PREFLIGHT_CHECK_LABELS[check.code] ?? "Runtime policy check"}</strong><code>{check.code}</code><small>{check.message}</small></span></li>)}</ul></section>
-        <section className="preflight-evidence-panel"><header><div><h4>Target issues</h4><p>Groups that require operator attention.</p></div><Badge tone={report.targetIssues.length ? "warning" : "success"}>{report.targetIssues.length}</Badge></header>{!report.targetIssues.length ? <div className="preflight-no-issues"><AppIcon name="check" size="sm" /><span>No target issues reported.</span></div> : <ul>{report.targetIssues.map((issue) => <li key={`${issue.groupId}-${issue.reason}`}><Badge tone={issue.capability === "DENIED" ? "danger" : "warning"}>{issue.capability}</Badge><span className="preflight-evidence-copy"><strong>{issue.groupName}</strong><small>{PREFLIGHT_ISSUE_LABELS[issue.reason] ?? "Runtime reported a target issue"}</small><code>{issue.reason}</code></span></li>)}</ul>}</section>
+        <section className="preflight-evidence-panel"><header><div><h4>Policy checks</h4><p>Each check contributes to Runtime's decision.</p></div><Badge tone="neutral">{report.checks.length}</Badge></header><ul>{report.checks.map((check) => <li key={check.code}><Badge className="preflight-check-status" tone={reportTone(check.status)} variant="status">{preflightCheckStatusLabel(check.status)}</Badge><span className="preflight-evidence-copy"><strong>{PREFLIGHT_CHECK_LABELS[check.code] ?? "Runtime policy check"}</strong><code>{check.code}</code><small>{check.message}</small></span></li>)}</ul></section>
+        <section className="preflight-evidence-panel"><header><div><h4>Target issues</h4><p>Groups that require operator attention.</p></div><Badge tone={report.targetIssues.length ? "warning" : "success"}>{report.targetIssues.length}</Badge></header>{!report.targetIssues.length ? <div className="preflight-no-issues"><AppIcon name="check" size="sm" /><span>No target issues reported.</span></div> : <ul>{report.targetIssues.map((issue) => <li key={`${issue.groupId}-${issue.reason}`}><Badge tone={issue.capability === "DENIED" ? "danger" : "warning"} variant="status">{statusLabel(issue.capability)}</Badge><span className="preflight-evidence-copy"><strong>{issue.groupName}</strong><small>{PREFLIGHT_ISSUE_LABELS[issue.reason] ?? "Runtime reported a target issue"}</small><code>{issue.reason}</code></span></li>)}</ul>}</section>
       </div>
     </section>
   );

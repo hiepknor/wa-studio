@@ -687,7 +687,7 @@ describe("CampaignsScreen", () => {
     expect(within(result).getByRole("heading", { name: "Target issues" })).toBeInTheDocument();
     const issuesPanel = within(result).getByRole("heading", { name: "Target issues" }).closest("section");
     expect(issuesPanel).not.toBeNull();
-    expect(within(issuesPanel!).getByText("DENIED")).toHaveClass("ui-badge-danger");
+    expect(within(issuesPanel!).getByText("Denied")).toHaveClass("ui-badge-danger");
     expect(within(issuesPanel!).getByText("Denied room").parentElement).toHaveClass("preflight-evidence-copy");
     expect(within(result).getByText("Group capability")).toBeInTheDocument();
     expect(await screen.findByText("GROUP_CAPABILITY")).toBeInTheDocument();
@@ -876,7 +876,7 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
     await user.click(await screen.findByRole("button", { name: "Resume" }));
     expect(await screen.findByText(/Campaign lifecycle: Paused/)).toBeInTheDocument();
-    expect(screen.getByText("BLOCKED")).toBeInTheDocument();
+    expect(screen.getByText("Blocked")).toBeInTheDocument();
   });
 
   it("renders an ARCHIVED Campaign after a terminal LIVE cancellation", async () => {
@@ -893,7 +893,7 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(await screen.findByText(/Campaign lifecycle: Archived/)).toBeInTheDocument();
-    expect(screen.getByText("CANCELLED")).toBeInTheDocument();
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
   });
 
   it("reloads Campaign lifecycle with an asynchronously completed LIVE run", async () => {
@@ -910,9 +910,9 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: "Preflight" }));
-    await screen.findByText("RUNNING");
+    await screen.findByText("Running");
     await user.click(screen.getByRole("button", { name: "Reload runs" }));
-    expect(await screen.findByText("COMPLETED")).toBeInTheDocument();
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
     expect(screen.getByText(/Campaign lifecycle: Archived/)).toBeInTheDocument();
   });
 
@@ -1424,7 +1424,7 @@ describe("CampaignsScreen", () => {
     expect(deleteCampaign).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole("button", { name: "View runs" }));
     expect(screen.getByRole("tab", { name: "Preflight" })).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByText("RUNNING")).toBeInTheDocument();
+    expect(await screen.findByText("Running")).toBeInTheDocument();
   });
 
   it("keeps the campaign and confirmation open after a network failure", async () => {
