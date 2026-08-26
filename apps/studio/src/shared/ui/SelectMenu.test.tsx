@@ -34,8 +34,10 @@ function ControlledSelectMenu({ onChange = vi.fn() }: { onChange?: (value: strin
 describe("SelectMenu", () => {
   it("derives dropdown height from the shared field control token", () => {
     expect(tokensCss).toContain("--control-height: 34px");
-    expect(textFieldCss).toContain("--field-control-font-size: 10px");
-    expect(textFieldCss).toContain("--field-control-font-size: 12px");
+    expect(tokensCss).toContain("--type-label: 11px");
+    expect(tokensCss).toContain("--type-ui: 13px");
+    expect(textFieldCss).toContain("--field-control-font-size: var(--type-label)");
+    expect(textFieldCss).toContain("--field-control-font-size: var(--type-body)");
     expect(textFieldCss).toContain("--field-control-height: 28px");
     expect(textFieldCss).toContain("--field-control-height: var(--control-height)");
     expect(textFieldCss).toContain("--field-control-height: 42px");

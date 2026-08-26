@@ -7,6 +7,7 @@ import "./text-field.css";
 
 export interface TextFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "size"> {
   containerClassName?: string;
+  controlClassName?: string;
   description?: ReactNode;
   error?: ReactNode;
   icon?: AppIconName;
@@ -21,6 +22,7 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function T
     "aria-describedby": ariaDescribedBy,
     className = "",
     containerClassName = "",
+    controlClassName = "",
     description,
     error,
     icon,
@@ -43,6 +45,7 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(function T
   return (
     <FieldFrame
       containerClassName={containerClassName}
+      controlClassName={controlClassName}
       description={description}
       descriptionId={descriptionId}
       error={error}

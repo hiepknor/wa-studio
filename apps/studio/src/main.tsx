@@ -5,7 +5,11 @@ import "./fonts.css";
 import "./styles/tokens.css";
 import "./styles/scrollbars.css";
 import { App } from "./app/App";
+import "./styles/focus.css";
+import { installFocusModality } from "./app/installFocusModality";
 import { installHmrContextRecovery } from "./app/installHmrContextRecovery";
+
+installFocusModality(document);
 
 if (import.meta.hot) {
   const disposeHmrRecovery = installHmrContextRecovery(import.meta.hot);

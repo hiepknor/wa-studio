@@ -55,6 +55,48 @@ export function formatDateTime(
   return `${parts.get("day")} ${parts.get("month")} ${parts.get("year")} · ${parts.get("hour")}:${parts.get("minute")}${seconds}${timeZone}`;
 }
 
+export function formatRelativeDateTime(
+  value: string | null | undefined,
+  {
+    fallback = "—",
+    now = new Date(),
+    timeZone,
+  }: {
+    fallback?: string;
+    now?: Date;
+    timeZone?: string;
+  } = {},
+): string {
+  const date = parseDateTime(value);
+  if (!date) return fallback;
+
+  const elapsedMs = Math.max(0, now.getTime() - date.getTime());
+  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+  if (elapsedMinutes < 1) return "Just now";
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago`;
+
+  const elapsedHours = Math.floor(elapsedMs / 3_600_000);
+  if (elapsedHours < 24) return `${elapsedHours} hr ago`;
+
+  const timeFormatter = new Intl.DateTimeFormat(LOCALE, {
+    hour: "2-digit",
+    hourCycle: "h23",
+    minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
+  });
+  if (elapsedHours < 48) return `Yesterday, ${timeFormatter.format(date)}`;
+
+  const elapsedDays = Math.floor(elapsedMs / 86_400_000);
+  if (elapsedDays < 7) return `${elapsedDays} days ago`;
+
+  const dateFormatter = new Intl.DateTimeFormat(LOCALE, {
+    day: "2-digit",
+    month: "short",
+    ...(timeZone ? { timeZone } : {}),
+  });
+  return `${dateFormatter.format(date)}, ${timeFormatter.format(date)}`;
+}
+
 export function formatExactDateTime(
   value: string,
   timeZone?: string,

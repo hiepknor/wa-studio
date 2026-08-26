@@ -74,9 +74,9 @@ body:has(.workspace) .toast-viewport {
 .toast-title {
   overflow-wrap: anywhere;
   color: var(--foreground);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.35;
+  font-size: var(--type-ui);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight-ui);
 }
 
 .toast-description {
@@ -84,8 +84,8 @@ body:has(.workspace) .toast-viewport {
   overflow: hidden;
   overflow-wrap: anywhere;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: var(--type-caption);
+  line-height: var(--leading-ui);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
@@ -96,15 +96,6 @@ body:has(.workspace) .toast-viewport {
   align-items: center;
   gap: 6px;
 }
-
-.toast-dismiss {
-  width: 28px;
-  flex: 0 0 28px;
-  padding: 0;
-  color: var(--dim);
-}
-
-.toast-dismiss:hover:not(:disabled) { color: var(--foreground); }
 
 @media (max-width: 760px) {
   .toast-viewport,

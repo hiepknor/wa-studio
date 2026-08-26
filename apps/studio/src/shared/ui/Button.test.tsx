@@ -10,6 +10,8 @@ describe("Button", () => {
     const button = screen.getByRole("button", { name: "Refresh" });
     expect(button).toHaveAttribute("type", "button");
     expect(button).toHaveClass("button-md", "button-secondary");
+    expect(button).not.toHaveClass("button-icon-only");
+    expect(button.querySelector("svg")).toHaveClass("ui-icon-md");
   });
 
   it("keeps a stable visual label while exposing loading semantics", () => {
@@ -30,6 +32,8 @@ describe("Button", () => {
 
     const button = screen.getByRole("button", { name: "Disconnect" });
     expect(button).toHaveTextContent("");
+    expect(button).toHaveClass("button-icon-only");
     expect(button.querySelector(".button-label")).not.toBeInTheDocument();
+    expect(button.querySelector("svg")).toHaveClass("ui-icon-md");
   });
 });

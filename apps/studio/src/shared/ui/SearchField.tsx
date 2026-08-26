@@ -30,6 +30,7 @@ export function SearchField({
     <TextField
       aria-busy={loading || undefined}
       containerClassName={`search-field search-field-${variant}`}
+      controlClassName={variant === "contained" ? "focus-owner" : undefined}
       icon="search"
       id={id}
       label={label}

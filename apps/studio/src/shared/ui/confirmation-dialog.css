@@ -24,11 +24,9 @@
   background: var(--surface-chrome);
   box-shadow: var(--elev-raised);
 }
-.confirmation-dialog:focus-visible,
-.confirmation-dialog-backdrop:focus-visible { outline: none; }
 .confirmation-dialog-content { padding: 20px; }
-.confirmation-dialog h2 { margin: 0; color: var(--text-primary); font-size: 15px; }
-.confirmation-dialog-body { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.confirmation-dialog h2 { margin: 0; color: var(--text-primary); font-size: var(--type-emphasis); }
+.confirmation-dialog-body { margin-top: 8px; color: var(--muted); font-size: var(--type-ui); line-height: var(--leading-ui); }
 .confirmation-dialog-body > p { margin: 0; }
 .confirmation-dialog-body > * + * { margin-top: 12px; }
 .confirmation-dialog-footer {

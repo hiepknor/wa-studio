@@ -287,9 +287,7 @@ export function Drawer({
             ref={closeButtonRef}
             size="sm"
             variant="ghost"
-          >
-            Close
-          </Button>
+          />
         </header>
         <div className="drawer-body" ref={bodyRef}>{children}</div>
         {footer && <footer className="drawer-footer">{footer}</footer>}

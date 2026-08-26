@@ -15,8 +15,8 @@
   border: 0;
   background: transparent;
   color: var(--dim);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--type-body);
+  font-weight: var(--weight-regular);
   cursor: pointer;
 }
 .tabs-trigger::after {
@@ -38,15 +38,12 @@
 .tabs-trigger[aria-selected="true"]::after {
   background: var(--active-rail);
 }
-.tabs-trigger:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: var(--focus-offset);
-}
 .tabs-meta {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
-  font-size: 8px;
-  font-weight: 500;
+  font-size: var(--type-micro);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-label);
   text-transform: uppercase;
 }
 .tabs-warning {
@@ -91,10 +88,10 @@
   border-radius: 50%;
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: var(--type-micro);
 }
 .tabs-steps .tabs-trigger[aria-selected="true"] .tabs-step-index {
-  border-color: var(--focus-inner-border);
+  border-color: var(--text-secondary);
   background: var(--accent);
   color: var(--text-primary);
 }

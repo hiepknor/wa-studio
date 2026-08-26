@@ -3,6 +3,7 @@ import type { HTMLAttributes } from "react";
 import {
   formatDateTime,
   formatExactDateTime,
+  formatRelativeDateTime,
   parseDateTime,
   type DateTimePrecision,
 } from "./date-time";
@@ -13,6 +14,7 @@ interface DateTimeProps extends Omit<HTMLAttributes<HTMLTimeElement>, "children"
   precision?: DateTimePrecision;
   timeZone?: string;
   value: string | null | undefined;
+  variant?: "absolute" | "relative";
 }
 
 export function DateTime({
@@ -23,9 +25,10 @@ export function DateTime({
   timeZone,
   title,
   value,
+  variant = "absolute",
   ...props
 }: DateTimeProps) {
-  const classes = `date-time ${className ?? ""}`.trim();
+  const classes = `date-time date-time-${variant} ${className ?? ""}`.trim();
   const date = parseDateTime(value);
   if (!date || !value) return <span className={classes}>{fallback}</span>;
 
@@ -38,7 +41,9 @@ export function DateTime({
       dateTime={date.toISOString()}
       title={title ?? exact}
     >
-      {formatDateTime(value, { precision, timeZone })}
+      {variant === "relative"
+        ? formatRelativeDateTime(value, { fallback, timeZone })
+        : formatDateTime(value, { precision, timeZone })}
     </time>
   );
 }

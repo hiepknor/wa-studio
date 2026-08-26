@@ -55,19 +55,13 @@
 }
 
 .switch-field input:checked + .switch-field-control {
-  border-color: var(--focus-inner-border);
+  border-color: var(--text-secondary);
   background: var(--accent);
 }
 
 .switch-field input:checked + .switch-field-control > span {
   background: var(--text-primary);
   transform: translateX(var(--switch-travel));
-}
-
-.switch-field input:focus-visible + .switch-field-control {
-  border-color: var(--focus-inner-border);
-  outline: var(--focus-width) solid var(--focus-outer-color);
-  outline-offset: var(--focus-offset);
 }
 
 .switch-field-copy {
@@ -78,14 +72,14 @@
 
 .switch-field-copy strong {
   color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--type-body);
+  font-weight: var(--weight-medium);
 }
 
 .switch-field-copy small {
   color: var(--muted);
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: var(--type-body);
+  line-height: var(--leading-ui);
 }
 
 .switch-field.is-disabled {

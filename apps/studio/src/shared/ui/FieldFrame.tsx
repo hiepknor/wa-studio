@@ -9,6 +9,7 @@ import {
 interface FieldFrameProps {
   children: ReactNode;
   containerClassName?: string;
+  controlClassName?: string;
   description?: ReactNode;
   descriptionId?: string;
   error?: ReactNode;
@@ -23,6 +24,7 @@ interface FieldFrameProps {
 export function FieldFrame({
   children,
   containerClassName = "",
+  controlClassName = "",
   description,
   descriptionId,
   error,
@@ -44,7 +46,7 @@ export function FieldFrame({
       <label className={labelHidden ? "text-field-label-hidden" : "text-field-label"} htmlFor={inputId}>
         {label}
       </label>
-      <div className="text-field-control">{children}</div>
+      <div className={`text-field-control ${controlClassName}`.trim()}>{children}</div>
       {message && (
         <span
           className={error ? "text-field-message text-field-error" : "text-field-message text-field-description"}

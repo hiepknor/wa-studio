@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { DateTime } from "./DateTime";
-import { formatDateTime, formatExactDateTime } from "./date-time";
+import { formatDateTime, formatExactDateTime, formatRelativeDateTime } from "./date-time";
 
 const TIMESTAMP = "2026-08-15T20:40:32.000Z";
 
@@ -23,6 +23,14 @@ describe("DateTime", () => {
     expect(time).toHaveAttribute("datetime", TIMESTAMP);
     expect(time).toHaveAccessibleName("15 Aug 2026 · 20:40:32 GMT+0");
     expect(time).toHaveAttribute("title", "15 Aug 2026 · 20:40:32 GMT+0");
+  });
+
+  it("supports the compact relative presentation used by operational tables", () => {
+    const now = new Date("2026-08-15T20:40:32.000Z");
+    expect(formatRelativeDateTime("2026-08-15T20:40:10.000Z", { now, timeZone: "UTC" })).toBe("Just now");
+    expect(formatRelativeDateTime("2026-08-15T20:36:00.000Z", { now, timeZone: "UTC" })).toBe("4 min ago");
+    expect(formatRelativeDateTime("2026-08-14T19:40:32.000Z", { now, timeZone: "UTC" })).toBe("Yesterday, 19:40");
+    expect(formatRelativeDateTime("2026-08-06T19:40:32.000Z", { now, timeZone: "UTC" })).toBe("06 Aug, 19:40");
   });
 
   it("uses context-specific fallback copy for missing or invalid values", () => {

@@ -1,0 +1,73 @@
+.filter-option {
+  position: relative;
+  min-height: var(--filter-option-height);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-tight);
+  padding: 0 var(--space-2);
+  border: var(--border-width) solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--type-label);
+}
+
+.filter-option:hover:not(.is-disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.filter-option:has(.filter-option-input:checked) {
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.filter-option-input {
+  width: var(--filter-indicator-size);
+  height: var(--filter-indicator-size);
+  display: grid;
+  flex: 0 0 var(--filter-indicator-size);
+  place-items: center;
+  margin: 0;
+  border: var(--border-width) solid var(--text-tertiary);
+  appearance: none;
+  background: transparent;
+  cursor: inherit;
+}
+
+.filter-option-input[type="checkbox"] { border-radius: 3px; }
+.filter-option-input[type="radio"] { border-radius: var(--radius-pill); }
+
+.filter-option-input::before {
+  content: "";
+  opacity: 0;
+}
+
+.filter-option-input[type="checkbox"]::before {
+  width: calc(var(--space-1) - var(--space-pixel));
+  height: var(--space-tight);
+  border-right: var(--border-width) solid var(--surface-canvas);
+  border-bottom: var(--border-width) solid var(--surface-canvas);
+  transform: translateY(calc(var(--space-pixel) * -1)) rotate(var(--rotation-check));
+}
+
+.filter-option-input[type="radio"]::before {
+  width: var(--space-1);
+  height: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--text-primary);
+}
+
+.filter-option-input[type="checkbox"]:checked {
+  border-color: var(--text-primary);
+  background: var(--text-primary);
+}
+
+.filter-option-input[type="radio"]:checked { border-color: var(--text-primary); }
+.filter-option-input:checked::before { opacity: 1; }
+.filter-option-input:disabled { cursor: not-allowed; }
+.filter-option.is-disabled { cursor: not-allowed; opacity: var(--disabled-opacity); }
+.filter-option-label { white-space: nowrap; }

@@ -27,8 +27,6 @@
   background: var(--surface-chrome);
   box-shadow: var(--elev-raised);
 }
-.modal-dialog:focus-visible,
-.modal-dialog-backdrop:focus-visible { outline: none; }
 .modal-dialog-header {
   display: flex;
   align-items: flex-start;
@@ -39,10 +37,9 @@
   background: var(--surface-subtle);
 }
 .modal-dialog-heading { min-width: 0; }
-.modal-dialog-eyebrow { color: var(--text-tertiary); font-size: 9px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; }
-.modal-dialog-title { margin: 5px 0 0; color: var(--text-primary); font-size: 15px; font-weight: 650; }
-.modal-dialog-description { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.modal-dialog-close { width: 28px; flex: 0 0 28px; padding: 0; color: var(--dim); }
+.modal-dialog-eyebrow { color: var(--text-tertiary); font-size: var(--type-micro); font-weight: var(--weight-medium); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.modal-dialog-title { margin: 5px 0 0; color: var(--text-primary); font-size: var(--type-emphasis); font-weight: var(--weight-regular); letter-spacing: var(--tracking-title); }
+.modal-dialog-description { margin: 6px 0 0; color: var(--muted); font-size: var(--type-caption); line-height: var(--leading-ui); }
 .modal-dialog-body { min-height: 0; overflow-y: auto; padding: 18px 20px 20px; }
 .modal-dialog-footer {
   display: flex;

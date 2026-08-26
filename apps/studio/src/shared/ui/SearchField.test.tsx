@@ -27,5 +27,20 @@ describe("SearchField", () => {
     expect(search).toHaveValue("release");
     expect(search).toHaveAttribute("type", "search");
     expect(search.closest(".text-field")).toHaveClass("ui-field-sm");
+    expect(search.parentElement).toHaveClass("focus-owner");
+  });
+
+  it("keeps toolbar search focus on the input instead of the compound wrapper", () => {
+    render(
+      <SearchField
+        label="Search records"
+        onChange={() => undefined}
+        value=""
+        variant="toolbar"
+      />,
+    );
+
+    expect(screen.getByRole("searchbox", { name: "Search records" }).parentElement)
+      .not.toHaveClass("focus-owner");
   });
 });

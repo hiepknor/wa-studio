@@ -1,0 +1,102 @@
+/*
+ * WARP focus contract
+ *
+ * Focus is a keyboard-navigation affordance, not a component state. Every
+ * focusable control gets the same crisp 1px outer outline with a 2px offset.
+ * Neutral bordered controls also strengthen their existing border; semantic
+ * borders remain untouched. Compound and visually-hidden inputs delegate the
+ * outer outline to their visible owner so only one ring is ever rendered.
+ */
+
+:where(
+  button,
+  a,
+  input,
+  textarea,
+  select,
+  summary,
+  [contenteditable="true"],
+  [tabindex]:not([tabindex="-1"])
+) {
+  outline: var(--focus-width) solid transparent;
+  outline-offset: var(--focus-offset);
+}
+
+html[data-focus-modality="keyboard"] :focus-visible {
+  outline: var(--focus-width) solid var(--focus-outer-color);
+  outline-offset: var(--focus-offset);
+}
+
+/* Programmatic focus targets are not interactive affordances. */
+[tabindex="-1"]:not(button):not(a):not(input):not(textarea):not(select),
+[tabindex="-1"]:not(button):not(a):not(input):not(textarea):not(select):focus {
+  outline: none;
+}
+html[data-focus-modality="keyboard"] [tabindex="-1"]:not(button):not(a):not(input):not(textarea):not(select):focus-visible,
+html[data-focus-modality="keyboard"] :is(
+  .modal-dialog,
+  .modal-dialog-backdrop,
+  .confirmation-dialog,
+  .confirmation-dialog-backdrop,
+  .drawer-surface,
+  .group-list-metadata-submit
+):focus-visible {
+  outline: none;
+}
+
+/* The inner step belongs only to ordinary neutral-bordered controls. */
+html[data-focus-modality="keyboard"] :is(
+  .button:not(.button-ghost):not(.button-danger),
+  .workspace-rail-toggle,
+  .workspace-nav-button,
+  .workspace-session-trigger,
+  .workspace-session-option,
+  .workspace-session-manage,
+  .select-menu-trigger:not([aria-invalid="true"]),
+  .group-scope-trigger,
+  .settings-choice-card
+):focus-visible,
+html[data-focus-modality="keyboard"] :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([aria-invalid="true"]),
+  textarea:not([aria-invalid="true"]),
+  select:not([aria-invalid="true"])
+):focus-visible {
+  border-color: var(--focus-inner-border);
+}
+
+html[data-focus-modality="keyboard"] .checkbox:not(:checked):not(:indeterminate):focus-visible {
+  border-color: var(--focus-inner-border);
+}
+
+/* A compound search owns one outer outline; its input supplies the inner step. */
+.focus-owner { border-radius: var(--radius-sm); }
+html[data-focus-modality="keyboard"] .focus-owner:has(> input:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-outer-color);
+  outline-offset: var(--focus-offset);
+}
+html[data-focus-modality="keyboard"] .focus-owner > input:focus-visible {
+  border-color: var(--focus-inner-border);
+  outline: none;
+}
+
+/* Hidden form controls delegate focus to the visible control surface. */
+html[data-focus-modality="keyboard"] .switch-field input:focus-visible,
+html[data-focus-modality="keyboard"] .filter-option-input:focus-visible {
+  outline: none;
+}
+html[data-focus-modality="keyboard"] .switch-field input:focus-visible + .switch-field-control,
+html[data-focus-modality="keyboard"] .filter-option:has(.filter-option-input:focus-visible) {
+  border-color: var(--focus-inner-border);
+  outline: var(--focus-width) solid var(--focus-outer-color);
+  outline-offset: var(--focus-offset);
+}
+
+/* Focus outlines must be allowed to escape clipped table action cells. */
+html[data-focus-modality="keyboard"] .data-cell-action:has(:focus-visible) {
+  overflow: visible;
+}
+
+/* Clipped option groups reserve exactly enough internal room for the ring. */
+.campaign-group-list-picker-results {
+  padding: calc(var(--focus-width) + var(--focus-offset));
+}

@@ -75,7 +75,7 @@ export function DataFilterToolbar({
             icon="settings"
             onClick={onToggleFilters}
             ref={filterTriggerRef}
-            size="sm"
+            size="md"
           >
             Filters{filterCount ? ` · ${filterCount}` : ""}
           </Button>

@@ -1,4 +1,5 @@
 import { AppIcon } from "./AppIcon";
+import { Button } from "./Button";
 import type { DropdownTriggerProps } from "./DropdownMenu";
 import "./update-action-trigger.css";
 
@@ -16,21 +17,16 @@ export function UpdateActionTrigger({
   triggerProps,
 }: UpdateActionTriggerProps) {
   return (
-    <button
+    <Button
       {...triggerProps}
-      aria-busy={busy || undefined}
       aria-label={ariaLabel}
-      className="button button-md button-secondary update-action-trigger"
-      type="button"
+      className="update-action-trigger"
+      icon="refresh"
+      loading={busy}
     >
-      <AppIcon
-        className={`button-icon ${busy ? "ui-icon-spin" : ""}`.trim()}
-        name="refresh"
-        size="sm"
-      />
-      <span className="button-label update-action-label">{label}</span>
+      <span className="update-action-label">{label}</span>
       <span aria-hidden="true" className="update-action-divider" />
       <AppIcon className="update-action-chevron" name="chevron-down" size="xs" />
-    </button>
+    </Button>
   );
 }

@@ -1,10 +1,10 @@
 .ui-field {
-  --field-control-font-size: 12px;
+  --field-control-font-size: var(--type-body);
   --field-control-height: var(--control-height);
   --field-control-padding-inline: 11px;
 }
 .ui-field-xs {
-  --field-control-font-size: 10px;
+  --field-control-font-size: var(--type-label);
   --field-control-height: 28px;
   --field-control-padding-inline: 9px;
 }
@@ -18,7 +18,7 @@
   flex-direction: column;
   gap: 7px;
 }
-.text-field-label { color: var(--text-tertiary); font-size: 9px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.text-field-label { color: var(--text-secondary); font-size: var(--type-caption); font-weight: var(--weight-regular); letter-spacing: var(--tracking-body); }
 .text-field-label-hidden {
   position: absolute;
   width: 1px;
@@ -35,38 +35,33 @@
 .text-field-control select,
 .text-field-control textarea {
   width: 100%;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  background: var(--surface-control);
+  border: 1px solid var(--control-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--control-surface-default);
   color: var(--foreground);
   font-family: var(--font-ui);
   font-size: var(--field-control-font-size);
-  outline: none;
+  line-height: var(--control-line-height);
   transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 .text-field-control select,
 .text-field-control input { height: var(--field-control-height); padding: 0 var(--field-control-padding-inline); }
-.text-field-control textarea { width: 100%; min-height: 88px; padding: 9px var(--field-control-padding-inline); resize: vertical; line-height: 1.5; }
+.text-field-control textarea { width: 100%; min-height: 88px; padding: 9px var(--field-control-padding-inline); resize: vertical; }
 .text-field-control input.text-field-input-with-icon { padding-left: 34px; }
 .text-field-control .text-field-input-mono { font-family: var(--font-mono); }
 .text-field-control input::placeholder,
 .text-field-control textarea::placeholder { color: var(--dim); opacity: 1; }
-.text-field-control input:hover,
-.text-field-control select:hover,
-.text-field-control textarea:hover { border-color: var(--border-strong); }
-.text-field-control input:focus-visible,
-.text-field-control select:focus-visible,
-.text-field-control textarea:focus-visible {
-  border-color: var(--focus-border);
-  outline: var(--focus-width) solid var(--focus-outer-color);
-  outline-offset: var(--focus-offset);
-  box-shadow: none;
+.text-field-control input:hover:not(:disabled),
+.text-field-control select:hover:not(:disabled),
+.text-field-control textarea:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+  background: var(--control-surface-hover);
 }
 .text-field-control input:disabled,
 .text-field-control select:disabled,
 .text-field-control textarea:disabled {
-  border-color: var(--border-subtle);
-  background: var(--surface-disabled);
+  border-color: var(--control-border-disabled);
+  background: var(--control-surface-disabled);
   color: var(--text-disabled);
   cursor: not-allowed;
   opacity: .78;
@@ -76,13 +71,6 @@
 .text-field[data-invalid="true"] .text-field-control input,
 .text-field[data-invalid="true"] .text-field-control textarea {
   border-color: var(--state-danger-border);
-}
-.text-field[data-invalid="true"] .text-field-control input:focus-visible,
-.text-field[data-invalid="true"] .text-field-control textarea:focus-visible {
-  border-color: var(--danger-focus-border);
-  outline: var(--focus-width) solid var(--focus-outer-color);
-  outline-offset: var(--focus-offset);
-  box-shadow: none;
 }
 .text-field-icon {
   position: absolute;
@@ -95,6 +83,6 @@
 }
 .text-field-control:focus-within .text-field-icon { color: var(--text-secondary); }
 .text-field-message,
-.text-field-description { min-height: 16px; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.text-field-description { min-height: 16px; font-size: var(--type-label); line-height: var(--leading-ui); overflow-wrap: anywhere; }
 .text-field-description { color: var(--dim); }
 .text-field-error { color: var(--state-danger); }
