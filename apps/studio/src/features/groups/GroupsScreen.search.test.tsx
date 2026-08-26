@@ -133,7 +133,7 @@ describe("GroupsScreen global search and filters", () => {
     expect(await screen.findByText("No groups were returned for this session."))
       .toBeInTheDocument();
     expect(screen.getByText("0–0 of 0")).toBeInTheDocument();
-    expect(screen.getByText("Page 0 of 0")).toBeInTheDocument();
+    expect(screen.getByText("No results")).toBeInTheDocument();
   });
 
   it("shows a scoped list error and retries the same Runtime query", async () => {
@@ -311,6 +311,45 @@ describe("GroupsScreen global search and filters", () => {
     })).toBeInTheDocument();
   });
 
+  it("sends an inclusive participant range and exposes each bound as a removable chip", async () => {
+    const user = userEvent.setup();
+    const listGroups = vi.fn().mockResolvedValue(defaultPage);
+    renderGroups(listGroups);
+    await connect(user);
+
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    const minimum = screen.getByRole("spinbutton", { name: "Minimum" });
+    const maximum = screen.getByRole("spinbutton", { name: "Maximum" });
+    expect(minimum.closest(".text-field")).toHaveClass("ui-field-xs");
+    expect(maximum.closest(".text-field")).toHaveClass("ui-field-xs");
+
+    await user.type(minimum, "20");
+    await user.type(maximum, "500");
+
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 20,
+      offset: 0,
+      minParticipants: 20,
+      maxParticipants: 500,
+    }));
+    expect(screen.getByRole("button", { name: "Filters · 1" })).toBeInTheDocument();
+    const minimumChip = screen.getByRole("button", {
+      name: "Remove Minimum participants: 20 filter",
+    });
+    expect(screen.getByRole("button", {
+      name: "Remove Maximum participants: 500 filter",
+    })).toBeInTheDocument();
+
+    await user.click(minimumChip);
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 20,
+      offset: 0,
+      maxParticipants: 500,
+    }));
+  });
+
   it("clears search independently from filters and clears filters independently from search", async () => {
     const user = userEvent.setup();
     const listGroups = vi.fn().mockResolvedValue(defaultPage);
@@ -467,7 +506,7 @@ describe("GroupsScreen global search and filters", () => {
     expect(await screen.findByText("No groups match this search or filters."))
       .toBeInTheDocument();
     expect(screen.getByText("0–0 of 0 matches")).toBeInTheDocument();
-    expect(screen.getByText("Page 0 of 0")).toBeInTheDocument();
+    expect(screen.getByText("No results")).toBeInTheDocument();
   });
 
   it("ignores stale search and previous-session responses", async () => {

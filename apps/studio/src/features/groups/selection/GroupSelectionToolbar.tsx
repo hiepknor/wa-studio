@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import type {
   RuntimeGroupCapabilityFreshness,
@@ -7,10 +7,15 @@ import type {
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
-import { TextField } from "@/shared/ui/TextField";
+import { FilterOption } from "@/shared/ui/FilterOption";
+import { ParticipantRangeFilter } from "../ParticipantRangeFilter";
+import type { ParticipantFilterErrors } from "../participant-range";
 import "./group-selection.css";
 
-const MAX_PARTICIPANTS = 2_147_483_647;
+export {
+  validateParticipantRange,
+  type ParticipantFilterErrors,
+} from "../participant-range";
 
 const CAPABILITY_OPTIONS: ReadonlyArray<{
   label: string;
@@ -35,11 +40,6 @@ export interface GroupSelectionFilters {
   isActive: boolean | undefined;
   maxParticipants: number | undefined;
   minParticipants: number | undefined;
-}
-
-export interface ParticipantFilterErrors {
-  maxParticipants?: string;
-  minParticipants?: string;
 }
 
 export function emptyGroupSelectionFilters(): GroupSelectionFilters {
@@ -68,42 +68,6 @@ function toggleOrdered<T extends string>(
     ? values.filter((candidate) => candidate !== value)
     : [...values, value];
   return options.map((option) => option.value).filter((candidate) => toggled.includes(candidate));
-}
-
-function participantValue(value: string, field: "Minimum" | "Maximum"): {
-  error?: string;
-  value?: number;
-} {
-  const normalized = value.trim();
-  if (!normalized) return {};
-  const parsed = Number(normalized);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_PARTICIPANTS) {
-    return { error: `${field} must be a whole number from 0 to ${MAX_PARTICIPANTS.toLocaleString()}.` };
-  }
-  return { value: parsed };
-}
-
-export function validateParticipantRange(minimum: string, maximum: string): {
-  errors: ParticipantFilterErrors;
-  maxParticipants?: number;
-  minParticipants?: number;
-} {
-  const min = participantValue(minimum, "Minimum");
-  const max = participantValue(maximum, "Maximum");
-  const errors: ParticipantFilterErrors = {
-    minParticipants: min.error,
-    maxParticipants: max.error,
-  };
-  if (!min.error && !max.error && min.value !== undefined && max.value !== undefined
-    && min.value > max.value) {
-    errors.minParticipants = "Minimum must not exceed maximum.";
-    errors.maxParticipants = "Maximum must be at least the minimum.";
-  }
-  return {
-    errors,
-    minParticipants: min.value,
-    maxParticipants: max.value,
-  };
 }
 
 export interface GroupSelectionToolbarProps {
@@ -206,66 +170,29 @@ function GroupSelectionFilterPanel({
   participantErrors,
   title,
 }: GroupSelectionFilterPanelProps) {
-  const [minimum, setMinimum] = useState(filters.minParticipants?.toString() ?? "");
-  const [maximum, setMaximum] = useState(filters.maxParticipants?.toString() ?? "");
-  const [localErrors, setLocalErrors] = useState<ParticipantFilterErrors>({});
-  const [rangeDirty, setRangeDirty] = useState(false);
   const filterCount = activeGroupSelectionFilterCount(filters);
-
-  useEffect(() => {
-    setMinimum(filters.minParticipants?.toString() ?? "");
-    setMaximum(filters.maxParticipants?.toString() ?? "");
-    setRangeDirty(false);
-  }, [filters.maxParticipants, filters.minParticipants]);
-
-  function applyParticipantRange() {
-    const validation = validateParticipantRange(minimum, maximum);
-    setLocalErrors(validation.errors);
-    if (validation.errors.minParticipants || validation.errors.maxParticipants) return;
-    onParticipantErrorsClear();
-    setRangeDirty(false);
-    onChange({
-      ...filters,
-      minParticipants: validation.minParticipants,
-      maxParticipants: validation.maxParticipants,
-    });
-  }
-
-  useEffect(() => {
-    if (!rangeDirty) return;
-    const timeout = window.setTimeout(applyParticipantRange, 500);
-    return () => window.clearTimeout(timeout);
-  }, [maximum, minimum, rangeDirty]);
-
-  const minimumError = localErrors.minParticipants ?? participantErrors.minParticipants;
-  const maximumError = localErrors.maxParticipants ?? participantErrors.maxParticipants;
 
   return (
     <section
       aria-label={ariaLabel}
-      className="data-filter-panel group-selection-filter-panel"
+      className="data-filter-panel data-filter-panel-grid-2 group-selection-filter-panel"
       id={`${idPrefix}-filter-panel`}
     >
       <header className="data-filter-panel-header">
         <div><strong>{title}</strong><span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span></div>
-        <button aria-label={`Close ${ariaLabel.toLocaleLowerCase()}`} className="data-filter-panel-close" onClick={onClose} type="button"><AppIcon name="close" size="xs" /></button>
+        <Button aria-label={`Close ${ariaLabel.toLocaleLowerCase()}`} className="data-filter-panel-close" icon="close" onClick={onClose} variant="ghost" />
       </header>
       <div className="data-filter-panel-body">
         <fieldset><legend>Capability</legend><div className="data-filter-options">
-          {CAPABILITY_OPTIONS.map((option) => <label key={option.value}><input checked={filters.capabilityStatuses.includes(option.value)} onChange={() => onChange({ ...filters, capabilityStatuses: toggleOrdered(filters.capabilityStatuses, option.value, CAPABILITY_OPTIONS) })} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{option.label}</span></label>)}
+          {CAPABILITY_OPTIONS.map((option) => <FilterOption checked={filters.capabilityStatuses.includes(option.value)} key={option.value} onChange={() => onChange({ ...filters, capabilityStatuses: toggleOrdered(filters.capabilityStatuses, option.value, CAPABILITY_OPTIONS) })}>{option.label}</FilterOption>)}
         </div></fieldset>
         <fieldset><legend>Capability data</legend><div className="data-filter-options">
-          {FRESHNESS_OPTIONS.map((option) => <label key={option.value}><input checked={filters.capabilityFreshness.includes(option.value)} onChange={() => onChange({ ...filters, capabilityFreshness: toggleOrdered(filters.capabilityFreshness, option.value, FRESHNESS_OPTIONS) })} type="checkbox" /><span aria-hidden="true" className="data-filter-check"><AppIcon name="check" size="xs" /></span><span>{option.label}</span></label>)}
+          {FRESHNESS_OPTIONS.map((option) => <FilterOption checked={filters.capabilityFreshness.includes(option.value)} key={option.value} onChange={() => onChange({ ...filters, capabilityFreshness: toggleOrdered(filters.capabilityFreshness, option.value, FRESHNESS_OPTIONS) })}>{option.label}</FilterOption>)}
         </div></fieldset>
-        <fieldset><legend>Participants</legend><form className="group-selection-filter-range" noValidate onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) applyParticipantRange(); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); applyParticipantRange(); } }} onSubmit={(event) => { event.preventDefault(); applyParticipantRange(); }}>
-          <TextField error={minimumError} inputMode="numeric" label="Minimum" labelHidden max={MAX_PARTICIPANTS} min={0} monospace onChange={(event) => { setMinimum(event.target.value); setRangeDirty(true); setLocalErrors((current) => ({ ...current, minParticipants: undefined })); onParticipantErrorsClear(); }} placeholder="Minimum" size="xs" step={1} type="number" value={minimum} />
-          <span aria-hidden="true" className="group-selection-filter-range-separator">–</span>
-          <TextField error={maximumError} inputMode="numeric" label="Maximum" labelHidden max={MAX_PARTICIPANTS} min={0} monospace onChange={(event) => { setMaximum(event.target.value); setRangeDirty(true); setLocalErrors((current) => ({ ...current, maxParticipants: undefined })); onParticipantErrorsClear(); }} placeholder="Maximum" size="xs" step={1} type="number" value={maximum} />
-          <small>Inclusive range · unknown counts excluded.</small>
-        </form></fieldset>
+        <fieldset><legend>Participants</legend><ParticipantRangeFilter errors={participantErrors} idPrefix={idPrefix} maxParticipants={filters.maxParticipants} minParticipants={filters.minParticipants} onChange={(range) => onChange({ ...filters, ...range })} onErrorsClear={onParticipantErrorsClear} /></fieldset>
         <fieldset><legend>Group state</legend><div className="data-filter-options data-filter-options-single">
-          <label><input checked={filters.isActive === undefined} name={`${idPrefix}-state-filter`} onChange={() => onChange({ ...filters, isActive: undefined })} type="radio" /><span>Active</span></label>
-          <label><input checked={filters.isActive === false} name={`${idPrefix}-state-filter`} onChange={() => onChange({ ...filters, isActive: false })} type="radio" /><span>Inactive</span></label>
+          <FilterOption checked={filters.isActive === undefined} name={`${idPrefix}-state-filter`} onChange={() => onChange({ ...filters, isActive: undefined })} type="radio">Active</FilterOption>
+          <FilterOption checked={filters.isActive === false} name={`${idPrefix}-state-filter`} onChange={() => onChange({ ...filters, isActive: false })} type="radio">Inactive</FilterOption>
         </div></fieldset>
       </div>
       <CampaignTargetFilterSummary filters={filters} onChange={onChange} />

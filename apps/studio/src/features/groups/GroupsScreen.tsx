@@ -287,6 +287,12 @@ export function GroupsScreen() {
             ? { capabilityFreshness: state.capabilityFreshness }
             : {}),
           ...(state.isActive === undefined ? {} : { isActive: state.isActive }),
+          ...(state.minParticipants === undefined
+            ? {}
+            : { minParticipants: state.minParticipants }),
+          ...(state.maxParticipants === undefined
+            ? {}
+            : { maxParticipants: state.maxParticipants }),
         });
         if (
           revision !== listRevision.current ||
@@ -521,6 +527,8 @@ export function GroupsScreen() {
       capabilityStatuses,
       capabilityFreshness,
       isActive,
+      maxParticipants,
+      minParticipants,
       offset,
     } = listState;
     if (sessionId !== selectedSessionId || groupsScope.scope.mode === "list:view") return;
@@ -530,6 +538,8 @@ export function GroupsScreen() {
       capabilityStatuses,
       capabilityFreshness,
       isActive,
+      maxParticipants,
+      minParticipants,
       offset,
     });
   }, [
@@ -538,6 +548,8 @@ export function GroupsScreen() {
     listState.capabilityStatuses,
     listState.capabilityFreshness,
     listState.isActive,
+    listState.maxParticipants,
+    listState.minParticipants,
     listState.offset,
     loadGroups,
     groupsScope.scope.mode,
@@ -1498,7 +1510,7 @@ export function GroupsScreen() {
                         value: <DateTime value={detail.syncedAt} />,
                       },
                     ]}
-                    status={<Badge tone={detail.isActive ? "success" : "neutral"}>{detail.isActive ? "Active" : "Inactive"}</Badge>}
+                    status={<Badge tone={detail.isActive ? "success" : "neutral"} variant="status">{detail.isActive ? "Active" : "Inactive"}</Badge>}
                     title={detail.name}
                     titleId="group-identity-title"
                   >
@@ -1549,6 +1561,7 @@ export function GroupsScreen() {
                               tone={
                                 detailCapabilityIsStale ? "warning" : "success"
                               }
+                              variant="status"
                             >
                               {detailCapabilityIsStale ? "Stale" : "Current"}
                             </Badge>
@@ -1783,7 +1796,7 @@ export function GroupsScreen() {
                             <Badge
                               tone={
                                 member.isAdmin || member.isSuperAdmin
-                                  ? "success"
+                                  ? "info"
                                   : "neutral"
                               }
                             >

@@ -1,5 +1,6 @@
 import type { RuntimeGroupListGroup } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
+import { Checkbox } from "@/shared/ui/Checkbox";
 import { GroupCapabilityStatus } from "../GroupCapabilityStatus";
 import "./group-selection.css";
 
@@ -49,13 +50,13 @@ export function GroupSelectionTable({
   const resultRows = rows.filter((row) => !pinnedIds.has(row.groupId));
   function renderRow(row: GroupSelectionRow) {
     const selected = selectedIds.has(row.groupId);
-    return <tr data-selected={selected || undefined} key={row.groupId}><td className="group-selection-check"><input aria-label={`Select ${row.groupName}`} checked={selected} disabled={disabled} onChange={() => onToggle(row.groupId)} type="checkbox" /></td><td className="group-selection-group"><div><strong>{row.groupName}</strong>{!row.isActive && <Badge tone="neutral">Inactive</Badge>}</div><small>{row.groupId}</small></td><td className="group-selection-participants" title={row.participantsCount === null ? unknownParticipantsTitle : undefined}>{participantCount(row.participantsCount)}</td><td className="group-selection-capability"><GroupCapabilityStatus capability={row.sendCapability} includeFreshness={false} /></td></tr>;
+    return <tr data-selected={selected || undefined} key={row.groupId}><td className="group-selection-check"><Checkbox aria-label={`Select ${row.groupName}`} checked={selected} disabled={disabled} onChange={() => onToggle(row.groupId)} /></td><td className="group-selection-group"><div><strong>{row.groupName}</strong>{!row.isActive && <Badge tone="neutral" variant="status">Inactive</Badge>}</div><small>{row.groupId}</small></td><td className="group-selection-participants" title={row.participantsCount === null ? unknownParticipantsTitle : undefined}>{participantCount(row.participantsCount)}</td><td className="group-selection-capability"><GroupCapabilityStatus capability={row.sendCapability} includeFreshness={false} /></td></tr>;
   }
   return (
     <div aria-busy={loading || undefined} className="group-selection-table">
       <table>
         <caption>{caption}</caption>
-        <thead><tr><th className="group-selection-check" scope="col"><input aria-checked={somePageSelected && !allPageSelected ? "mixed" : allPageSelected} aria-label="Select all groups on this page" checked={allPageSelected} disabled={disabled || !pageIds.length || loading} onChange={onTogglePage} ref={(node) => { if (node) node.indeterminate = somePageSelected && !allPageSelected; }} title="Select all groups on this page" type="checkbox" /></th><th scope="col">Group</th><th className="group-selection-participants" scope="col">Participants</th><th className="group-selection-capability" scope="col">Capability</th></tr></thead>
+        <thead><tr><th className="group-selection-check" scope="col"><Checkbox aria-checked={somePageSelected && !allPageSelected ? "mixed" : allPageSelected} aria-label="Select all groups on this page" checked={allPageSelected} disabled={disabled || !pageIds.length || loading} onChange={onTogglePage} ref={(node) => { if (node) node.indeterminate = somePageSelected && !allPageSelected; }} title="Select all groups on this page" /></th><th scope="col">Group</th><th className="group-selection-participants" scope="col">Participants</th><th className="group-selection-capability" scope="col">Capability</th></tr></thead>
         {loading && !rows.length ? <tbody><tr><td className="group-selection-table-empty" colSpan={4}>{loadingMessage}</td></tr></tbody>
           : !rows.length ? <tbody><tr><td className="group-selection-table-empty" colSpan={4}>{emptyMessage}</td></tr></tbody>
           : <>

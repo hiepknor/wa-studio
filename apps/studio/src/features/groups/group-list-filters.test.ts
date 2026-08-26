@@ -15,6 +15,8 @@ describe("group list filters", () => {
     const state = initialGroupListState("session-id");
 
     expect(state.isActive).toBeUndefined();
+    expect(state.minParticipants).toBeUndefined();
+    expect(state.maxParticipants).toBeUndefined();
     expect(hasGroupFilters(state)).toBe(false);
     expect(activeGroupFilterCount(state)).toBe(0);
   });
@@ -24,8 +26,10 @@ describe("group list filters", () => {
     state.capabilityStatuses = ["DENIED", "UNKNOWN"];
     state.capabilityFreshness = ["CURRENT", "STALE"];
     state.isActive = false;
+    state.minParticipants = 20;
+    state.maxParticipants = 500;
 
-    expect(activeGroupFilterCount(state)).toBe(3);
+    expect(activeGroupFilterCount(state)).toBe(4);
   });
 
   it("clears filters without clearing the current search", () => {
@@ -33,6 +37,8 @@ describe("group list filters", () => {
     state.inputQuery = "release";
     state.query = "release";
     state.capabilityStatuses = ["DENIED"];
+    state.minParticipants = 20;
+    state.maxParticipants = 500;
     state.offset = 40;
 
     expect(clearGroupFilters(state)).toMatchObject({
@@ -41,6 +47,8 @@ describe("group list filters", () => {
       capabilityStatuses: [],
       capabilityFreshness: [],
       isActive: undefined,
+      minParticipants: undefined,
+      maxParticipants: undefined,
       offset: 0,
     });
   });

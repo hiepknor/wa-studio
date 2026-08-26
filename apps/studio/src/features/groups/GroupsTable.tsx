@@ -1,6 +1,7 @@
 import type { RuntimeGroup } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
+import { Checkbox } from "@/shared/ui/Checkbox";
 import { DateTime } from "@/shared/ui/DateTime";
 import { GroupCapabilityStatus } from "./GroupCapabilityStatus";
 
@@ -70,12 +71,11 @@ export function GroupsTable({
       >
         {selection && (
           <td className="groups-selection-cell">
-            <input
+            <Checkbox
               aria-label={`Select ${row.name}`}
               checked={selected}
               disabled={selection.disabled}
               onChange={() => selection.onToggle(row.id)}
-              type="checkbox"
             />
           </td>
         )}
@@ -83,7 +83,7 @@ export function GroupsTable({
           <div className="stack stack-xs groups-name-cell">
             <span className="groups-name-line">
               <strong className="data-primary-text" title={row.name}>{row.name}</strong>
-              {!row.isActive && <Badge tone="neutral">Inactive</Badge>}
+              {!row.isActive && <Badge tone="neutral" variant="status">Inactive</Badge>}
             </span>
             <span className="data-identifier" title={row.id}>{row.id}</span>
           </div>
@@ -121,7 +121,7 @@ export function GroupsTable({
       className="data-table-scroll groups-table-scroll"
       data-updating={(loading && rows.length > 0) || undefined}
     >
-      <table>
+      <table className="data-table">
         <caption>{caption}</caption>
         <colgroup>
           {selection && <col className="groups-column-selection" />}
@@ -135,7 +135,7 @@ export function GroupsTable({
           <tr>
             {selection && (
               <th className="groups-selection-cell" scope="col">
-                <input
+                <Checkbox
                   aria-checked={somePageSelected && !allPageSelected ? "mixed" : allPageSelected}
                   aria-label="Select all groups on this page"
                   checked={allPageSelected}
@@ -144,14 +144,13 @@ export function GroupsTable({
                   ref={(node) => {
                     if (node) node.indeterminate = somePageSelected && !allPageSelected;
                   }}
-                  type="checkbox"
                 />
               </th>
             )}
             <th scope="col">Group</th>
             <th className="data-column-number" scope="col">Participants</th>
             <th scope="col">Send capability</th>
-            <th scope="col">Record synced</th>
+            <th className="data-column-time" scope="col">Record synced</th>
             <th aria-label="Actions" scope="col" />
           </tr>
         </thead>

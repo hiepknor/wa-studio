@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 
-import { AppIcon } from "@/shared/ui/AppIcon";
+import { Button } from "@/shared/ui/Button";
+import { FilterOption } from "@/shared/ui/FilterOption";
 import {
   activeGroupFilterCount,
   CAPABILITY_FRESHNESS_OPTIONS,
@@ -9,6 +10,7 @@ import {
   toggleFilterValue,
 } from "./group-list-filters";
 import { GroupFilterSummary } from "./GroupFilterSummary";
+import { ParticipantRangeFilter } from "./ParticipantRangeFilter";
 
 interface GroupFilterPanelProps {
   onClose: () => void;
@@ -22,7 +24,7 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
   return (
     <section
       aria-label="Group filters"
-      className="data-filter-panel"
+      className="data-filter-panel data-filter-panel-grid-2"
       id="group-list-filter-panel"
     >
       <header className="data-filter-panel-header">
@@ -30,14 +32,13 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
           <strong>Filter groups</strong>
           <span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span>
         </div>
-        <button
+        <Button
           aria-label="Close group filters"
           className="data-filter-panel-close"
+          icon="close"
           onClick={onClose}
-          type="button"
-        >
-          <AppIcon name="close" size="xs" />
-        </button>
+          variant="ghost"
+        />
       </header>
 
       <div className="data-filter-panel-body">
@@ -45,9 +46,9 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
           <legend>Send capability</legend>
           <div className="data-filter-options">
             {CAPABILITY_STATUS_OPTIONS.map((option) => (
-              <label key={option.value}>
-                <input
+              <FilterOption
                   checked={state.capabilityStatuses.includes(option.value)}
+                  key={option.value}
                   onChange={() => setState((current) => ({
                     ...current,
                     capabilityStatuses: toggleFilterValue(
@@ -57,24 +58,32 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
                     ),
                     offset: 0,
                   }))}
-                  type="checkbox"
-                />
-                <span aria-hidden="true" className="data-filter-check">
-                  <AppIcon name="check" size="xs" />
-                </span>
-                <span>{option.label}</span>
-              </label>
+              >{option.label}</FilterOption>
             ))}
           </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Participants</legend>
+          <ParticipantRangeFilter
+            idPrefix="group-list-filter"
+            maxParticipants={state.maxParticipants}
+            minParticipants={state.minParticipants}
+            onChange={(range) => setState((current) => ({
+              ...current,
+              ...range,
+              offset: 0,
+            }))}
+          />
         </fieldset>
 
         <fieldset>
           <legend>Freshness</legend>
           <div className="data-filter-options">
             {CAPABILITY_FRESHNESS_OPTIONS.map((option) => (
-              <label key={option.value}>
-                <input
+              <FilterOption
                   checked={state.capabilityFreshness.includes(option.value)}
+                  key={option.value}
                   onChange={() => setState((current) => ({
                     ...current,
                     capabilityFreshness: toggleFilterValue(
@@ -84,13 +93,7 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
                     ),
                     offset: 0,
                   }))}
-                  type="checkbox"
-                />
-                <span aria-hidden="true" className="data-filter-check">
-                  <AppIcon name="check" size="xs" />
-                </span>
-                <span>{option.label}</span>
-              </label>
+              >{option.label}</FilterOption>
             ))}
           </div>
         </fieldset>
@@ -98,8 +101,7 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
         <fieldset>
           <legend>Group state</legend>
           <div className="data-filter-options data-filter-options-single">
-            <label>
-              <input
+            <FilterOption
                 checked={state.isActive === undefined}
                 name="group-state-filter"
                 onChange={() => setState((current) => ({
@@ -108,11 +110,8 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
                   offset: 0,
                 }))}
                 type="radio"
-              />
-              <span>Active</span>
-            </label>
-            <label>
-              <input
+            >Active</FilterOption>
+            <FilterOption
                 checked={state.isActive === false}
                 name="group-state-filter"
                 onChange={() => setState((current) => ({
@@ -121,9 +120,7 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
                   offset: 0,
                 }))}
                 type="radio"
-              />
-              <span>Inactive</span>
-            </label>
+            >Inactive</FilterOption>
           </div>
         </fieldset>
       </div>

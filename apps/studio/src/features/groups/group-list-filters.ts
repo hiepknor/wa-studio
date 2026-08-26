@@ -9,6 +9,8 @@ export interface GroupListRequestState {
   capabilityStatuses: RuntimeGroupCapabilityStatus[];
   capabilityFreshness: RuntimeGroupCapabilityFreshness[];
   isActive: boolean | undefined;
+  maxParticipants: number | undefined;
+  minParticipants: number | undefined;
   offset: number;
 }
 
@@ -41,6 +43,8 @@ export function initialGroupListState(sessionId: string | null): GroupListState 
     capabilityStatuses: [],
     capabilityFreshness: [],
     isActive: undefined,
+    maxParticipants: undefined,
+    minParticipants: undefined,
     offset: 0,
   };
 }
@@ -65,6 +69,8 @@ export function groupListRequestKey(state: GroupListRequestState): string {
     capabilityStatuses: state.capabilityStatuses,
     capabilityFreshness: state.capabilityFreshness,
     isActive: state.isActive,
+    maxParticipants: state.maxParticipants,
+    minParticipants: state.minParticipants,
     offset: state.offset,
   });
 }
@@ -74,13 +80,16 @@ export function hasGroupFilters(state: GroupListState): boolean {
     state.capabilityStatuses.length
     || state.capabilityFreshness.length
     || state.isActive !== undefined
+    || state.minParticipants !== undefined
+    || state.maxParticipants !== undefined
   );
 }
 
 export function activeGroupFilterCount(state: GroupListState): number {
   return Number(state.capabilityStatuses.length > 0)
     + Number(state.capabilityFreshness.length > 0)
-    + Number(state.isActive !== undefined);
+    + Number(state.isActive !== undefined)
+    + Number(state.minParticipants !== undefined || state.maxParticipants !== undefined);
 }
 
 export function clearGroupFilters(state: GroupListState): GroupListState {
@@ -89,6 +98,8 @@ export function clearGroupFilters(state: GroupListState): GroupListState {
     capabilityStatuses: [],
     capabilityFreshness: [],
     isActive: undefined,
+    maxParticipants: undefined,
+    minParticipants: undefined,
     offset: 0,
   };
 }

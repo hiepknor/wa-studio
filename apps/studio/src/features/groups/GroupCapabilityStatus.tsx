@@ -55,7 +55,7 @@ export function GroupCapabilityStatus({
   const label = includeFreshness ? presentation.label : presentation.statusLabel;
 
   return (
-    <Badge aria-label={presentation.accessibleLabel} tone={presentation.tone}>
+    <Badge aria-label={presentation.accessibleLabel} tone={presentation.tone} variant="status">
       {label}
     </Badge>
   );

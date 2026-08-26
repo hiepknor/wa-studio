@@ -81,6 +81,28 @@ export function GroupFilterSummary({
             }))}
           />
         ))}
+        {state.minParticipants !== undefined && (
+          <FilterChip
+            accessibleLabel={`Minimum participants: ${state.minParticipants}`}
+            label={`≥ ${state.minParticipants} participants`}
+            onRemove={() => setState((current) => ({
+              ...current,
+              minParticipants: undefined,
+              offset: 0,
+            }))}
+          />
+        )}
+        {state.maxParticipants !== undefined && (
+          <FilterChip
+            accessibleLabel={`Maximum participants: ${state.maxParticipants}`}
+            label={`≤ ${state.maxParticipants} participants`}
+            onRemove={() => setState((current) => ({
+              ...current,
+              maxParticipants: undefined,
+              offset: 0,
+            }))}
+          />
+        )}
         {state.isActive !== undefined && (
           <FilterChip
             accessibleLabel="Inactive groups"
