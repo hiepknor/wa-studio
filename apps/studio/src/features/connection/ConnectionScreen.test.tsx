@@ -30,6 +30,11 @@ describe("ConnectionScreen", () => {
       .toHaveValue("");
     expect(screen.getByPlaceholderText("http://127.0.0.1:34100"))
       .toBeInTheDocument();
+    expect(screen.getByText("The API key remains in memory and is never written to disk."))
+      .toBeInTheDocument();
+    expect(screen.getByRole("form", { name: "WA Runtime connection" }))
+      .toHaveClass("connection-setup-card");
+    expect(document.querySelector(".connection-terminal-bar")).not.toBeInTheDocument();
   });
 
   it("shows a loading state while the Runtime probe is pending", async () => {

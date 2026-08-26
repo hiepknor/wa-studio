@@ -17,6 +17,13 @@ describe("ManagedRuntimeSetupScreen", () => {
     const user = userEvent.setup();
     const onConnect = vi.fn().mockResolvedValue(undefined);
     render(<ManagedRuntimeSetupScreen flow="configure" onConnect={onConnect} snapshot={snapshot} />);
+    expect(screen.getByRole("heading", { name: "Ready on this machine." })).toBeInTheDocument();
+    expect(screen.getByRole("form", { name: "OpenWA connection" }))
+      .toHaveClass("connection-setup-card");
+    expect(screen.getByText("WA Studio does not send operational data to a hosted workspace."))
+      .toBeInTheDocument();
+    expect(screen.queryByText("1 of 1")).not.toBeInTheDocument();
+    expect(document.querySelector(".connection-terminal-bar")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("OpenWA base URL"), "https://openwa.onio.cc");
     await user.type(screen.getByLabelText("OpenWA API key"), "openwa-key");
     await user.click(screen.getByRole("button", { name: "Connect OpenWA" }));

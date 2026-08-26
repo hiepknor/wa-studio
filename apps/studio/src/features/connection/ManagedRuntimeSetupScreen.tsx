@@ -10,11 +10,12 @@ import {
   type ManagedRuntimeProvisioningProfile,
   type ManagedRuntimeSnapshot,
 } from "@/shared/native/managed-runtime";
-import { BrandMark } from "@/shared/ui/BrandMark";
+import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { TextField } from "@/shared/ui/TextField";
+import { ConnectionShell } from "./ConnectionShell";
 
 interface ManagedRuntimeSetupScreenProps {
   connectionError?: string | null;
@@ -116,83 +117,69 @@ export function ManagedRuntimeSetupScreen({
   }
 
   return (
-    <main className="shell connection-shell managed-runtime-shell">
-      <header className="connection-brand">
-        <BrandMark /><strong>WA Studio</strong><span className="connection-build">local workspace</span>
-      </header>
-      <div className="connection-stage">
-        <section className="intro connection-intro" aria-labelledby="managed-runtime-title">
-          <span className="eyebrow">{showForm ? "Gateway connection" : "Local workspace"}</span>
-          <h1 id="managed-runtime-title">{showForm ? <>Connect your <span>OpenWA</span></> : <>Preparing your <span>workspace</span></>}</h1>
-          <p>{showForm ? "Point WA Studio at your existing OpenWA gateway. Everything else runs privately on this Mac." : "WA Studio is preparing the private local workspace on this Mac."}</p>
-          <ol aria-label="Workspace setup progress" className="connection-setup-steps">
-            {[
-              ["Connect OpenWA", "Validate the gateway and discover Event Inbox."],
-              ["Start local services", "Prepare Runtime, PostgreSQL, and the durable queue."],
-              ["Open workspace", "Attach Studio after every local process is healthy."],
-            ].map(([title, description], index) => (
-              <li className={index < step ? "is-complete" : index === step ? "is-active" : ""} key={title}>
-                <span className="connection-step-index">{index < step ? "✓" : index + 1}</span>
-                <span><strong>{title}</strong><small>{description}</small></span>
-              </li>
-            ))}
-          </ol>
-          <dl className="connection-specs">
-            <div><dt>Gateway</dt><dd>OpenWA 0.22.0 pinned</dd></div>
-            <div><dt>Runtime</dt><dd>{snapshot.manifest?.version ?? "bundled with Studio"}</dd></div>
-            <div><dt>Storage</dt><dd>local + protected</dd></div>
-          </dl>
-        </section>
-
+    <>
+      <ConnectionShell
+        buildLabel="Local workspace"
+        description={showForm
+          ? "Connect WA Studio to OpenWA. Runtime, queues, campaign drafts, and backups remain managed on this Mac."
+          : "WA Studio is preparing the private local workspace and validating each managed service."}
+        eyebrow="Local operations workbench"
+        title={flow === "error" ? "Workspace needs attention." : showForm ? "Ready on this machine." : "Preparing this machine."}
+        titleId="managed-runtime-title"
+        trustNote="WA Studio does not send operational data to a hosted workspace."
+      >
         {showForm ? (
-          <form className="connection-form" onSubmit={submit}>
-            <article aria-label="OpenWA connection" className="connection-card">
-              <header className="connection-terminal-bar"><span className="connection-window-dots" aria-hidden="true"><i /><i /><i /></span><span>openwa.connect</span><span className="connection-terminal-state">0.22.0</span></header>
-              <div className="card-content stack stack-md">
-                <div className="connection-card-heading"><span className="connection-card-kicker">Gateway connection</span><h2>Connect to OpenWA</h2><p>Studio validates OpenWA before starting the local workspace.</p></div>
-                <TextField autoFocus={baseUrl.length === 0} icon="server" id="openwa-url" inputMode="url" label="OpenWA base URL" monospace onChange={event => setBaseUrl(event.currentTarget.value)} placeholder="https://openwa.company.com" required spellCheck={false} type="url" value={baseUrl} />
-                <TextField autoComplete="new-password" autoFocus={baseUrl.length > 0} description="Saved in the protected local app store after validation." icon="key" id="openwa-api-key" label="OpenWA API key" monospace onChange={event => setApiKey(event.currentTarget.value)} required type="password" value={apiKey} />
-                {flow === "error" ? <InlineAlert className="connection-status" indicator title="Could not connect">{connectionError ?? snapshot.error ?? "Check the connection and try again."}</InlineAlert> : <InlineAlert className="connection-status" indicator title="Local by default" tone="neutral">Runtime and data stay on this Mac.</InlineAlert>}
-                {snapshot.phase === "degraded" && (
-                  <section aria-labelledby="degraded-recovery-title" className="managed-runtime-recovery stack stack-sm">
-                    <div>
-                      <span className="connection-card-kicker">Database recovery</span>
-                      <h3 id="degraded-recovery-title">Restore a verified local backup</h3>
-                      <p>The failed PostgreSQL directory will be quarantined, never deleted.</p>
-                    </div>
-                    {backupError && <InlineAlert title="Recovery unavailable">{backupError}</InlineAlert>}
-                    {backups.length === 0 ? (
-                      <small>No local recovery points are available.</small>
-                    ) : (
-                      <div className="managed-runtime-recovery-list">
-                        {backups.map(backup => (
-                          <Button
-                            disabled={restoringBackup}
-                            key={backup.id}
-                            onClick={() => setSelectedBackup(backup)}
-                            size="sm"
-                            type="button"
-                          >
-                            Restore {new Date(backup.createdAtMs).toLocaleString()}
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                  </section>
+          <form aria-label="OpenWA connection" className="connection-form connection-setup-card" onSubmit={submit}>
+            <header className="connection-section-label"><span>OpenWA gateway</span></header>
+            <div className="connection-card-heading"><h2>Connect to OpenWA</h2><p>Studio validates the gateway before starting the managed local workspace.</p></div>
+            <div className="connection-fields">
+              <TextField autoFocus={baseUrl.length === 0} icon="server" id="openwa-url" inputMode="url" label="OpenWA base URL" monospace onChange={event => setBaseUrl(event.currentTarget.value)} placeholder="https://openwa.company.com" required spellCheck={false} type="url" value={baseUrl} />
+              <TextField autoComplete="new-password" autoFocus={baseUrl.length > 0} description="Saved in the protected local app store after validation." icon="key" id="openwa-api-key" label="OpenWA API key" monospace onChange={event => setApiKey(event.currentTarget.value)} required type="password" value={apiKey} />
+            </div>
+            {flow === "error" ? <InlineAlert className="connection-status" indicator title="Could not connect">{connectionError ?? snapshot.error ?? "Check the connection and try again."}</InlineAlert> : <InlineAlert className="connection-status" indicator title="Local by default" tone="neutral">Runtime and data stay on this Mac.</InlineAlert>}
+            {snapshot.phase === "degraded" && (
+              <section aria-labelledby="degraded-recovery-title" className="managed-runtime-recovery stack stack-sm">
+                <div>
+                  <span className="connection-card-kicker">Database recovery</span>
+                  <h3 id="degraded-recovery-title">Restore a verified local backup</h3>
+                  <p>The failed PostgreSQL directory will be quarantined, never deleted.</p>
+                </div>
+                {backupError && <InlineAlert title="Recovery unavailable">{backupError}</InlineAlert>}
+                {backups.length === 0 ? <small>No local recovery points are available.</small> : (
+                  <div className="managed-runtime-recovery-list">
+                    {backups.map(backup => <Button disabled={restoringBackup} key={backup.id} onClick={() => setSelectedBackup(backup)} size="sm" type="button">Restore {new Date(backup.createdAtMs).toLocaleString()}</Button>)}
+                  </div>
                 )}
-              </div>
-              <footer className="card-footer"><span className="connection-shortcut" aria-hidden="true">Local services start automatically</span><Button className="connection-submit-button" size="lg" type="submit" variant="primary">Connect OpenWA</Button></footer>
-            </article>
+              </section>
+            )}
+            <div className="connection-service-check">
+              <span aria-hidden="true" className="connection-status-mark"><AppIcon name="server" size="sm" /></span>
+              <span><strong>WA Runtime managed locally</strong><small>v{snapshot.manifest?.version ?? "bundled"} · PostgreSQL-backed</small></span>
+            </div>
+            <Button className="connection-submit-button" size="lg" type="submit" variant="primary">Connect OpenWA</Button>
+            <p className="connection-setup-footnote">Connection settings can be changed later without moving local data.</p>
           </form>
         ) : (
-          <section aria-live="polite" className="connection-form">
-            <article aria-label="Connection progress" className="connection-card managed-runtime-status-card">
-              <header className="connection-terminal-bar"><span className="connection-window-dots" aria-hidden="true"><i /><i /><i /></span><span>workspace.start</span><span className="connection-terminal-state">{flow}</span></header>
-              <div className="card-content stack stack-md"><div className="connection-card-heading"><span className="connection-card-kicker">Workspace setup</span><h2>{progress[0]}</h2><p>Keep WA Studio open while setup completes.</p></div><p className="managed-runtime-progress" role="status"><span aria-hidden="true" /><strong>{progress[1]}</strong></p><dl className="connection-runtime-grid"><div><dt>Database</dt><dd>PostgreSQL</dd></div><div><dt>Queue</dt><dd>PostgreSQL</dd></div><div><dt>Processes</dt><dd>API · Worker · Scheduler</dd></div></dl></div>
-            </article>
+          <section aria-label="Connection progress" aria-live="polite" className="connection-form connection-setup-card">
+            <header className="connection-section-label"><span>Workspace setup</span><span className="connection-step-count">{Math.min(step + 1, 3)} of 3</span></header>
+            <div className="connection-card-heading"><h2>{progress[0]}</h2><p>Keep WA Studio open while setup completes.</p></div>
+            <ol aria-label="Workspace setup progress" className="connection-setup-steps">
+              {[
+                ["Connect OpenWA", "Validate the gateway and discover Event Inbox."],
+                ["Start local services", "Prepare Runtime, PostgreSQL, and the durable queue."],
+                ["Open workspace", "Attach Studio after every local process is healthy."],
+              ].map(([title, description], index) => (
+                <li className={index < step ? "is-complete" : index === step ? "is-active" : ""} key={title}>
+                  <span className="connection-step-index">{index < step ? <AppIcon name="check" size="xs" /> : index + 1}</span>
+                  <span><strong>{title}</strong><small>{description}</small></span>
+                </li>
+              ))}
+            </ol>
+            <p className="managed-runtime-progress" role="status"><span aria-hidden="true" /><strong>{progress[1]}</strong></p>
+            <dl className="connection-runtime-grid"><div><dt>Database</dt><dd>PostgreSQL</dd></div><div><dt>Queue</dt><dd>PostgreSQL</dd></div><div><dt>Processes</dt><dd>API · Worker · Scheduler</dd></div></dl>
           </section>
         )}
-      </div>
+      </ConnectionShell>
       <ConfirmationDialog
         body={selectedBackup ? (
           <>
@@ -210,7 +197,6 @@ export function ManagedRuntimeSetupScreen({
         open={selectedBackup !== null}
         title="Recover the local Runtime database?"
       />
-      <footer className="connection-footer"><span><i /> local services managed by Studio</span><span>OpenWA stays release-pinned and unchanged</span></footer>
-    </main>
+    </>
   );
 }

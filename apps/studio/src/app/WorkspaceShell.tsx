@@ -21,6 +21,7 @@ import {
 } from "@/shared/native/managed-runtime";
 import { AppIcon, type AppIconName } from "@/shared/ui/AppIcon";
 import { BrandMark } from "@/shared/ui/BrandMark";
+import { Button } from "@/shared/ui/Button";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { StatusDot } from "@/shared/ui/StatusDot";
@@ -236,16 +237,15 @@ export function WorkspaceShell({
           <div className="workspace-brand-lockup">
             <BrandMark />
             <strong className="workspace-brand">WA Studio</strong>
-            <button
+            <Button
               aria-expanded={!railCollapsed}
               aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               className="workspace-rail-toggle"
+              icon="chevron-right"
               onClick={toggleRail}
               title={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              type="button"
-            >
-              <AppIcon name="chevron-right" />
-            </button>
+              variant="ghost"
+            />
           </div>
 
           <nav aria-label="Workspace navigation" className="workspace-navigation">
