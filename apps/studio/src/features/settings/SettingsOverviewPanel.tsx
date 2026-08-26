@@ -26,12 +26,14 @@ interface SettingsOverviewPanelProps {
 type OverviewTone = "danger" | "neutral" | "success" | "warning";
 
 function runtimePresentation(phase: ManagedRuntimeSnapshot["phase"]): {
+  badgeLabel: string;
   description: ReactNode;
   label: string;
   tone: OverviewTone;
 } {
   if (phase === "ready") {
     return {
+      badgeLabel: "Ready",
       description: "API, workers, scheduler, database, and queue are available on this device.",
       label: "WA Runtime is ready",
       tone: "success",
@@ -39,6 +41,7 @@ function runtimePresentation(phase: ManagedRuntimeSnapshot["phase"]): {
   }
   if (phase === "degraded") {
     return {
+      badgeLabel: "Degraded",
       description: "WA Runtime is available, but one or more managed services need attention.",
       label: "WA Runtime needs attention",
       tone: "warning",
@@ -46,12 +49,14 @@ function runtimePresentation(phase: ManagedRuntimeSnapshot["phase"]): {
   }
   if (phase === "unavailable") {
     return {
+      badgeLabel: "Unavailable",
       description: "The desktop supervisor cannot reach the local Runtime right now.",
       label: "WA Runtime is unavailable",
       tone: "danger",
     };
   }
   return {
+    badgeLabel: "Starting",
     description: "The desktop supervisor is preparing the local Runtime services.",
     label: "WA Runtime is starting",
     tone: "warning",
@@ -95,7 +100,7 @@ function SummaryCard({
       <div className="settings-summary-copy">
         <div className="settings-summary-title-row">
           <h4>{title}</h4>
-          <Badge tone={tone}>{status}</Badge>
+          <Badge tone={tone} variant="status">{status}</Badge>
         </div>
         <p>{description}</p>
       </div>
@@ -121,13 +126,13 @@ export function SettingsOverviewPanel({
       {error && <InlineAlert title="Status could not be refreshed">{error}</InlineAlert>}
 
       <section aria-labelledby="settings-runtime-status-title" className={`settings-status-hero settings-status-hero-${runtime.tone}`}>
-        <div className="settings-status-hero-icon"><AppIcon name="server" size="xl" /></div>
+        <div className="settings-status-hero-icon"><AppIcon name="server" size="lg" /></div>
         <div className="settings-status-hero-copy">
           <span className="settings-card-label">Managed locally</span>
           <h3 id="settings-runtime-status-title">{runtime.label}</h3>
           <p>{runtime.description}</p>
         </div>
-        <Badge tone={runtime.tone}>{managedRuntime.phase}</Badge>
+        <Badge tone={runtime.tone} variant="status">{runtime.badgeLabel}</Badge>
       </section>
 
       <div className="settings-summary-grid">
@@ -175,7 +180,7 @@ export function SettingsOverviewPanel({
       </div>
 
       <SettingsSection
-        action={<Badge tone={diagnostics?.managedPostgresRunning ? "success" : "neutral"}>{loading ? "Refreshing" : "Local only"}</Badge>}
+        action={<Badge tone={diagnostics?.managedPostgresRunning ? "success" : "neutral"} variant={loading ? "label" : "status"}>{loading ? "Refreshing" : "Local only"}</Badge>}
         description="Operational details are kept here for troubleshooting and support."
         kicker="Technical details"
         title="Managed desktop stack"

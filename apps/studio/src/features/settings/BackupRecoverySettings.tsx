@@ -185,7 +185,7 @@ export function BackupRecoverySettings({
       {error && <InlineAlert title="Recovery operation failed">{error}</InlineAlert>}
 
       <SettingsSection
-        action={<Badge tone={protection.tone}>{protection.label}</Badge>}
+        action={<Badge tone={protection.tone} variant="status">{protection.label}</Badge>}
         description="WA Studio verifies backup freshness and database integrity on this device."
         kicker="Protection status"
         title="Your local data"
@@ -201,7 +201,7 @@ export function BackupRecoverySettings({
           <div><dt>Recovery points</dt><dd>{diagnostics?.recoveryPointCount ?? 0}</dd></div>
           <div>
             <dt>Integrity</dt>
-            <dd><Badge tone={protectionPresentation(diagnostics?.integrityFreshness).tone}>
+            <dd><Badge tone={protectionPresentation(diagnostics?.integrityFreshness).tone} variant="status">
               {protectionPresentation(diagnostics?.integrityFreshness).label}
             </Badge></dd>
           </div>
@@ -235,13 +235,13 @@ export function BackupRecoverySettings({
         titleId="settings-backup-list-title"
       >
         <div className="data-table-scroll settings-backup-table">
-          <table>
+          <table className="data-table">
             <caption>Managed PostgreSQL backups</caption>
             <thead>
               <tr>
-                <th scope="col">Created</th>
+                <th className="data-column-time" scope="col">Created</th>
                 <th scope="col">Recovery point</th>
-                <th scope="col">Size</th>
+                <th className="data-column-number" scope="col">Size</th>
                 <th className="align-end" scope="col">Action</th>
               </tr>
             </thead>
@@ -257,7 +257,7 @@ export function BackupRecoverySettings({
                     <strong>{backupKind(backup.kind)}</strong>
                     <span className="data-secondary-text">{backup.id}</span>
                   </td>
-                  <td>{bytes(backup.sizeBytes)}</td>
+                  <td className="data-cell-number">{bytes(backup.sizeBytes)}</td>
                   <td className="data-cell-action">
                     <Button
                       disabled={!runtimeReady || restoringBackup}
@@ -276,7 +276,7 @@ export function BackupRecoverySettings({
       </SettingsSection>
 
       <SettingsSection
-        action={recoveryFlow === null ? <Badge tone="warning">Passphrase required</Badge> : undefined}
+        action={recoveryFlow === null ? <Badge tone="warning" variant="status">Passphrase required</Badge> : undefined}
         description="Move Runtime data to another device or keep an encrypted copy away from this computer."
         kicker="Off-device recovery"
         title="Portable recovery archive"

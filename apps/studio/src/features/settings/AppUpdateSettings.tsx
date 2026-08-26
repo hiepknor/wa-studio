@@ -113,13 +113,13 @@ export function AppUpdateSettings({
       )}
 
       <section aria-labelledby="settings-update-status-title" className={`settings-status-hero settings-status-hero-${statusTone}`}>
-        <div className="settings-status-hero-icon"><AppIcon name="sync" size="xl" /></div>
+        <div className="settings-status-hero-icon"><AppIcon name="sync" size="lg" /></div>
         <div className="settings-status-hero-copy">
           <span className="settings-card-label">Signed release channel</span>
           <h3 id="settings-update-status-title">{statusTitle}</h3>
           <p>{statusDescription}</p>
         </div>
-        <Badge tone={enabled ? pending ? "warning" : "success" : "neutral"}>
+        <Badge tone={enabled ? pending ? "warning" : "success" : "neutral"} variant="status">
           {enabled ? pending ? "Update available" : "Channel ready" : "Disabled"}
         </Badge>
       </section>

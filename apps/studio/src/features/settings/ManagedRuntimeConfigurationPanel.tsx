@@ -102,7 +102,7 @@ export function ManagedRuntimeConfigurationPanel({
       {error && <InlineAlert title="Connection settings failed">{error}</InlineAlert>}
 
       <SettingsSection
-        action={<Badge tone={profile ? "success" : "neutral"}>{loading ? "Loading" : profile ? "Connected" : "Developer managed"}</Badge>}
+        action={<Badge tone={profile ? "success" : "neutral"} variant={loading ? "label" : "status"}>{loading ? "Loading" : profile ? "Connected" : "Developer managed"}</Badge>}
         description="WA Runtime uses this endpoint and credential to reach your OpenWA service."
         kicker="Gateway connection"
         title="OpenWA profile"
