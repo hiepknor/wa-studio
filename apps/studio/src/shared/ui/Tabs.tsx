@@ -16,6 +16,7 @@ interface TabsProps<T extends string> {
   ariaLabel: string;
   idPrefix: string;
   onChange: (tab: T) => void;
+  orientation?: "horizontal" | "vertical";
   tabs: readonly TabItem<T>[];
 }
 
@@ -25,14 +26,16 @@ export function Tabs<T extends string>({
   ariaLabel,
   idPrefix,
   onChange,
+  orientation = "horizontal",
   tabs,
 }: TabsProps<T>) {
   function handleKeyDown(
     event: KeyboardEvent<HTMLButtonElement>,
     index: number,
   ) {
-    const direction =
-      event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    const direction = orientation === "vertical"
+      ? event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0
+      : event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
     const enabledIndexes = tabs
       .map((tab, tabIndex) => tab.disabled ? -1 : tabIndex)
       .filter((tabIndex) => tabIndex >= 0);
@@ -59,7 +62,8 @@ export function Tabs<T extends string>({
   return (
     <div
       aria-label={ariaLabel}
-      className={`tabs tabs-${appearance}`}
+      aria-orientation={orientation}
+      className={`tabs tabs-${appearance} tabs-${orientation}`}
       role="tablist"
     >
       {tabs.map((tab, index) => (

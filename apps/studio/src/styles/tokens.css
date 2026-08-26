@@ -194,6 +194,9 @@
   --table-state-width: 148px;
   --table-date-width: 124px;
   --table-action-width: 44px;
+  --settings-nav-width: 172px;
+  --setting-row-min-height: 62px;
+  --copy-line-settings: 58ch;
   --progress-track-height: 4px;
   --switch-width: 36px;
   --switch-height: 20px;

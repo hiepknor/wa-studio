@@ -21,7 +21,6 @@ import {
   type ManagedRuntimeBackup,
   type ManagedRuntimeDiagnostics,
 } from "@/shared/native/managed-runtime";
-import { Button } from "@/shared/ui/Button";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { Tabs, type TabItem } from "@/shared/ui/Tabs";
@@ -146,87 +145,84 @@ export function SettingsScreen({
   }));
 
   return (
-    <div className="settings-screen stack stack-lg">
+    <div className="settings-screen">
       <PageHeader
-        actions={(
-          <Button
-            disabled={refreshing || managedRuntime.phase === "restoring"}
-            icon="refresh"
-            loading={refreshing}
-            onClick={() => void refreshAll()}
-          >
-            Refresh status
-          </Button>
-        )}
-        description="Manage WA Runtime, local data protection, connections, and desktop updates."
+        description="Product preferences stay separate from connection, backup, and WA Runtime service controls."
         title="Settings"
         titleId="settings-title"
       />
 
-      <nav className="settings-navigation">
-        <Tabs
-          activeTab={activeTab}
-          ariaLabel="Settings sections"
-          idPrefix="settings"
-          onChange={setActiveTab}
-          tabs={tabs}
-        />
-      </nav>
+      <div className="settings-layout">
+        <nav aria-label="Settings sections" className="settings-navigation">
+          <Tabs
+            activeTab={activeTab}
+            ariaLabel="Settings sections"
+            idPrefix="settings"
+            onChange={setActiveTab}
+            orientation="vertical"
+            tabs={tabs}
+          />
+        </nav>
 
-      {managedRuntime.phase === "restoring" && (
-        <InlineAlert indicator title="Restore in progress" tone="warning">
-          WA Runtime is paused while the selected data is restored.
-        </InlineAlert>
-      )}
+        <div className="settings-content">
+          {managedRuntime.phase === "restoring" && (
+            <InlineAlert className="settings-notice" indicator title="Restore in progress" tone="warning">
+              WA Runtime is paused while the selected data is restored.
+            </InlineAlert>
+          )}
 
-      <div
-        aria-labelledby={`settings-${activeTab}-tab`}
-        className="settings-tab-panel"
-        id={`settings-${activeTab}-panel`}
-        role="tabpanel"
-        tabIndex={0}
-      >
-        {activeTab === "overview" && (
-          <SettingsOverviewPanel
-            diagnostics={diagnostics}
-            error={runtimeError ?? updateError}
-            loading={runtimeLoading}
-            managedRuntime={managedRuntime}
-            onNavigate={setActiveTab}
-            updateState={updateState}
-          />
-        )}
-        {activeTab === "connection" && (
-          <ManagedRuntimeConfigurationPanel
-            getProfile={getProvisioningProfile}
-            phase={managedRuntime.phase}
-            saveProfile={saveProvisioningProfile}
-          />
-        )}
-        {activeTab === "recovery" && (
-          <BackupRecoverySettings
-            backups={backups}
-            createBackup={createBackup}
-            diagnostics={diagnostics}
-            exportRecoveryArchive={exportRecoveryArchive}
-            loading={runtimeLoading}
-            onReload={loadRuntime}
-            restoreBackup={restoreBackup}
-            restoreRecoveryArchive={restoreRecoveryArchive}
-            runtimeReady={runtimeReady}
-          />
-        )}
-        {activeTab === "updates" && (
-          <AppUpdateSettings
-            checkUpdate={checkUpdate}
-            error={updateError}
-            installUpdate={installUpdate}
-            onUpdateStateChange={setUpdateState}
-            progress={updateProgress}
-            runtimeReady={runtimeReady}
-            updateState={updateState}
-          />
-        )}
+          <div
+            aria-labelledby={`settings-${activeTab}-tab`}
+            className="settings-tab-panel"
+            id={`settings-${activeTab}-panel`}
+            role="tabpanel"
+            tabIndex={0}
+          >
+            {activeTab === "overview" && (
+              <SettingsOverviewPanel
+                diagnostics={diagnostics}
+                error={runtimeError ?? updateError}
+                loading={runtimeLoading}
+                managedRuntime={managedRuntime}
+                onNavigate={setActiveTab}
+                onRefresh={() => void refreshAll()}
+                refreshing={refreshing}
+                updateState={updateState}
+              />
+            )}
+            {activeTab === "connection" && (
+              <ManagedRuntimeConfigurationPanel
+                getProfile={getProvisioningProfile}
+                phase={managedRuntime.phase}
+                saveProfile={saveProvisioningProfile}
+              />
+            )}
+            {activeTab === "recovery" && (
+              <BackupRecoverySettings
+                backups={backups}
+                createBackup={createBackup}
+                diagnostics={diagnostics}
+                exportRecoveryArchive={exportRecoveryArchive}
+                loading={runtimeLoading}
+                onReload={loadRuntime}
+                restoreBackup={restoreBackup}
+                restoreRecoveryArchive={restoreRecoveryArchive}
+                runtimeReady={runtimeReady}
+              />
+            )}
+            {activeTab === "updates" && (
+              <AppUpdateSettings
+                checkUpdate={checkUpdate}
+                error={updateError}
+                installUpdate={installUpdate}
+                onUpdateStateChange={setUpdateState}
+                progress={updateProgress}
+                runtimeReady={runtimeReady}
+                updateState={updateState}
+              />
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

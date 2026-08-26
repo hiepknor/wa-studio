@@ -72,4 +72,29 @@ describe("Tabs", () => {
     expect(preflight).toHaveFocus();
     expect(targets).not.toHaveFocus();
   });
+
+  it("uses vertical arrow navigation when rendered vertically", async () => {
+    const user = userEvent.setup();
+    render(
+      <Tabs
+        activeTab="overview"
+        ariaLabel="Settings sections"
+        idPrefix="settings"
+        onChange={() => undefined}
+        orientation="vertical"
+        tabs={[
+          { id: "overview", label: "Overview" },
+          { id: "updates", label: "Updates" },
+        ]}
+      />,
+    );
+
+    const overview = screen.getByRole("tab", { name: "Overview" });
+    const updates = screen.getByRole("tab", { name: "Updates" });
+    expect(overview.closest("[role='tablist']")).toHaveAttribute("aria-orientation", "vertical");
+
+    overview.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(updates).toHaveFocus();
+  });
 });

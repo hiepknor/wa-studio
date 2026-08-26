@@ -100,3 +100,26 @@
   color: var(--text-disabled);
 }
 .tabs-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tabs-vertical {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: 0;
+}
+
+.tabs-vertical .tabs-trigger {
+  width: 100%;
+  min-height: var(--control-height);
+  justify-content: flex-start;
+  padding: var(--space-compact) var(--space-2);
+  text-align: left;
+}
+
+.tabs-vertical .tabs-trigger::after {
+  inset: 0 auto 0 0;
+  width: var(--selection-rail-width);
+  height: auto;
+}
