@@ -6,10 +6,13 @@ import {
 } from '../../contracts/event-inbox';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
+import { readBoundedResponseJson } from '../../core/http/bounded-response';
 import type { OpenWAWebhookEnvelope } from './webhook.repository';
 import { WebhookIngressService } from './webhook-ingress.service';
 
 class PoisonEventError extends Error {}
+
+const maximumMutationResponseBytes = 1024 * 1024;
 
 @Injectable()
 export class EventInboxConsumerService implements OnModuleInit, OnModuleDestroy {
@@ -123,10 +126,21 @@ export class EventInboxConsumerService implements OnModuleInit, OnModuleDestroy 
       },
       body: JSON.stringify(body),
       redirect: 'error',
-      signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(30_000)]),
+      signal: AbortSignal.any([
+        this.abort.signal,
+        AbortSignal.timeout(this.config.EVENT_INBOX_REQUEST_TIMEOUT_MS),
+      ]),
     });
-    if (!response.ok) throw new Error(`Event Inbox request returned HTTP ${response.status}`);
-    return response.json();
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`Event Inbox request returned HTTP ${response.status}`);
+    }
+    return readBoundedResponseJson(
+      response,
+      path.endsWith('/claim')
+        ? this.config.EVENT_INBOX_RESPONSE_MAX_BYTES
+        : maximumMutationResponseBytes,
+    );
   }
 
   private async wait(milliseconds: number): Promise<void> {

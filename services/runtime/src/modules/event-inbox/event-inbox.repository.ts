@@ -37,6 +37,8 @@ export interface EventInboxReadiness {
   activeDevices: number;
   legacyDevices: number;
   ownedSessions: number;
+  activeRateLimitBuckets: number;
+  rateLimitedPairingAttempts: number;
   maxStoredEvents: number;
   maxStoredBytes: number;
 }
@@ -108,6 +110,52 @@ export class EventInboxRepository implements OnModuleDestroy {
     } finally {
       client.release();
     }
+  }
+
+  async consumeRateLimit(
+    scope: string,
+    keyHash: Buffer,
+    maxAttempts: number,
+    windowSeconds: number,
+  ): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+    const result = await this.pool.query<{
+      attempts: string;
+      retry_after_seconds: string;
+    }>(
+      `INSERT INTO event_inbox_rate_limits
+         (scope, key_hash, window_started_at, attempts, blocked_attempts, expires_at)
+       VALUES ($1, $2, now(), 1, 0, now() + ($4::text || ' seconds')::interval)
+       ON CONFLICT (scope, key_hash) DO UPDATE SET
+         window_started_at = CASE
+           WHEN event_inbox_rate_limits.expires_at <= now() THEN now()
+           ELSE event_inbox_rate_limits.window_started_at
+         END,
+         attempts = CASE
+           WHEN event_inbox_rate_limits.expires_at <= now() THEN 1
+           ELSE event_inbox_rate_limits.attempts + 1
+         END,
+         blocked_attempts = CASE
+           WHEN event_inbox_rate_limits.expires_at <= now() THEN 0
+           WHEN event_inbox_rate_limits.attempts + 1 > $3
+             THEN event_inbox_rate_limits.blocked_attempts + 1
+           ELSE event_inbox_rate_limits.blocked_attempts
+         END,
+         expires_at = CASE
+           WHEN event_inbox_rate_limits.expires_at <= now()
+             THEN now() + ($4::text || ' seconds')::interval
+           ELSE event_inbox_rate_limits.expires_at
+         END
+       RETURNING attempts::text,
+         GREATEST(1, CEIL(EXTRACT(EPOCH FROM expires_at - now())))::bigint::text
+           AS retry_after_seconds`,
+      [scope, keyHash, maxAttempts, windowSeconds],
+    );
+    const bucket = result.rows[0];
+    if (!bucket) throw new Error('Event Inbox rate limit did not return a decision');
+    return {
+      allowed: Number(bucket.attempts) <= maxAttempts,
+      retryAfterSeconds: Number(bucket.retry_after_seconds),
+    };
   }
 
   async claim(
@@ -305,6 +353,20 @@ export class EventInboxRepository implements OnModuleDestroy {
     }
   }
 
+  async removeExpiredRateLimits(limit: number): Promise<number> {
+    const result = await this.pool.query(
+      `DELETE FROM event_inbox_rate_limits
+       WHERE (scope, key_hash) IN (
+         SELECT scope, key_hash FROM event_inbox_rate_limits
+         WHERE expires_at <= now()
+         ORDER BY expires_at, scope, key_hash
+         LIMIT $1
+       )`,
+      [limit],
+    );
+    return result.rowCount ?? 0;
+  }
+
   async readiness(): Promise<EventInboxReadiness> {
     const result = await this.pool.query<{
       stored_events: string;
@@ -316,6 +378,8 @@ export class EventInboxRepository implements OnModuleDestroy {
       active_devices: string;
       legacy_devices: string;
       owned_sessions: string;
+      active_rate_limit_buckets: string;
+      rate_limited_pairing_attempts: string;
     }>(
       `SELECT usage.stored_events::text, usage.stored_bytes::text,
          count(event.*) FILTER (WHERE event.dead_at IS NULL)::text AS pending_events,
@@ -338,7 +402,11 @@ export class EventInboxRepository implements OnModuleDestroy {
             ON device.device_id = owner.device_id
            AND device.token_generation = owner.token_generation
           WHERE device.revoked_at IS NULL
-            AND device.token_expires_at > now()) AS owned_sessions
+            AND device.token_expires_at > now()) AS owned_sessions,
+         (SELECT count(*)::text FROM event_inbox_rate_limits
+          WHERE expires_at > now()) AS active_rate_limit_buckets,
+         (SELECT COALESCE(sum(blocked_attempts), 0)::text FROM event_inbox_rate_limits
+          WHERE expires_at > now()) AS rate_limited_pairing_attempts
        FROM event_inbox_usage AS usage
        LEFT JOIN event_inbox_events AS event ON true
        WHERE usage.singleton = true
@@ -357,6 +425,8 @@ export class EventInboxRepository implements OnModuleDestroy {
       activeDevices: Number(usage.active_devices),
       legacyDevices: Number(usage.legacy_devices),
       ownedSessions: Number(usage.owned_sessions),
+      activeRateLimitBuckets: Number(usage.active_rate_limit_buckets),
+      rateLimitedPairingAttempts: Number(usage.rate_limited_pairing_attempts),
       maxStoredEvents: this.config.EVENT_INBOX_MAX_STORED_EVENTS,
       maxStoredBytes: this.config.EVENT_INBOX_MAX_STORED_BYTES,
     };

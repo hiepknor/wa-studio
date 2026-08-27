@@ -51,4 +51,31 @@ describe('Runtime HTTP exception normalization', () => {
       body: { code: 'INTERNAL_ERROR', message: 'Internal server error', details: {} },
     });
   });
+
+  it('normalizes Express parser failures without exposing body content', () => {
+    const tooLarge = Object.assign(new Error('entity too large: secret body'), {
+      type: 'entity.too.large', status: 413,
+    });
+    expect(runtimeErrorFromException(tooLarge)).toEqual({
+      status: 413,
+      body: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body exceeds the configured limit',
+        details: {},
+      },
+    });
+
+    const invalid = Object.assign(new SyntaxError('Unexpected token secret'), {
+      type: 'entity.parse.failed', status: 400,
+    });
+    expect(runtimeErrorFromException(invalid)).toEqual({
+      status: 400,
+      body: {
+        code: 'VALIDATION_ERROR',
+        message: 'Request body is not valid JSON',
+        fieldErrors: { request: ['Request body is not valid JSON'] },
+        details: {},
+      },
+    });
+  });
 });

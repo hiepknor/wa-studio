@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+
+import { verifyOpenWAServerRelease } from "./openwa-server-release.mjs";
 
 const workspaceRoot = resolve(import.meta.dirname, "..");
 
@@ -17,6 +19,7 @@ function captured(source, pattern, label) {
 
 function validateComponents() {
   const components = readJson("release/components.json");
+  const openwa = verifyOpenWAServerRelease({ workspaceRoot });
   const studioPackage = readJson("apps/studio/package.json");
   const tauri = readJson("apps/studio/src-tauri/tauri.conf.json");
   const runtimePackage = readJson("services/runtime/package.json");
@@ -27,7 +30,7 @@ function validateComponents() {
     "utf8",
   );
 
-  assert.equal(components.schemaVersion, 2);
+  assert.equal(components.schemaVersion, 3);
   assert.equal(components.product, "wa-studio");
   assert.equal(components.runtimeService, "wa-runtime");
   assert.equal(studioPackage.name, "@wa/studio");
@@ -63,13 +66,8 @@ function validateComponents() {
     components.runtimeContractVersion,
     captured(runtimeRelease, /RUNTIME_CONTRACT_VERSION = '([^']+)'/u, "Runtime contract version"),
   );
-  assert(
-    existsSync(resolve(
-      workspaceRoot,
-      `services/runtime/contracts/openwa/${components.openwaReleaseTag}/openapi.json`,
-    )),
-    `OpenWA ${components.openwaReleaseTag} contract snapshot is missing`,
-  );
+  assert.equal(components.openwaReleaseTag, openwa.releaseTag);
+  assert.equal(components.openwaContractSha256, openwa.contractSha256);
   return components;
 }
 

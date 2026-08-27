@@ -2833,6 +2833,11 @@
             }
           }
         },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
         "tags": [
           "health"
         ]
@@ -5038,7 +5043,7 @@
           },
           "openwaRelease": {
             "type": "string",
-            "example": "0.22.0"
+            "example": "0.23.3"
           },
           "allowedSessionCount": {
             "type": "number",

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Pool } from 'pg';
+import { OPENWA_RELEASE_TAG } from '../../src/contracts/release/openwa-release.generated';
 
 const docker = (args: string[]): string =>
   execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -88,7 +89,7 @@ export default async function setup(): Promise<() => Promise<void>> {
       ENABLE_RUNTIME_DOCS: 'false',
       OPENWA_BASE_URL: 'http://127.0.0.1:1',
       OPENWA_API_KEY: 'integration-openwa-key',
-      OPENWA_RELEASE_TAG: '0.22.0',
+      OPENWA_RELEASE_TAG,
       OPENWA_WEBHOOK_SECRET: 'integration-webhook-secret-0000000000000',
       OPENWA_ALLOWED_SESSION_IDS: '00000000-0000-4000-8000-000000000001',
       ALLOW_LIVE_SENDS: 'false',

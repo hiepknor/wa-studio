@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
+import { runtimeConfig } from '../../src/core/config/runtime-config';
 import { DatabaseService } from '../../src/core/database/database.service';
 import { messageRequestHash } from '../../src/modules/messages/message-idempotency';
 import { MessageJobRepository } from '../../src/modules/messages/message-job.repository';
@@ -89,6 +90,41 @@ describe('PostgreSQL outbound session lease', () => {
       },
     )).rejects.toBeInstanceOf(OutboundSessionLeaseLostError);
     expect(upstreamStarted).toBe(false);
+  });
+
+  it('holds session and message ownership beyond the configured OpenWA request timeout', async () => {
+    const [jobId] = await createProcessingJobs(messages[0]!, 1);
+    const longRequestSession = new OutboundSessionLeaseService(
+      leases[0]!,
+      messages[0]!,
+      {
+        ...runtimeConfig(),
+        OPENWA_REQUEST_TIMEOUT_MS: 120_000,
+        OUTBOUND_MAX_DELAY_MS: 0,
+      },
+    );
+
+    await longRequestSession.withLease(
+      INTEGRATION_SESSION_ID,
+      jobId!,
+      async verifyForSend => {
+        await verifyForSend();
+        const remaining = await pool.query<{
+          message_lease_ms: string;
+          session_lease_ms: string;
+        }>(
+          `SELECT
+             extract(epoch FROM jobs.lease_expires_at - now()) * 1000 AS message_lease_ms,
+             extract(epoch FROM sessions.lease_expires_at - now()) * 1000 AS session_lease_ms
+           FROM message_jobs jobs
+           JOIN outbound_session_leases sessions ON sessions.holder_message_job_id = jobs.id
+           WHERE jobs.id = $1`,
+          [jobId],
+        );
+        expect(Number(remaining.rows[0]!.message_lease_ms)).toBeGreaterThan(120_000);
+        expect(Number(remaining.rows[0]!.session_lease_ms)).toBeGreaterThan(120_000);
+      },
+    );
   });
 
   it('allows different sessions to make progress concurrently', async () => {

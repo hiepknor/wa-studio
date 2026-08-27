@@ -10,6 +10,8 @@ interface OpenWAContract {
 
 type JsonObject = Record<string, unknown>;
 
+const REVIEWED_OPENWA_RELEASE = '0.23.3' as const;
+
 const readContract = (release: string): OpenWAContract => JSON.parse(readFileSync(
   resolve(process.cwd(), 'contracts', 'openwa', release, 'openapi.json'),
   'utf8',
@@ -31,12 +33,63 @@ const schema = (contract: OpenWAContract, name: string): JsonObject => {
 const responseMap = (value: JsonObject): JsonObject => value.responses as JsonObject;
 const properties = (value: JsonObject): JsonObject => value.properties as JsonObject;
 
-describe('OpenWA 0.22.0 contract review', () => {
+describe(`OpenWA ${REVIEWED_OPENWA_RELEASE} contract review`, () => {
   const previous = readContract('0.18.0');
-  const current = readContract('0.22.0');
+  const priorReviewed = readContract('0.22.0');
+  const current = readContract(REVIEWED_OPENWA_RELEASE);
+
+  it('keeps the complete WA Runtime adapter surface unchanged from 0.22.0', () => {
+    for (const [path, method] of [
+      ['/api/health', 'get'],
+      ['/api/sessions', 'get'],
+      ['/api/sessions/{sessionId}', 'get'],
+      ['/api/sessions/{sessionId}/groups', 'get'],
+      ['/api/sessions/{sessionId}/groups/{groupId}', 'get'],
+      ['/api/sessions/{sessionId}/contacts', 'get'],
+      ['/api/sessions/{sessionId}/webhooks', 'get'],
+      ['/api/sessions/{sessionId}/webhooks', 'post'],
+      ['/api/sessions/{sessionId}/webhooks/{id}', 'put'],
+      ['/api/sessions/{sessionId}/webhooks/{id}', 'delete'],
+      ['/api/sessions/{sessionId}/messages/send-text', 'post'],
+    ] as const) {
+      expect(operation(current, path, method)).toEqual(operation(priorReviewed, path, method));
+    }
+
+    for (const name of [
+      'AccountRestrictionDto',
+      'ContactDto',
+      'CreateGroupDto',
+      'CreateSessionDto',
+      'CreateWebhookDto',
+      'CustomLinkPreviewDto',
+      'GroupInfoDto',
+      'GroupParticipantDto',
+      'GroupSummaryDto',
+      'HealthCheckResponseDto',
+      'MessageResponseDto',
+      'SendTextMessageDto',
+      'SessionGroupSummaryDto',
+      'SessionResponseDto',
+      'UpdateWebhookDto',
+      'WebhookFilterConditionDto',
+      'WebhookFiltersDto',
+      'WebhookResponseDto',
+    ]) {
+      expect(schema(current, name)).toEqual(schema(priorReviewed, name));
+    }
+  });
+
+  it('records the unrelated 0.23.3 chat-unread addition without adopting it', () => {
+    expect(schema(current, 'MarkChatUnreadDto')).toMatchObject({
+      type: 'object',
+      required: ['chatId'],
+      properties: { chatId: { type: 'string' } },
+    });
+    expect(priorReviewed.components.schemas).not.toHaveProperty('MarkChatUnreadDto');
+  });
 
   it('pins the expected upstream artifact and keeps unchanged Runtime operations stable', () => {
-    expect(current.info.version).toBe('0.22.0');
+    expect(current.info.version).toBe(REVIEWED_OPENWA_RELEASE);
 
     for (const [path, method] of [
       ['/api/health', 'get'],

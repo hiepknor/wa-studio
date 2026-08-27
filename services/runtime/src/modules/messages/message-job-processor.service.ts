@@ -45,12 +45,6 @@ export class MessageJobProcessorService {
       throw new Error(error);
     }
 
-    const blockReason = await this.policy.liveBlockReason(job.sessionId, job.recipientId);
-    if (blockReason) {
-      await this.update(job.id, 'FAILED', { error: `Live send blocked: ${blockReason}` });
-      throw new Error(`Live send blocked: ${blockReason}`);
-    }
-
     let upstreamStarted = false;
     try {
       return await this.outboundSessions.withLease(
@@ -60,6 +54,8 @@ export class MessageJobProcessorService {
           await new Promise(resolve =>
             setTimeout(resolve, randomDelay(this.config.OUTBOUND_MIN_DELAY_MS, this.config.OUTBOUND_MAX_DELAY_MS)),
           );
+          const blockReason = await this.policy.liveBlockReason(job.sessionId, job.recipientId);
+          if (blockReason) throw new Error(`Live send blocked: ${blockReason}`);
           await verifyForSend();
           upstreamStarted = true;
           const result = await this.openwa.sendText(job.sessionId, job.recipientId, job.payload.text);

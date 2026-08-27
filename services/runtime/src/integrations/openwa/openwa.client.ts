@@ -1,7 +1,12 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { z } from 'zod';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
+import {
+  delayWithSignal,
+  readBoundedResponseJson,
+  readBoundedResponseText,
+} from '../../core/http/bounded-response';
 
 export type OpenWASessionStatus =
   | 'created'
@@ -103,6 +108,7 @@ const healthSchema = z.object({ status: nonEmptyString, timestamp: dateTimeStrin
 const sendTextResultSchema = z.object({ messageId: nonEmptyString, timestamp: z.number().int().nonnegative() });
 const maxRateLimitRetries = 12;
 const maxTransientReadRetries = 4;
+const maximumErrorResponseBytes = 64 * 1024;
 
 export type OpenWASendTextResult = z.infer<typeof sendTextResultSchema>;
 export type OpenWASession = z.infer<typeof sessionSchema>;
@@ -132,10 +138,15 @@ export class OpenWAResponseValidationError extends Error {
 }
 
 @Injectable()
-export class OpenWAClient {
+export class OpenWAClient implements OnModuleDestroy {
   private readonly logger = new Logger(OpenWAClient.name);
+  private readonly abort = new AbortController();
 
   constructor(@Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig()) {}
+
+  onModuleDestroy(): void {
+    this.abort.abort();
+  }
 
   private async request<T>(operation: string, path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
     const started = performance.now();
@@ -143,6 +154,10 @@ export class OpenWAClient {
     const headers = new Headers(init?.headers);
     headers.set('accept', 'application/json');
     headers.set('x-api-key', this.config.OPENWA_API_KEY);
+    const deadline = AbortSignal.any([
+      this.abort.signal,
+      AbortSignal.timeout(this.config.OPENWA_REQUEST_DEADLINE_MS),
+    ]);
     try {
       let rateLimitRetries = 0;
       let transientRetries = 0;
@@ -150,31 +165,38 @@ export class OpenWAClient {
         const response = await fetch(new URL(path, this.config.OPENWA_BASE_URL), {
           ...init,
           redirect: 'error',
-          signal: AbortSignal.timeout(30_000),
+          signal: AbortSignal.any([
+            deadline,
+            AbortSignal.timeout(this.config.OPENWA_REQUEST_TIMEOUT_MS),
+          ]),
           headers,
         });
         if (response.status === 429 && method === 'GET' && operation !== 'get_group'
           && rateLimitRetries < maxRateLimitRetries) {
           response.body?.cancel().catch(() => undefined);
-          await delay(rateLimitDelayMs(response.headers, rateLimitRetries));
+          await delayWithSignal(rateLimitDelayMs(response.headers, rateLimitRetries), deadline);
           rateLimitRetries += 1;
           continue;
         }
         if (response.status >= 500 && method === 'GET' && operation !== 'get_group'
           && transientRetries < maxTransientReadRetries) {
           response.body?.cancel().catch(() => undefined);
-          await delay(jitteredBackoffMs(transientRetries, 5_000));
+          await delayWithSignal(jitteredBackoffMs(transientRetries, 5_000), deadline);
           transientRetries += 1;
           continue;
         }
         if (!response.ok) {
           throw new OpenWAHttpError(
             response.status,
-            await response.text(),
+            await readBoundedResponseText(response, maximumErrorResponseBytes),
             parseRetryAfterMs(response.headers),
           );
         }
-        const parsed = schema.safeParse(response.status === 204 ? undefined : await response.json());
+        const parsed = schema.safeParse(
+          response.status === 204
+            ? undefined
+            : await readBoundedResponseJson(response, this.config.OPENWA_RESPONSE_MAX_BYTES),
+        );
         if (!parsed.success) throw new OpenWAResponseValidationError(operation, parsed.error.issues.length);
         this.logger.debug({
           event: 'openwa.request.completed', operation, method, statusCode: response.status,
@@ -361,9 +383,6 @@ function parseRetryAfterMs(headers: Headers): number | undefined {
   if (!Number.isFinite(at)) return undefined;
   return Math.min(60_000, Math.max(250, at - Date.now()));
 }
-
-const delay = (milliseconds: number): Promise<void> =>
-  new Promise(resolve => setTimeout(resolve, milliseconds));
 
 const jitteredBackoffMs = (attempt: number, maximum: number): number => {
   const backoff = Math.min(maximum, 250 * 2 ** attempt);

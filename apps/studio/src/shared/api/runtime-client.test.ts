@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   normalizeRuntimeBaseUrl,
+  normalizeRuntimeConnection,
+  normalizeRuntimeProfile,
   probeRuntimeConnection,
   RuntimeApi,
   RuntimeConnectionError,
@@ -26,6 +28,47 @@ describe("normalizeRuntimeBaseUrl", () => {
       RuntimeConnectionError,
     );
   });
+
+  it.each([
+    "https://user:secret@runtime.example.com",
+    "https://runtime.example.com?target=other",
+    "https://runtime.example.com#credentials",
+    "https://runtime.example.com/unreviewed/path",
+    "http://runtime.example.com",
+  ])("rejects an unsafe external Runtime URL: %s", (value) => {
+    expect(() => normalizeRuntimeBaseUrl(value)).toThrow(RuntimeConnectionError);
+  });
+
+  it("allows explicit loopback HTTP including IPv6", () => {
+    expect(normalizeRuntimeBaseUrl("http://localhost:34100")).toBe(
+      "http://localhost:34100",
+    );
+    expect(normalizeRuntimeBaseUrl("http://[::1]:34100/api/v1")).toBe(
+      "http://[::1]:34100",
+    );
+  });
+
+  it("matches Runtime API-key length and character constraints", () => {
+    expect(() => normalizeRuntimeConnection({
+      baseUrl: "https://runtime.example.com",
+      apiKey: "short",
+    })).toThrow("between 32 and 4096 characters");
+    expect(() => normalizeRuntimeConnection({
+      baseUrl: "https://runtime.example.com",
+      apiKey: `${"a".repeat(32)}\nheader-injection`,
+    })).toThrow("control characters");
+  });
+
+  it("restricts the keyless native profile to numeric loopback HTTP", () => {
+    expect(normalizeRuntimeProfile({
+      baseUrl: "http://127.0.0.1:34100",
+      transport: "native",
+    })).toEqual({ baseUrl: "http://127.0.0.1:34100", transport: "native" });
+    expect(() => normalizeRuntimeProfile({
+      baseUrl: "https://runtime.example.com",
+      transport: "native",
+    })).toThrow("must target loopback HTTP");
+  });
 });
 
 describe("probeRuntimeConnection", () => {
@@ -44,7 +87,7 @@ describe("probeRuntimeConnection", () => {
 
     await expect(
       probeRuntimeConnection(
-        { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+        { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
         runtimeFetch,
       ),
     ).resolves.toMatchObject({
@@ -59,7 +102,7 @@ describe("probeRuntimeConnection", () => {
     expect(runtimeFetch).toHaveBeenCalledTimes(2);
     const sessionRequest = runtimeFetch.mock.calls[1][0];
     expect(sessionRequest).toBeInstanceOf(Request);
-    expect((sessionRequest as Request).headers.get("X-Runtime-Key")).toBe("test-key");
+    expect((sessionRequest as Request).headers.get("X-Runtime-Key")).toBe("0123456789abcdef0123456789abcdef");
   });
 
   it("maps an unauthorized response to a useful error", async () => {
@@ -70,7 +113,7 @@ describe("probeRuntimeConnection", () => {
 
     await expect(
       probeRuntimeConnection(
-        { baseUrl: "http://127.0.0.1:3100", apiKey: "wrong-key" },
+        { baseUrl: "http://127.0.0.1:3100", apiKey: "fedcba9876543210fedcba9876543210" },
         runtimeFetch,
       ),
     ).rejects.toThrow("WA Runtime API key was rejected.");
@@ -78,12 +121,32 @@ describe("probeRuntimeConnection", () => {
 });
 
 describe("RuntimeApi", () => {
+  it("propagates caller cancellation through a typed read", async () => {
+    let transportSignal: AbortSignal | undefined;
+    const runtimeFetch = vi.fn<typeof fetch>().mockImplementation((input) => {
+      transportSignal = (input as Request).signal;
+      return new Promise<Response>(() => undefined);
+    });
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
+      runtimeFetch,
+    );
+    const controller = new AbortController();
+    const pending = api.listSessions({ signal: controller.signal });
+    const assertion = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+
+    controller.abort(new DOMException("screen changed", "AbortError"));
+
+    await assertion;
+    expect(transportSignal?.aborted).toBe(true);
+  });
+
   it("omits new campaign search/filter parameters by default", async () => {
     const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       data: [], meta: { total: 0, limit: 50, offset: 0 },
     }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
     await api.listCampaigns({ sessionId: "session id" });
@@ -96,7 +159,7 @@ describe("RuntimeApi", () => {
       data: [], meta: { total: 0, limit: 20, offset: 40 },
     }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
     await api.listCampaigns({
@@ -116,7 +179,7 @@ describe("RuntimeApi", () => {
       data: [], meta: { total: 0, limit: 50, offset: 0 },
     }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
     await api.listCampaigns({
@@ -136,7 +199,7 @@ describe("RuntimeApi", () => {
       data: [], meta: { total: 0, limit: 20, offset: 40 },
     }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -171,7 +234,7 @@ describe("RuntimeApi", () => {
       data: [], meta: { limit: 50, nextCursor: null, retentionDays: 90 },
     }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -217,7 +280,7 @@ describe("RuntimeApi", () => {
       .mockRejectedValueOnce(new TypeError("response lost"))
       .mockResolvedValueOnce(Response.json(created, { status: 200 }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
     const key = "37ce30a8-07e3-43b7-a499-1be2d40090a9";
@@ -228,7 +291,10 @@ describe("RuntimeApi", () => {
       scheduleType: "IMMEDIATE",
     } as const;
 
-    await expect(api.createCampaign(payload, key)).rejects.toThrow("response lost");
+    await expect(api.createCampaign(payload, key)).rejects.toMatchObject({
+      name: "RuntimeTransportError",
+      requestDispatched: true,
+    });
     await expect(api.createCampaign(payload, key)).resolves.toEqual(created);
     expect(runtimeFetch).toHaveBeenCalledTimes(2);
     for (const call of runtimeFetch.mock.calls) {
@@ -250,7 +316,7 @@ describe("RuntimeApi", () => {
       details: { campaignId: "existing" },
     }, { status: 409 }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -274,7 +340,7 @@ describe("RuntimeApi", () => {
       new Response(null, { status: 204 }),
     );
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -328,7 +394,7 @@ describe("RuntimeApi", () => {
       .mockResolvedValueOnce(Response.json(run))
       .mockResolvedValueOnce(Response.json({ ...run, status: "PAUSED" }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -394,7 +460,7 @@ describe("RuntimeApi", () => {
       .fn<typeof fetch>()
       .mockResolvedValue(Response.json(syncRun, { status: 202 }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -405,7 +471,7 @@ describe("RuntimeApi", () => {
     expect(request.url).toBe(
       "http://127.0.0.1:3100/api/v1/sessions/session%20id/sync",
     );
-    expect(request.headers.get("X-Runtime-Key")).toBe("test-key");
+    expect(request.headers.get("X-Runtime-Key")).toBe("0123456789abcdef0123456789abcdef");
   });
 
   it("reads paginated groups and group details for a session", async () => {
@@ -441,7 +507,7 @@ describe("RuntimeApi", () => {
         meta: { total: 0, limit: 25, offset: 50, datasetRevision: 0 },
       }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -461,7 +527,7 @@ describe("RuntimeApi", () => {
     expect(listRequest.url).toBe(
       "http://127.0.0.1:3100/api/v1/groups?sessionId=session%20id&limit=20&offset=20",
     );
-    expect(listRequest.headers.get("X-Runtime-Key")).toBe("test-key");
+    expect(listRequest.headers.get("X-Runtime-Key")).toBe("0123456789abcdef0123456789abcdef");
     const detailRequest = runtimeFetch.mock.calls[1][0] as Request;
     expect(detailRequest.url).toBe(
       "http://127.0.0.1:3100/api/v1/groups/120363%40g.us?sessionId=session%20id",
@@ -478,7 +544,7 @@ describe("RuntimeApi", () => {
       meta: { total: 0, limit: 50, offset: 0, datasetRevision: 0 },
     }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -500,7 +566,7 @@ describe("RuntimeApi", () => {
       meta: { total: 0, limit: 20, offset: 0 },
     }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -528,7 +594,7 @@ describe("RuntimeApi", () => {
       meta: { total: 0, limit: 25, offset: 0 },
     }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -554,7 +620,7 @@ describe("RuntimeApi", () => {
         new Response(null, { status }),
       );
       const api = new RuntimeApi(
-        { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+        { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
         runtimeFetch,
       );
 
@@ -574,7 +640,7 @@ describe("RuntimeApi", () => {
       details: {},
     }, { status: 400 }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -601,7 +667,7 @@ describe("RuntimeApi", () => {
         new Response(null, { status }),
       );
       const api = new RuntimeApi(
-        { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+        { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
         runtimeFetch,
       );
 
@@ -617,7 +683,7 @@ describe("RuntimeApi", () => {
       .fn<typeof fetch>()
       .mockResolvedValue(new Response(null, { status: 202 }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -636,7 +702,7 @@ describe("RuntimeApi", () => {
       data: [], meta: { total: 0, limit: 20, offset: 40 },
     }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
     await api.listGroupLists({
@@ -666,12 +732,15 @@ describe("RuntimeApi", () => {
       .mockRejectedValueOnce(new TypeError("response lost"))
       .mockResolvedValueOnce(Response.json(saved, { status: 200 }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
     const key = "22222222-2222-4222-8222-222222222222";
     const payload = { sessionId: "session-id", name: "Launch", groupIds: [] };
-    await expect(api.createGroupList(payload, key)).rejects.toThrow("response lost");
+    await expect(api.createGroupList(payload, key)).rejects.toMatchObject({
+      name: "RuntimeTransportError",
+      requestDispatched: true,
+    });
     await expect(api.createGroupList(payload, key)).resolves.toEqual(saved);
     for (const call of runtimeFetch.mock.calls) {
       const request = call[0] as Request;
@@ -689,7 +758,7 @@ describe("RuntimeApi", () => {
       details: {},
     }, { status: 422 }));
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
     const error = await api.replaceGroupListGroups("list-id", ["one@g.us"], 7)
@@ -711,7 +780,7 @@ describe("RuntimeApi", () => {
       new Response(null, { status: 204 }),
     );
     const api = new RuntimeApi(
-      { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
@@ -734,7 +803,7 @@ describe("RuntimeApi", () => {
         details: { status },
       }, { status }));
       const api = new RuntimeApi(
-        { baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" },
+        { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
         runtimeFetch,
       );
       const error = await api.getGroupList("list-id").catch((caught: unknown) => caught);

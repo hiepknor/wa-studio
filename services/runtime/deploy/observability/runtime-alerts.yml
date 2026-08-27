@@ -1,0 +1,80 @@
+groups:
+  - name: wa-runtime-availability
+    rules:
+      - alert: WARuntimeScrapeMissing
+        expr: up{job="wa-runtime"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Runtime metrics target is unavailable
+          description: Prometheus has been unable to scrape WA Runtime for two minutes.
+
+      - alert: WARuntimeDependencyUnavailable
+        expr: wa_runtime_dependency_up{job="wa-runtime"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Runtime dependency probe is failing
+          description: The {{ $labels.dependency }} dependency has failed every scrape for two minutes.
+
+      - alert: WARuntimeBackgroundProcessDegraded
+        expr: wa_runtime_background_process_up{job="wa-runtime"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Runtime background process heartbeat is stale
+          description: The {{ $labels.process }} heartbeat has been stale for two minutes.
+
+      - alert: WARuntimeMetricsSnapshotFailures
+        expr: increase(wa_runtime_metrics_snapshot_failures_total{job="wa-runtime"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Runtime metric snapshots are failing
+          description: The {{ $labels.dependency }} snapshot probe failed during the last five minutes.
+
+      - alert: WARuntimeDatabasePoolSaturated
+        expr: wa_runtime_database_pool_waiting_requests{job="wa-runtime"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Runtime PostgreSQL pool is saturated
+          description: Requests have waited for a database connection continuously for five minutes.
+
+  - name: wa-runtime-http
+    rules:
+      - alert: WARuntimeHighHttpErrorRate
+        expr: |
+          (
+            sum(rate(wa_runtime_http_requests_total{job="wa-runtime",status_code=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(wa_runtime_http_requests_total{job="wa-runtime"}[5m])), 0.001)
+          ) > 0.05
+          and
+          sum(rate(wa_runtime_http_requests_total{job="wa-runtime"}[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Runtime HTTP 5xx rate is elevated
+          description: More than five percent of Runtime requests have failed for ten minutes.
+
+      - alert: WARuntimeHighHttpLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(wa_runtime_http_request_duration_seconds_bucket{job="wa-runtime"}[5m]))
+          ) > 2
+          and
+          sum(rate(wa_runtime_http_request_duration_seconds_count{job="wa-runtime"}[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Runtime HTTP latency is elevated
+          description: Aggregate p95 Runtime request latency has exceeded two seconds for ten minutes.

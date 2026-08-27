@@ -4,6 +4,7 @@ mod model;
 pub(crate) mod observability;
 mod postgres;
 mod provisioning;
+mod release;
 mod secret_store;
 mod state;
 pub(crate) mod transport;
@@ -21,6 +22,7 @@ use age::secrecy::SecretString;
 use config::{DesktopDatabaseConfig, DesktopRuntimeConfig};
 use model::{ManagedRuntimeConnection, ManagedRuntimePhase, ProtectionFreshness};
 use provisioning::{ManagedRuntimeProvisioningInput, ManagedRuntimeProvisioningProfile};
+use release::{OPENWA_CONTRACT_SHA256, OPENWA_RELEASE_TAG};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -820,6 +822,17 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
         publish_snapshot(app, ManagedRuntimeSnapshot::provisioning_required(manifest));
         return Ok(());
     };
+    let (openwa_base_url, openwa_api_key) = config.openwa_probe_credentials();
+    let expected_openwa_release = manifest.openwa_release_tag.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        provisioning::assert_compatible_release(
+            &openwa_base_url,
+            &openwa_api_key,
+            &expected_openwa_release,
+        )
+    })
+    .await
+    .map_err(|error| format!("OpenWA release probe task failed: {error}"))??;
 
     let resource_directory = app
         .path()
@@ -942,7 +955,8 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
     let migration_path = migrations_directory
         .to_str()
         .ok_or_else(|| "Runtime migration path is not valid UTF-8.".to_string())?;
-    let environment = config.runtime_environment(migration_path, &database_url);
+    let environment =
+        config.runtime_environment(migration_path, &database_url, &manifest.openwa_release_tag);
 
     publish_snapshot(
         app,
@@ -1486,7 +1500,7 @@ fn parse_and_validate_manifest(bytes: &[u8]) -> Result<RuntimeReleaseManifest, S
     let manifest: RuntimeReleaseManifest = serde_json::from_slice(bytes)
         .map_err(|error| format!("WA Runtime returned an invalid manifest: {error}"))?;
 
-    if manifest.schema_version != 1 {
+    if manifest.schema_version != 2 {
         return Err(format!(
             "Unsupported WA Runtime manifest schema {}.",
             manifest.schema_version
@@ -1503,6 +1517,15 @@ fn parse_and_validate_manifest(bytes: &[u8]) -> Result<RuntimeReleaseManifest, S
             "Unsupported WA Runtime contract {}.",
             manifest.contract_version
         ));
+    }
+    if manifest.openwa_release_tag != OPENWA_RELEASE_TAG {
+        return Err(format!(
+            "WA Runtime expects OpenWA {}, but WA Studio reviewed {}.",
+            manifest.openwa_release_tag, OPENWA_RELEASE_TAG
+        ));
+    }
+    if manifest.openwa_contract_sha256 != OPENWA_CONTRACT_SHA256 {
+        return Err("WA Runtime OpenWA contract snapshot does not match WA Studio.".to_string());
     }
     if !manifest
         .profiles
@@ -1540,27 +1563,44 @@ mod tests {
 
     use super::{
         operational_response_matches, parse_and_validate_manifest, protection_freshness,
-        quarantine_path, recovery_passphrase,
+        quarantine_path, recovery_passphrase, OPENWA_CONTRACT_SHA256, OPENWA_RELEASE_TAG,
     };
     use crate::managed_runtime::model::ProtectionFreshness;
+    use serde_json::json;
 
-    const VALID_MANIFEST: &str = r#"{
-      "schemaVersion": 1,
-      "service": "wa-runtime",
-      "version": "0.1.0",
-      "contractVersion": "v1",
-      "profiles": ["server", "desktop-managed"],
-      "roles": ["api", "worker", "scheduler", "desktop", "migrate"],
-      "databaseBackends": ["postgres"],
-      "queueBackends": ["redis", "postgres"]
-    }"#;
+    fn valid_manifest() -> String {
+        json!({
+          "schemaVersion": 2,
+          "service": "wa-runtime",
+          "version": "0.1.0",
+          "contractVersion": "v1",
+          "openwaReleaseTag": OPENWA_RELEASE_TAG,
+          "openwaContractSha256": OPENWA_CONTRACT_SHA256,
+          "profiles": ["server", "desktop-managed"],
+          "roles": ["api", "worker", "scheduler", "desktop", "migrate"],
+          "databaseBackends": ["postgres"],
+          "queueBackends": ["redis", "postgres"]
+        })
+        .to_string()
+    }
 
     #[test]
     fn accepts_the_managed_runtime_release_contract() {
-        let manifest = parse_and_validate_manifest(VALID_MANIFEST.as_bytes()).unwrap();
+        let source = valid_manifest();
+        let manifest = parse_and_validate_manifest(source.as_bytes()).unwrap();
 
         assert_eq!(manifest.service, "wa-runtime");
         assert_eq!(manifest.version, "0.1.0");
+    }
+
+    #[test]
+    fn rejects_the_legacy_runtime_manifest_schema() {
+        let manifest = valid_manifest().replace("\"schemaVersion\":2", "\"schemaVersion\":1");
+
+        assert_eq!(
+            parse_and_validate_manifest(manifest.as_bytes()).unwrap_err(),
+            "Unsupported WA Runtime manifest schema 1."
+        );
     }
 
     #[test]
@@ -1585,7 +1625,7 @@ mod tests {
 
     #[test]
     fn rejects_a_runtime_without_the_managed_profile() {
-        let manifest = VALID_MANIFEST.replace("[\"server\", \"desktop-managed\"]", "[\"server\"]");
+        let manifest = valid_manifest().replace("[\"server\",\"desktop-managed\"]", "[\"server\"]");
 
         assert_eq!(
             parse_and_validate_manifest(manifest.as_bytes()).unwrap_err(),
@@ -1595,7 +1635,7 @@ mod tests {
 
     #[test]
     fn rejects_an_incompatible_contract() {
-        let manifest = VALID_MANIFEST.replace("\"v1\"", "\"v2\"");
+        let manifest = valid_manifest().replace("\"v1\"", "\"v2\"");
 
         assert_eq!(
             parse_and_validate_manifest(manifest.as_bytes()).unwrap_err(),
@@ -1604,8 +1644,21 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_runtime_built_for_another_openwa_release() {
+        let incompatible_release = "99.0.0";
+        let manifest = valid_manifest().replace(OPENWA_RELEASE_TAG, incompatible_release);
+
+        assert_eq!(
+            parse_and_validate_manifest(manifest.as_bytes()).unwrap_err(),
+            format!(
+                "WA Runtime expects OpenWA {incompatible_release}, but WA Studio reviewed {OPENWA_RELEASE_TAG}."
+            )
+        );
+    }
+
+    #[test]
     fn rejects_a_runtime_without_the_postgres_queue_backend() {
-        let manifest = VALID_MANIFEST.replace("[\"redis\", \"postgres\"]", "[\"redis\"]");
+        let manifest = valid_manifest().replace("[\"redis\",\"postgres\"]", "[\"redis\"]");
 
         assert_eq!(
             parse_and_validate_manifest(manifest.as_bytes()).unwrap_err(),
@@ -1615,7 +1668,7 @@ mod tests {
 
     #[test]
     fn rejects_a_runtime_without_the_desktop_role() {
-        let manifest = VALID_MANIFEST.replace("\"desktop\", ", "");
+        let manifest = valid_manifest().replace("\"desktop\",", "");
 
         assert_eq!(
             parse_and_validate_manifest(manifest.as_bytes()).unwrap_err(),

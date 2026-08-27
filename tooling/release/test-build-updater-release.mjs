@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { releasePreflightErrors } from "./build-updater-release.mjs";
+import {
+  releaseIndependentEnvironment,
+  releasePreflightErrors,
+} from "./build-updater-release.mjs";
 
 const updaterSecrets = {
   WA_STUDIO_UPDATER_ENDPOINT: "https://updates.example.test/wa-studio/{{target}}",
@@ -19,6 +22,20 @@ const invalidEndpoint = releasePreflightErrors({
 assert.deepEqual(invalidEndpoint, [
   "WA_STUDIO_UPDATER_ENDPOINT must be HTTPS and cannot contain credentials.",
 ]);
+
+const mismatchedPublishedEndpoint = releasePreflightErrors({
+  ...updaterSecrets,
+  GITHUB_REPOSITORY: "hiepknor/wa-studio",
+}, "linux");
+assert.deepEqual(mismatchedPublishedEndpoint, [
+  "WA_STUDIO_UPDATER_ENDPOINT must publish from https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json.",
+]);
+
+assert.deepEqual(releasePreflightErrors({
+  ...updaterSecrets,
+  GITHUB_REPOSITORY: "hiepknor/wa-studio",
+  WA_STUDIO_UPDATER_ENDPOINT: "https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json",
+}, "linux"), []);
 
 const unsignedMac = releasePreflightErrors(updaterSecrets, "darwin");
 assert.equal(unsignedMac.length, 2);
@@ -52,7 +69,13 @@ assert.deepEqual(releasePreflightErrors({
   APPLE_API_KEY_PATH: "/secure/ci/AuthKey_key-test-id.p8",
 }, "darwin"), []);
 
-const allErrors = [missing, invalidEndpoint, unsignedMac, adHocMac].flat().join("\n");
+const allErrors = [
+  missing,
+  invalidEndpoint,
+  mismatchedPublishedEndpoint,
+  unsignedMac,
+  adHocMac,
+].flat().join("\n");
 for (const secret of [
   updaterSecrets.TAURI_SIGNING_PRIVATE_KEY,
   "apple-test-secret",
@@ -61,6 +84,16 @@ for (const secret of [
   assert.equal(allErrors.includes(secret), false, "preflight errors exposed a secret value");
 }
 
+const isolatedEnvironment = releaseIndependentEnvironment({
+  APPLE_API_PRIVATE_KEY: "private-notarization-key",
+  APPLE_SIGNING_IDENTITY: "Developer ID Application: Example",
+  GITHUB_TOKEN: "github-job-token",
+  PATH: "/usr/bin:/bin",
+  TAURI_SIGNING_PRIVATE_KEY: updaterSecrets.TAURI_SIGNING_PRIVATE_KEY,
+  WA_STUDIO_UPDATER_PUBLIC_KEY: updaterSecrets.WA_STUDIO_UPDATER_PUBLIC_KEY,
+});
+assert.deepEqual(isolatedEnvironment, { PATH: "/usr/bin:/bin" });
+
 process.stdout.write(
-  "Signed release preflight test passed: updater, Developer ID and notarization gates fail closed.\n",
+  "Signed release preflight test passed: updater, Developer ID and notarization gates fail closed with step-isolated secrets.\n",
 );

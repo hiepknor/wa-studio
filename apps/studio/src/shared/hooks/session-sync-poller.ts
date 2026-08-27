@@ -19,12 +19,28 @@ interface PollSessionSyncOptions {
 }
 
 function abortableWait(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.reject(
+      signal.reason instanceof Error
+        ? signal.reason
+        : new DOMException("Aborted", "AbortError"),
+    );
+  }
   return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(resolve, milliseconds);
-    signal.addEventListener("abort", () => {
+    const onAbort = () => {
       window.clearTimeout(timeout);
-      reject(new DOMException("Aborted", "AbortError"));
-    }, { once: true });
+      signal.removeEventListener("abort", onAbort);
+      reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("Aborted", "AbortError"),
+      );
+    };
+    const timeout = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }
 

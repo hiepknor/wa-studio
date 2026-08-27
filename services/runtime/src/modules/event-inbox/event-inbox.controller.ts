@@ -3,17 +3,21 @@ import {
   Controller,
   Get,
   Headers,
+  HttpException,
   HttpCode,
+  HttpStatus,
+  Ip,
   Inject,
   PayloadTooLargeException,
   Post,
   Req,
+  Res,
   ServiceUnavailableException,
   UnauthorizedException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { z } from 'zod';
 import {
   eventInboxAckSchema,
@@ -31,6 +35,7 @@ import {
   type EventInboxDeviceAuthorization,
 } from './event-inbox-device.repository';
 import { decodeEventInboxReceipt } from './event-inbox-receipt';
+import { EventInboxPairRateLimitService } from './event-inbox-rate-limit.service';
 import { EventInboxRepository } from './event-inbox.repository';
 
 const envelopeSchema = z.object({
@@ -85,12 +90,25 @@ export class EventInboxController {
     private readonly tokens: EventInboxTokenService,
     private readonly devices: EventInboxDeviceRepository,
     private readonly openwa: EventInboxOpenWAClient,
+    private readonly pairingRateLimit: EventInboxPairRateLimitService,
     @Inject(EVENT_INBOX_CONFIG) private readonly config: EventInboxConfig = eventInboxConfig(),
   ) {}
 
   @Post('pair')
   @HttpCode(200)
-  async pair(@Body() body: unknown) {
+  async pair(
+    @Body() body: unknown,
+    @Ip() sourceIp: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const rateLimit = await this.pairingRateLimit.consume(sourceIp);
+    if (!rateLimit.allowed) {
+      response.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+      throw new HttpException(
+        'Event Inbox pairing rate limit exceeded',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
     const parsed = eventInboxPairingRequestSchema.safeParse(body);
     if (!parsed.success) throw new UnprocessableEntityException('Invalid Event Inbox pairing request');
     let sessionIds: string[];

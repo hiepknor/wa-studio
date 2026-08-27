@@ -44,30 +44,36 @@ export class IsolatedSchedulerTick {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
     this.nextRunAt = null;
-    if (!this.activeRun) return;
-    let settled = false;
-    await new Promise<void>(resolve => {
-      const grace = setTimeout(resolve, graceMs);
-      void this.activeRun!.then(
-        () => { settled = true; clearTimeout(grace); resolve(); },
-        () => { settled = true; clearTimeout(grace); resolve(); },
-      );
-    });
-    if (!settled) {
+    const activeRun = this.activeRun;
+    if (!activeRun) return;
+    const grace = setTimeout(() => {
       this.options.logger.warn({
         event: 'scheduler.tick.shutdown_incomplete',
         tick: this.options.name,
         graceMs,
       });
-    }
+    }, graceMs);
+    grace.unref();
+    await activeRun.then(() => undefined, () => undefined);
+    clearTimeout(grace);
   }
 
-  async execute(): Promise<SchedulerTickOutcome> {
+  execute(): Promise<SchedulerTickOutcome> {
     if (this.running) {
       this.options.logger.warn({ event: 'scheduler.tick.overlap_skipped', tick: this.options.name });
-      return 'SKIPPED_OVERLAP';
+      return Promise.resolve('SKIPPED_OVERLAP');
     }
 
+    const activeRun = this.runExecution();
+    this.activeRun = activeRun;
+    void activeRun.then(
+      () => { if (this.activeRun === activeRun) this.activeRun = undefined; },
+      () => { if (this.activeRun === activeRun) this.activeRun = undefined; },
+    );
+    return activeRun;
+  }
+
+  private async runExecution(): Promise<SchedulerTickOutcome> {
     this.running = true;
     this.timedOut = false;
     const startedAtMs = Date.now();
@@ -154,16 +160,14 @@ export class IsolatedSchedulerTick {
     this.nextRunAt = new Date(Date.now() + delayMs).toISOString();
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      const activeRun = this.execute();
-      this.activeRun = activeRun;
-      void activeRun
+      const scheduledRun = this.execute();
+      void scheduledRun
         .catch(error => this.options.logger.error({
           event: 'scheduler.tick.runner_failed',
           tick: this.options.name,
           error,
         }))
         .finally(() => {
-          if (this.activeRun === activeRun) this.activeRun = undefined;
           if (!this.stopped) {
             const nextAt = this.nextRunAt ? Date.parse(this.nextRunAt) : Date.now() + this.options.intervalMs;
             this.schedule(Math.max(0, nextAt - Date.now()));

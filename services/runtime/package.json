@@ -5,7 +5,7 @@
   "description": "Durable control plane between WA Studio and OpenWA",
   "license": "UNLICENSED",
   "engines": {
-    "node": ">=22"
+    "node": ">=24.19.0 <25"
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
@@ -24,7 +24,7 @@
     "start:event-inbox": "node dist/src/entrypoints/event-inbox.js",
     "event-inbox:migrate": "tsx src/entrypoints/event-inbox-migrate.ts",
     "event-inbox:migrate:prod": "node dist/src/entrypoints/event-inbox-migrate.js",
-    "event-inbox:e2e": "npm run build --silent && tsx scripts/test-event-inbox-e2e.ts",
+    "event-inbox:e2e": "npm run build --silent && node scripts/run-event-inbox-e2e.mjs",
     "migrate": "tsx scripts/migrate.ts",
     "migrate:prod": "node dist/scripts/migrate.js",
     "contract:generate": "npm run build --silent && node dist/scripts/generate-runtime-contract.js --output ../../packages/runtime-contract/openapi.json",
@@ -40,15 +40,18 @@
     "test:integration": "npm run build --silent && vitest run --config vitest.integration.config.ts",
     "test:group-members": "npm run build --silent && vitest run --config vitest.group-members.config.ts",
     "architecture:check": "tsx scripts/check-architecture.ts",
+    "event-inbox:deployment:check": "bash -n deploy/event-inbox/event-inbox-backup.sh deploy/event-inbox/event-inbox-restore-drill.sh",
+    "event-inbox:backup:test": "node scripts/test-event-inbox-backup.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run architecture:check && npm run typecheck && npm test && npm run build",
-    "check:all": "npm run check && npm run test:integration"
+    "check": "npm run architecture:check && npm run event-inbox:deployment:check && npm run event-inbox:backup:test && npm run typecheck && npm test && npm run build",
+    "check:all": "npm run check && npm run test:integration && npm run event-inbox:e2e"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",
     "@nestjs/core": "^11.1.6",
     "@nestjs/platform-express": "^11.1.6",
     "@nestjs/swagger": "^11.2.0",
+    "@prometheus-io/client": "^0.16.0",
     "bullmq": "^5.58.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",

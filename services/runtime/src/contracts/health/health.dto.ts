@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { OPENWA_RELEASE_TAG } from '../release/openwa-release.generated';
 
 export class HealthLiveDto {
   @ApiProperty({ enum: ['ok'] })
@@ -51,7 +52,7 @@ export class HealthReadyDto {
   @ApiProperty()
   liveSendsEnabled!: boolean;
 
-  @ApiProperty({ example: '0.22.0' })
+  @ApiProperty({ example: OPENWA_RELEASE_TAG })
   openwaRelease!: string;
 
   @ApiProperty({ minimum: 0 })

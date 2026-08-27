@@ -24,14 +24,17 @@ The current base path is:
 /api/v1
 ```
 
-All business endpoints require:
+All business endpoints and detailed readiness require:
 
 ```http
 X-Runtime-Key: <RUNTIME_API_KEY>
 ```
 
-Health probes and the signed OpenWA webhook ingress are public by design. The webhook has its own
-HMAC authentication and is excluded from Swagger.
+Only `GET /health/live` bypasses Runtime authentication. `GET /health/ready` exposes dependency,
+process and deployment state and therefore requires `X-Runtime-Key`. The dedicated metrics route
+bypasses the shared guard only to enforce its own independent bearer credential and remains excluded
+from Swagger. Signed OpenWA ingress belongs to the separately deployed Event Inbox boundary, not the
+local Runtime API.
 
 The current static Runtime key is for development and trusted internal clients. A desktop client may
 keep it in the operating system credential store during the initial phase. A browser application or
@@ -75,8 +78,8 @@ membership. Exact replay returns the original list with HTTP 200; another payloa
 ### Health
 
 ```text
-GET /health/live
-GET /health/ready
+GET /health/live   (public liveness only)
+GET /health/ready  (X-Runtime-Key required)
 ```
 
 ### Gateway sessions and groups

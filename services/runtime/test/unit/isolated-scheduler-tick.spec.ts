@@ -143,4 +143,29 @@ describe('IsolatedSchedulerTick', () => {
       vi.useRealTimers();
     }
   });
+
+  it('retains a directly-triggered run past the shutdown grace warning', async () => {
+    vi.useFakeTimers();
+    try {
+      const work = deferred<void>();
+      const { tick, logger } = create(() => work.promise, 30_000);
+      const running = tick.execute();
+      let stopped = false;
+      const stopping = tick.stop(100).then(() => { stopped = true; });
+
+      await vi.advanceTimersByTimeAsync(101);
+      expect(stopped).toBe(false);
+      expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({
+        event: 'scheduler.tick.shutdown_incomplete',
+        graceMs: 100,
+      }));
+
+      work.resolve();
+      await expect(running).resolves.toBe('SUCCEEDED');
+      await stopping;
+      expect(stopped).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

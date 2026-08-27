@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 import { runtimeConfig } from '../src/core/config/runtime-config';
+import { operatorJsonRequest, parseRuntimeApiRoot } from './lib/operator-http';
 
 interface CampaignRunView {
   id: string;
@@ -33,7 +34,11 @@ const config = runtimeConfig();
 const targetCount = numberSetting('LOAD_TEST_TARGET_COUNT', 500, 1, 1000);
 const timeoutMs = numberSetting('LOAD_TEST_TIMEOUT_MS', 600_000, 10_000, 3_600_000);
 const pollMs = numberSetting('LOAD_TEST_POLL_MS', 500, 100, 10_000);
-const apiUrl = process.env.LOAD_TEST_API_URL ?? 'http://127.0.0.1:3100/api/v1';
+const apiRoot = parseRuntimeApiRoot(
+  process.env.LOAD_TEST_API_URL ?? 'http://127.0.0.1:3100/api/v1',
+  { allowInsecureHttp: booleanSetting('LOAD_TEST_ALLOW_INSECURE_HTTP', false) },
+);
+const requestTimeoutMs = numberSetting('LOAD_TEST_REQUEST_TIMEOUT_MS', 30_000, 1_000, 120_000);
 const sessionId = config.OPENWA_ALLOWED_SESSION_IDS[0]!;
 const token = randomUUID().replaceAll('-', '').slice(0, 12);
 const groupIds = Array.from({ length: targetCount }, (_, index) =>
@@ -78,9 +83,7 @@ async function main(): Promise<void> {
 }
 
 async function assertReadyAndSafe(): Promise<void> {
-  const response = await fetch(`${apiUrl}/health/ready`);
-  if (!response.ok) throw new Error(`Runtime readiness failed with HTTP ${response.status}`);
-  const health = await response.json() as { status?: string; liveSendsEnabled?: boolean };
+  const health = await apiRequest<{ status?: string; liveSendsEnabled?: boolean }>('/health/ready');
   if (health.status !== 'ready') throw new Error('Runtime is not ready');
   if (health.liveSendsEnabled) throw new Error('Load test refused: readiness reports live sends enabled');
   const session = await pool.query('SELECT 1 FROM gateway_sessions WHERE id = $1', [sessionId]);
@@ -196,12 +199,7 @@ async function cleanupRun(client: PoolClient, id: string): Promise<void> {
 }
 
 async function apiRequest<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
-  headers.set('content-type', 'application/json');
-  headers.set('x-runtime-key', config.RUNTIME_API_KEY);
-  const response = await fetch(`${apiUrl}${path}`, { ...init, headers });
-  if (!response.ok) throw new Error(`${init.method ?? 'GET'} ${path} failed with HTTP ${response.status}: ${await response.text()}`);
-  return await response.json() as T;
+  return operatorJsonRequest<T>(apiRoot, config.RUNTIME_API_KEY, path, init, requestTimeoutMs);
 }
 
 function numberSetting(name: string, fallback: number, minimum: number, maximum: number): number {
@@ -210,6 +208,14 @@ function numberSetting(name: string, fallback: number, minimum: number, maximum:
     throw new Error(`${name} must be an integer from ${minimum} to ${maximum}`);
   }
   return value;
+}
+
+function booleanSetting(name: string, fallback: boolean): boolean {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`${name} must be true or false`);
 }
 
 const delay = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));

@@ -17,6 +17,8 @@ describe('health OpenAPI contract', () => {
       .toEqual({ $ref: '#/components/schemas/HealthReadyDto' });
     expect(operation?.responses['503']?.content?.['application/json']?.schema)
       .toEqual({ $ref: '#/components/schemas/HealthNotReadyDto' });
+    expect(operation?.security).toEqual([{ 'runtime-key': [] }]);
+    expect(contract.paths['/api/v1/health/live']?.get?.security).toBeUndefined();
 
     const ready = contract.components.schemas.HealthReadyDto!;
     expect(ready.required).toEqual([

@@ -7,17 +7,18 @@ import { existsSync } from 'node:fs';
 import { Pool } from 'pg';
 import { migrateEventInboxDatabase } from '../src/core/event-inbox/event-inbox-migrations';
 import { parseEventInboxConfig } from '../src/core/event-inbox/event-inbox-config';
+import { OPENWA_RELEASE_TAG } from '../src/contracts/release/openwa-release.generated';
 
 const sessionId = '00000000-0000-4000-8000-000000000001';
 const apiKey = 'event-inbox-e2e-openwa-key';
 const masterSecret = 'event-inbox-e2e-master-secret-with-at-least-32-characters';
+const metricsToken = 'event-inbox-e2e-metrics-token-with-at-least-32-characters';
 
 async function main(): Promise<void> {
   if (existsSync('.env')) process.loadEnvFile();
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required for Event Inbox E2E');
   const database = new URL(process.env.DATABASE_URL);
   database.hostname = '127.0.0.1';
-  database.port = '5433';
   const schema = `event_inbox_e2e_${process.pid}_${Date.now()}`;
   assert(/^[a-z0-9_]+$/u.test(schema), 'unsafe Event Inbox E2E schema');
   const admin = new Pool({ connectionString: database.toString(), max: 1 });
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
     EVENT_INBOX_PORT: String(eventInboxPort),
     EVENT_INBOX_DATABASE_URL: database.toString(),
     EVENT_INBOX_MASTER_SECRET: masterSecret,
+    EVENT_INBOX_METRICS_TOKEN: metricsToken,
     EVENT_INBOX_PUBLIC_BASE_URL: eventInboxBaseUrl,
     EVENT_INBOX_OPENWA_BASE_URL: openwaBaseUrl,
     EVENT_INBOX_ALLOWED_SESSION_IDS: sessionId,
@@ -52,6 +54,21 @@ async function main(): Promise<void> {
       stdio: 'inherit',
     });
     await waitUntilReady(eventInboxBaseUrl);
+
+    const liveResponse = await fetch(`${eventInboxBaseUrl}/api/v1/health/live`);
+    assert(liveResponse.headers.get('x-content-type-options') === 'nosniff', 'security headers are missing');
+    assert(liveResponse.headers.get('x-powered-by') === null, 'Express fingerprint header is exposed');
+
+    const unauthorizedMetrics = await fetch(`${eventInboxBaseUrl}/api/v1/metrics`);
+    assert(unauthorizedMetrics.status === 401, 'Event Inbox metrics accepted an unauthenticated scrape');
+    const metricsResponse = await fetch(`${eventInboxBaseUrl}/api/v1/metrics`, {
+      headers: { authorization: `Bearer ${metricsToken}` },
+    });
+    const metrics = await metricsResponse.text();
+    assert(metricsResponse.status === 200, 'Event Inbox metrics rejected its dedicated token');
+    assert(metrics.includes('wa_event_inbox_metrics_snapshot_up 1'), 'Event Inbox snapshot metric is missing');
+    assert(metrics.includes('wa_event_inbox_storage_limit_bytes'), 'Event Inbox capacity metric is missing');
+    assert(!metrics.includes(metricsToken), 'Event Inbox metrics exposed its credential');
 
     const legacyToken = issueLegacyDeviceToken(masterSecret, randomUUID(), [sessionId]);
     await claim(eventInboxBaseUrl, legacyToken);
@@ -81,6 +98,27 @@ async function main(): Promise<void> {
     assert(rotationAck.acknowledged === 1, 'rotated device could not ACK its fenced lease');
     assert(pairing.sessionIds.join(',') === sessionId, 'pairing session scope drifted');
     assert(pairing.callbackUrl === `${eventInboxBaseUrl}/api/v1/webhooks/openwa`, 'callback drifted');
+
+    const largeEnvelope = {
+      ...envelope('parser-over-100-kib'),
+      data: { padding: 'x'.repeat(130_000) },
+    };
+    await postWebhook(pairing.callbackUrl, pairing.webhookSecret, largeEnvelope);
+    const largeClaim = await claim(eventInboxBaseUrl, pairing.deviceToken);
+    assert(largeClaim.data.length === 1, 'custom parser rejected a valid webhook above Nest default size');
+    const largeAck = await inboxRequest(eventInboxBaseUrl, pairing.deviceToken, 'events/ack', {
+      receiptHandles: [largeClaim.data[0]!.receiptHandle],
+    });
+    assert(largeAck.acknowledged === 1, 'large webhook could not complete delivery');
+
+    const oversizedWebhook = await fetch(pairing.callbackUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-openwa-signature': 'sha256=irrelevant' },
+      body: JSON.stringify({ padding: 'x'.repeat(262_144) }),
+    });
+    assert(oversizedWebhook.status === 413, 'Event Inbox accepted a webhook above its configured body cap');
+    const oversizedBody = await oversizedWebhook.json() as { code?: string };
+    assert(oversizedBody.code === 'PAYLOAD_TOO_LARGE', 'Event Inbox did not normalize its 413 response');
     const rejectedPairing = await fetch(`${eventInboxBaseUrl}/api/v1/event-inbox/pair`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -147,8 +185,28 @@ async function main(): Promise<void> {
     assert(revoked.revoked === true, 'active Event Inbox device was not revoked');
     await expectUnauthorized(eventInboxBaseUrl, replacement.deviceToken);
 
+    const finalAllowedPairing = await fetch(`${eventInboxBaseUrl}/api/v1/event-inbox/pair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ openwaBaseUrl, openwaApiKey: 'wrong', deviceId: randomUUID() }),
+    });
+    assert(finalAllowedPairing.status === 401, 'pairing limiter rejected an in-budget request');
+    const rateLimitedPairing = await fetch(`${eventInboxBaseUrl}/api/v1/event-inbox/pair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ openwaBaseUrl, openwaApiKey: 'wrong', deviceId: randomUUID() }),
+    });
+    assert(rateLimitedPairing.status === 429, 'pairing limiter allowed an over-budget request');
+    assert(Number(rateLimitedPairing.headers.get('retry-after')) > 0, 'pairing limiter omitted Retry-After');
+    const limitedHealth = await publicRequest(`${eventInboxBaseUrl}/api/v1/health/ready`);
+    assert(
+      limitedHealth.activeRateLimitBuckets === 2
+        && limitedHealth.rateLimitedPairingAttempts === 1,
+      'health did not expose active pairing rate-limit state',
+    );
+
     process.stdout.write(
-      'Event Inbox E2E passed: v1 adoption, v2 rotation/takeover/revocation, HMAC, dedup, lease fencing, retry, ACK and poison isolation.\n',
+      'Event Inbox E2E passed: bounded HTTP parsing, security headers, v1 adoption, v2 rotation/takeover/revocation, HMAC, dedup, lease fencing, retry, ACK, poison isolation, durable pairing rate limits and private metrics.\n',
     );
   } finally {
     if (inbox) await stop(inbox);
@@ -169,7 +227,7 @@ function startOpenWAMock(port: number): Server {
     if (request.url === '/api/health') {
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({
-        status: 'ok', timestamp: new Date().toISOString(), version: '0.22.0',
+        status: 'ok', timestamp: new Date().toISOString(), version: OPENWA_RELEASE_TAG,
       }));
       return;
     }

@@ -1,4 +1,4 @@
-FROM node:24-alpine AS build
+FROM node:24.19.0-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS build
 WORKDIR /workspace
 
 COPY package.json package-lock.json ./
@@ -14,7 +14,7 @@ COPY services/runtime/migrations services/runtime/migrations
 COPY services/runtime/event-inbox-migrations services/runtime/event-inbox-migrations
 RUN npm -w @wa/runtime run build
 
-FROM node:24-alpine AS runtime
+FROM node:24.19.0-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS runtime
 WORKDIR /workspace
 ENV NODE_ENV=production
 

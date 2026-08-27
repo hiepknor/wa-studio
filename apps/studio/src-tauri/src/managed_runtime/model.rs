@@ -7,6 +7,8 @@ pub struct RuntimeReleaseManifest {
     pub service: String,
     pub version: String,
     pub contract_version: String,
+    pub openwa_release_tag: String,
+    pub openwa_contract_sha256: String,
     pub profiles: Vec<String>,
     pub roles: Vec<String>,
     pub database_backends: Vec<String>,

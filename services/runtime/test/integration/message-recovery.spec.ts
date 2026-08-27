@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
+import { runtimeConfig } from '../../src/core/config/runtime-config';
 import { DatabaseService } from '../../src/core/database/database.service';
 import { OpenWAClient, OpenWAHttpError } from '../../src/integrations/openwa/openwa.client';
 import { GatewayRepository } from '../../src/modules/gateway/gateway.repository';
@@ -138,6 +139,50 @@ describe('message durability and delivery', () => {
     expect(await messages.find(created.job.id)).toMatchObject({ status: 'FAILED' });
     expect(await gateway.findGroup(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID)).toMatchObject({
       sendCapability: { status: 'UNKNOWN', reason: 'GROUP_CHANGED' },
+    });
+  });
+
+  it('rechecks live policy after acquiring the session lease and before dispatch', async () => {
+    const created = await create('late-session-block', 'must-not-send', false);
+    await messages.claimDue(10);
+    const gateway = new GatewayRepository(database, new ContactRepository(database));
+    const openwa = {
+      sendText: vi.fn().mockResolvedValue({ messageId: 'must-not-exist', timestamp: Date.now() }),
+    } as unknown as OpenWAClient;
+    const lease = {
+      withLease: async (
+        _sessionId: string,
+        _messageJobId: string,
+        operation: (verifyForSend: () => Promise<void>) => Promise<unknown>,
+      ) => {
+        await pool.query(
+          `UPDATE gateway_sessions SET status = 'disconnected', updated_at = now() WHERE id = $1`,
+          [INTEGRATION_SESSION_ID],
+        );
+        return operation(async () => undefined);
+      },
+    } as unknown as OutboundSessionLeaseService;
+    const processor = new MessageJobProcessorService(
+      database,
+      messages,
+      new MessageSendPolicyService(gateway, new SessionScopeService()),
+      openwa,
+      gateway,
+      lease,
+      {
+        ...runtimeConfig(),
+        ALLOW_LIVE_SENDS: true,
+        OUTBOUND_MIN_DELAY_MS: 0,
+        OUTBOUND_MAX_DELAY_MS: 0,
+      },
+    );
+
+    await expect(processor.process({ messageJobId: created.job.id }))
+      .rejects.toThrow('Live send blocked: Gateway session is not sendable');
+    expect(openwa.sendText).not.toHaveBeenCalled();
+    expect(await messages.find(created.job.id)).toMatchObject({
+      status: 'FAILED',
+      lastError: 'Live send blocked: Gateway session is not sendable',
     });
   });
 

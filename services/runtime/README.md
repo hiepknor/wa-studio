@@ -14,7 +14,8 @@ Milestone 3 is complete. The Runtime currently provides:
 - pause, resume and cancel controls;
 - PostgreSQL-backed state, Redis/BullMQ queues and HMAC-verified OpenWA webhooks;
 - PostgreSQL-coordinated per-session outbound pacing and bounded PostgreSQL retention;
-- correlated, redacted JSON logs across API, scheduler and worker.
+- correlated, redacted JSON logs across API, scheduler and worker;
+- a disabled-by-default, dedicated-token Prometheus contract and reference alert rules.
 
 Live delivery is disabled by default. A new `LIVE` run requires a recent passing signed preflight,
 explicit campaign/target revisions, and `ALLOW_LIVE_SENDS=true`. Develop against `dev-session` with
@@ -23,14 +24,15 @@ this switch kept off.
 ## Architecture
 
 The production target is local-first: WA Studio supervises the bundled Runtime roles, PostgreSQL and
-PostgreSQL durable queue on the operator's device. The VPS keeps OpenWA `0.22.0` unchanged and runs
-only a bounded Event Inbox so an offline/NATed desktop does not lose acknowledged callbacks.
+PostgreSQL durable queue on the operator's device. The VPS keeps the reviewed OpenWA release
+unchanged and runs only a bounded Event Inbox so an offline/NATed desktop does not lose acknowledged
+callbacks.
 
 ```text
 WA Studio desktop -> loopback Runtime API/worker/scheduler -> embedded PostgreSQL
                                               |
                                               v
-                                      OpenWA Gateway 0.22.0
+                                      OpenWA Gateway (reviewed tag)
                                               |
                                               | signed webhook
                                               v
@@ -47,28 +49,32 @@ for the target topology and failure analysis.
 
 ## Quick start with Docker
 
-Prerequisites: Docker with Compose. Node.js 22+ is needed only for running checks or processes
+Prerequisites: Docker with Compose. Node.js 24.19.0 is needed only for running checks or processes
 outside Docker. Start OpenWA from its own repository first so the shared `wa-dev-network` and
 `openwa-dev-api` service exist; see [Development](docs/development.md).
 
 ```bash
-cp .env.example .env
+cp services/runtime/.env.example services/runtime/.env
 ```
 
 Replace every placeholder in `.env`, then start the stack:
 
 ```bash
-docker compose up --build -d
-docker compose ps
-curl http://localhost:3100/api/v1/health/ready
+set -a
+source services/runtime/.env
+set +a
+docker compose --env-file services/runtime/.env -f services/runtime/docker-compose.yml up --build -d
+docker compose --env-file services/runtime/.env -f services/runtime/docker-compose.yml ps
+curl --header "X-Runtime-Key: $RUNTIME_API_KEY" \
+  http://localhost:3100/api/v1/health/ready
 ```
 
 Local endpoints:
 
 - Runtime API: <http://localhost:3100/api/v1>
 - Swagger UI: <http://localhost:3100/api/v1/docs>
-- Liveness: <http://localhost:3100/api/v1/health/live>
-- Readiness: <http://localhost:3100/api/v1/health/ready>
+- Public liveness: <http://localhost:3100/api/v1/health/live>
+- Authenticated readiness: <http://localhost:3100/api/v1/health/ready>
 
 Protected endpoints require:
 
@@ -107,6 +113,7 @@ The exact lifecycle and state meanings are documented in
 - [Desktop installation runbook](docs/runbooks/desktop-managed-cutover.md) — clean local initialization and direct retirement of the old Runtime.
 - [Failure model](docs/failure-model.md) — durable dispatch, leases, retry and ambiguous delivery semantics.
 - [Observability](docs/observability.md) — JSON logs, correlation IDs, health checks and manual diagnosis.
+- [Metrics deployment](deploy/observability/README.md) — private scraping, credential handling and alert rules.
 - [Latest local acceptance](docs/acceptance/2026-08-12-multiprocess-local.md) — two-worker concurrency, Redis recovery, dry-run load and group-member smoke evidence.
 - [API contract](docs/api-contract.md) — authentication, idempotency, endpoint groups and versioning.
 

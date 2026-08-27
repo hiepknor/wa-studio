@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Docker Desktop or Docker Engine with Compose;
-- Node.js 22+ and npm for host-side checks;
+- Node.js 24.19.0 and npm for host-side checks (pinned by the workspace `.nvmrc`);
 - a paired local OpenWA `dev-session`;
 - no production credentials on the development machine.
 
@@ -57,7 +57,7 @@ adapter.
 Return to the repository root and create the ignored environment file:
 
 ```bash
-cp .env.example .env
+cp services/runtime/.env.example services/runtime/.env
 ```
 
 Required choices:
@@ -69,18 +69,22 @@ Required choices:
 - keep `ALLOW_LIVE_SENDS=false`;
 - keep `OPENWA_RELEASE_TAG` equal to the reviewed local OpenWA image tag.
 
-The current reviewed Gateway release is OpenWA `0.22.0`; its upstream contract snapshot is stored
-under `contracts/openwa/0.22.0`.
+The current reviewed Gateway release and exact contract digest are declared in
+`release/components.json`; its snapshot is stored under `contracts/openwa/<tag>`. Run
+`npm run openwa:server:status` from the repository root to compare the configured development
+server with that reviewed pin.
 
 The checked-in Compose file consumes `.env` inside containers. Runtime storage resolves through the
 private aliases `wa-runtime-postgres` and `wa-runtime-redis`; OpenWA resolves as `openwa-dev-api` on
 the shared development network. New installations create the `wa_runtime` database and the
-`wa-runtime_postgres-data` and `wa-runtime_redis-data` volumes.
+`wa-runtime_postgres-data` and `wa-runtime_redis-data` volumes. Keep the bounded database pool and
+timeout defaults from `.env.example` unless a test explicitly exercises a different limit.
 
 ```bash
-docker compose up --build -d
-docker compose ps
-docker compose logs --tail=100 migrate api worker scheduler
+docker compose --env-file services/runtime/.env -f services/runtime/docker-compose.yml up --build -d
+docker compose --env-file services/runtime/.env -f services/runtime/docker-compose.yml ps
+docker compose --env-file services/runtime/.env -f services/runtime/docker-compose.yml \
+  logs --tail=100 migrate api worker scheduler
 ```
 
 Migration files are applied in filename order under a PostgreSQL advisory lock and recorded in
@@ -148,11 +152,15 @@ verifies campaign delivery invariants and removes its test data afterward. Again
 ```bash
 docker compose run --rm \
   -e LOAD_TEST_API_URL=http://api:3100/api/v1 \
+  -e LOAD_TEST_ALLOW_INSECURE_HTTP=true \
   api node dist/scripts/load-test-dry-run.js
 ```
 
-Set `LOAD_TEST_TARGET_COUNT`, `LOAD_TEST_TIMEOUT_MS` or `LOAD_TEST_POLL_MS` only when testing another
-profile. Worker and scheduler may be restarted while the command is running to exercise recovery.
+The explicit insecure-HTTP flag is limited to this disposable internal Compose network. Outside
+loopback, operator tooling otherwise requires HTTPS before sending `X-Runtime-Key`. Set
+`LOAD_TEST_TARGET_COUNT`, `LOAD_TEST_TIMEOUT_MS`, `LOAD_TEST_POLL_MS` or
+`LOAD_TEST_REQUEST_TIMEOUT_MS` only when testing another profile. Worker and scheduler may be
+restarted while the command is running to exercise recovery.
 
 ## Contract workflow
 
@@ -199,6 +207,11 @@ only the webhook proxy route:
 npm run dev:webhook-proxy
 cloudflared tunnel --url http://127.0.0.1:3101
 ```
+
+The loopback proxy accepts only the exact webhook path, buffers at most 1 MiB before forwarding,
+strips hop-by-hop headers, caps Runtime responses and fails closed after 30 seconds. Override
+`WEBHOOK_PROXY_MAX_BODY_BYTES`, `WEBHOOK_PROXY_MAX_RESPONSE_BYTES` or
+`WEBHOOK_PROXY_UPSTREAM_TIMEOUT_MS` only to match an explicitly reviewed development profile.
 
 Never expose PostgreSQL, Redis, MinIO or the Runtime API through that tunnel.
 

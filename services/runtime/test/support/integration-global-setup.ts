@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import { OPENWA_RELEASE_TAG } from '../../src/contracts/release/openwa-release.generated';
 
 const SESSION_ID = '00000000-0000-4000-8000-000000000001';
 const GROUP_ID = '120363000000000000@g.us';
@@ -123,7 +124,7 @@ export default async function setup(): Promise<() => Promise<void>> {
         });
       }
       if (request.method === 'GET' && path === '/api/health') {
-        return json(response, 200, { status: 'ok', timestamp: new Date().toISOString(), version: '0.22.0' });
+        return json(response, 200, { status: 'ok', timestamp: new Date().toISOString(), version: OPENWA_RELEASE_TAG });
       }
       if (request.method === 'GET' && path === `/api/sessions/${SESSION_ID}`) {
         return json(response, 200, {
@@ -179,10 +180,11 @@ export default async function setup(): Promise<() => Promise<void>> {
       DATABASE_URL: databaseUrl,
       REDIS_URL: `redis://127.0.0.1:${redisPort}`,
       RUNTIME_API_KEY: 'integration-runtime-key-0000000000000000',
+      RUNTIME_METRICS_TOKEN: 'integration-metrics-token-0000000000000',
       ENABLE_RUNTIME_DOCS: 'false',
       OPENWA_BASE_URL: `http://127.0.0.1:${address.port}`,
       OPENWA_API_KEY: 'integration-openwa-key',
-      OPENWA_RELEASE_TAG: '0.22.0',
+      OPENWA_RELEASE_TAG,
       OPENWA_WEBHOOK_SECRET: 'integration-webhook-secret-0000000000000',
       OPENWA_ALLOWED_SESSION_IDS: SESSION_ID,
       ALLOW_LIVE_SENDS: 'true',

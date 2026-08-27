@@ -5,8 +5,8 @@ event is migrated, and there is no dual delivery or fallback mode.
 
 ## 1. Release gates
 
-1. Pin OpenWA to 0.22.0 and record its immutable image.
-2. Run Runtime check, Event Inbox E2E, Studio check, and packaged managed-runtime E2E.
+1. Pin OpenWA to the reviewed tag in `release/components.json` and record its immutable image.
+2. Run Runtime check, Event Inbox E2E, Prometheus config/rule validation, Studio check, and packaged managed-runtime E2E.
 3. Build immutable amd64 Event Inbox and signed universal Studio artifacts.
 4. Record both image/app digests and verify no generated secret is in source control.
 
@@ -19,10 +19,12 @@ https://openwa.onio.cc/.well-known/wa-studio.
 Required pre-cutover checks:
 
 - Event Inbox local readiness returns protocolVersion 2 and zero stored events.
+- An authenticated private metrics scrape reports snapshot-up and capacity limits.
+- Public `/api/v1/health/ready` and `/api/v1/metrics` both return 404.
 - Public discovery names exactly https://wa-events.onio.cc.
 - Legacy GET /api/v1/relay/events returns 404.
 - GET on pairing and delivery endpoints returns 404.
-- OpenWA remains healthy on image/tag 0.22.0.
+- OpenWA remains healthy on the recorded image and reviewed tag.
 
 ## 3. Atomic callback cutover
 
@@ -53,10 +55,11 @@ Require all of the following before deleting legacy resources:
 ## 5. Irreversible cleanup
 
 After acceptance, remove exactly the wa-webhook-relay Compose project, directory, stopped
-containers, network and wa-webhook-relay_postgres-data volume. Delete any obsolete schema-v1 local
-secret file before pairing the final schema-v2 profile.
-after schema v2 has started successfully. Remove only the staged image archive and explicitly
-identified unreferenced legacy image. Do not run broad Docker prune commands.
+containers, network and wa-webhook-relay_postgres-data volume. Let WA Studio migrate a supported
+schema-v1 local secret file into the operating-system credential store; verify the schema-v2 profile
+starts successfully and that the legacy file was removed before final pairing. Remove only the
+staged image archive and explicitly identified unreferenced legacy image. Do not run broad Docker
+prune commands.
 
 Rollback is not part of this design. A failure before acceptance is fixed forward while Event Inbox
 continues to buffer signed callbacks.

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { OPENWA_RELEASE_TAG } from '../../contracts/release/openwa-release.generated';
 
 const booleanFromEnv = (defaultValue: boolean) => z
   .enum(['true', 'false'])
@@ -6,6 +7,14 @@ const booleanFromEnv = (defaultValue: boolean) => z
   .transform(value => value === undefined ? defaultValue : value === 'true');
 
 const desktopLoopbackHosts = new Set(['127.0.0.1', '::1']);
+
+const originSchema = z.url().transform(value => {
+  const url = new URL(value);
+  if (!['', '/'].includes(url.pathname) || url.search || url.hash || url.username || url.password) {
+    throw new Error('must be an origin without credentials, path, query or fragment');
+  }
+  return url.origin;
+});
 
 const schema = z
   .object({
@@ -15,18 +24,37 @@ const schema = z
       .regex(/^[A-Za-z0-9._:-]+$/u)
       .default('default'),
     RUNTIME_BIND_HOST: z.string().trim().min(1).optional(),
+    RUNTIME_HTTP_BODY_MAX_BYTES: z.coerce.number().int()
+      .min(65_536).max(16_777_216).default(1_048_576),
+    RUNTIME_HTTP_REQUEST_TIMEOUT_MS: z.coerce.number().int()
+      .min(1_000).max(120_000).default(30_000),
+    RUNTIME_HTTP_HEADERS_TIMEOUT_MS: z.coerce.number().int()
+      .min(1_000).max(60_000).default(10_000),
     QUEUE_BACKEND: z.enum(['redis', 'postgres']).default('redis'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3100),
     DATABASE_URL: z.string().url(),
+    DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+    DATABASE_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
+    DATABASE_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(30_000),
+    DATABASE_QUERY_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
+    DATABASE_LOCK_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(10_000),
+    DATABASE_IDLE_TRANSACTION_TIMEOUT_MS: z.coerce.number().int()
+      .min(1_000).max(300_000).default(30_000),
+    DATABASE_MAX_LIFETIME_SECONDS: z.coerce.number().int().min(60).max(86_400).default(3_600),
     REDIS_URL: z.string().url().optional(),
-    RUNTIME_API_KEY: z.string().min(32),
+    RUNTIME_API_KEY: z.string().min(32).max(4096),
+    RUNTIME_METRICS_TOKEN: z.string().min(32).max(4096).optional(),
     ENABLE_RUNTIME_DOCS: z
       .enum(['true', 'false'])
       .optional()
       .transform(value => value === undefined ? undefined : value === 'true'),
-    OPENWA_BASE_URL: z.string().url(),
+    OPENWA_BASE_URL: originSchema,
     OPENWA_API_KEY: z.string().min(1),
-    OPENWA_RELEASE_TAG: z.string().min(1).default('0.22.0'),
+    OPENWA_RELEASE_TAG: z.string().min(1).default(OPENWA_RELEASE_TAG),
+    OPENWA_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+    OPENWA_REQUEST_DEADLINE_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
+    OPENWA_RESPONSE_MAX_BYTES: z.coerce.number().int()
+      .min(65_536).max(134_217_728).default(33_554_432),
     OPENWA_WEBHOOK_SECRET: z.string().min(32),
     OPENWA_WEBHOOK_RECONCILIATION_ENABLED: booleanFromEnv(false),
     OPENWA_WEBHOOK_CALLBACK_URL: z.url().optional(),
@@ -36,6 +64,9 @@ const schema = z
     EVENT_INBOX_DEVICE_TOKEN: z.string().min(32).max(4096).optional(),
     EVENT_INBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(250).max(60_000).default(2_000),
     EVENT_INBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(100),
+    EVENT_INBOX_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(21_000).max(120_000).default(30_000),
+    EVENT_INBOX_RESPONSE_MAX_BYTES: z.coerce.number().int()
+      .min(1_048_576).max(167_772_160).default(41_943_040),
     OPENWA_ALLOWED_SESSION_IDS: z
       .string()
       .min(1)
@@ -105,6 +136,13 @@ const schema = z
         message: 'REDIS_URL is required when QUEUE_BACKEND=redis',
       });
     }
+    if (value.RUNTIME_METRICS_TOKEN === value.RUNTIME_API_KEY) {
+      context.addIssue({
+        code: 'custom',
+        path: ['RUNTIME_METRICS_TOKEN'],
+        message: 'RUNTIME_METRICS_TOKEN must be different from RUNTIME_API_KEY',
+      });
+    }
     if (value.RUNTIME_PROFILE === 'desktop-managed' && value.RUNTIME_BIND_HOST
       && !desktopLoopbackHosts.has(value.RUNTIME_BIND_HOST)) {
       context.addIssue({
@@ -113,11 +151,23 @@ const schema = z
         message: 'desktop-managed Runtime must bind to a loopback address',
       });
     }
+    if (value.RUNTIME_HTTP_HEADERS_TIMEOUT_MS > value.RUNTIME_HTTP_REQUEST_TIMEOUT_MS) {
+      context.addIssue({
+        code: 'custom', path: ['RUNTIME_HTTP_HEADERS_TIMEOUT_MS'],
+        message: 'RUNTIME_HTTP_HEADERS_TIMEOUT_MS cannot exceed RUNTIME_HTTP_REQUEST_TIMEOUT_MS',
+      });
+    }
     if (value.OUTBOUND_MAX_DELAY_MS < value.OUTBOUND_MIN_DELAY_MS) {
       context.addIssue({
         code: 'custom',
         path: ['OUTBOUND_MAX_DELAY_MS'],
         message: 'must be greater than or equal to OUTBOUND_MIN_DELAY_MS',
+      });
+    }
+    if (value.OPENWA_REQUEST_DEADLINE_MS < value.OPENWA_REQUEST_TIMEOUT_MS) {
+      context.addIssue({
+        code: 'custom', path: ['OPENWA_REQUEST_DEADLINE_MS'],
+        message: 'OPENWA_REQUEST_DEADLINE_MS must be greater than or equal to OPENWA_REQUEST_TIMEOUT_MS',
       });
     }
     if (value.GATEWAY_GROUP_EVENT_MAX_WAIT_MS < value.GATEWAY_GROUP_EVENT_DEBOUNCE_MS) {

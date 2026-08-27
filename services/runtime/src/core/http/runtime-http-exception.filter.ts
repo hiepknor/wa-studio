@@ -16,6 +16,7 @@ const statusCode = (status: number): string => ({
   [HttpStatus.NOT_FOUND]: 'RESOURCE_NOT_FOUND',
   [HttpStatus.CONFLICT]: 'CONFLICT',
   [HttpStatus.UNPROCESSABLE_ENTITY]: 'UNPROCESSABLE_ENTITY',
+  [HttpStatus.PAYLOAD_TOO_LARGE]: 'PAYLOAD_TOO_LARGE',
   [HttpStatus.TOO_MANY_REQUESTS]: 'RATE_LIMITED',
   [HttpStatus.SERVICE_UNAVAILABLE]: 'SERVICE_UNAVAILABLE',
 } as Record<number, string>)[status] ?? `HTTP_${status}`;
@@ -65,10 +66,38 @@ export function runtimeErrorFromException(exception: unknown): {
   if (exception instanceof HttpException) {
     return { status: exception.getStatus(), body: runtimeErrorFromHttpException(exception) };
   }
+  if (isBodyParserError(exception, 'entity.too.large', HttpStatus.PAYLOAD_TOO_LARGE)) {
+    return {
+      status: HttpStatus.PAYLOAD_TOO_LARGE,
+      body: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body exceeds the configured limit',
+        details: {},
+      },
+    };
+  }
+  if (isBodyParserError(exception, 'entity.parse.failed', HttpStatus.BAD_REQUEST)) {
+    const message = 'Request body is not valid JSON';
+    return {
+      status: HttpStatus.BAD_REQUEST,
+      body: {
+        code: 'VALIDATION_ERROR',
+        message,
+        fieldErrors: { request: [message] },
+        details: {},
+      },
+    };
+  }
   return {
     status: HttpStatus.INTERNAL_SERVER_ERROR,
     body: { code: 'INTERNAL_ERROR', message: 'Internal server error', details: {} },
   };
+}
+
+function isBodyParserError(exception: unknown, type: string, status: number): boolean {
+  return exception instanceof Error
+    && (exception as Error & { type?: unknown }).type === type
+    && (exception as Error & { status?: unknown }).status === status;
 }
 
 @Catch()
@@ -77,7 +106,7 @@ export class RuntimeHttpExceptionFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const normalized = runtimeErrorFromException(exception);
-    if (!(exception instanceof HttpException)) {
+    if (normalized.status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error({ event: 'http.unhandled_exception', error: exception });
     }
     host.switchToHttp().getResponse<Response>()

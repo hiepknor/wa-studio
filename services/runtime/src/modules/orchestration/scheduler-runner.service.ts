@@ -3,6 +3,7 @@ import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-con
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { withCorrelationContext } from '../../core/observability/correlation-context';
 import { terminationSignal } from '../../core/process/termination-signal';
+import { runWithCleanup } from '../../core/process/run-with-cleanup';
 import { RUNTIME_HEARTBEAT_INTERVAL_MS } from '../../core/queue/runtime-heartbeat';
 import { QueueService } from '../../core/queue/queue.service';
 import { CampaignDispatchTick } from './campaign-dispatch.tick';
@@ -49,17 +50,20 @@ export class SchedulerRunnerService {
 
   async run(): Promise<void> {
     const termination = terminationSignal();
-    try {
-      await this.start();
-      const leadershipFailure = await Promise.race([
-        termination.promise.then(() => null),
-        this.waitForFailure(),
-      ]);
-      if (leadershipFailure) throw leadershipFailure;
-    } finally {
-      termination.dispose();
-      await this.stop();
-    }
+    await runWithCleanup(
+      async () => {
+        await this.start();
+        const leadershipFailure = await Promise.race([
+          termination.promise.then(() => null),
+          this.waitForFailure(),
+        ]);
+        if (leadershipFailure) throw leadershipFailure;
+      },
+      async () => {
+        termination.dispose();
+        await this.stop();
+      },
+    );
   }
 
   async start(): Promise<void> {

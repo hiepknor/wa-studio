@@ -11,6 +11,9 @@ import process from "node:process";
 const workspaceRoot = resolve(import.meta.dirname, "..");
 const studioRoot = resolve(workspaceRoot, "apps/studio");
 const runtimeRoot = resolve(workspaceRoot, "services/runtime");
+const openWaReleaseTag = JSON.parse(
+  readFileSync(resolve(workspaceRoot, "release/components.json"), "utf8"),
+).openwaReleaseTag;
 const runtimeRequire = createRequire(resolve(runtimeRoot, "package.json"));
 const { Pool } = runtimeRequire("pg");
 
@@ -132,7 +135,7 @@ async function main() {
       /^desktop-[1-9][0-9]*$/u.test(operational.instanceId),
       "Packaged Runtime operational health did not report its supervisor generation",
     );
-    const health = await waitForRuntimeReady();
+    const health = await waitForRuntimeReady(profile.runtimeApiKey);
     assertCompleteRuntimeHealth(health);
     const registration = await waitForWebhookRegistration(openwa, eventInboxBaseUrl);
     const syncRun = await requestFullSync(profile.runtimeApiKey);
@@ -154,7 +157,7 @@ async function main() {
     await waitForChildExit(app, 30_000, "WA Studio did not exit after the native quit request");
     app = spawn(appBinary, [], { env: appEnvironment, stdio: "inherit" });
     await waitForRuntimeOperational(profile.runtimeApiKey);
-    await waitForRuntimeReady();
+    await waitForRuntimeReady(profile.runtimeApiKey);
     assertManagedBackupCreated();
     nativeQuitStudio();
     await waitForChildExit(
@@ -194,7 +197,7 @@ async function main() {
   if (oneShot) {
     if (!successfulNativeQuit) throw new Error("Packaged E2E did not complete a native app shutdown.");
     process.stdout.write(
-      "Packaged managed Runtime E2E passed: OpenWA 0.22.0 registration, durable Event Inbox claim/ACK, local PostgreSQL dedup, verified encrypted restart backup, safe native shutdown.\n",
+      `Packaged managed Runtime E2E passed: OpenWA ${openWaReleaseTag} registration, durable Event Inbox claim/ACK, local PostgreSQL dedup, verified encrypted restart backup, safe native shutdown.\n`,
     );
   }
 }
@@ -315,7 +318,7 @@ async function handleOpenWaRequest(request, response, state) {
     return json(response, 200, {
       status: "ok",
       timestamp: new Date().toISOString(),
-      version: "0.22.0",
+      version: openWaReleaseTag,
     });
   }
   if (request.method === "GET" && url.pathname === "/api/sessions") {
@@ -503,13 +506,14 @@ function requiredTestDatabaseUrl() {
   return databaseUrl;
 }
 
-async function waitForRuntimeReady() {
+async function waitForRuntimeReady(runtimeApiKey) {
   return waitForJson(
     `http://127.0.0.1:${runtimePort}/api/v1/health/ready`,
     value => value.status === "ready"
       && value.processes?.worker === "healthy"
       && value.processes?.scheduler === "healthy",
     180_000,
+    { headers: { "x-runtime-key": runtimeApiKey } },
   );
 }
 
@@ -532,7 +536,10 @@ function assertCompleteRuntimeHealth(health) {
     "Packaged Runtime is not using its PostgreSQL durable queue",
   );
   assert(health.liveSendsEnabled === false, "Packaged E2E unexpectedly enabled live sends");
-  assert(health.openwaRelease === "0.22.0", "Packaged Runtime did not pin OpenWA 0.22.0");
+  assert(
+    health.openwaRelease === openWaReleaseTag,
+    `Packaged Runtime did not pin OpenWA ${openWaReleaseTag}`,
+  );
   assert(health.allowedSessionCount === 1, "Packaged Runtime allowed-session scope drifted");
 }
 

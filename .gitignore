@@ -14,6 +14,8 @@ dist/
 dist-ssr/
 **/dist-ssr/
 *.local
+services/runtime/deploy/observability/runtime-metrics-token
+services/runtime/deploy/observability/event-inbox-metrics-token
 apps/studio/src-tauri/binaries/*
 !apps/studio/src-tauri/binaries/.gitkeep
 apps/studio/src-tauri/resources/runtime-migrations/

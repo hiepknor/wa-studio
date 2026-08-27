@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { RuntimeApi, RuntimeSyncRun } from "@/shared/api/runtime-client";
+import {
+  isUnknownMutationOutcome,
+  unknownMutationOutcomeMessage,
+} from "@/shared/api/runtime-mutation";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
 import { pollSessionSync } from "./session-sync-poller";
 
 export type SessionSyncState =
@@ -9,11 +14,13 @@ export type SessionSyncState =
   | "running"
   | "updating"
   | "background"
+  | "unknown"
   | "failed";
 
 export type SessionSyncResult =
   | { status: "completed"; run: RuntimeSyncRun; warning?: string }
   | { status: "failed"; run: RuntimeSyncRun | null; error: string }
+  | { status: "unknown"; run: null; error: string }
   | { status: "background"; run: RuntimeSyncRun };
 
 interface UseSessionSyncOptions {
@@ -21,10 +28,6 @@ interface UseSessionSyncOptions {
   runtimeApi: RuntimeApi;
   runtimeOrigin: string;
   sessionId: string | null;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
 }
 
 export function useSessionSync({
@@ -37,6 +40,7 @@ export function useSessionSync({
   const [run, setRun] = useState<RuntimeSyncRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const revisionRef = useRef(0);
+  const activeRevisionRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const targetRef = useRef({ runtimeOrigin, sessionId });
   const completedRef = useRef(onCompleted);
@@ -45,6 +49,7 @@ export function useSessionSync({
 
   const cancel = useCallback(() => {
     revisionRef.current += 1;
+    activeRevisionRef.current = null;
     abortRef.current?.abort();
     abortRef.current = null;
   }, []);
@@ -67,11 +72,11 @@ export function useSessionSync({
   useEffect(() => () => cancel(), [cancel]);
 
   const start = useCallback(async (): Promise<SessionSyncResult | null> => {
-    const active = state === "requesting" || state === "running" || state === "updating";
-    if (!sessionId || active) return null;
+    if (!sessionId || activeRevisionRef.current !== null) return null;
 
     cancel();
     const revision = revisionRef.current;
+    activeRevisionRef.current = revision;
     const origin = runtimeOrigin;
     const id = sessionId;
     const controller = new AbortController();
@@ -89,7 +94,9 @@ export function useSessionSync({
       const result = await pollSessionSync({
         initialRun,
         signal: controller.signal,
-        read: () => runtimeApi.getSessionSyncRun(id, initialRun.id),
+        read: () => runtimeApi.getSessionSyncRun(id, initialRun.id, {
+          signal: controller.signal,
+        }),
         onObservation: (nextRun) => {
           if (flowIsCurrent(revision, origin, id)) setRun(nextRun);
         },
@@ -103,7 +110,10 @@ export function useSessionSync({
         try {
           warning = await completedRef.current?.(result.run) || undefined;
         } catch (completionError) {
-          warning = errorMessage(completionError, "The synchronized view could not be updated.");
+          warning = userFacingErrorMessage(
+            completionError,
+            "The synchronized view could not be updated.",
+          );
         }
         if (!flowIsCurrent(revision, origin, id)) return null;
         setState("idle");
@@ -121,14 +131,22 @@ export function useSessionSync({
       return { status: "background", run: result.run };
     } catch (requestError) {
       if (!flowIsCurrent(revision, origin, id)) return null;
-      const message = errorMessage(requestError, "Could not start session sync.");
-      setState("failed");
+      const outcomeUnknown = isUnknownMutationOutcome(requestError);
+      const message = outcomeUnknown
+        ? unknownMutationOutcomeMessage("observe-background")
+        : userFacingErrorMessage(requestError, "Could not start session sync.");
+      setState(outcomeUnknown ? "unknown" : "failed");
       setError(message);
-      return { status: "failed", run: null, error: message };
+      return {
+        status: outcomeUnknown ? "unknown" : "failed",
+        run: null,
+        error: message,
+      };
     } finally {
+      if (activeRevisionRef.current === revision) activeRevisionRef.current = null;
       if (flowIsCurrent(revision, origin, id)) abortRef.current = null;
     }
-  }, [cancel, flowIsCurrent, runtimeApi, runtimeOrigin, sessionId, state]);
+  }, [cancel, flowIsCurrent, runtimeApi, runtimeOrigin, sessionId]);
 
   return {
     active: state === "requesting" || state === "running" || state === "updating",

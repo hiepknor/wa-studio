@@ -3,6 +3,8 @@ import type { PoolClient } from 'pg';
 import { DatabaseService } from '../../core/database/database.service';
 import type { MessageJob, MessageJobStatus } from './message-job.types';
 
+const defaultProcessingLeaseTtlMs = 120_000;
+
 interface MessageJobRow {
   id: string;
   idempotency_key: string;
@@ -133,11 +135,15 @@ export class MessageJobRepository {
     return result.rows[0] ? map(result.rows[0]) : null;
   }
 
-  async refreshProcessingLease(id: string): Promise<boolean> {
+  async refreshProcessingLease(
+    id: string,
+    ttlMs = defaultProcessingLeaseTtlMs,
+  ): Promise<boolean> {
     const result = await this.database.query(
-      `UPDATE message_jobs SET lease_expires_at = now() + interval '2 minutes', updated_at = now()
+      `UPDATE message_jobs
+       SET lease_expires_at = now() + $2 * interval '1 millisecond', updated_at = now()
        WHERE id = $1 AND status = 'PROCESSING' AND lease_expires_at > now()`,
-      [id],
+      [id, ttlMs],
     );
     return result.rowCount === 1;
   }

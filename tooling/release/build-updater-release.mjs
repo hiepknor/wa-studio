@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { canonicalUpdaterEndpoint } from "./updater-release.mjs";
+
 const workspaceRoot = resolve(import.meta.dirname, "../..");
 const studioRoot = resolve(workspaceRoot, "apps/studio");
 
@@ -10,6 +12,25 @@ const commonRequired = [
   "WA_STUDIO_UPDATER_PUBLIC_KEY",
   "TAURI_SIGNING_PRIVATE_KEY",
 ];
+
+const signedBuildOnlyEnvironment = new Set([
+  "APPLE_API_ISSUER",
+  "APPLE_API_KEY",
+  "APPLE_API_KEY_PATH",
+  "APPLE_API_PRIVATE_KEY",
+  "APPLE_CERTIFICATE",
+  "APPLE_CERTIFICATE_PASSWORD",
+  "APPLE_ID",
+  "APPLE_PASSWORD",
+  "APPLE_SIGNING_IDENTITY",
+  "APPLE_TEAM_ID",
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "TAURI_SIGNING_PRIVATE_KEY",
+  "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+  "WA_STUDIO_UPDATER_ENDPOINT",
+  "WA_STUDIO_UPDATER_PUBLIC_KEY",
+]);
 
 const present = (environment, name) => Boolean(environment[name]?.trim());
 
@@ -29,6 +50,17 @@ export function releasePreflightErrors(environment, platform = process.platform)
       }
     } catch {
       errors.push("WA_STUDIO_UPDATER_ENDPOINT must be a valid absolute URL.");
+    }
+  }
+  if (present(environment, "GITHUB_REPOSITORY")
+    && present(environment, "WA_STUDIO_UPDATER_ENDPOINT")) {
+    try {
+      const expected = canonicalUpdaterEndpoint(environment.GITHUB_REPOSITORY);
+      if (environment.WA_STUDIO_UPDATER_ENDPOINT.trim() !== expected) {
+        errors.push(`WA_STUDIO_UPDATER_ENDPOINT must publish from ${expected}.`);
+      }
+    } catch (error) {
+      errors.push(error.message);
     }
   }
   if (present(environment, "WA_STUDIO_UPDATER_PUBLIC_KEY")
@@ -65,10 +97,16 @@ export function releasePreflightErrors(environment, platform = process.platform)
   return errors;
 }
 
-function run(command, args) {
+export function releaseIndependentEnvironment(environment) {
+  return Object.fromEntries(
+    Object.entries(environment).filter(([name]) => !signedBuildOnlyEnvironment.has(name)),
+  );
+}
+
+function run(command, args, environment = releaseIndependentEnvironment(process.env)) {
   const result = spawnSync(command, args, {
     cwd: workspaceRoot,
-    env: process.env,
+    env: environment,
     stdio: "inherit",
   });
   if (result.error) throw result.error;
@@ -116,7 +154,7 @@ function main() {
     "build",
     "--config",
     resolve(studioRoot, "src-tauri/tauri.updater.conf.json"),
-  ]);
+  ], process.env);
   if (process.platform === "darwin") assertMacReleaseArtifact();
 }
 

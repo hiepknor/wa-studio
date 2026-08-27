@@ -15,6 +15,9 @@ import {
   type RuntimeConnectionInput,
   type RuntimeConnectionProfile,
 } from "@/shared/api/runtime-client";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
+import { useLatestOperation } from "@/shared/hooks/useLatestOperation";
+import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
 import {
   getManagedRuntimeState,
   provisionManagedRuntime,
@@ -51,6 +54,17 @@ const DISCOVERING_MANAGED_RUNTIME: ManagedRuntimeSnapshot = {
   error: null,
 };
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function supersededRequestError(signal: AbortSignal): Error {
+  if (isAbortError(signal.reason)) return signal.reason;
+  const error = new Error("The connection request was superseded.");
+  error.name = "AbortError";
+  return error;
+}
+
 export function RuntimeConnectionProvider({
   children,
   createApi = defaultCreateApi,
@@ -69,8 +83,12 @@ export function RuntimeConnectionProvider({
   const [managedConnectionError, setManagedConnectionError] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const connectionRevision = useRef(0);
+  const managedConfigurationInFlight = useRef(false);
   const managedConnectionInFlight = useRef<string | null>(null);
   const managedConnectionFlowRef = useRef<ManagedConnectionFlow>("booting");
+  const managedConfigurationOperation = useLatestOperation();
+  const connectionRead = useLatestRequest();
+  const sessionsRead = useLatestRequest();
 
   const setManagedConnectionFlow = useCallback((flow: ManagedConnectionFlow) => {
     managedConnectionFlowRef.current = flow;
@@ -80,19 +98,33 @@ export function RuntimeConnectionProvider({
   const attach = useCallback(
     async (input: RuntimeConnectionProfile) => {
       const revision = ++connectionRevision.current;
-      const result = await probeConnection(input);
-      if (revision !== connectionRevision.current) return result;
-      const profile = normalizeRuntimeProfile(input);
-      setConnected({ api: createApi(profile), profile, sessions: result.sessions });
-      setManagedConnectionFlow("connected");
-      setSelectedSessionId(
-        result.sessions.find((session) => session.status === "ready")?.id ??
-          result.sessions[0]?.id ??
-          null,
-      );
-      return result;
+      const signal = connectionRead.begin();
+      try {
+        const result = await probeConnection(input, undefined, { signal });
+        if (
+          revision !== connectionRevision.current
+          || !connectionRead.isCurrent(signal)
+        ) throw supersededRequestError(signal);
+        const profile = normalizeRuntimeProfile(input);
+        setConnected({ api: createApi(profile), profile, sessions: result.sessions });
+        setManagedConnectionFlow("connected");
+        setSelectedSessionId(
+          result.sessions.find((session) => session.status === "ready")?.id ??
+            result.sessions[0]?.id ??
+            null,
+        );
+        return result;
+      } catch (error) {
+        if (
+          revision !== connectionRevision.current
+          || !connectionRead.isCurrent(signal)
+        ) throw supersededRequestError(signal);
+        throw error;
+      } finally {
+        connectionRead.complete(signal);
+      }
     },
-    [createApi, probeConnection, setManagedConnectionFlow],
+    [connectionRead, createApi, probeConnection, setManagedConnectionFlow],
   );
 
   const connect = useCallback(
@@ -101,25 +133,46 @@ export function RuntimeConnectionProvider({
   );
 
   const configureManagedRuntime = useCallback(async (input: ManagedRuntimeProvisioningInput) => {
+    if (managedConfigurationInFlight.current) {
+      throw new Error("Managed Runtime configuration is already in progress.");
+    }
+    managedConfigurationInFlight.current = true;
+    const token = managedConfigurationOperation.begin();
     setManagedConnectionError(null);
     setManagedConnectionFlow("validating");
     try {
       if (managedRuntime.phase === "ready") await reconfigureRuntime(input);
       else await provisionRuntime(input);
-      if (managedConnectionFlowRef.current === "validating") {
+      if (
+        managedConfigurationOperation.isCurrent(token)
+        && managedConnectionFlowRef.current === "validating"
+      ) {
         setManagedConnectionFlow("starting");
       }
     } catch (error) {
-      setManagedConnectionError(
-        error instanceof Error ? error.message : "Could not connect to OpenWA.",
-      );
-      setManagedConnectionFlow("error");
+      if (managedConfigurationOperation.isCurrent(token)) {
+        setManagedConnectionError(userFacingErrorMessage(
+          error,
+          "Could not connect to OpenWA.",
+          [input.openwaApiKey],
+        ));
+        setManagedConnectionFlow("error");
+      }
       throw error;
+    } finally {
+      managedConfigurationInFlight.current = false;
     }
-  }, [managedRuntime.phase, provisionRuntime, reconfigureRuntime, setManagedConnectionFlow]);
+  }, [
+    managedConfigurationOperation,
+    managedRuntime.phase,
+    provisionRuntime,
+    reconfigureRuntime,
+    setManagedConnectionFlow,
+  ]);
 
   useEffect(() => {
     let disposed = false;
+    let receivedManagedEvent = false;
     let unlisten: (() => void) | undefined;
 
     const acceptManagedRuntime = (snapshot: ManagedRuntimeSnapshot) => {
@@ -155,26 +208,35 @@ export function RuntimeConnectionProvider({
       setManagedConnectionError(null);
       setManagedConnectionFlow("attaching");
       void attach(connection).catch((error: unknown) => {
-        setManagedConnectionError(
-          error instanceof Error ? error.message : "Could not connect to managed Runtime.",
-        );
+        if (
+          disposed
+          || isAbortError(error)
+          || managedConnectionInFlight.current !== fingerprint
+        ) return;
+        setManagedConnectionError(userFacingErrorMessage(
+          error,
+          "Could not connect to managed Runtime.",
+        ));
         setManagedConnectionFlow("error");
-        if (managedConnectionInFlight.current === fingerprint) {
-          managedConnectionInFlight.current = null;
-        }
+        managedConnectionInFlight.current = null;
       });
     };
 
-    void subscribeToManagedRuntime(acceptManagedRuntime)
+    void subscribeToManagedRuntime(snapshot => {
+      receivedManagedEvent = true;
+      acceptManagedRuntime(snapshot);
+    })
       .then(dispose => {
         if (disposed) dispose();
         else unlisten = dispose;
       })
       .catch(() => undefined);
     void discoverManagedRuntime()
-      .then(acceptManagedRuntime)
+      .then(snapshot => {
+        if (!receivedManagedEvent) acceptManagedRuntime(snapshot);
+      })
       .catch(() => {
-        if (!disposed) {
+        if (!disposed && !receivedManagedEvent) {
           setManagedRuntime({
             phase: "unavailable",
             manifest: null,
@@ -192,28 +254,45 @@ export function RuntimeConnectionProvider({
   }, [attach, discoverManagedRuntime, setManagedConnectionFlow, subscribeToManagedRuntime]);
 
   const disconnect = useCallback(() => {
+    connectionRead.cancel();
+    sessionsRead.cancel();
     connectionRevision.current += 1;
     managedConnectionInFlight.current = null;
     setConnected(null);
     setManagedConnectionError(null);
     setManagedConnectionFlow(managedRuntime.phase === "unavailable" ? "manual" : "configure");
     setSelectedSessionId(null);
-  }, [managedRuntime.phase, setManagedConnectionFlow]);
+  }, [connectionRead, managedRuntime.phase, sessionsRead, setManagedConnectionFlow]);
 
   const refreshSessions = useCallback(async () => {
-    if (!connected) return;
+    if (!connected) return false;
     const revision = connectionRevision.current;
-    const sessions = await connected.api.listSessions();
-    if (revision !== connectionRevision.current) return;
-    setConnected((current) => (current ? { ...current, sessions } : current));
-    setSelectedSessionId((current) =>
-      current && sessions.some((session) => session.id === current)
-        ? current
-        : sessions.find((session) => session.status === "ready")?.id ??
-          sessions[0]?.id ??
-          null,
-    );
-  }, [connected]);
+    const signal = sessionsRead.begin();
+    try {
+      const sessions = await connected.api.listSessions({ signal });
+      if (
+        revision !== connectionRevision.current
+        || !sessionsRead.isCurrent(signal)
+      ) return false;
+      setConnected((current) => (current ? { ...current, sessions } : current));
+      setSelectedSessionId((current) =>
+        current && sessions.some((session) => session.id === current)
+          ? current
+          : sessions.find((session) => session.status === "ready")?.id ??
+            sessions[0]?.id ??
+            null,
+      );
+      return true;
+    } catch (error) {
+      if (
+        revision !== connectionRevision.current
+        || !sessionsRead.isCurrent(signal)
+      ) return false;
+      throw error;
+    } finally {
+      sessionsRead.complete(signal);
+    }
+  }, [connected, sessionsRead]);
 
   const value = useMemo(
     () => ({

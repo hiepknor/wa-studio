@@ -184,6 +184,7 @@ impl DesktopRuntimeConfig {
         &self,
         migrations_directory: &str,
         database_url: &str,
+        openwa_release_tag: &str,
     ) -> Vec<(String, String)> {
         vec![
             ("NODE_ENV".to_string(), self.node_environment.clone()),
@@ -203,7 +204,10 @@ impl DesktopRuntimeConfig {
             ),
             ("OPENWA_BASE_URL".to_string(), self.openwa_base_url.clone()),
             ("OPENWA_API_KEY".to_string(), self.openwa_api_key.clone()),
-            ("OPENWA_RELEASE_TAG".to_string(), "0.22.0".to_string()),
+            (
+                "OPENWA_RELEASE_TAG".to_string(),
+                openwa_release_tag.to_string(),
+            ),
             (
                 "OPENWA_WEBHOOK_SECRET".to_string(),
                 self.openwa_webhook_secret.clone(),
@@ -233,6 +237,10 @@ impl DesktopRuntimeConfig {
                 self.event_inbox.callback_url.clone(),
             ),
         ]
+    }
+
+    pub fn openwa_probe_credentials(&self) -> (String, String) {
+        (self.openwa_base_url.clone(), self.openwa_api_key.clone())
     }
 
     pub fn managed_backup_directory(
@@ -311,6 +319,7 @@ mod tests {
         let environment = config(false).runtime_environment(
             "/app/runtime-migrations",
             "postgresql://runtime:secret@127.0.0.1/runtime",
+            "0.22.0",
         );
 
         assert!(
@@ -345,6 +354,7 @@ mod tests {
         let environment = config(true).runtime_environment(
             "/app/runtime-migrations",
             "postgresql://runtime:secret@127.0.0.1/runtime",
+            "0.22.0",
         );
         assert!(environment.contains(&("ALLOW_LIVE_SENDS".to_string(), "true".to_string())));
     }

@@ -40,7 +40,7 @@ wa-events.onio.cc {
 
 	@health {
 		method GET
-		path /api/v1/health/live /api/v1/health/ready
+		path /api/v1/health/live
 	}
 	handle @health {
 		reverse_proxy 127.0.0.1:34200

@@ -1,9 +1,13 @@
 import { z } from 'zod';
 
+// EVENT_INBOX_MAX_PAYLOAD_BYTES is bounded at 1 MiB. Base64 expands every three
+// bytes into four characters, including padding for the final partial block.
+const maximumEncodedEventBodyLength = Math.ceil(1_048_576 / 3) * 4;
+
 export const eventInboxEventSchema = z.object({
   idempotencyKey: z.string().min(1).max(512),
   receiptHandle: z.string().min(1).max(2048),
-  rawBody: z.base64().max(400_000),
+  rawBody: z.base64().max(maximumEncodedEventBodyLength),
   signature: z.string().min(1).max(512),
 });
 

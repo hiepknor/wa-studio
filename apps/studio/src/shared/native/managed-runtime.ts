@@ -15,8 +15,7 @@ export type ManagedRuntimePhase =
   | "stopping"
   | "unavailable";
 
-export interface RuntimeReleaseManifest {
-  schemaVersion: 1;
+interface RuntimeReleaseManifestBase {
   service: "wa-runtime";
   version: string;
   contractVersion: "v1";
@@ -25,6 +24,19 @@ export interface RuntimeReleaseManifest {
   databaseBackends: string[];
   queueBackends: string[];
 }
+
+export type RuntimeReleaseManifest = RuntimeReleaseManifestBase & (
+  | {
+      schemaVersion: 1;
+      openwaReleaseTag?: string;
+      openwaContractSha256?: string;
+    }
+  | {
+      schemaVersion: 2;
+      openwaReleaseTag: string;
+      openwaContractSha256: string;
+    }
+);
 
 export interface ManagedRuntimeSnapshot {
   phase: ManagedRuntimePhase;

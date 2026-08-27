@@ -28,9 +28,14 @@ An operator must resolve that ambiguity or create a new intent.
 
 The implementation serializes outbound work with a token-owned PostgreSQL lease per session. A
 waiting worker refreshes its message processing lease, and only the current session-lease owner may
-start the OpenWA request or release the lease. Lease loss cannot make an unproven OpenWA result safe
-to retry. After the outbound POST starts, HTTP 408, HTTP 5xx, transport failures and invalid success
-responses become `UNKNOWN`; only explicit non-timeout HTTP 4xx responses prove rejection.
+start the OpenWA request or release the lease. At the final pre-send fence, both the session lease
+and message processing lease are extended beyond the configured OpenWA request timeout with a fixed
+safety margin, so another worker cannot acquire that session while the POST is still within its
+allowed response window. After the configured pacing delay and while still holding that session
+lease, the worker re-reads durable session sendability and group capability before the final
+ownership check and outbound POST. Lease loss cannot make an unproven OpenWA result safe to retry.
+After the outbound POST starts, HTTP 408, HTTP 5xx, transport failures and invalid success responses
+become `UNKNOWN`; only explicit non-timeout HTTP 4xx responses prove rejection.
 
 Session status and restriction projections are independently event-time fenced. A strictly older or
 equal-time distinct event cannot overwrite the accepted observation, and a session snapshot follows
@@ -85,10 +90,29 @@ runner model gives each tick an interval, timeout, no-overlap guard and failure 
 processors through repositories—not Bull event listeners or executable entrypoints—own state
 transitions and side effects.
 
+Worker startup takes ownership of each queue handle before creating the next one, so a later queue
+startup failure closes every worker already created. Queue-worker close is idempotent and all
+concurrent close callers await the same active-job drain; the transport does not disconnect its
+shared queue connections until those drains settle.
+
+HTTP entrypoint startup is rollback-safe. After Nest has created the API or Event Inbox application
+context, a listener bind failure closes that context so database pools and module-owned resources do
+not keep a failed process alive. If context close also fails, the startup and cleanup failures are
+retained together for the process supervisor and logs.
+
+Event Inbox expiry maintenance is single-flight. Interval ticks reuse an active cleanup instead of
+starting overlapping database work, and module shutdown cancels future ticks and drains the active
+cleanup before repository pools close.
+
 Scheduler leadership is process-wide rather than tick-specific. The advisory lock prevents two
 replicas from concurrently publishing the same durable work, while repository leases and unique
 job IDs remain the per-item correctness fences. Leadership is deliberately fail-fast instead of
 automatic in-process standby promotion; the process supervisor owns restart and retry policy.
+Every scheduled or notification-triggered tick registers the same active-run ownership. During
+shutdown, exceeding the graceful wait emits an operational warning but does not release scheduler
+leadership; the lock remains held until active work settles or process termination closes the
+dedicated PostgreSQL connection. Shutdown also disables the notification wake coordinator before
+draining ticks, so a coalesced catch-up wake cannot start new scheduler work behind that drain.
 
 A tick timeout emits telemetry but does not pretend to cancel an in-flight SQL or queue operation.
 The tick remains guarded until that operation settles, then schedules bounded exponential backoff.

@@ -8,6 +8,7 @@ const gatewayWorkChannel = 'wa_runtime_gateway_work';
 export class GatewayWakeCoordinator {
   private wakeInFlight = false;
   private wakeAgain = false;
+  private stopped = false;
 
   constructor(
     private readonly wake: () => Promise<unknown>,
@@ -15,6 +16,7 @@ export class GatewayWakeCoordinator {
   ) {}
 
   request(): void {
+    if (this.stopped) return;
     if (this.wakeInFlight) {
       this.wakeAgain = true;
       return;
@@ -24,11 +26,16 @@ export class GatewayWakeCoordinator {
       .catch(this.failed)
       .finally(() => {
         this.wakeInFlight = false;
-        if (this.wakeAgain) {
+        if (!this.stopped && this.wakeAgain) {
           this.wakeAgain = false;
           this.request();
         }
       });
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.wakeAgain = false;
   }
 }
 
@@ -44,17 +51,22 @@ export class GatewayWorkListenerService {
   private coordinator: GatewayWakeCoordinator | undefined;
 
   async start(wake: () => Promise<unknown>): Promise<void> {
+    if (!this.stopped) return;
+    this.coordinator?.stop();
     this.coordinator = new GatewayWakeCoordinator(
       wake,
       error => this.logger.error({ event: 'gateway.sync.wakeup.failed', error }),
     );
-    if (!this.config.GATEWAY_SYNC_NOTIFY_WAKEUP_ENABLED || !this.stopped) return;
+    if (!this.config.GATEWAY_SYNC_NOTIFY_WAKEUP_ENABLED) return;
     this.stopped = false;
     await this.connect();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
+    const coordinator = this.coordinator;
+    this.coordinator = undefined;
+    coordinator?.stop();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
     const client = this.client;

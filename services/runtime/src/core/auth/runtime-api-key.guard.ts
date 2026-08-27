@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { runtimeConfig, type RuntimeConfig } from '../config/runtime-config';
 import { RUNTIME_CONFIG } from '../config/runtime-config.module';
+import { secureStringEqual } from '../security/secure-string-equal';
 import { IS_PUBLIC } from './public.decorator';
 
 @Injectable()
@@ -19,7 +20,7 @@ export class RuntimeApiKeyGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
     const supplied = request.header('x-runtime-key');
-    if (!supplied || supplied !== this.config.RUNTIME_API_KEY) {
+    if (!secureStringEqual(supplied, this.config.RUNTIME_API_KEY)) {
       throw new UnauthorizedException('Missing or invalid X-Runtime-Key');
     }
     return true;

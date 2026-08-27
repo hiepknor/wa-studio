@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 
+use super::release::OPENWA_RELEASE_TAG;
 use super::secret_store;
 
-const OPENWA_RELEASE: &str = "0.22.0";
 const EVENT_INBOX_PROTOCOL_V1: u8 = 1;
 const EVENT_INBOX_PROTOCOL_V2: u8 = 2;
 const MAX_SECRET_LENGTH: usize = 4_096;
@@ -211,33 +211,13 @@ fn probe_and_pair(
     device_id: &str,
 ) -> Result<PairingResponse, String> {
     Uuid::parse_str(device_id).map_err(|_| "Managed Runtime device ID is invalid.".to_string())?;
-    let client = Client::builder()
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(15))
-        .redirect(Policy::none())
-        .build()
-        .map_err(|error| format!("Could not initialize the OpenWA connection probe: {error}"))?;
-
-    let health = client
-        .get(format!("{}/api/health", input.openwa_base_url))
-        .header("x-api-key", &input.openwa_api_key)
-        .send()
-        .map_err(|error| format!("Could not reach OpenWA health endpoint: {error}"))?;
-    if !health.status().is_success() {
-        return Err(format!(
-            "OpenWA health probe was rejected with HTTP {}.",
-            health.status()
-        ));
-    }
-    let health: OpenWaHealth = health
-        .json()
-        .map_err(|error| format!("OpenWA returned an invalid health response: {error}"))?;
-    if health.version != OPENWA_RELEASE {
-        return Err(format!(
-            "OpenWA release mismatch: expected {OPENWA_RELEASE}, received {}.",
-            health.version
-        ));
-    }
+    let client = connection_probe_client()?;
+    assert_compatible_release_with_client(
+        &client,
+        &input.openwa_base_url,
+        &input.openwa_api_key,
+        OPENWA_RELEASE_TAG,
+    )?;
 
     let discovery = client
         .get(format!("{}/.well-known/wa-studio", input.openwa_base_url))
@@ -277,6 +257,58 @@ fn probe_and_pair(
         .json()
         .map_err(|error| format!("WA Event Inbox pairing response is invalid: {error}"))?;
     validate_pairing(pairing, &event_inbox_base_url, discovered_protocol)
+}
+
+fn connection_probe_client() -> Result<Client, String> {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(15))
+        .redirect(Policy::none())
+        .build()
+        .map_err(|error| format!("Could not initialize the OpenWA connection probe: {error}"))
+}
+
+pub(crate) fn assert_compatible_release(
+    openwa_base_url: &str,
+    openwa_api_key: &str,
+    expected_release: &str,
+) -> Result<(), String> {
+    let client = connection_probe_client()?;
+    assert_compatible_release_with_client(
+        &client,
+        openwa_base_url,
+        openwa_api_key,
+        expected_release,
+    )
+}
+
+fn assert_compatible_release_with_client(
+    client: &Client,
+    openwa_base_url: &str,
+    openwa_api_key: &str,
+    expected_release: &str,
+) -> Result<(), String> {
+    let health = client
+        .get(format!("{openwa_base_url}/api/health"))
+        .header("x-api-key", openwa_api_key)
+        .send()
+        .map_err(|error| format!("Could not reach OpenWA health endpoint: {error}"))?;
+    if !health.status().is_success() {
+        return Err(format!(
+            "OpenWA health probe was rejected with HTTP {}.",
+            health.status()
+        ));
+    }
+    let health: OpenWaHealth = health
+        .json()
+        .map_err(|error| format!("OpenWA returned an invalid health response: {error}"))?;
+    if health.version != expected_release {
+        return Err(format!(
+            "OpenWA release mismatch: expected {expected_release}, received {}.",
+            health.version
+        ));
+    }
+    Ok(())
 }
 
 fn validate_pairing(

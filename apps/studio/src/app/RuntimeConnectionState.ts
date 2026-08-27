@@ -36,7 +36,7 @@ export interface RuntimeConnectionContextValue {
   managedConnectionFlow: ManagedConnectionFlow;
   managedConnectionError: string | null;
   managedRuntime: ManagedRuntimeSnapshot;
-  refreshSessions: () => Promise<void>;
+  refreshSessions: () => Promise<boolean>;
   selectedSessionId: string | null;
   selectSession: (sessionId: string) => void;
 }

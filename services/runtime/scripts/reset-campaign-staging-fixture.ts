@@ -5,17 +5,21 @@ const required = (name: string): string => {
 };
 
 async function request(baseUrl: string, runtimeKey: string, path: string, init: RequestInit) {
-  const response = await fetch(`${baseUrl.replace(/\/$/u, '')}/api/v1${path}`, {
-    ...init,
-    headers: {
-      'content-type': 'application/json',
-      'x-runtime-key': runtimeKey,
-      ...(init.headers ?? {}),
-    },
-  });
-  const body = await response.json() as Record<string, unknown>;
-  if (!response.ok) throw new Error(`Fixture request failed (${response.status}): ${JSON.stringify(body)}`);
-  return body;
+  return operatorJsonRequest<Record<string, unknown>>(
+    runtimeApiRootFromOrigin(baseUrl),
+    runtimeKey,
+    path,
+    init,
+    numberSetting('CAMPAIGN_FIXTURE_REQUEST_TIMEOUT_MS', 30_000, 1_000, 120_000),
+  );
+}
+
+function numberSetting(name: string, fallback: number, minimum: number, maximum: number): number {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be an integer from ${minimum} to ${maximum}`);
+  }
+  return value;
 }
 
 async function main(): Promise<void> {
@@ -47,7 +51,10 @@ async function main(): Promise<void> {
   process.stdout.write(`Reset reusable campaign fixture ${campaignId} with ${groupIds.length} targets\n`);
 }
 
-main().catch(error => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  void main().catch(error => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}
+import { operatorJsonRequest, runtimeApiRootFromOrigin } from './lib/operator-http';

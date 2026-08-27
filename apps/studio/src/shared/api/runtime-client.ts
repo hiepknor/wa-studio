@@ -2,6 +2,7 @@ import createClient from "openapi-fetch";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
 import type { components, paths } from "@wa/runtime-contract";
+import { createRuntimeHttpFetch } from "@/shared/api/runtime-http";
 import { managedRuntimeFetch } from "@/shared/native/runtime-transport";
 
 export type RuntimeSession = components["schemas"]["SessionDto"];
@@ -136,6 +137,10 @@ export interface RuntimeConnectionInput {
   apiKey: string;
 }
 
+export interface RuntimeReadOptions {
+  signal?: AbortSignal;
+}
+
 export interface NativeRuntimeConnection {
   baseUrl: string;
   transport: "native";
@@ -227,18 +232,34 @@ export function normalizeRuntimeBaseUrl(value: string): string {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new RuntimeConnectionError("WA Runtime URL must use http or https.");
   }
-
-  url.search = "";
-  url.hash = "";
-  url.pathname = url.pathname.replace(/\/?api\/v1\/?$/, "").replace(/\/$/, "");
-  return url.toString().replace(/\/$/, "");
+  if (url.username || url.password) {
+    throw new RuntimeConnectionError("WA Runtime URL must not contain credentials.");
+  }
+  if (url.search || url.hash) {
+    throw new RuntimeConnectionError("WA Runtime URL must not contain a query or fragment.");
+  }
+  const path = url.pathname.replace(/\/+$/u, "");
+  if (path && path !== "/api/v1") {
+    throw new RuntimeConnectionError("WA Runtime URL must be an origin or end with /api/v1.");
+  }
+  if (url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
+    throw new RuntimeConnectionError("WA Runtime URL must use HTTPS outside localhost.");
+  }
+  return url.origin;
 }
 
 export function normalizeRuntimeConnection(
   input: RuntimeConnectionInput,
 ): RuntimeConnectionInput {
   const apiKey = input.apiKey.trim();
-  if (!apiKey) throw new RuntimeConnectionError("WA Runtime API key is required.");
+  if (apiKey.length < 32 || apiKey.length > 4096) {
+    throw new RuntimeConnectionError(
+      "WA Runtime API key must contain between 32 and 4096 characters.",
+    );
+  }
+  if (/[\u0000-\u001f\u007f]/u.test(apiKey)) {
+    throw new RuntimeConnectionError("WA Runtime API key must not contain control characters.");
+  }
   return { baseUrl: normalizeRuntimeBaseUrl(input.baseUrl), apiKey };
 }
 
@@ -246,7 +267,17 @@ export function normalizeRuntimeProfile(
   input: RuntimeConnectionProfile,
 ): RuntimeConnectionProfile {
   if (isNativeRuntimeConnection(input)) {
-    return { baseUrl: normalizeRuntimeBaseUrl(input.baseUrl), transport: "native" };
+    const baseUrl = normalizeRuntimeBaseUrl(input.baseUrl);
+    const url = new URL(baseUrl);
+    if (
+      url.protocol !== "http:"
+      || !["127.0.0.1", "[::1]"].includes(url.hostname)
+    ) {
+      throw new RuntimeConnectionError(
+        "Managed WA Runtime native transport must target loopback HTTP.",
+      );
+    }
+    return { baseUrl, transport: "native" };
   }
   return normalizeRuntimeConnection(input);
 }
@@ -260,17 +291,18 @@ export class RuntimeApi {
   ) {
     const normalized = normalizeRuntimeProfile(connection);
     const native = isNativeRuntimeConnection(normalized);
+    const transport = runtimeFetch ?? (native ? managedRuntimeFetch : tauriFetch);
     this.client = createClient<paths>({
       baseUrl: normalized.baseUrl,
-      fetch: runtimeFetch ?? (native ? managedRuntimeFetch : tauriFetch),
+      fetch: createRuntimeHttpFetch(normalized.baseUrl, transport),
       ...(!isNativeRuntimeConnection(normalized)
         ? { headers: { "X-Runtime-Key": normalized.apiKey } }
         : {}),
     });
   }
 
-  async assertReady(): Promise<void> {
-    const result = await this.client.GET("/api/v1/health/ready");
+  async assertReady(options: RuntimeReadOptions = {}): Promise<void> {
+    const result = await this.client.GET("/api/v1/health/ready", { ...options });
     if (!result.response.ok) {
       throw new RuntimeConnectionError(
         `WA Runtime is not ready (HTTP ${result.response.status}).`,
@@ -278,8 +310,8 @@ export class RuntimeApi {
     }
   }
 
-  async listSessions(): Promise<RuntimeSession[]> {
-    const result = await this.client.GET("/api/v1/sessions");
+  async listSessions(options: RuntimeReadOptions = {}): Promise<RuntimeSession[]> {
+    const result = await this.client.GET("/api/v1/sessions", { ...options });
     if (!result.response.ok || !result.data) {
       const message =
         result.response.status === 401
@@ -302,8 +334,13 @@ export class RuntimeApi {
     return result.data;
   }
 
-  async getSessionSyncRun(sessionId: string, runId: string): Promise<RuntimeSyncRun> {
+  async getSessionSyncRun(
+    sessionId: string,
+    runId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeSyncRun> {
     const result = await this.client.GET("/api/v1/sessions/{id}/sync-runs/{runId}", {
+      ...options,
       params: { path: { id: sessionId, runId } },
     });
     if (!result.response.ok || !result.data) {
@@ -324,9 +361,10 @@ export class RuntimeApi {
     isActive,
     minParticipants,
     maxParticipants,
-  }: RuntimeGroupDirectoryInput): Promise<RuntimeGroupPage> {
+  }: RuntimeGroupDirectoryInput, options: RuntimeReadOptions = {}): Promise<RuntimeGroupPage> {
     const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/groups", {
+      ...options,
       params: {
         query: {
           sessionId,
@@ -352,8 +390,13 @@ export class RuntimeApi {
     return result.data;
   }
 
-  async getGroup(sessionId: string, groupId: string): Promise<RuntimeGroupDetail> {
+  async getGroup(
+    sessionId: string,
+    groupId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeGroupDetail> {
     const result = await this.client.GET("/api/v1/groups/{id}", {
+      ...options,
       params: { path: { id: groupId }, query: { sessionId } },
     });
     if (!result.response.ok || !result.data) {
@@ -370,9 +413,10 @@ export class RuntimeApi {
     limit = 50,
     offset = 0,
     query,
-  }: RuntimeGroupMemberListInput): Promise<RuntimeGroupMemberPage> {
+  }: RuntimeGroupMemberListInput, options: RuntimeReadOptions = {}): Promise<RuntimeGroupMemberPage> {
     const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/groups/{id}/members", {
+      ...options,
       params: {
         path: { id: groupId },
         query: {
@@ -410,9 +454,10 @@ export class RuntimeApi {
     limit = 20,
     offset = 0,
     query,
-  }: RuntimeGroupListsInput): Promise<RuntimeGroupListPage> {
+  }: RuntimeGroupListsInput, options: RuntimeReadOptions = {}): Promise<RuntimeGroupListPage> {
     const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/group-lists", {
+      ...options,
       params: { query: {
         sessionId,
         limit,
@@ -448,8 +493,12 @@ export class RuntimeApi {
     return result.data;
   }
 
-  async getGroupList(listId: string): Promise<RuntimeGroupList> {
+  async getGroupList(
+    listId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeGroupList> {
     const result = await this.client.GET("/api/v1/group-lists/{id}", {
+      ...options,
       params: { path: { id: listId } },
     });
     if (!result.response.ok || !result.data) {
@@ -462,8 +511,12 @@ export class RuntimeApi {
     return result.data;
   }
 
-  async getGroupListMembership(listId: string): Promise<RuntimeGroupListMembership> {
+  async getGroupListMembership(
+    listId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeGroupListMembership> {
     const result = await this.client.GET("/api/v1/group-lists/{id}/groups", {
+      ...options,
       params: { path: { id: listId } },
     });
     if (!result.response.ok || !result.data) {
@@ -539,9 +592,10 @@ export class RuntimeApi {
     query,
     statuses,
     scheduleTypes,
-  }: RuntimeCampaignListInput): Promise<RuntimeCampaignPage> {
+  }: RuntimeCampaignListInput, options: RuntimeReadOptions = {}): Promise<RuntimeCampaignPage> {
     const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/campaigns", {
+      ...options,
       params: { query: {
         sessionId,
         limit,
@@ -562,8 +616,12 @@ export class RuntimeApi {
     return result.data;
   }
 
-  async getCampaign(campaignId: string): Promise<RuntimeCampaign> {
+  async getCampaign(
+    campaignId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeCampaign> {
     const result = await this.client.GET("/api/v1/campaigns/{id}", {
+      ...options,
       params: { path: { id: campaignId } },
     });
     if (!result.response.ok || !result.data) {
@@ -637,8 +695,12 @@ export class RuntimeApi {
     }
   }
 
-  async listCampaignTargets(campaignId: string): Promise<RuntimeCampaignTargetList> {
+  async listCampaignTargets(
+    campaignId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeCampaignTargetList> {
     const result = await this.client.GET("/api/v1/campaigns/{id}/targets", {
+      ...options,
       params: { path: { id: campaignId } },
     });
     if (!result.response.ok || !result.data) {
@@ -713,8 +775,10 @@ export class RuntimeApi {
     campaignId: string,
     limit = 20,
     offset = 0,
+    options: RuntimeReadOptions = {},
   ): Promise<RuntimeCampaignRunPage> {
     const result = await this.client.GET("/api/v1/campaigns/{id}/runs", {
+      ...options,
       params: { path: { id: campaignId }, query: { limit, offset } },
     });
     if (!result.response.ok || !result.data) {
@@ -736,9 +800,10 @@ export class RuntimeApi {
     executionModes,
     from,
     to,
-  }: RuntimeCampaignRunListInput): Promise<RuntimeCampaignRunSummaryPage> {
+  }: RuntimeCampaignRunListInput, options: RuntimeReadOptions = {}): Promise<RuntimeCampaignRunSummaryPage> {
     const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/campaign-runs", {
+      ...options,
       params: { query: {
         sessionId,
         limit,
@@ -767,9 +832,10 @@ export class RuntimeApi {
     offset = 0,
     query,
     statuses,
-  }: RuntimeCampaignDeliveryListInput): Promise<RuntimeCampaignDeliveryPage> {
+  }: RuntimeCampaignDeliveryListInput, options: RuntimeReadOptions = {}): Promise<RuntimeCampaignDeliveryPage> {
     const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/campaign-runs/{id}/deliveries", {
+      ...options,
       params: {
         path: { id: runId },
         query: {
@@ -800,9 +866,10 @@ export class RuntimeApi {
     from,
     to,
     cursor,
-  }: RuntimeActivityListInput): Promise<RuntimeActivityPage> {
+  }: RuntimeActivityListInput, options: RuntimeReadOptions = {}): Promise<RuntimeActivityPage> {
     const normalizedQuery = query?.trim();
     const result = await this.client.GET("/api/v1/activity", {
+      ...options,
       params: { query: {
         sessionId,
         limit,
@@ -847,8 +914,12 @@ export class RuntimeApi {
     return result.data;
   }
 
-  async getCampaignRun(runId: string): Promise<RuntimeCampaignRun> {
+  async getCampaignRun(
+    runId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeCampaignRun> {
     const result = await this.client.GET("/api/v1/campaign-runs/{id}", {
+      ...options,
       params: { path: { id: runId } },
     });
     if (!result.response.ok || !result.data) {
@@ -894,13 +965,18 @@ export class RuntimeApi {
   }
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(hostname.toLowerCase());
+}
+
 export async function probeRuntimeConnection(
   input: RuntimeConnectionProfile,
   runtimeFetch?: typeof globalThis.fetch,
+  options: RuntimeReadOptions = {},
 ): Promise<RuntimeConnectionResult> {
   const api = new RuntimeApi(input, runtimeFetch);
-  await api.assertReady();
-  const sessions = await api.listSessions();
+  await api.assertReady(options);
+  const sessions = await api.listSessions(options);
 
   return {
     sessionCount: sessions.length,

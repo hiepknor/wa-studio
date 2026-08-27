@@ -25,6 +25,7 @@ import {
   type SchedulerTickState,
   type RuntimeProcessName,
 } from './runtime-heartbeat';
+import { runCleanupTasks, runWithCleanup } from '../process/run-with-cleanup';
 
 @Injectable()
 export class RedisQueueTransport implements QueueTransport {
@@ -34,6 +35,7 @@ export class RedisQueueTransport implements QueueTransport {
   private readonly config: RuntimeConfig;
   private workerConnection: IORedis | undefined;
   private readonly workers = new Set<Worker>();
+  private readonly workerClosures = new Map<Worker, Promise<void>>();
   readonly messageSend: Queue;
   readonly webhookIngress: Queue;
   readonly gatewaySync: Queue;
@@ -101,14 +103,8 @@ export class RedisQueueTransport implements QueueTransport {
     );
     worker.on('error', onError);
     this.workers.add(worker);
-    let closed = false;
     return {
-      close: async () => {
-        if (closed) return;
-        closed = true;
-        this.workers.delete(worker);
-        await worker.close();
-      },
+      close: () => this.closeWorker(worker),
     };
   }
 
@@ -132,17 +128,35 @@ export class RedisQueueTransport implements QueueTransport {
   }
 
   async close(): Promise<void> {
-    await Promise.all([
-      ...[...this.workers].map(worker => worker.close()),
-      this.messageSend.close(),
-      this.webhookIngress.close(),
-      this.gatewaySync.close(),
-      this.campaign.close(),
-    ]);
-    this.connection.disconnect();
-    this.healthConnection.disconnect();
-    this.workerConnection?.disconnect();
-    this.workers.clear();
+    await runWithCleanup(
+      () => runCleanupTasks([
+        ...[...this.workers].map(worker => () => this.closeWorker(worker)),
+        () => this.messageSend.close(),
+        () => this.webhookIngress.close(),
+        () => this.gatewaySync.close(),
+        () => this.campaign.close(),
+      ]),
+      () => {
+        this.connection.disconnect();
+        this.healthConnection.disconnect();
+        this.workerConnection?.disconnect();
+        this.workers.clear();
+        this.workerClosures.clear();
+      },
+    );
+  }
+
+  private closeWorker(worker: Worker): Promise<void> {
+    const existing = this.workerClosures.get(worker);
+    if (existing) return existing;
+    const closing = Promise.resolve()
+      .then(() => worker.close())
+      .finally(() => {
+        this.workers.delete(worker);
+        this.workerClosures.delete(worker);
+      });
+    this.workerClosures.set(worker, closing);
+    return closing;
   }
 
   private queue(name: RuntimeQueueName): Queue {

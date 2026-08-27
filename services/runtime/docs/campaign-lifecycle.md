@@ -118,6 +118,10 @@ CAMPAIGN_FIXTURE_GROUP_IDS=first@g.us,second@g.us \
 npm run campaign:fixture:reset
 ```
 
+The fixture command accepts an origin-only URL, requires HTTPS outside loopback, never follows
+redirects and caps each request at 30 seconds. Use `CAMPAIGN_FIXTURE_REQUEST_TIMEOUT_MS` only when a
+measured staging operation requires a different bound.
+
 The fixture campaign must remain `DRAFT`; if another workflow changes its status, provision a new
 dedicated fixture key rather than modifying status directly.
 

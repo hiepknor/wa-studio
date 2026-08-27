@@ -1,11 +1,11 @@
 import 'reflect-metadata';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { Pool } from 'pg';
 import { DatabaseService } from '../../src/core/database/database.service';
+import { configureApi } from '../../src/core/http/configure-api';
 import { messageRequestHash } from '../../src/modules/messages/message-idempotency';
 import { MessageJobRepository } from '../../src/modules/messages/message-job.repository';
 import { DISALLOWED_SESSION_ID, INTEGRATION_GROUP_ID, integrationPool, resetIntegrationDatabase, seedSendableGroup } from '../support/integration-database';
@@ -13,7 +13,7 @@ import { INTEGRATION_SESSION_ID } from '../support/integration-database';
 
 describe('HTTP session authorization', () => {
   let pool: Pool;
-  let app: INestApplication;
+  let app: NestExpressApplication;
   let baseUrl: string;
 
   beforeAll(async () => {
@@ -21,9 +21,12 @@ describe('HTTP session authorization', () => {
     const { ApiAppModule } = require(resolve(process.cwd(), 'dist/src/app/api-app.module.js')) as {
       ApiAppModule: new (...args: never[]) => unknown;
     };
-    app = await NestFactory.create(ApiAppModule, { rawBody: true, logger: false });
-    app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
+    app = await NestFactory.create<NestExpressApplication>(ApiAppModule, {
+      rawBody: true,
+      bodyParser: false,
+      logger: false,
+    });
+    configureApi(app);
     await app.listen(0, '127.0.0.1');
     const address = app.getHttpServer().address() as { port: number };
     baseUrl = `http://127.0.0.1:${address.port}/api/v1`;
@@ -39,6 +42,22 @@ describe('HTTP session authorization', () => {
 
     const generated = await fetch(`${baseUrl}/health/live`, { headers: { 'x-request-id': 'not valid!' } });
     expect(generated.headers.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('sets the shared security headers and rejects oversized JSON before routing', async () => {
+    const live = await fetch(`${baseUrl}/health/live`);
+    expect(live.headers.get('cache-control')).toBe('no-store');
+    expect(live.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(live.headers.get('x-frame-options')).toBe('DENY');
+    expect(live.headers.get('x-powered-by')).toBeNull();
+
+    const oversized = await fetch(`${baseUrl}/sessions/${INTEGRATION_SESSION_ID}/sync`, {
+      method: 'POST',
+      headers: { ...runtimeHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ padding: 'x'.repeat(1_048_576) }),
+    });
+    expect(oversized.status).toBe(413);
+    expect(oversized.headers.get('x-content-type-options')).toBe('nosniff');
   });
 
   it('hides group reads outside the deployment session scope', async () => {

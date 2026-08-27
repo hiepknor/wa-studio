@@ -1,0 +1,12 @@
+[Unit]
+Description=Run an isolated WA Event Inbox restore drill monthly
+
+[Timer]
+OnCalendar=monthly
+RandomizedDelaySec=2h
+Persistent=true
+AccuracySec=5m
+Unit=wa-event-inbox-restore-drill.service
+
+[Install]
+WantedBy=timers.target

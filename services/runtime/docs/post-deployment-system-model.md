@@ -6,7 +6,7 @@
 flowchart LR
   subgraph Mac["Operator Mac · trusted boundary"]
     Studio["WA Studio · Tauri UI"]
-    Native["Native supervisor<br/>discovery + pairing + local secret file"]
+    Native["Native supervisor<br/>discovery + pairing + OS credential store"]
     Runtime["WA Runtime<br/>API · worker · scheduler"]
     LocalDb[("Managed PostgreSQL<br/>business state + durable queue")]
     Studio <-->|"loopback only"| Runtime
@@ -17,7 +17,7 @@ flowchart LR
 
   subgraph VPS["VPS · public ingress boundary"]
     Caddy["Caddy / Cloudflare edge<br/>TLS + exact routes"]
-    OpenWA["OpenWA 0.22.0<br/>unchanged"]
+    OpenWA["OpenWA reviewed release<br/>unchanged"]
     Inbox["WA Event Inbox<br/>pair · ingress · claim · ACK/NACK"]
     InboxDb[("Dedicated PostgreSQL<br/>transient bounded events")]
     Caddy --> OpenWA
@@ -49,19 +49,21 @@ sequenceDiagram
 
   User->>Studio: OpenWA Base URL + API key
   Studio->>Native: provision
-  Native->>OpenWA: health / release 0.22.0
+  Native->>OpenWA: health / compare live release with reviewed pin
   Native->>OpenWA: GET /.well-known/wa-studio
   Native->>Inbox: POST /event-inbox/pair
   Inbox->>OpenWA: validate API key + list sessions
   OpenWA-->>Inbox: authorized configured sessions
   Inbox-->>Native: device token + secret + callback + scope
-Native->>Native: atomically store protected local schema-v2 secret file
+  Native->>Native: store schema-v2 credentials in OS credential store
   Native->>Runtime: start local API / worker / scheduler
   Runtime->>OpenWA: reconcile callback via supported API
 ```
 
-React never receives the OpenWA key, Runtime key, webhook secret or device token. A v1 local secret
-record is treated as absent rather than migrated or used as fallback.
+React never receives the OpenWA key, Runtime key, webhook secret or device token. On first
+secure-store access, the native supervisor migrates a supported legacy schema-v1 `secrets.json`
+into missing credential-store entries, then removes the file only after all writes succeed. A
+credential-store failure fails closed and never falls back to plaintext storage.
 
 ## Durable callback delivery
 
@@ -102,12 +104,13 @@ has been re-leased. Local idempotency collapses duplicates.
 | --- | --- | --- |
 | Campaigns, messages, projections, queues | Local Runtime PostgreSQL | Retention and encrypted desktop backups |
 | WhatsApp sessions and gateway facts | OpenWA stores | OpenWA lifecycle |
-| Uncommitted callback bytes | Event Inbox PostgreSQL | 100,000 events, 256 MiB, seven days |
-| Device/OpenWA/Runtime secrets | App data directory | Schema v2; `0700` directory / `0600` file; never returned to React |
+| Uncommitted callback bytes | Event Inbox PostgreSQL | 100,000 events, 256 MiB, seven days; daily age-encrypted off-host logical backup |
+| Device/OpenWA/Runtime secrets | OS credential store | Schema-v2 Runtime credential payload; never returned to React |
 | Event Inbox logs | Docker JSON logs | 10 MiB × 3 files per container |
 
-Event Inbox returns HTTP 503 when either event or byte capacity would be exceeded. Readiness exposes
-stored, pending, leased, dead, oldest-pending and configured limit metrics.
+Event Inbox returns HTTP 503 when either event or byte capacity would be exceeded. Private readiness
+and a dedicated-token Prometheus endpoint expose aggregate stored, pending, leased, dead,
+oldest-pending and configured-limit metrics. Caddy publishes neither detailed endpoint.
 
 ## Failure behavior
 
@@ -117,6 +120,8 @@ stored, pending, leased, dead, oldest-pending and configured limit metrics.
 | Runtime crashes after local commit | Lease expires; duplicate collapses locally | None unless retries grow |
 | Malformed callback | Runtime NACKs dead; later events continue | Inspect dead count without exposing payload |
 | Event Inbox restart | PostgreSQL retains committed rows and leases | Consumer resumes |
-| OpenWA unavailable during pairing | Pairing fails closed; local secret file is unchanged | Restore OpenWA, retry Connect |
+| OpenWA unavailable during pairing | Pairing fails closed; credential-store entries are unchanged | Restore OpenWA, retry Connect |
+| Pairing abuse | Durable global and HMACed per-IP buckets return 429 before OpenWA validation | Investigate private pairing-rate metrics before changing limits |
 | Master secret rotation | Existing device token/signature become invalid | Reconnect Studio and reconcile webhook |
+| Event Inbox host/volume loss | Restore the latest verified encrypted logical backup and matching escrowed master secret | Run the isolated restore drill before reopening ingress |
 | VPS disk pressure | hard row/byte/expiry/log/WAL bounds limit growth | Inspect exact owners; never broad-prune volumes |

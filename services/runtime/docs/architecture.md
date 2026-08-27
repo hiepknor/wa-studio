@@ -25,17 +25,18 @@ The current `X-Runtime-Key` mechanism is suitable for development and trusted in
 It must never be embedded in publicly distributed mobile binaries or browser JavaScript. Before
 those clients are introduced, add an identity/access layer (or trusted backend-for-frontend) that
 issues short-lived user tokens and enforces tenant, role and action scopes. This authentication
-evolution must not change the campaign domain contract.
+evolution must not change the campaign domain contract. Only the minimal liveness route is public;
+detailed readiness and every business route use constant-time credential verification.
 
 ## Production deployment boundary
 
 The steady-state deployment packages WA Studio and the three Runtime roles as one desktop product.
 The native shell binds Runtime to loopback, supervises its processes and embedded PostgreSQL, and
-keeps credentials in a protected local secret file. Queue transport is PostgreSQL in this profile;
-Redis is not installed on the desktop.
+keeps credentials in the operating-system credential store (macOS Keychain). Queue transport is
+PostgreSQL in this profile; Redis is not installed on the desktop.
 
 ```text
-OpenWA 0.22.0 --signed POST--> public Event Inbox --durable row--> bounded PostgreSQL
+OpenWA (reviewed tag) --signed POST--> public Event Inbox --durable row--> bounded PostgreSQL
                                                                   |
 WA Studio <--loopback--> local Runtime <--claim/lease/ACK/NACK-----+
                               |

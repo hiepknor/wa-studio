@@ -1145,7 +1145,7 @@ export interface components {
             dependencies: components["schemas"]["HealthDependenciesDto"];
             processes: components["schemas"]["RuntimeProcessHealthDto"];
             liveSendsEnabled: boolean;
-            /** @example 0.22.0 */
+            /** @example 0.23.3 */
             openwaRelease: string;
             allowedSessionCount: number;
         };

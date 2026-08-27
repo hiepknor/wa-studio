@@ -1,0 +1,22 @@
+[Unit]
+Description=Create and upload an encrypted WA Event Inbox backup
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+EnvironmentFile=/etc/wa-event-inbox/backup.env
+ExecStart=/opt/wa-event-inbox/scripts/event-inbox-backup.sh
+StateDirectory=wa-event-inbox-backup
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=30m
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/wa-event-inbox-backup

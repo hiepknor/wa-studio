@@ -2,8 +2,10 @@
 
 ## Runtime logs
 
-API, scheduler and worker write newline-delimited JSON to stdout/stderr. The deployment intentionally
-has no telemetry collector, trace store, metrics database, dashboard or alert engine.
+API, scheduler and worker write newline-delimited JSON to stdout/stderr. The repository also ships a
+private Prometheus scrape contract and reference alert rules for the server profile. It does not
+embed a telemetry backend, paging destination or credentials, and the local-first desktop profile
+keeps metrics disabled unless an operator explicitly provisions them.
 
 Each API response includes `X-Request-ID`; a caller's value is preserved only when it contains
 1–100 letters, digits, dots, underscores or hyphens. Worker log context can include `bullJobId`,
@@ -48,6 +50,28 @@ docker compose exec -T redis redis-cli get wa-runtime:scheduler-tick:messages
 Set `LOG_LEVEL` to `verbose`, `debug`, `log`, `warn`, `error` or `fatal`. Production defaults to
 `log`; other environments default to `debug`.
 
+## Prometheus metrics
+
+Set a dedicated `RUNTIME_METRICS_TOKEN` to enable `GET /api/v1/metrics`. The route accepts
+`Authorization: Bearer <token>`, is excluded from OpenAPI and returns 404 when disabled. It must stay
+on a private network and must not reuse `RUNTIME_API_KEY`.
+
+HTTP metrics label only a bounded method, the matched route template and response status. Unknown
+routes collapse to `<unmatched>` so an attacker-controlled path, session/group ID, search term or
+message value cannot create a series or enter the completion log. Dependency and current-instance
+background heartbeat gauges refresh on every scrape; a failed probe is represented as zero while
+the metrics response remains available for diagnosis.
+
+Reference Prometheus configuration, alert rules, credential setup and rollout checks live in
+[deploy/observability](../deploy/observability/README.md). The default rules cover scrape loss,
+PostgreSQL/queue loss, stale worker/scheduler heartbeats, repeated snapshot failures, sustained HTTP
+5xx ratio and aggregate p95 latency.
+
+Event Inbox has an independent production metrics token and a private scrape configuration. Its
+aggregate gauges cover hard event/byte capacity, pending/leased/dead events, oldest pending age,
+device protocol migration, session ownership and active pairing rate limits. Public Caddy routing
+does not expose detailed readiness or metrics.
+
 ## Desktop supervisor logs and diagnostics
 
 The WA Studio native supervisor also emits newline-delimited JSON. Its canonical envelope contains
@@ -77,19 +101,20 @@ the next safe opportunity and must not silently broaden the restart budget.
 ## Health checks
 
 ```text
-GET /api/v1/health/live
-GET /api/v1/health/ready
+GET /api/v1/health/live   (public liveness only)
+GET /api/v1/health/ready  (X-Runtime-Key required)
 ```
 
 Liveness proves that the API process can answer. Readiness requires PostgreSQL and Redis, then
 reports worker and scheduler heartbeat state independently as `healthy` or `degraded`, together with
 the live-send interlock, pinned OpenWA release and allowlisted-session count. A missing background
 heartbeat does not remove the API from routing because PostgreSQL still owns durable intent. The
-probe does not prove that OpenWA is currently paired.
+probe does not prove that OpenWA is currently paired. Because that response exposes deployment
+state, probes and operator diagnostics must supply the Runtime credential; only liveness is public.
 
 ## Manual diagnosis
 
-The repository emits alertable events but does not ship a collector or paging engine. Configure the
-deployment platform to alert on repeated tick failure/timeout, webhook `DEAD`, delivery `UNKNOWN`,
-queue failures and growing backlog. Never automatically retry an `UNKNOWN` live delivery; follow
-[Failure model](failure-model.md).
+The repository ships scrape and rule configuration, but the deployment still owns Prometheus,
+Alertmanager, log collection and paging destinations. Configure log-derived alerts for repeated tick
+failure/timeout, webhook `DEAD`, delivery `UNKNOWN`, queue failures and growing backlog. Never
+automatically retry an `UNKNOWN` live delivery; follow [Failure model](failure-model.md).

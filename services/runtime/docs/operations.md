@@ -14,8 +14,8 @@ session IDs or Docker volumes.
 
 The target production topology is the desktop-managed model in
 [ADR 015](adr/015-event-inbox-discovery-and-pairing.md). WA Studio owns Runtime business
-execution and PostgreSQL on the trusted desktop. The public VPS retains OpenWA `0.22.0` plus the
-bounded Event Inbox described in [its deployment guide](../deploy/event-inbox/README.md). The server topology
+execution and PostgreSQL on the trusted desktop. The public VPS retains the reviewed OpenWA release
+plus the bounded Event Inbox described in [its deployment guide](../deploy/event-inbox/README.md). The server topology
 below remains a development and controlled rollback profile; it is not the steady-state target.
 
 Desktop-managed PostgreSQL uses the layered recovery policy in
@@ -34,6 +34,13 @@ immediately and schedule maintenance when backup or integrity freshness becomes 
 
 Set `WA_RUNTIME_DB_PASSWORD` to an independently generated staging/production secret and use the
 same URL-encoded credential in `DATABASE_URL`. The Compose defaults are development-only.
+
+Database waits are fail-closed and bounded. The defaults allow 10 pooled connections, five seconds
+to acquire/connect, 30 seconds per SQL statement/query, 10 seconds waiting for a lock, 30 seconds
+idle inside a transaction, and one hour per pooled connection. Tune `DATABASE_POOL_MAX` and the
+`DATABASE_*_TIMEOUT_*` settings only from observed query latency and PostgreSQL capacity; never use
+zero to turn a production timeout back into an unbounded wait. Idle-client socket failures are
+logged as `runtime.database.idle_client_error` and the pool retires that client.
 
 ## Container topology
 
@@ -98,21 +105,26 @@ while retaining the database invariant.
 
 ## Health and observability
 
-Public probes:
+Public liveness and authenticated readiness:
 
 ```text
-GET /api/v1/health/live
-GET /api/v1/health/ready
+GET /api/v1/health/live   (public)
+GET /api/v1/health/ready  (X-Runtime-Key required)
 ```
 
 Readiness requires PostgreSQL and Redis. It reports fresh worker/scheduler heartbeats separately as
 `healthy` or `degraded`, so a background-plane outage remains alertable without removing the API
 from routing while durable intent can still be stored. It also reports the live-send interlock,
 pinned OpenWA release and number of allowlisted sessions. It does not prove that OpenWA is currently
-paired; session sendability is visible through the session API and campaign preflight.
+paired; session sendability is visible through the session API and campaign preflight. Do not expose
+the Runtime key through a public load balancer or probe configuration; keep this endpoint on the
+trusted Runtime network.
 
-All processes emit correlated JSON logs. The deployment has no trace store, metrics database,
-dashboard or alert engine. See [Observability](observability.md) for log fields and manual diagnosis.
+All processes emit correlated JSON logs. The server profile can additionally expose a dedicated-
+token Prometheus endpoint with low-cardinality HTTP, dependency, heartbeat and process metrics.
+Reference scrape and alert rules are shipped without collector credentials or paging destinations.
+See [Observability](observability.md) and the
+[metrics deployment runbook](../deploy/observability/README.md).
 
 Useful container checks:
 
@@ -366,6 +378,20 @@ After restart:
 Before ADR 001 is fully implemented, do not start a second scheduler or worker as a recovery
 shortcut. Restart the single process and let PostgreSQL-backed discovery republish the durable rows.
 
+### Graceful shutdown and cleanup failures
+
+API, worker, scheduler, Event Inbox and managed Desktop processes own their shutdown sequence. A
+normal signal stops queue intake and runner loops before closing the Nest application context and
+database pool. Event Inbox also cancels its maintenance timer and waits for any active, single-flight
+expiry cleanup before repository pools close. Independent workers and queue resources are all given
+a chance to close; one cleanup failure does not skip the remaining cleanup tasks.
+
+If the process operation and cleanup both fail, Runtime preserves both errors in its terminal log
+instead of replacing the original failure with the cleanup failure. A failed transaction rollback
+is logged as `runtime.database.transaction_rollback_failed`, and that PostgreSQL client is evicted
+from the pool. Treat either event as an abnormal shutdown: confirm the process exited, inspect any
+leased work through the normal recovery flow above, and restart the single owning process only.
+
 ## OpenWA webhook registration gate
 
 Runtime validates and processes OpenWA webhooks. When
@@ -426,33 +452,94 @@ the group before resuming live work.
 
 ## OpenWA upgrade
 
-OpenWA is pinned by `OPENWA_RELEASE_TAG`, and its reviewed Swagger snapshot lives under
+The OpenWA server selected by the operator is the source of truth for the observed release. The
+workspace never uses the latest GitHub tag to decide compatibility. `release/components.json` pins
+the last reviewed server tag and the SHA-256 of its exact Swagger snapshot under
 `contracts/openwa/<tag>/openapi.json`.
 
-The currently reviewed release is OpenWA `0.22.0`. A deployment using another release must update
-and review the pinned snapshot and adapter tests before changing `OPENWA_RELEASE_TAG`.
-
-For an upgrade:
-
-1. add the new upstream snapshot without overwriting the old one;
-2. diff relevant sessions, groups, send and webhook schemas;
-3. update only the OpenWA adapter when upstream shapes changed;
-4. run unit, adapter, dry-run and restart-recovery tests;
-5. deploy OpenWA to a non-production session first;
-6. release a compatible Runtime tag;
-7. change `OPENWA_RELEASE_TAG` only in that reviewed release.
-
-Import an exact upstream artifact through the guarded repository command:
+Load the server origin and API key into the current secure operator shell, then compare that server
+with the reviewed pin:
 
 ```bash
-npm run contract:openwa:import -- 0.22.0 < openapi.json
+export OPENWA_BASE_URL=https://openwa.example.com
+export OPENWA_API_KEY=<operator-key>
+npm run openwa:server:status
 ```
 
-The command validates the declared release and refuses to overwrite a different artifact already
-reviewed under the same version.
+`status` calls `/api/health` on that origin. It reports `current`, `upgrade_available`, or
+`server_behind` and never prints the API key. An upgrade is available only when this live server
+reports a newer stable tag than `release/components.json`.
 
-If the live Gateway reports another version, full sync fails closed. Do not bypass the check during
-an upgrade.
+After deliberately upgrading a non-production server, import the contract exposed by that same
+server:
+
+```bash
+npm run openwa:server:sync
+```
+
+The sync command probes `/api/health` first, then downloads `/api/docs-json` from the same origin. It
+stages the immutable snapshot without changing the reviewed Runtime/Studio pin. If Swagger is
+disabled on the server, export its exact OpenAPI document and keep live tag discovery anchored to
+the server:
+
+```bash
+npm run openwa:server:sync -- --contract /secure/path/openapi.json
+```
+
+Sync refuses a downgrade, a version mismatch between health and OpenAPI, an unencrypted remote
+origin, redirects, oversized responses, and replacement of a different snapshot already stored
+under the same tag. The running compatibility pin remains unchanged until a developer has:
+
+1. diffed the old and new sessions, groups, send, health, and webhook schemas;
+2. adapted Runtime only where the server contract changed;
+3. updated `REVIEWED_OPENWA_RELEASE` in the contract-upgrade test after that review;
+4. run the adapter and unit checks against the staged snapshot;
+5. promoted the reviewed tag while the same server still reports it:
+
+```bash
+npm run openwa:server:promote
+```
+
+Promotion re-probes `/api/health`, requires the matching staged snapshot and review marker, then
+recoverably advances the component pin, snapshot digest, and generated Runtime constants. After
+promotion, run `npm run check`, Runtime integration tests, and packaged managed-Runtime E2E, then
+update `EVENT_INBOX_OPENWA_RELEASE_TAG` during the coordinated deployment.
+
+Run `npm run openwa:server:verify` in every release checkout. This offline gate verifies the pin,
+snapshot hash, generated constants, and adapter-review marker without contacting production.
+
+If the live Gateway reports another version, Runtime group synchronization and desktop startup fail
+closed. Do not bypass the check during an upgrade.
+
+## Outbound HTTP boundaries
+
+Runtime accepts `OPENWA_BASE_URL` only as an origin without credentials, path, query or fragment,
+never follows redirects, and sends the operator key only to URLs constructed under that origin.
+`OPENWA_REQUEST_TIMEOUT_MS` bounds one attempt while `OPENWA_REQUEST_DEADLINE_MS` bounds the entire
+retry sequence, including rate-limit backoff. Keep the deadline greater than or equal to the attempt
+timeout. Shutdown aborts both active requests and backoff immediately.
+
+Successful OpenWA bodies are capped by `OPENWA_RESPONSE_MAX_BYTES`; error bodies use a fixed 64 KiB
+cap. The Event Inbox credential probe has independent timeout and response limits. Runtime claim
+responses use `EVENT_INBOX_REQUEST_TIMEOUT_MS` and `EVENT_INBOX_RESPONSE_MAX_BYTES`; the timeout must
+remain above the protocol's 20-second long poll. The default 40 MiB response cap covers 100 events
+at the default 256 KiB raw-payload limit after base64 expansion. If the Event Inbox payload limit is
+raised, either reduce `EVENT_INBOX_BATCH_SIZE` or raise the response cap from measured staging data.
+Malformed or oversized upstream bodies fail before schema validation and are never included in logs.
+
+## Inbound HTTP boundaries
+
+API and desktop-managed Runtime disable Nest's implicit parser and register one explicit strict JSON
+parser capped by `RUNTIME_HTTP_BODY_MAX_BYTES` (1 MiB by default). Event Inbox uses its own
+`EVENT_INBOX_MAX_PAYLOAD_BYTES` cap, so signed webhooks between 100 KiB and the configured limit are
+accepted instead of being rejected by Nest's hidden default. Bodies above either limit return HTTP
+413 before controller code runs.
+
+All HTTP entrypoints remove `X-Powered-By`, emit no-store, nosniff, frame-denial, no-referrer,
+same-origin resource and disabled camera/microphone/geolocation headers, and explicitly bound header
+and full-request receive time. Keep the header timeout at or below the request timeout. CORS remains
+disabled; do not enable a browser origin without a separate threat review because the Runtime key is
+an operator credential, not a browser session token.
 
 ## Group reconciliation
 

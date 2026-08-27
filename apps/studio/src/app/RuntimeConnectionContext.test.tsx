@@ -1,29 +1,69 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { RuntimeApi } from "@/shared/api/runtime-client";
+import type { RuntimeApi, RuntimeConnectionResult } from "@/shared/api/runtime-client";
 import type { ManagedRuntimeSnapshot } from "@/shared/native/managed-runtime";
 import { RuntimeConnectionProvider, useRuntimeConnection } from "./RuntimeConnectionContext";
 
 function ConnectionObserver() {
-  const { connected, disconnect, managedConnectionFlow } = useRuntimeConnection();
+  const {
+    connected,
+    disconnect,
+    managedConnectionError,
+    managedConnectionFlow,
+    managedRuntime,
+  } = useRuntimeConnection();
   return (
     <div>
-      <span>{connected?.profile.baseUrl ?? "disconnected"}</span>
-      <span>{managedConnectionFlow}</span>
+      <span data-testid="connection-origin">{connected?.profile.baseUrl ?? "disconnected"}</span>
+      <span data-testid="connection-flow">{managedConnectionFlow}</span>
+      <span data-testid="managed-phase">{managedRuntime.phase}</span>
+      {managedConnectionError && <span>{managedConnectionError}</span>}
       {connected && <button onClick={disconnect} type="button">Disconnect</button>}
     </div>
   );
 }
 
+function ConfigurationObserver() {
+  const { configureManagedRuntime, managedConnectionError, managedConnectionFlow } =
+    useRuntimeConnection();
+  return (
+    <div>
+      <button
+        onClick={() => void configureManagedRuntime({
+          openwaApiKey: "submitted-openwa-key",
+          openwaBaseUrl: "https://openwa.example.com",
+        }).catch(() => undefined)}
+        type="button"
+      >
+        Configure
+      </button>
+      <span>{managedConnectionFlow}</span>
+      {managedConnectionError && <span>{managedConnectionError}</span>}
+    </div>
+  );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
+    resolve = next;
+    reject = fail;
+  });
+  return { promise, reject, resolve };
+}
+
 const managedReady = (): ManagedRuntimeSnapshot => ({
   phase: "ready",
   manifest: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     service: "wa-runtime",
     version: "0.1.0",
     contractVersion: "v1",
+    openwaReleaseTag: "1.2.3",
+    openwaContractSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     profiles: ["desktop-managed"],
     roles: ["api", "worker", "scheduler", "migrate"],
     databaseBackends: ["postgres"],
@@ -56,7 +96,11 @@ describe("RuntimeConnectionProvider managed mode", () => {
     );
 
     await waitFor(() => expect(screen.getByText("http://127.0.0.1:3100")).toBeInTheDocument());
-    expect(probeConnection).toHaveBeenCalledWith(managedReady().connection);
+    expect(probeConnection).toHaveBeenCalledWith(
+      managedReady().connection,
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("keeps remote connection mode available while provisioning is incomplete", async () => {
@@ -117,5 +161,169 @@ describe("RuntimeConnectionProvider managed mode", () => {
     );
 
     await waitFor(() => expect(screen.getByText("error")).toBeInTheDocument());
+  });
+
+  it("aborts a managed connection probe when the provider unmounts", async () => {
+    const probeConnection = vi.fn().mockReturnValue(new Promise(() => undefined));
+    const view = render(
+      <RuntimeConnectionProvider
+        discoverManagedRuntime={async () => managedReady()}
+        probeConnection={probeConnection}
+        subscribeToManagedRuntime={async () => () => undefined}
+      >
+        <ConnectionObserver />
+      </RuntimeConnectionProvider>,
+    );
+    await waitFor(() => expect(probeConnection).toHaveBeenCalledTimes(1));
+    const signal = probeConnection.mock.calls[0][2]?.signal as AbortSignal | undefined;
+
+    view.unmount();
+
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("does not let a superseded attach failure overwrite a newer connection", async () => {
+    const firstProbe = deferred<RuntimeConnectionResult>();
+    let publishSnapshot: ((snapshot: ManagedRuntimeSnapshot) => void) | undefined;
+    const probeConnection = vi.fn()
+      .mockReturnValueOnce(firstProbe.promise)
+      .mockResolvedValueOnce({ sessionCount: 0, readySessions: 0, sessions: [] });
+    const initialSnapshot: ManagedRuntimeSnapshot = {
+      ...managedReady(),
+      connection: null,
+      phase: "runtimeStarting",
+    };
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => ({}) as RuntimeApi}
+        discoverManagedRuntime={async () => initialSnapshot}
+        probeConnection={probeConnection}
+        subscribeToManagedRuntime={async handler => {
+          publishSnapshot = handler;
+          return () => undefined;
+        }}
+      >
+        <ConnectionObserver />
+      </RuntimeConnectionProvider>,
+    );
+    await waitFor(() => expect(publishSnapshot).toBeDefined());
+
+    act(() => publishSnapshot?.(managedReady()));
+    await waitFor(() => expect(probeConnection).toHaveBeenCalledOnce());
+    act(() => publishSnapshot?.({
+      ...managedReady(),
+      connection: { baseUrl: "http://127.0.0.1:3200", transport: "native" },
+    }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("connection-origin")).toHaveTextContent(
+        "http://127.0.0.1:3200",
+      );
+    });
+    await act(async () => {
+      firstProbe.reject(new Error("Stale Runtime attach failed."));
+      await firstProbe.promise.catch(() => undefined);
+    });
+
+    expect(screen.getByTestId("connection-origin")).toHaveTextContent(
+      "http://127.0.0.1:3200",
+    );
+    expect(screen.getByTestId("connection-flow")).toHaveTextContent("connected");
+    expect(screen.queryByText("Stale Runtime attach failed.")).not.toBeInTheDocument();
+  });
+
+  it("does not apply a discovery snapshot after a newer supervisor event", async () => {
+    const discovery = deferred<ManagedRuntimeSnapshot>();
+    let publishSnapshot: ((snapshot: ManagedRuntimeSnapshot) => void) | undefined;
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => ({}) as RuntimeApi}
+        discoverManagedRuntime={() => discovery.promise}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 0,
+          readySessions: 0,
+          sessions: [],
+        })}
+        subscribeToManagedRuntime={async handler => {
+          publishSnapshot = handler;
+          return () => undefined;
+        }}
+      >
+        <ConnectionObserver />
+      </RuntimeConnectionProvider>,
+    );
+    await waitFor(() => expect(publishSnapshot).toBeDefined());
+    act(() => publishSnapshot?.(managedReady()));
+    await waitFor(() => expect(screen.getByTestId("connection-flow")).toHaveTextContent("connected"));
+
+    await act(async () => {
+      discovery.resolve({
+        ...managedReady(),
+        connection: null,
+        phase: "provisioningRequired",
+      });
+      await discovery.promise;
+    });
+
+    expect(screen.getByTestId("managed-phase")).toHaveTextContent("ready");
+    expect(screen.getByTestId("connection-flow")).toHaveTextContent("connected");
+  });
+
+  it("does not apply a discovery failure after a newer supervisor event", async () => {
+    const discovery = deferred<ManagedRuntimeSnapshot>();
+    let publishSnapshot: ((snapshot: ManagedRuntimeSnapshot) => void) | undefined;
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => ({}) as RuntimeApi}
+        discoverManagedRuntime={() => discovery.promise}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 0,
+          readySessions: 0,
+          sessions: [],
+        })}
+        subscribeToManagedRuntime={async handler => {
+          publishSnapshot = handler;
+          return () => undefined;
+        }}
+      >
+        <ConnectionObserver />
+      </RuntimeConnectionProvider>,
+    );
+    await waitFor(() => expect(publishSnapshot).toBeDefined());
+    act(() => publishSnapshot?.(managedReady()));
+    await waitFor(() => expect(screen.getByTestId("connection-flow")).toHaveTextContent("connected"));
+
+    await act(async () => {
+      discovery.reject(new Error("Stale discovery failed."));
+      await discovery.promise.catch(() => undefined);
+    });
+
+    expect(screen.getByTestId("managed-phase")).toHaveTextContent("ready");
+    expect(screen.getByTestId("connection-flow")).toHaveTextContent("connected");
+  });
+
+  it("redacts the submitted OpenWA key from managed provisioning errors", async () => {
+    const user = userEvent.setup();
+    const initialSnapshot: ManagedRuntimeSnapshot = {
+      ...managedReady(),
+      connection: null,
+      phase: "provisioningRequired",
+    };
+    render(
+      <RuntimeConnectionProvider
+        discoverManagedRuntime={async () => initialSnapshot}
+        provisionRuntime={vi.fn().mockRejectedValue(
+          new Error("Credential submitted-openwa-key was rejected."),
+        )}
+        subscribeToManagedRuntime={async () => () => undefined}
+      >
+        <ConfigurationObserver />
+      </RuntimeConnectionProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Configure" }));
+
+    expect(await screen.findByText("Credential [redacted] was rejected.")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("submitted-openwa-key");
   });
 });

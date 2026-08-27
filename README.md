@@ -11,7 +11,7 @@ not modified by this repository.
 | --- | --- | --- |
 | WA Studio | operator-facing desktop product and this monorepo's release product | `wa-studio` |
 | WA Runtime | UI-independent business engine, sidecar, service and public API contract | `wa-runtime` |
-| OpenWA | external, release-pinned WhatsApp gateway | upstream `0.22.0` release |
+| OpenWA | external, release-pinned WhatsApp gateway | reviewed tag in `release/components.json` |
 
 The project is therefore not renamed wholesale to WA Runtime: Studio is the shipped desktop
 product, while Runtime is the reusable engine inside and behind it. The release gate enforces these
@@ -36,7 +36,7 @@ workspace.
 - Rust stable
 - macOS: Xcode or Xcode Command Line Tools
 - PostgreSQL only for integration tests that explicitly use an external database
-- OpenWA 0.22.0 Base URL and API key when exercising the real Connect flow
+- OpenWA Base URL and API key for a server running the reviewed tag when exercising the real Connect flow
 
 ## Development
 
@@ -49,8 +49,9 @@ npm run dev
 
 `npm run dev` generates the release manifest, builds the Runtime sidecar, stages Runtime migrations,
 and starts Tauri. Connect accepts an OpenWA Base URL and API key. Native provisioning verifies
-OpenWA 0.22.0, discovers Event Inbox, pairs the desktop device, persists the provisioning profile in
-the protected local app store, and starts local PostgreSQL, API, worker, and scheduler processes.
+the server's release against the reviewed pin, discovers Event Inbox, pairs the desktop device,
+persists the provisioning profile in the protected local app store, and starts local PostgreSQL,
+API, worker, and scheduler processes.
 
 Production installation is greenfield. WA Studio creates a new local Runtime database and does not
 import legacy VPS Runtime data. Encrypted backups in Settings cover only data created by this
@@ -92,11 +93,19 @@ manifest bundled into the desktop app.
 
 ## Signed updater releases
 
-Development builds intentionally have no updater channel. A release operator supplies updater,
-Developer ID, and notarization credentials through the CI secret store, then runs:
+Development builds intentionally have no updater channel. Signed releases use the canonical static
+feed at:
 
 ```bash
-export WA_STUDIO_UPDATER_ENDPOINT='https://updates.example.com/wa-studio/{{target}}/{{arch}}/{{current_version}}'
+https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json
+```
+
+Set `WA_STUDIO_UPDATER_ENDPOINT` to that exact value in the GitHub Actions secret store, together
+with the updater, Developer ID, and notarization credentials. A release operator can validate a
+signed build locally with:
+
+```bash
+export WA_STUDIO_UPDATER_ENDPOINT='https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json'
 export WA_STUDIO_UPDATER_PUBLIC_KEY='...minisign public key...'
 export TAURI_SIGNING_PRIVATE_KEY='...CI secret or key path...'
 export APPLE_SIGNING_IDENTITY='Developer ID Application: ...'
@@ -110,5 +119,15 @@ Notarization can instead use `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`. 
 `APPLE_CERTIFICATE` with `APPLE_CERTIFICATE_PASSWORD` instead of selecting an installed identity.
 The release command fails closed if updater signing, Developer ID signing, notarization, or the HTTPS
 endpoint is incomplete; it then verifies the app signature and stapled notarization ticket.
+
+Pushing a tag that exactly matches `v<apps/studio/package.json version>` runs the release workflow.
+It builds and verifies the macOS updater, stages a normalized signed archive, DMG, static
+`latest.json`, checksums and release metadata, and publishes the immutable Event Inbox image. The
+workflow creates a draft GitHub Release only after both builds pass, verifies the uploaded feed, and
+then promotes the draft to the latest published release. A failed or incomplete upload remains a
+draft and is never exposed through the updater endpoint.
+
+See [docs/release-runbook.md](docs/release-runbook.md) for release prerequisites, post-publication
+verification, retry behavior, and fix-forward recovery.
 
 See [docs/architecture.md](docs/architecture.md) for system boundaries and security ownership.

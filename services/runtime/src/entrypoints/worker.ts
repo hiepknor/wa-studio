@@ -3,11 +3,14 @@ import { NestFactory } from '@nestjs/core';
 import { WorkerAppModule } from '../app/worker-app.module';
 import { WorkerRunnerService } from '../modules/orchestration/worker-runner.service';
 import { JsonLogger } from '../core/observability/json-logger';
+import { runWithCleanup } from '../core/process/run-with-cleanup';
 
 export async function runWorker(): Promise<void> {
   const app = await NestFactory.createApplicationContext(WorkerAppModule, { logger: new JsonLogger('worker') });
-  await app.get(WorkerRunnerService).run();
-  await app.close();
+  await runWithCleanup(
+    () => app.get(WorkerRunnerService).run(),
+    () => app.close(),
+  );
 }
 
 if (require.main === module) {

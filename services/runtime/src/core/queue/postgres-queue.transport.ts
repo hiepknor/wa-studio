@@ -22,6 +22,7 @@ import {
   type SchedulerTickState,
   type RuntimeProcessName,
 } from './runtime-heartbeat';
+import { runCleanupTasks, runWithCleanup } from '../process/run-with-cleanup';
 
 const QUEUE_WAKEUP_CHANNEL = 'runtime_queue_wakeup';
 const QUEUE_POLL_INTERVAL_MS = 1_000;
@@ -139,11 +140,15 @@ export class PostgresQueueTransport implements QueueTransport {
   }
 
   async close(): Promise<void> {
-    await Promise.all([...this.workers].map(worker => worker.close()));
-    this.workers.clear();
-    this.listenerErrorHandlers.clear();
-    this.wake();
-    await this.closeListener();
+    await runWithCleanup(
+      () => runCleanupTasks([...this.workers].map(worker => () => worker.close())),
+      async () => {
+        this.workers.clear();
+        this.listenerErrorHandlers.clear();
+        this.wake();
+        await this.closeListener();
+      },
+    );
   }
 
   async claim<T>(queue: RuntimeQueueName): Promise<PostgresQueueRow<T> | null> {
@@ -303,6 +308,7 @@ export class PostgresQueueTransport implements QueueTransport {
 class PostgresQueueWorker<T> implements RuntimeQueueWorker {
   private stopping = false;
   private readonly loops: Array<Promise<void>>;
+  private closePromise: Promise<void> | undefined;
 
   constructor(
     private readonly transport: PostgresQueueTransport,
@@ -315,12 +321,12 @@ class PostgresQueueWorker<T> implements RuntimeQueueWorker {
     this.loops = Array.from({ length: concurrency }, () => this.run());
   }
 
-  async close(): Promise<void> {
-    if (this.stopping) return;
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.stopping = true;
     this.transport.wake(this.queue);
-    await Promise.all(this.loops);
-    this.onClose();
+    this.closePromise = Promise.all(this.loops).then(() => { this.onClose(); });
+    return this.closePromise;
   }
 
   private async run(): Promise<void> {

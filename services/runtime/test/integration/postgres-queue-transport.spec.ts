@@ -99,6 +99,42 @@ describe('PostgresQueueTransport', () => {
     await worker.close();
   });
 
+  it('makes concurrent close callers wait for the same active-job drain', async () => {
+    let release!: () => void;
+    const activeJob = new Promise<void>(resolve => { release = resolve; });
+    const started = vi.fn();
+    await transport.publish(
+      'message-send',
+      'close-drain',
+      { value: 'active' },
+      { jobId: 'close-drain-job', attempts: 1 },
+    );
+    const worker = transport.startWorker<{ value: string }>(
+      'message-send',
+      1,
+      async () => {
+        started();
+        await activeJob;
+      },
+      error => { throw error; },
+    );
+    await vi.waitFor(() => expect(started).toHaveBeenCalledOnce());
+
+    let firstClosed = false;
+    let secondClosed = false;
+    const firstClose = worker.close().then(() => { firstClosed = true; });
+    const secondClose = worker.close().then(() => { secondClosed = true; });
+    await Promise.resolve();
+
+    expect(firstClosed).toBe(false);
+    expect(secondClosed).toBe(false);
+
+    release();
+    await Promise.all([firstClose, secondClose]);
+    expect(firstClosed).toBe(true);
+    expect(secondClosed).toBe(true);
+  });
+
   it('reclaims a delivery after its previous worker lease expires', async () => {
     await transport.publish(
       'campaign',

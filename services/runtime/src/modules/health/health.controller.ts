@@ -33,8 +33,8 @@ export class HealthController {
     return { status: 'ok', service: RUNTIME_SERVICE, version: RUNTIME_VERSION };
   }
 
-  @Public()
   @Get('ready')
+  @ApiSecurity('runtime-key')
   @ApiOkResponse({ type: HealthReadyDto })
   @ApiServiceUnavailableResponse({ type: HealthNotReadyDto })
   async ready(): Promise<HealthReadyDto> {

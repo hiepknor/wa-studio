@@ -5,13 +5,14 @@
 WA Studio and WA Runtime are versioned and built from one monorepo, but remain separate architectural
 components. Studio does not call OpenWA, PostgreSQL, queues, or workers directly. WA Runtime owns
 business rules, authorization, preflight, campaign execution, delivery state, and Gateway
-compatibility. OpenWA remains an external deployment pinned to 0.22.0.
+compatibility. OpenWA remains an external deployment pinned to the reviewed tag and contract digest
+in `release/components.json`.
 
 ```text
 WA Studio desktop
   -> loopback WA Runtime API v1 / worker / scheduler
       -> managed PostgreSQL queue and business state
-      -> OpenWA Gateway 0.22.0
+      -> OpenWA Gateway (reviewed tag)
       <- durable Event Inbox claim / lease / receipt ACK
 ```
 
@@ -82,33 +83,97 @@ Responsive CSS still owns content layout, but it must not simulate native window
 
 WA Studio owns its semantic React controls and CSS. The interface follows a Warp Terminal-inspired operations language—graphite surfaces, restrained violet accents, compact system typography, and monospace for technical data—without copying Warp branding or assets. Feature modules continue to own accessibility, domain language, validation, WA Runtime requests, server state, and workflows. See [ui-implementation-plan.md](ui-implementation-plan.md) for the incremental rollout.
 
+Modal workflows use the shared dialog primitives as the sole focus owner. While open, they portal above the application, make every background body sibling inert, lock body scrolling, trap keyboard focus, and restore the still-connected invocation target after close. The visual backdrop is hidden from the accessibility tree; the named close or cancel button remains the single discoverable dismissal control. Confirmation submission is synchronously single-flight, and guarded workspace navigation consumes its pending destination before applying it, so repeated input in one browser task cannot repeat a destructive action or navigation side effect.
+
 ## Security
 
 The native supervisor stores the Runtime key, OpenWA API key, derived webhook secret, Event Inbox
-device token, callback and session scope in the protected local secret file under schema v2. Secrets never cross the
-Tauri command response into React, source control, logs, local storage, or Vite environment variables.
-Legacy schema-v1 relay records are not read or migrated.
+device token, callback and session scope in the operating-system credential store (macOS Keychain).
+The Runtime credential payload uses schema v2. Secrets never cross the Tauri command response into
+React, source control, logs, local storage, or Vite environment variables. On first secure-store
+access, a supported legacy schema-v1 `secrets.json` is migrated into missing credential-store entries
+and removed only after every write succeeds; secure-store failures never fall back to plaintext.
 
 Tauri HTTP permissions and its custom-header feature are intentionally explicit. The build permits
 the local development origins and the production Event Inbox at `https://wa-events.onio.cc`.
 WA Runtime remains bound to loopback; arbitrary user-entered origins remain blocked by the native
 layer.
 
+The developer-only external Runtime fallback accepts an origin or that origin's `/api/v1` root,
+requires HTTPS outside loopback, and rejects URL credentials, query strings and fragments. Its API
+key remains memory-only and is attached behind an exact-origin transport policy: redirects are
+denied, every request has a 30-second deadline, success bodies are capped at 8 MiB, error bodies at
+256 KiB, and outgoing request bodies at 2 MiB. Managed Runtime requests cross the webview boundary
+without a key and retain the same API-path, cancellation and response bounds; the Rust transport
+independently revalidates them and injects the key from native state.
+
+Runtime read methods accept an `AbortSignal`. Each screen owns independent latest-read slots for
+directories, details and polling: a new request aborts the superseded transport, and session changes,
+drawer/dialog closure and component unmount abort any remaining read. Request revision and target
+keys remain a second guard against adapters that resolve after cancellation. Submitted mutations are
+not automatically aborted because a lost response cannot prove that Runtime did not commit the
+operation. The HTTP boundary records whether a failed request reached the transport adapter. A
+post-dispatch mutation failure is treated as an unknown outcome: idempotent creates retain their
+original request key, revisioned updates and state transitions reload canonical Runtime state while
+preserving staged operator input, deletes confirm presence before offering another attempt, and
+asynchronous requests continue observation when a durable result can still appear. Session changes,
+target changes and unmount invalidate the UI continuation so a late mutation cannot write old-session
+state or start a later step in a multi-step save. Typed HTTP failures remain authoritative and are
+never reclassified as transport ambiguity.
+
+Settings and managed setup apply the same ownership rule to native operations that cannot be
+aborted. Each surface invalidates superseded or unmounted continuations before it updates React
+state, while the native operation itself is allowed to finish. Native mutations acquire a
+single-flight token synchronously before React busy state renders; the ownership primitives restore
+their mounted state after React StrictMode's development effect rehearsal. Recovery mutations are
+mutually exclusive, and a committed backup or restore is reported separately from a failed follow-up refresh
+so the UI never invites a duplicate destructive retry. Independent diagnostics and backup reads
+retain whichever result succeeds. Native error copy is normalized before display and redacts any
+submitted OpenWA key or recovery passphrase.
+
+Campaign editing follows the same rule across details, target replacement, saved-list application,
+run launch/state changes, and deletion. These writes share one synchronous single-flight owner per
+editor, while preflight has an independent read owner that is invalidated as soon as persisted input
+becomes dirty. Closing or retargeting the editor clears every busy projection immediately and makes
+late continuations observationally inert. A run response is the commit boundary: if a subsequent
+Campaign refresh fails, Studio keeps the canonical run result and reports only the refresh failure,
+never presenting a committed launch or state change as safe to retry.
+
+The Runs inspector cancels any in-flight detail poll before dispatching a lifecycle mutation and
+admits only one pause, resume, or cancel request at a time. Retargeting or closing the inspector
+invalidates the old continuation without attempting to abort a possibly committed write. When the
+write response is ambiguous, canonical detail/list reconciliation preserves the ambiguity warning
+instead of clearing it at refresh start, so refreshed state never masquerades as proof that the
+original request failed.
+
+Initial managed setup and developer fallback attachment use the same synchronous single-flight
+boundary, so repeated form or confirmation events cannot dispatch overlapping provision, restore,
+or attach operations. A late stored-profile read never replaces an OpenWA URL the operator has
+already edited, and a new degraded episode clears the previous recovery catalog before loading and
+presenting the current verified recovery points.
+
 ## Initial workflow
 
-1. Normalize the OpenWA origin and verify release 0.22.0.
+1. Normalize the OpenWA origin and verify its live release against the reviewed pin.
 2. Read `/.well-known/wa-studio` from that origin.
 3. Pair a stable desktop device with the discovered Event Inbox using the supplied OpenWA API key.
-4. Persist the returned token, signing secret, callback and authorized session scope atomically in the protected local secret file.
+4. Persist the returned token, signing secret, callback and authorized session scope in the
+   operating-system credential store.
 5. Start managed PostgreSQL and Runtime, then reconcile the supported OpenWA webhook registration.
 
 ## Desktop workspace state
 
 After authentication, `RuntimeConnectionProvider` holds the normalized WA Runtime origin, API key, typed API client, initial sessions, and selected session in process memory. The session list returned during credential verification is reused when the workspace opens, so entering the shell does not duplicate `GET /sessions`.
 
+Connection discovery and supervisor events share one ordered ownership boundary. Once a supervisor
+event has arrived, an older discovery result or discovery failure cannot replace it. Starting a new
+attach aborts the previous probe; even adapters that ignore cancellation cannot let a stale success
+or failure replace the newer connection. Session refresh reports whether its response was actually
+accepted, so a screen that disconnects or unmounts never announces a stale reload as successful.
+
 The shell treats the selected session as shared workspace context. Its toolbar selector is therefore the single context switch used by current and future Groups, Campaigns, Runs, and Activity pages. Destinations and availability live in `src/app/workspace-pages.ts`; adding a feature page means registering it there and adding its renderer, without duplicating sidebar or status-bar logic. Unimplemented destinations remain visibly disabled rather than presenting mock workflows.
 
-Disconnect clears the connection profile, API client, sessions, and selection. A monotonically increasing connection revision prevents late connect or refresh responses from restoring state after disconnect. Session full sync follows the durable WA Runtime workflow: create a sync run, poll its status, then refresh session read models after completion.
+Disconnect clears the connection profile, API client, sessions, and selection. A monotonically increasing connection revision prevents late connect or refresh responses from restoring state after disconnect. Session full sync follows the durable WA Runtime workflow: create a sync run, poll its status, then refresh session read models after completion. Studio admits one sync dispatch before React busy state renders, cancels polling when its session or screen loses ownership, and removes abort listeners after each completed poll delay.
 
 ## Campaign draft boundary
 
@@ -127,6 +192,8 @@ Campaign deletion is a revision-safe removal from the active workspace, not audi
 ## Reusable group-list boundary
 
 Runtime Group Lists are session-scoped static templates, not saved queries or dynamic segments. Groups exposes All groups and Group lists as two views under the existing single sidebar destination. List create owns one UUID idempotency key per intent; editing loads complete canonical membership, keeps persisted and staged IDs separate, sends aggregate revision for metadata/delete and membership revision for replacement, and never retries a conflict silently. Product copy describes deletion from saved lists; Runtime implements it as an idempotent archive. Studio waits for HTTP 204 before removing the item, and deleting a list does not alter any campaign target snapshot.
+
+The scope controller admits only one multi-step save pipeline at a time. Scope, session, and component-lifetime changes invalidate every remaining continuation, while catalog and membership reads require both a matching request revision and current abort-signal ownership before committing state. This second guard protects the UI even when a transport adapter ignores cancellation.
 
 Applying a Group List to Campaign targets uses Runtime's atomic apply endpoint with `groupListId`, `expectedMembershipRevision`, and `expectedTargetsRevision`. It replaces the materialized campaign target snapshot with the canonical response and records nullable source provenance; it does not fetch/copy membership in Studio and does not create a campaign–list binding. Later list rename, edit, or archive cannot mutate existing campaign targets.
 

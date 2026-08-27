@@ -9,6 +9,7 @@ import {
 } from '../../src/modules/event-inbox/event-inbox.controller';
 import type { EventInboxDeviceRepository } from '../../src/modules/event-inbox/event-inbox-device.repository';
 import { encodeEventInboxReceipt } from '../../src/modules/event-inbox/event-inbox-receipt';
+import { EventInboxPairRateLimitService } from '../../src/modules/event-inbox/event-inbox-rate-limit.service';
 import type { EventInboxRepository } from '../../src/modules/event-inbox/event-inbox.repository';
 
 const sessionId = '00000000-0000-4000-8000-000000000001';
@@ -35,11 +36,43 @@ describe('Event Inbox boundary', () => {
       EVENT_INBOX_LEASE_SECONDS: 60,
       EVENT_INBOX_RETENTION_DAYS: 7,
       EVENT_INBOX_DEVICE_TOKEN_TTL_DAYS: 365,
+      EVENT_INBOX_PAIR_RATE_LIMIT_MAX_ATTEMPTS: 5,
+      EVENT_INBOX_PAIR_GLOBAL_RATE_LIMIT_MAX_ATTEMPTS: 100,
+      EVENT_INBOX_PAIR_RATE_LIMIT_WINDOW_SECONDS: 300,
+      EVENT_INBOX_OPENWA_REQUEST_TIMEOUT_MS: 10_000,
+      EVENT_INBOX_OPENWA_RESPONSE_MAX_BYTES: 4_194_304,
+      EVENT_INBOX_HTTP_REQUEST_TIMEOUT_MS: 30_000,
+      EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS: 10_000,
     });
     expect(() => parseEventInboxConfig({
       ...configEnvironment(),
       EVENT_INBOX_DATABASE_URL: 'redis://redis.test:6379',
     })).toThrow('must use PostgreSQL');
+    expect(() => parseEventInboxConfig({
+      ...configEnvironment(),
+      EVENT_INBOX_HTTP_REQUEST_TIMEOUT_MS: '5000',
+      EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS: '5001',
+    })).toThrow('cannot exceed');
+  });
+
+  it('requires an independent metrics credential for production', () => {
+    expect(() => parseEventInboxConfig({
+      ...configEnvironment(),
+      NODE_ENV: 'production',
+      EVENT_INBOX_PUBLIC_BASE_URL: 'https://events.example.test',
+      EVENT_INBOX_OPENWA_BASE_URL: 'https://openwa.example.test',
+    })).toThrow('EVENT_INBOX_METRICS_TOKEN is required in production');
+    expect(() => parseEventInboxConfig({
+      ...configEnvironment(),
+      EVENT_INBOX_METRICS_TOKEN: masterSecret,
+    })).toThrow('must be different from EVENT_INBOX_MASTER_SECRET');
+    expect(parseEventInboxConfig({
+      ...configEnvironment(),
+      NODE_ENV: 'production',
+      EVENT_INBOX_PUBLIC_BASE_URL: 'https://events.example.test',
+      EVENT_INBOX_OPENWA_BASE_URL: 'https://openwa.example.test',
+      EVENT_INBOX_METRICS_TOKEN: 'independent-event-inbox-metrics-token-0000000',
+    }).EVENT_INBOX_METRICS_TOKEN).toBe('independent-event-inbox-metrics-token-0000000');
   });
 
   it('issues expiring v2 tokens and accepts v1 only inside an explicit fixed grace window', () => {
@@ -97,6 +130,9 @@ describe('Event Inbox boundary', () => {
       negativelyAcknowledge: vi.fn().mockResolvedValue({ retried: 0, dead: 1 }),
     };
     const openwa = { validateCredentials: vi.fn().mockResolvedValue([sessionId]) };
+    const pairingRateLimit = {
+      consume: vi.fn().mockResolvedValue({ allowed: true, retryAfterSeconds: 300 }),
+    };
     const devices = {
       pair: vi.fn().mockResolvedValue({
         deviceId,
@@ -119,11 +155,12 @@ describe('Event Inbox boundary', () => {
       tokens,
       devices as unknown as EventInboxDeviceRepository,
       openwa as unknown as EventInboxOpenWAClient,
+      pairingRateLimit as unknown as EventInboxPairRateLimitService,
       config(),
     );
     const pairing = await controller.pair({
       openwaBaseUrl: 'http://127.0.0.1:2785', openwaApiKey: 'openwa-key', deviceId,
-    });
+    }, '203.0.113.10', { setHeader: vi.fn() } as never);
 
     expect(pairing).toMatchObject({
       protocolVersion: 2,
@@ -142,6 +179,62 @@ describe('Event Inbox boundary', () => {
     await expect(controller.revoke(authorization)).resolves.toEqual({ revoked: true });
     await expect(controller.claim('Bearer invalid', { limit: 10, waitSeconds: 0 }))
       .rejects.toThrow('Invalid Event Inbox device token');
+  });
+
+  it('rate limits pairing before validating credentials and returns Retry-After', async () => {
+    const openwa = { validateCredentials: vi.fn() };
+    const pairingRateLimit = {
+      consume: vi.fn().mockResolvedValue({ allowed: false, retryAfterSeconds: 127 }),
+    };
+    const response = { setHeader: vi.fn() };
+    const controller = new EventInboxController(
+      {} as EventInboxRepository,
+      new EventInboxTokenService(config()),
+      {} as EventInboxDeviceRepository,
+      openwa as unknown as EventInboxOpenWAClient,
+      pairingRateLimit as unknown as EventInboxPairRateLimitService,
+      config(),
+    );
+
+    await expect(controller.pair({}, '203.0.113.10', response as never))
+      .rejects.toMatchObject({ status: 429 });
+    expect(pairingRateLimit.consume).toHaveBeenCalledWith('203.0.113.10');
+    expect(response.setHeader).toHaveBeenCalledWith('Retry-After', '127');
+    expect(openwa.validateCredentials).not.toHaveBeenCalled();
+  });
+
+  it('uses durable global and privacy-preserving per-IP pairing buckets', async () => {
+    const repository = {
+      consumeRateLimit: vi.fn()
+        .mockResolvedValueOnce({ allowed: true, retryAfterSeconds: 300 })
+        .mockResolvedValueOnce({ allowed: false, retryAfterSeconds: 219 }),
+    };
+    const limiter = new EventInboxPairRateLimitService(
+      repository as unknown as EventInboxRepository,
+      config(),
+    );
+
+    await expect(limiter.consume('203.0.113.10')).resolves.toEqual({
+      allowed: false,
+      retryAfterSeconds: 219,
+    });
+    expect(repository.consumeRateLimit).toHaveBeenNthCalledWith(
+      1,
+      'pair-global',
+      expect.any(Buffer),
+      100,
+      300,
+    );
+    expect(repository.consumeRateLimit).toHaveBeenNthCalledWith(
+      2,
+      'pair-ip',
+      expect.any(Buffer),
+      5,
+      300,
+    );
+    const ipHash = repository.consumeRateLimit.mock.calls[1]?.[1] as Buffer;
+    expect(ipHash).toHaveLength(32);
+    expect(ipHash.includes(Buffer.from('203.0.113.10'))).toBe(false);
   });
 });
 

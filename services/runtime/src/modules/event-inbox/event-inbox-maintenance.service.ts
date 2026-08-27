@@ -7,6 +7,7 @@ import { EventInboxRepository } from './event-inbox.repository';
 @Injectable()
 export class EventInboxMaintenanceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EventInboxMaintenanceService.name);
+  private activeCleanup: Promise<void> | undefined;
   private timer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -21,11 +22,22 @@ export class EventInboxMaintenanceService implements OnModuleInit, OnModuleDestr
     this.timer.unref();
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    await this.activeCleanup;
   }
 
-  private async cleanup(): Promise<void> {
+  private cleanup(): Promise<void> {
+    if (this.activeCleanup) return this.activeCleanup;
+    const active = this.runCleanup().finally(() => {
+      if (this.activeCleanup === active) this.activeCleanup = undefined;
+    });
+    this.activeCleanup = active;
+    return active;
+  }
+
+  private async runCleanup(): Promise<void> {
     try {
       let deleted = 0;
       let batches = 0;
@@ -37,6 +49,22 @@ export class EventInboxMaintenanceService implements OnModuleInit, OnModuleDestr
       }
       if (deleted > 0) {
         this.logger.log({ event: 'event_inbox.expired_events.deleted', deleted });
+      }
+      let expiredRateLimits = 0;
+      let rateLimitBatches = 0;
+      while (rateLimitBatches < this.config.EVENT_INBOX_CLEANUP_MAX_BATCHES) {
+        const batch = await this.repository.removeExpiredRateLimits(
+          this.config.EVENT_INBOX_CLEANUP_BATCH_SIZE,
+        );
+        expiredRateLimits += batch;
+        rateLimitBatches += 1;
+        if (batch < this.config.EVENT_INBOX_CLEANUP_BATCH_SIZE) break;
+      }
+      if (expiredRateLimits > 0) {
+        this.logger.log({
+          event: 'event_inbox.expired_rate_limits.deleted',
+          deleted: expiredRateLimits,
+        });
       }
       const inactive = await this.devices.cleanupInactive();
       if (inactive.sessionFences > 0 || inactive.devices > 0) {

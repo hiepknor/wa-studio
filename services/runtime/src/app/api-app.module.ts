@@ -4,6 +4,7 @@ import { RuntimeApiKeyGuard } from '../core/auth/runtime-api-key.guard';
 import { DatabaseModule } from '../core/database/database.module';
 import { QueueModule } from '../core/queue/queue.module';
 import { RequestContextMiddleware } from '../core/observability/request-context.middleware';
+import { RuntimeObservabilityModule } from '../core/observability/runtime-observability.module';
 import { RuntimeHttpExceptionFilter } from '../core/http/runtime-http-exception.filter';
 import { RuntimeConfigModule } from '../core/config/runtime-config.module';
 import { OpenWAModule } from '../integrations/openwa/openwa.module';
@@ -22,6 +23,7 @@ import { ActivityModule } from '../modules/activity/activity.module';
     RuntimeConfigModule,
     DatabaseModule,
     QueueModule,
+    RuntimeObservabilityModule,
     OpenWAModule,
     GatewayModule,
     GroupListsModule,

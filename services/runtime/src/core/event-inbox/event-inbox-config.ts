@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { OPENWA_RELEASE_TAG } from '../../contracts/release/openwa-release.generated';
 
 const originSchema = z.url().transform(value => {
   const url = new URL(value);
@@ -12,8 +13,13 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   EVENT_INBOX_BIND_HOST: z.string().trim().min(1).default('127.0.0.1'),
   EVENT_INBOX_PORT: z.coerce.number().int().min(1).max(65535).default(34200),
+  EVENT_INBOX_HTTP_REQUEST_TIMEOUT_MS: z.coerce.number().int()
+    .min(1_000).max(120_000).default(30_000),
+  EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS: z.coerce.number().int()
+    .min(1_000).max(60_000).default(10_000),
   EVENT_INBOX_DATABASE_URL: z.url(),
   EVENT_INBOX_MASTER_SECRET: z.string().min(32).max(4096),
+  EVENT_INBOX_METRICS_TOKEN: z.string().min(32).max(4096).optional(),
   EVENT_INBOX_DEVICE_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(730).default(365),
   EVENT_INBOX_V1_ACCEPT_UNTIL: z.preprocess(
     value => value === '' ? undefined : value,
@@ -21,7 +27,11 @@ const schema = z.object({
   ),
   EVENT_INBOX_PUBLIC_BASE_URL: originSchema,
   EVENT_INBOX_OPENWA_BASE_URL: originSchema,
-  EVENT_INBOX_OPENWA_RELEASE_TAG: z.string().min(1).default('0.22.0'),
+  EVENT_INBOX_OPENWA_RELEASE_TAG: z.string().min(1).default(OPENWA_RELEASE_TAG),
+  EVENT_INBOX_OPENWA_REQUEST_TIMEOUT_MS: z.coerce.number().int()
+    .min(1_000).max(120_000).default(10_000),
+  EVENT_INBOX_OPENWA_RESPONSE_MAX_BYTES: z.coerce.number().int()
+    .min(65_536).max(16_777_216).default(4_194_304),
   EVENT_INBOX_ALLOWED_SESSION_IDS: z.string().min(1)
     .transform(value => value.split(',').map(item => item.trim()).filter(Boolean))
     .pipe(z.array(z.uuid()).min(1).max(1000)),
@@ -30,6 +40,11 @@ const schema = z.object({
   EVENT_INBOX_MAX_STORED_BYTES: z.coerce.number().int()
     .min(1_048_576).max(8_589_934_592).default(268_435_456),
   EVENT_INBOX_MAX_PAYLOAD_BYTES: z.coerce.number().int().min(1024).max(1_048_576).default(262_144),
+  EVENT_INBOX_PAIR_RATE_LIMIT_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(5),
+  EVENT_INBOX_PAIR_GLOBAL_RATE_LIMIT_MAX_ATTEMPTS: z.coerce.number().int()
+    .min(1).max(10_000).default(100),
+  EVENT_INBOX_PAIR_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int()
+    .min(60).max(3_600).default(300),
   EVENT_INBOX_CLAIM_BATCH_MAX: z.coerce.number().int().min(1).max(100).default(100),
   EVENT_INBOX_LEASE_SECONDS: z.coerce.number().int().min(10).max(300).default(60),
   EVENT_INBOX_MAX_DELIVERY_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(20),
@@ -44,6 +59,26 @@ const schema = z.object({
       code: 'custom',
       path: ['EVENT_INBOX_DATABASE_URL'],
       message: 'EVENT_INBOX_DATABASE_URL must use PostgreSQL',
+    });
+  }
+  if (value.NODE_ENV === 'production' && !value.EVENT_INBOX_METRICS_TOKEN) {
+    context.addIssue({
+      code: 'custom',
+      path: ['EVENT_INBOX_METRICS_TOKEN'],
+      message: 'EVENT_INBOX_METRICS_TOKEN is required in production',
+    });
+  }
+  if (value.EVENT_INBOX_METRICS_TOKEN === value.EVENT_INBOX_MASTER_SECRET) {
+    context.addIssue({
+      code: 'custom',
+      path: ['EVENT_INBOX_METRICS_TOKEN'],
+      message: 'EVENT_INBOX_METRICS_TOKEN must be different from EVENT_INBOX_MASTER_SECRET',
+    });
+  }
+  if (value.EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS > value.EVENT_INBOX_HTTP_REQUEST_TIMEOUT_MS) {
+    context.addIssue({
+      code: 'custom', path: ['EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS'],
+      message: 'EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS cannot exceed EVENT_INBOX_HTTP_REQUEST_TIMEOUT_MS',
     });
   }
   for (const [name, origin] of [
