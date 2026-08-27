@@ -1,6 +1,7 @@
 import type { Dispatch, ReactNode, Ref, SetStateAction } from "react";
 
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
+import { formatListResultSummary } from "@/shared/ui/list-result-summary";
 import {
   activeGroupFilterCount,
   type GroupListState,
@@ -54,7 +55,14 @@ export function GroupSearchToolbar({
       onToggleFilters={() => setFiltersOpen((open) => !open)}
       resultSummary={loading
         ? "Updating results…"
-        : `${firstItem}–${lastItem} of ${total}${hasAppliedCriteria ? " matches" : ""}`}
+        : formatListResultSummary({
+          firstItem,
+          hasCriteria: hasAppliedCriteria,
+          lastItem,
+          plural: "groups",
+          singular: "group",
+          total,
+        })}
       searchLabel={searchLabel}
       searchInputRef={searchInputRef}
       searchPlaceholder={searchPlaceholder}

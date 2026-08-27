@@ -178,7 +178,7 @@ export function SettingsOverviewPanel({
         <SettingsRow action={<span className="settings-row-value">{diagnostics?.processGeneration ?? "Not running"}</span>} label="Supervisor generation" />
         <SettingsRow action={<Badge tone={diagnostics?.managedPostgresRunning ? "success" : "neutral"} variant="status">{loading ? "Inspecting" : diagnostics?.managedPostgresRunning ? "Running" : "Stopped"}</Badge>} label="Managed PostgreSQL" />
         <SettingsRow action={<span className="settings-row-value">PostgreSQL</span>} label="Queue" />
-        <SettingsRow action={<span className="settings-row-value">0.22.0 pinned</span>} label="OpenWA release" />
+        <SettingsRow action={<span className="settings-row-value">{managedRuntime.manifest?.openwaReleaseTag ? `${managedRuntime.manifest.openwaReleaseTag} reviewed` : "Unknown"}</span>} label="OpenWA release" />
         <SettingsRow action={<span className="settings-row-value">{diagnostics?.recoveryPointCount ?? 0}</span>} label="Recovery points" />
       </SettingsSection>
     </div>

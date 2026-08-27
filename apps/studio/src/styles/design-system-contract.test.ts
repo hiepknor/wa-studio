@@ -28,6 +28,12 @@ const buttonSource = readFileSync("src/shared/ui/Button.tsx", "utf8");
 const badgeCss = readFileSync("src/shared/ui/badge.css", "utf8");
 const badgeSource = readFileSync("src/shared/ui/Badge.tsx", "utf8");
 const modalDialogCss = readFileSync("src/shared/ui/modal-dialog.css", "utf8");
+const modalDialogSource = readFileSync("src/shared/ui/ModalDialog.tsx", "utf8");
+const confirmationDialogSource = readFileSync(
+  "src/shared/ui/ConfirmationDialog.tsx",
+  "utf8",
+);
+const modalIsolationSource = readFileSync("src/shared/ui/modal-isolation.ts", "utf8");
 const tabsCss = readFileSync("src/shared/ui/tabs.css", "utf8");
 const checkboxCss = readFileSync("src/shared/ui/checkbox.css", "utf8");
 const checkboxSource = readFileSync("src/shared/ui/Checkbox.tsx", "utf8");
@@ -56,10 +62,27 @@ const switchCss = readFileSync("src/shared/ui/switch-field.css", "utf8");
 const textFieldCss = readFileSync("src/shared/ui/text-field.css", "utf8");
 const settingsCss = readFileSync("src/features/settings/settings.css", "utf8");
 const settingsScreenSource = readFileSync("src/features/settings/SettingsScreen.tsx", "utf8");
+const settingsSectionSource = readFileSync("src/features/settings/SettingsSection.tsx", "utf8");
+const pageHeaderSource = readFileSync("src/shared/ui/PageHeader.tsx", "utf8");
 const settingsOverviewSource = readFileSync(
   "src/features/settings/SettingsOverviewPanel.tsx",
   "utf8",
 );
+const connectionShellSource = readFileSync(
+  "src/features/connection/ConnectionShell.tsx",
+  "utf8",
+);
+const connectionScreenSource = readFileSync(
+  "src/features/connection/ConnectionScreen.tsx",
+  "utf8",
+);
+const managedSetupSource = readFileSync(
+  "src/features/connection/ManagedRuntimeSetupScreen.tsx",
+  "utf8",
+);
+const tauriConfig = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8")) as {
+  app: { windows: Array<{ minWidth: number }> };
+};
 
 describe("WARP design-system contract", () => {
   it("locks the warm foundation and operational geometry", () => {
@@ -77,6 +100,10 @@ describe("WARP design-system contract", () => {
     expect(tokensCss).toContain("--rail-width: 176px");
     expect(tokensCss).toContain("--rail-width-collapsed: 52px");
     expect(tokensCss).toContain("--session-selector-panel-width: 360px");
+    expect(tauriConfig.app.windows[0]?.minWidth).toBe(960);
+    expect(tokensCss).toContain(
+      `--app-min-width: ${tauriConfig.app.windows[0]?.minWidth}px`,
+    );
   });
 
   it("binds the self-hosted type families and semantic scale", () => {
@@ -84,7 +111,9 @@ describe("WARP design-system contract", () => {
     expect(tokensCss).toContain('--font-body: "Matter Regular", "Matter", "Inter", ui-sans-serif, system-ui, sans-serif');
     expect(tokensCss).toContain('--font-mono: "Geist Mono", "Matter Mono Regular", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace');
     expect(fontsCss).toContain('font-family: "Inter"');
+    expect(fontsCss).toContain('font-family: "Geist Mono"');
     expect(fontsCss).not.toContain('font-family: "Inter Variable"');
+    expect(fontsCss).not.toMatch(/https?:\/\//i);
     expect(tokensCss).toContain("--type-micro: 10px");
     expect(tokensCss).toContain("--type-label: 11px");
     expect(tokensCss).toContain("--type-caption: 12px");
@@ -127,7 +156,7 @@ describe("WARP design-system contract", () => {
     }
   });
 
-  it("maps core text roles one-to-one with the prototype", () => {
+  it("maps core text roles to the product typography contract", () => {
     expect(appCss).toContain("font: var(--weight-regular) var(--type-body)/var(--leading-ui) var(--font-body)");
     expect(appCss).toContain("h1, h2, h3, h4, h5, h6 { font-weight: var(--weight-regular); }");
     expect(appCss).toContain("strong, b { font-weight: var(--weight-medium); }");
@@ -182,6 +211,18 @@ describe("WARP design-system contract", () => {
     expect(buttonSource).toContain('iconOnly ? "button-icon-only" : ""');
   });
 
+  it("keeps modal focus ownership and backdrop semantics centralized", () => {
+    for (const source of [modalDialogSource, confirmationDialogSource]) {
+      expect(source).toContain("acquireModalIsolation(layer");
+      expect(source).toContain('aria-hidden="true"');
+      expect(source).not.toMatch(/aria-label="Close (?:modal|confirmation)"/);
+    }
+    expect(modalIsolationSource).toContain('document.body.style.overflow = "hidden"');
+    expect(modalIsolationSource).toContain("element.inert = element !== topLayer");
+    expect(modalIsolationSource).toContain("bodyObserver.observe(document.body, { childList: true })");
+    expect(confirmationDialogSource).toContain("confirmRequestedRef.current");
+  });
+
   it("locks one compact semantic badge matrix", () => {
     expect(tokensCss).toContain("--badge-min-height: 20px");
     expect(tokensCss).toContain("--badge-padding-block: var(--space-hair)");
@@ -218,11 +259,11 @@ describe("WARP design-system contract", () => {
     expect(appIconSource).not.toContain("absoluteStrokeWidth");
   });
 
-  it("uses the keyboard-only stepped focus grammar from the prototype", () => {
-    expect(tokensCss).toContain("--focus-outer-color: var(--fg-2)");
-    expect(tokensCss).toContain("--focus-inner-border: var(--fg-2)");
+  it("uses the product keyboard-only focus grammar", () => {
+    expect(tokensCss).toContain("--focus-outer-color: var(--muted)");
+    expect(tokensCss).toContain("--focus-inner-border: var(--muted)");
     expect(tokensCss).toContain("--focus-width: 1px");
-    expect(tokensCss).toContain("--focus-offset: 2px");
+    expect(tokensCss).toContain("--focus-offset: 0px");
     expect(focusCss).toContain('html[data-focus-modality="keyboard"] :focus-visible');
     expect(focusCss).toContain("outline: var(--focus-width) solid transparent");
     expect(focusCss).toContain("outline: var(--focus-width) solid var(--focus-outer-color)");
@@ -310,8 +351,8 @@ describe("WARP design-system contract", () => {
     expect(tokensCss).toContain("--control-surface-default: var(--surface-control)");
     expect(tokensCss).toContain("--control-surface-hover: var(--surface-hover)");
     expect(tokensCss).toContain("--control-surface-disabled: var(--surface-disabled)");
-    expect(tokensCss).toContain("--control-border-default: var(--border-subtle)");
-    expect(tokensCss).toContain("--control-border-hover: var(--border-strong)");
+    expect(tokensCss).toContain("--control-border-default: color-mix(in oklab, var(--fg) 38%, transparent)");
+    expect(tokensCss).toContain("--control-border-hover: color-mix(in oklab, var(--fg) 52%, transparent)");
     expect(tokensCss).toContain("--control-border-disabled: var(--border-subtle)");
     expect(textFieldCss).toContain("border: 1px solid var(--control-border-default)");
     expect(textFieldCss).toContain("background: var(--control-surface-default)");
@@ -351,12 +392,12 @@ describe("WARP design-system contract", () => {
     expect(groupsCss).toContain(".group-scope-pane {\n  position: absolute;");
   });
 
-  it("locks the accepted prototype shell and keeps deprecated chrome absent", () => {
+  it("locks the accepted product shell and keeps deprecated chrome absent", () => {
     expect(appCss).toContain("grid-template-rows: var(--shell-header-height) minmax(0, 1fr) var(--shell-footer-height)");
     expect(appCss).toContain(".workspace.workspace-rail-collapsed");
     expect(workspaceShell).toContain('className="workspace-sidebar-bottom"');
     expect(workspaceShell).toContain('className="workspace-build-line"');
-    expect(workspaceShell).toContain("Active workspace");
+    expect(workspaceShell).toContain("Current view");
     expect(workspaceShell).toContain("Connected locally");
     expect(workspaceShell).not.toContain("workspace-runtime-summary");
     expect(workspaceShell).not.toContain("action editor");
@@ -385,6 +426,9 @@ describe("WARP design-system contract", () => {
     expect(tokensCss).toContain("--setting-row-min-height: 62px");
     expect(tokensCss).toContain("--copy-line-settings: 58ch");
     expect(settingsScreenSource).toContain('orientation="vertical"');
+    expect(settingsScreenSource).not.toContain("tabIndex={0}");
+    expect(pageHeaderSource).toContain('<h1 className="page-header-title"');
+    expect(settingsSectionSource).toContain("<h2 id={titleId}>");
     expect(settingsCss).toContain("grid-template-columns: var(--settings-nav-width) minmax(0, 1fr)");
     expect(settingsCss).toContain("min-height: var(--setting-row-min-height)");
     expect(settingsCss).toContain("border-radius: 0");
@@ -392,6 +436,16 @@ describe("WARP design-system contract", () => {
     expect(settingsOverviewSource).not.toContain("settings-status-hero");
     expect(settingsOverviewSource).not.toContain("settings-summary-card");
     expect(settingsCss).not.toContain("box-shadow");
+  });
+
+  it("locks the accepted WARP connection anatomy", () => {
+    expect(appCss).toContain("grid-template-columns: var(--connection-columns)");
+    expect(appCss).toContain("grid-template-rows: var(--connection-brand-height) minmax(0, 1fr)");
+    expect(connectionShellSource).toContain("<h1 id={titleId}>");
+    expect(connectionScreenSource).toContain('className="connection-form connection-setup-card"');
+    expect(managedSetupSource).toContain('className="connection-form connection-setup-card"');
+    expect(connectionScreenSource).not.toContain("connection-terminal-bar");
+    expect(managedSetupSource).not.toContain("connection-terminal-bar");
   });
 
   it("keeps component CSS token-driven, flat, and free of colored focus effects", () => {

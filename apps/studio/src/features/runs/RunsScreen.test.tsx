@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   RuntimeConnectionProvider,
@@ -12,6 +12,7 @@ import type {
   RuntimeCampaignRunSummary,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
+import { RuntimeTransportError } from "@/shared/api/runtime-http";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ToastProvider } from "@/shared/ui/Toast";
 import { RunsScreen } from "./RunsScreen";
@@ -74,15 +75,40 @@ const run: RuntimeCampaignRun = {
   targetsRevision: 4,
 };
 
-function Harness() {
-  const { connect, connected } = useRuntimeConnection();
-  if (!connected) {
-    return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "key" })}>Connect</button>;
-  }
-  return <RunsScreen />;
+const secondSummary: RuntimeCampaignRunSummary = {
+  ...summary,
+  id: "66666666-6666-4666-8666-666666666666",
+  campaignId: "77777777-7777-4777-8777-777777777777",
+  campaignNameSnapshot: "Retention campaign",
+};
+
+const secondRun: RuntimeCampaignRun = {
+  ...run,
+  ...secondSummary,
+  text: "Retention message snapshot",
+};
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
 }
 
-function renderRuns(overrides: Partial<RuntimeApi> = {}) {
+function Harness({ onOpenCampaigns }: { onOpenCampaigns?: () => void }) {
+  const { connect, connected, selectedSessionId } = useRuntimeConnection();
+  if (!connected) {
+    return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "0123456789abcdef0123456789abcdef" })}>Connect</button>;
+  }
+  if (!selectedSessionId) return <span>Selecting session…</span>;
+  return <RunsScreen onOpenCampaigns={onOpenCampaigns} />;
+}
+
+function renderRunsWithView(
+  overrides: Partial<RuntimeApi> = {},
+  { onOpenCampaigns }: { onOpenCampaigns?: () => void } = {},
+) {
   const api = {
     listRuns: vi.fn().mockResolvedValue({
       data: [summary],
@@ -109,7 +135,7 @@ function renderRuns(overrides: Partial<RuntimeApi> = {}) {
     ...overrides,
   } as unknown as RuntimeApi;
 
-  render(
+  const view = render(
     <ToastProvider>
       <RuntimeConnectionProvider
         createApi={() => api}
@@ -119,12 +145,18 @@ function renderRuns(overrides: Partial<RuntimeApi> = {}) {
           sessions: [session],
         })}
       >
-        <DrawerProvider><Harness /><DrawerHost /></DrawerProvider>
+        <DrawerProvider><Harness onOpenCampaigns={onOpenCampaigns} /><DrawerHost /></DrawerProvider>
       </RuntimeConnectionProvider>
     </ToastProvider>,
   );
-  return api;
+  return { api, view };
 }
+
+function renderRuns(overrides: Partial<RuntimeApi> = {}) {
+  return renderRunsWithView(overrides).api;
+}
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("RunsScreen", () => {
   it("opens a durable run, reads deliveries on demand, and applies lifecycle controls", async () => {
@@ -140,7 +172,7 @@ describe("RunsScreen", () => {
       query: "",
       statuses: [],
       executionModes: [],
-    }));
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect(api.listRuns).toHaveBeenCalledTimes(1);
 
     const runsTable = screen.getByRole("table", { name: "Campaign runs for the active session" });
@@ -151,7 +183,8 @@ describe("RunsScreen", () => {
     expect(runsTable.querySelector(".date-time-relative")).toBeInTheDocument();
     expect(within(runsTable).getByRole("progressbar", { name: "1 of 2 targets resolved" })).toBeInTheDocument();
     expect(within(runsTable).getByRole("button", { name: "Inspect run 11111111" })).toBeInTheDocument();
-    expect(screen.getByText("1 durable run")).toBeInTheDocument();
+    expect(screen.getByText("1 run")).toBeInTheDocument();
+    expect(screen.getByText("All results shown")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Product release" }));
     const inspector = await screen.findByRole("dialog", { name: "Product release" });
@@ -171,10 +204,255 @@ describe("RunsScreen", () => {
       offset: 0,
       query: "",
       statuses: [],
-    });
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     await user.click(within(inspector).getByRole("button", { name: "Pause" }));
     await waitFor(() => expect(api.pauseCampaignRun).toHaveBeenCalledWith(run.id));
     expect(await within(inspector).findByText(/Paused · Runtime authoritative/)).toBeInTheDocument();
+  });
+
+  it("reports a cancellation failure inside the active confirmation", async () => {
+    const user = userEvent.setup();
+    renderRuns({
+      cancelCampaignRun: vi.fn().mockRejectedValue(new Error("Runtime unavailable.")),
+    });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+    await user.click(within(inspector).getByRole("button", { name: "Cancel" }));
+    const confirmation = screen.getByRole("dialog", { name: "Cancel this campaign run?" });
+
+    await user.click(within(confirmation).getByRole("button", { name: "Cancel run" }));
+
+    const alert = await within(confirmation).findByRole("alert");
+    expect(alert).toHaveTextContent("Could not cancel run");
+    expect(alert).toHaveTextContent("Runtime unavailable.");
+    expect(screen.getAllByText("Runtime unavailable.")).toHaveLength(1);
+  });
+
+  it("dispatches only one lifecycle mutation before the busy state renders", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<RuntimeCampaignRun>();
+    const pauseCampaignRun = vi.fn().mockReturnValue(pending.promise);
+    renderRuns({ pauseCampaignRun });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+    const pause = await within(inspector).findByRole("button", { name: "Pause" });
+
+    act(() => {
+      pause.click();
+      pause.click();
+    });
+
+    expect(pauseCampaignRun).toHaveBeenCalledOnce();
+    await act(async () => pending.resolve({ ...run, status: "PAUSED" }));
+    expect(await within(inspector).findByText(/Paused · Runtime authoritative/)).toBeInTheDocument();
+  });
+
+  it("aborts an older detail poll before applying a lifecycle result", async () => {
+    let detailPoll: TimerHandler | null = null;
+    vi.spyOn(window, "setInterval").mockImplementation((handler, timeout) => {
+      if (timeout === 3_000) detailPoll = handler;
+      return 1 as unknown as ReturnType<typeof window.setInterval>;
+    });
+    const user = userEvent.setup();
+    const staleDetail = deferred<RuntimeCampaignRun>();
+    const getCampaignRun = vi.fn()
+      .mockResolvedValueOnce(run)
+      .mockReturnValueOnce(staleDetail.promise);
+    const paused = { ...run, status: "PAUSED" as const };
+    renderRuns({
+      getCampaignRun,
+      pauseCampaignRun: vi.fn().mockResolvedValue(paused),
+    });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+    await within(inspector).findByText("Release message snapshot");
+    await waitFor(() => expect(detailPoll).not.toBeNull());
+
+    act(() => {
+      if (typeof detailPoll === "function") detailPoll();
+    });
+    await waitFor(() => expect(getCampaignRun).toHaveBeenCalledTimes(2));
+    const staleSignal = getCampaignRun.mock.calls[1][1]?.signal;
+    await user.click(within(inspector).getByRole("button", { name: "Pause" }));
+    expect(staleSignal?.aborted).toBe(true);
+
+    await act(async () => staleDetail.resolve(run));
+    expect(await within(inspector).findByText(/Paused · Runtime authoritative/)).toBeInTheDocument();
+  });
+
+  it("preserves an unknown-outcome warning while canonical run state reloads", async () => {
+    const user = userEvent.setup();
+    const canonical = { ...run, status: "PAUSED" as const };
+    const getCampaignRun = vi.fn()
+      .mockResolvedValueOnce(run)
+      .mockResolvedValueOnce(canonical);
+    renderRuns({
+      getCampaignRun,
+      pauseCampaignRun: vi.fn().mockRejectedValue(new RuntimeTransportError(
+        "response lost",
+        { requestDispatched: true },
+      )),
+    });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+    await user.click(await within(inspector).findByRole("button", { name: "Pause" }));
+
+    expect(await within(inspector).findByText(/did not confirm the result/)).toBeInTheDocument();
+    expect(await within(inspector).findByText(/Paused · Runtime authoritative/)).toBeInTheDocument();
+    expect(getCampaignRun).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns an out-of-range result to the aligned last page", async () => {
+    const user = userEvent.setup();
+    let contracted = false;
+    const listRuns = vi.fn().mockImplementation(({ offset }: { offset: number }) => {
+      if (offset === 100) {
+        contracted = true;
+        return Promise.resolve({
+          data: [],
+          meta: { total: 91, limit: 50, offset },
+        });
+      }
+      return Promise.resolve({
+        data: [summary],
+        meta: { total: contracted ? 91 : 101, limit: 50, offset },
+      });
+    });
+    renderRuns({ listRuns } as unknown as Partial<RuntimeApi>);
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText("1–1 of 101")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(listRuns).toHaveBeenCalledWith(
+      expect.objectContaining({ offset: 50 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    await waitFor(() => expect(listRuns).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 50,
+      offset: 50,
+      query: "",
+      statuses: [],
+      executionModes: [],
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    expect(await screen.findByText("51–51 of 91")).toBeInTheDocument();
+  });
+
+  it("keeps the empty table footer and offers the product next step", async () => {
+    const user = userEvent.setup();
+    const onOpenCampaigns = vi.fn();
+    renderRunsWithView({
+      listRuns: vi.fn().mockResolvedValue({
+        data: [],
+        meta: { total: 0, limit: 50, offset: 0 },
+      }),
+    }, { onOpenCampaigns });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(await screen.findByText("0 runs")).toBeInTheDocument();
+    expect(screen.getByText("No results")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open Campaigns" }));
+
+    expect(onOpenCampaigns).toHaveBeenCalledOnce();
+  });
+
+  it("does not apply a completed mutation to a newly selected run", async () => {
+    const user = userEvent.setup();
+    const paused = deferred<RuntimeCampaignRun>();
+    const api = renderRuns({
+      listRuns: vi.fn().mockResolvedValue({
+        data: [summary, secondSummary],
+        meta: { total: 2, limit: 50, offset: 0 },
+      }),
+      getCampaignRun: vi.fn().mockImplementation((runId: string) =>
+        Promise.resolve(runId === secondRun.id ? secondRun : run)),
+      pauseCampaignRun: vi.fn().mockReturnValue(paused.promise),
+    } as unknown as Partial<RuntimeApi>);
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const firstInspector = await screen.findByRole("dialog", { name: "Product release" });
+    expect(await within(firstInspector).findByText("Release message snapshot")).toBeInTheDocument();
+    await user.click(within(firstInspector).getByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(api.pauseCampaignRun).toHaveBeenCalledWith(run.id));
+
+    await user.click(screen.getByRole("button", { name: "Retention campaign" }));
+    const secondInspector = await screen.findByRole("dialog", { name: "Retention campaign" });
+    expect(await within(secondInspector).findByText("Retention message snapshot")).toBeInTheDocument();
+
+    await act(async () => {
+      paused.resolve({ ...run, status: "PAUSED" });
+      await paused.promise;
+    });
+
+    await waitFor(() => {
+      const currentInspector = screen.getByRole("dialog", { name: "Retention campaign" });
+      expect(within(currentInspector).getByText("Retention message snapshot")).toBeInTheDocument();
+      expect(within(currentInspector).queryByText("Release message snapshot")).not.toBeInTheDocument();
+    });
+  });
+
+  it("invalidates a pending run mutation when the screen unmounts", async () => {
+    const user = userEvent.setup();
+    const paused = deferred<RuntimeCampaignRun>();
+    const listRuns = vi.fn().mockResolvedValue({
+      data: [summary],
+      meta: { total: 1, limit: 50, offset: 0 },
+    });
+    const { api, view } = renderRunsWithView({
+      listRuns,
+      pauseCampaignRun: vi.fn().mockReturnValue(paused.promise),
+    } as unknown as Partial<RuntimeApi>);
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+    await within(inspector).findByText("Release message snapshot");
+    await user.click(within(inspector).getByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(api.pauseCampaignRun).toHaveBeenCalledOnce());
+    const listCallsBeforeUnmount = listRuns.mock.calls.length;
+
+    view.unmount();
+    await act(async () => {
+      paused.resolve({ ...run, status: "PAUSED" });
+      await paused.promise;
+    });
+
+    expect(listRuns).toHaveBeenCalledTimes(listCallsBeforeUnmount);
+  });
+
+  it("aborts a delivery read when leaving the deliveries tab", async () => {
+    const user = userEvent.setup();
+    const deliveries = deferred<Awaited<ReturnType<RuntimeApi["listCampaignDeliveries"]>>>();
+    const listCampaignDeliveries = vi.fn<RuntimeApi["listCampaignDeliveries"]>()
+      .mockReturnValue(deliveries.promise);
+    const api = renderRuns({ listCampaignDeliveries } as unknown as Partial<RuntimeApi>);
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+    await within(inspector).findByText("Release message snapshot");
+    await user.click(within(inspector).getByRole("tab", { name: /Deliveries/u }));
+    await waitFor(() => expect(api.listCampaignDeliveries).toHaveBeenCalledOnce());
+    const signal = listCampaignDeliveries.mock.calls[0][1]?.signal;
+
+    await user.click(within(inspector).getByRole("tab", { name: "Overview" }));
+
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      deliveries.resolve({
+        data: [],
+        meta: { total: 0, limit: 20, offset: 0 },
+      });
+      await deliveries.promise;
+    });
+    expect(within(inspector).queryByRole("list", {
+      name: "Per-group deliveries for this run",
+    })).not.toBeInTheDocument();
   });
 });

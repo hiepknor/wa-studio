@@ -29,6 +29,7 @@
 .confirmation-dialog-body { margin-top: 8px; color: var(--muted); font-size: var(--type-ui); line-height: var(--leading-ui); }
 .confirmation-dialog-body > p { margin: 0; }
 .confirmation-dialog-body > * + * { margin-top: 12px; }
+.confirmation-dialog-error { margin-top: 12px; }
 .confirmation-dialog-footer {
   display: flex;
   justify-content: flex-end;

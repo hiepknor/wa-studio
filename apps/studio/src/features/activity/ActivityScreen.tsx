@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import type { RuntimeActivityEvent } from "@/shared/api/runtime-client";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
+import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { DateTime } from "@/shared/ui/DateTime";
@@ -28,10 +30,6 @@ interface ActivityScreenProps {
   onOpenRun?: (runId: string) => void;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Could not load operational activity.";
-}
-
 export function ActivityScreen({
   initialEventId = null,
   onEventSelectionChange,
@@ -51,7 +49,9 @@ export function ActivityScreen({
   const [error, setError] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(initialEventId);
   const requestRef = useRef(0);
+  const activeReadRef = useRef<"append" | "background" | "foreground" | null>(null);
   const sessionRef = useRef(selectedSessionId);
+  const activityRead = useLatestRequest();
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === selectedEventId) ?? null,
@@ -72,7 +72,10 @@ export function ActivityScreen({
     cursor,
   }: { append?: boolean; background?: boolean; cursor?: string } = {}) => {
     if (!selectedSessionId) return;
+    if (background && activeReadRef.current) return;
     const request = ++requestRef.current;
+    const signal = activityRead.begin();
+    activeReadRef.current = append ? "append" : background ? "background" : "foreground";
     if (append) setLoadingOlder(true);
     else if (!background) setLoading(true);
     setError(null);
@@ -84,8 +87,8 @@ export function ActivityScreen({
         categories: state.categories,
         severities: state.severities,
         cursor,
-      });
-      if (request !== requestRef.current) return;
+      }, { signal });
+      if (request !== requestRef.current || !activityRead.isCurrent(signal)) return;
       setEvents((current) => append
         ? [...current, ...result.data.filter((event) => !current.some((candidate) => candidate.id === event.id))]
         : result.data);
@@ -93,25 +96,38 @@ export function ActivityScreen({
       setRetentionDays(result.meta.retentionDays);
       if (append) setLoadedOlder(true);
     } catch (loadError) {
-      if (request === requestRef.current) setError(errorMessage(loadError));
-    } finally {
+      if (!activityRead.isCurrent(signal)) return;
       if (request === requestRef.current) {
+        setError(userFacingErrorMessage(loadError, "Could not load operational activity."));
+      }
+    } finally {
+      const current = request === requestRef.current && activityRead.isCurrent(signal);
+      if (current) activeReadRef.current = null;
+      activityRead.complete(signal);
+      if (current) {
         setLoading(false);
         setLoadingOlder(false);
       }
     }
-  }, [api, selectedSessionId, state.categories, state.query, state.severities]);
+  }, [activityRead, api, selectedSessionId, state.categories, state.query, state.severities]);
 
   useEffect(() => {
     if (sessionRef.current === selectedSessionId) return;
     sessionRef.current = selectedSessionId;
+    activityRead.cancel();
+    requestRef.current += 1;
+    activeReadRef.current = null;
     setEvents([]);
     setSelectedEventId(null);
     setNextCursor(null);
+    setRetentionDays(null);
+    setLoading(false);
+    setLoadingOlder(false);
     setLoadedOlder(false);
+    setError(null);
     setFiltersOpen(false);
     setState(initialActivityListState());
-  }, [selectedSessionId]);
+  }, [activityRead, selectedSessionId]);
 
   useEffect(() => {
     setLoadedOlder(false);
@@ -148,7 +164,6 @@ export function ActivityScreen({
         count={events.length}
         filtersOpen={filtersOpen}
         loading={loading}
-        retentionDays={retentionDays}
         setFiltersOpen={setFiltersOpen}
         setState={setState}
         state={state}

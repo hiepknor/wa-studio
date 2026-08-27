@@ -53,6 +53,7 @@ export function DropdownMenu({
   const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const openingFocusRef = useRef<"first" | "last">("first");
 
   function close({ restoreFocus = false } = {}) {
     setOpen(false);
@@ -61,7 +62,8 @@ export function DropdownMenu({
 
   useEffect(() => {
     if (!open) return;
-    menuItems(contentRef.current)[0]?.focus();
+    const items = menuItems(contentRef.current);
+    items[openingFocusRef.current === "last" ? items.length - 1 : 0]?.focus();
 
     function closeFromOutside(event: PointerEvent) {
       if (
@@ -73,6 +75,10 @@ export function DropdownMenu({
     document.addEventListener("pointerdown", closeFromOutside);
     return () => document.removeEventListener("pointerdown", closeFromOutside);
   }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   useLayoutEffect(() => {
     if (!open || !portal) {
@@ -86,9 +92,13 @@ export function DropdownMenu({
       if (!triggerRect || !contentRect) return;
       const gap = 8;
       const viewportPadding = 8;
+      const maxLeft = Math.max(
+        viewportPadding,
+        window.innerWidth - contentRect.width - viewportPadding,
+      );
       const left = Math.min(
         Math.max(viewportPadding, triggerRect.right - contentRect.width),
-        window.innerWidth - contentRect.width - viewportPadding,
+        maxLeft,
       );
       const fitsBelow = triggerRect.bottom + gap + contentRect.height
         <= window.innerHeight - viewportPadding;
@@ -110,7 +120,10 @@ export function DropdownMenu({
   function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
-    if (!disabled) setOpen(true);
+    if (!disabled) {
+      openingFocusRef.current = event.key === "ArrowUp" ? "last" : "first";
+      setOpen(true);
+    }
   }
 
   function handleMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -118,6 +131,7 @@ export function DropdownMenu({
     const currentIndex = items.indexOf(document.activeElement as HTMLElement);
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       close({ restoreFocus: true });
     } else if (event.key === "Tab") {
       close();
@@ -163,7 +177,11 @@ export function DropdownMenu({
         "aria-controls": contentId,
         "aria-expanded": open,
         "aria-haspopup": "menu",
-        onClick: () => !disabled && setOpen((current) => !current),
+        onClick: () => {
+          if (disabled) return;
+          openingFocusRef.current = "first";
+          setOpen((current) => !current);
+        },
         onKeyDown: handleTriggerKeyDown,
         ref: triggerRef,
       })}

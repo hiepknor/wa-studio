@@ -118,6 +118,11 @@
   text-align: left;
 }
 
+.tabs-vertical .tabs-trigger[aria-selected="true"],
+.tabs-vertical .tabs-trigger[aria-selected="true"]:hover {
+  background: transparent;
+}
+
 .tabs-vertical .tabs-trigger::after {
   inset: 0 auto 0 0;
   width: var(--selection-rail-width);

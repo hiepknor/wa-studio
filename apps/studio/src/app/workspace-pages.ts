@@ -29,7 +29,7 @@ export const SETTINGS_WORKSPACE_PAGE: WorkspacePageDefinition = {
 export const WORKSPACE_SECTIONS: readonly WorkspaceSectionDefinition[] = [
   {
     id: "workspaces",
-    label: "Workspaces",
+    label: "Workspace",
     pages: [
       { available: true, id: "sessions", label: "Sessions" },
       { available: true, id: "groups", label: "Groups" },

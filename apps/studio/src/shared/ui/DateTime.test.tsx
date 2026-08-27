@@ -31,6 +31,10 @@ describe("DateTime", () => {
     expect(formatRelativeDateTime("2026-08-15T20:36:00.000Z", { now, timeZone: "UTC" })).toBe("4 min ago");
     expect(formatRelativeDateTime("2026-08-14T19:40:32.000Z", { now, timeZone: "UTC" })).toBe("Yesterday, 19:40");
     expect(formatRelativeDateTime("2026-08-06T19:40:32.000Z", { now, timeZone: "UTC" })).toBe("06 Aug, 19:40");
+    expect(formatRelativeDateTime("2026-08-15T20:40:10.000Z", { now, style: "compact", timeZone: "UTC" })).toBe("Now");
+    expect(formatRelativeDateTime("2026-08-15T20:36:00.000Z", { now, style: "compact", timeZone: "UTC" })).toBe("4m ago");
+    expect(formatRelativeDateTime("2026-08-14T19:40:32.000Z", { now, style: "compact", timeZone: "UTC" })).toBe("1d ago");
+    expect(formatRelativeDateTime("2026-08-06T19:40:32.000Z", { now, style: "compact", timeZone: "UTC" })).toBe("06 Aug");
   });
 
   it("uses context-specific fallback copy for missing or invalid values", () => {

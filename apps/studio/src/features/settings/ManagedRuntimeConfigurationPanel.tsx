@@ -7,6 +7,8 @@ import {
   type ManagedRuntimeProvisioningInput,
   type ManagedRuntimeProvisioningProfile,
 } from "@/shared/native/managed-runtime";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
+import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -16,15 +18,18 @@ import { TextField } from "@/shared/ui/TextField";
 import { useToast } from "@/shared/ui/Toast";
 import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
+import type { SettingsTaskNavigationState } from "./settings-types";
 
 interface ManagedRuntimeConfigurationPanelProps {
   getProfile?: typeof getManagedRuntimeProvisioningProfile;
+  onNavigationStateChange?: (state: SettingsTaskNavigationState) => void;
   phase: ManagedRuntimePhase;
   saveProfile?: typeof reconfigureManagedRuntime;
 }
 
 export function ManagedRuntimeConfigurationPanel({
   getProfile = getManagedRuntimeProvisioningProfile,
+  onNavigationStateChange,
   phase,
   saveProfile = reconfigureManagedRuntime,
 }: ManagedRuntimeConfigurationPanelProps) {
@@ -37,6 +42,7 @@ export function ManagedRuntimeConfigurationPanel({
   const [candidate, setCandidate] = useState<ManagedRuntimeProvisioningInput | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const saveOperation = useSingleFlightOperation();
 
   useEffect(() => {
     let disposed = false;
@@ -51,7 +57,7 @@ export function ManagedRuntimeConfigurationPanel({
       })
       .catch(caught => {
         if (!disposed) {
-          setError(caught instanceof Error ? caught.message : "Could not load Runtime settings.");
+          setError(userFacingErrorMessage(caught, "Could not load Runtime settings."));
         }
       })
       .finally(() => { if (!disposed) setLoading(false); });
@@ -70,10 +76,13 @@ export function ManagedRuntimeConfigurationPanel({
 
   async function confirmSave() {
     if (!candidate) return;
+    const token = saveOperation.begin();
+    if (token === null) return;
     setSaving(true);
     setError(null);
     try {
       const saved = await saveProfile(candidate);
+      if (!saveOperation.isCurrent(token)) return;
       setProfile(saved);
       setBaseUrl(saved.openwaBaseUrl);
       setAllowLiveSends(saved.allowLiveSends);
@@ -85,9 +94,15 @@ export function ManagedRuntimeConfigurationPanel({
         tone: "success",
       });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update Runtime settings.");
+      if (saveOperation.isCurrent(token)) {
+        setError(userFacingErrorMessage(
+          caught,
+          "Could not update Runtime settings.",
+          [candidate.openwaApiKey],
+        ));
+      }
     } finally {
-      setSaving(false);
+      if (saveOperation.complete(token)) setSaving(false);
     }
   }
 
@@ -98,16 +113,27 @@ export function ManagedRuntimeConfigurationPanel({
     || apiKey.length > 0
   );
 
+  useEffect(() => {
+    onNavigationStateChange?.({ busy: saving, dirty });
+    return () => onNavigationStateChange?.({ busy: false, dirty: false });
+  }, [dirty, onNavigationStateChange, saving]);
+
+  function discardChanges() {
+    if (!profile || saving) return;
+    setBaseUrl(profile.openwaBaseUrl);
+    setAllowLiveSends(profile.allowLiveSends);
+    setApiKey("");
+    setCandidate(null);
+    setError(null);
+  }
+
   return (
     <div className="settings-panel-stack">
-      <InlineAlert className="settings-notice" title="WA Runtime service settings" tone="info">
-        Changes here affect the managed WA Runtime connection, not WA Studio product preferences.
-      </InlineAlert>
-      {error && <InlineAlert className="settings-notice" title="Connection settings failed">{error}</InlineAlert>}
+      {!candidate && error && <InlineAlert className="settings-notice" title="Connection settings failed">{error}</InlineAlert>}
 
       <SettingsSection
         action={<Badge tone={profile ? "success" : "neutral"} variant={loading ? "label" : "status"}>{loading ? "Loading" : profile ? "Connected" : "Developer managed"}</Badge>}
-        description="WA Runtime uses this endpoint and credential to reach your OpenWA service."
+        description="Managed WA Runtime uses this endpoint and credential to reach OpenWA; WA Studio product preferences are unchanged."
         kicker="Gateway connection"
         title="OpenWA profile"
         titleId="runtime-configuration-title"
@@ -171,17 +197,27 @@ export function ManagedRuntimeConfigurationPanel({
 
           <div className="settings-form-actions">
             <div className="settings-action-copy">
-              <strong>{dirty ? "Unsaved connection changes" : "Connection is saved"}</strong>
+              <strong aria-live="polite">{dirty ? "Unsaved connection changes" : "Connection is saved"}</strong>
               <span>WA Studio verifies the endpoint and Event Inbox pairing before applying changes.</span>
             </div>
-            <Button
-              disabled={!editable || !dirty || apiKey.length === 0 || saving}
-              loading={saving}
-              type="submit"
-              variant="primary"
-            >
-              Verify and restart Runtime
-            </Button>
+            <div className="settings-section-actions settings-form-controls">
+              <Button
+                disabled={!dirty || saving}
+                onClick={discardChanges}
+                type="button"
+                variant="ghost"
+              >
+                Discard changes
+              </Button>
+              <Button
+                disabled={!editable || !dirty || apiKey.length === 0 || saving}
+                loading={saving}
+                type="submit"
+                variant="primary"
+              >
+                Verify and restart Runtime
+              </Button>
+            </div>
           </div>
         </form>
       </SettingsSection>
@@ -202,6 +238,8 @@ export function ManagedRuntimeConfigurationPanel({
         busyLabel="Verifying…"
         confirmLabel={candidate?.allowLiveSends ? "Enable live sends and restart" : "Save and restart"}
         confirmVariant={candidate?.allowLiveSends ? "danger" : "primary"}
+        error={error}
+        errorTitle="Connection verification failed"
         onCancel={() => { if (!saving) setCandidate(null); }}
         onConfirm={() => void confirmSave()}
         open={candidate !== null}

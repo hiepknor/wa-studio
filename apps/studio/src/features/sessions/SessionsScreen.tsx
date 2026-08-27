@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
+import { useLatestOperation } from "@/shared/hooks/useLatestOperation";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
 import { FilterOption } from "@/shared/ui/FilterOption";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
+import { formatListResultSummary } from "@/shared/ui/list-result-summary";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import { useToast } from "@/shared/ui/Toast";
@@ -44,6 +47,7 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
   const [reloading, setReloading] = useState(false);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [disconnectConfirmationOpen, setDisconnectConfirmationOpen] = useState(false);
+  const reloadOperation = useLatestOperation();
 
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const filteredSessions = useMemo(() => connected.sessions.filter((session) => {
@@ -65,9 +69,8 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
   const filterCount = statuses.length + engines.length + workspaces.length;
   const hasCriteria = Boolean(normalizedSearch || filterCount);
   const pageSessions = filteredSessions.slice(offset, offset + SESSIONS_PAGE_SIZE);
-  const footerLabel = filteredSessions.length === 0
-    ? hasCriteria ? "No matching sessions" : "No sessions"
-    : `${filteredSessions.length} ${hasCriteria ? "matching " : ""}${filteredSessions.length === 1 ? "session" : "sessions"}`;
+  const firstItem = filteredSessions.length === 0 ? 0 : offset + 1;
+  const lastItem = Math.min(offset + pageSessions.length, filteredSessions.length);
 
   useEffect(() => {
     setOffset(0);
@@ -79,15 +82,22 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
   }, [filteredSessions.length, offset]);
 
   async function reloadSessions() {
+    if (reloading) return;
+    const token = reloadOperation.begin();
     setReloading(true);
     setSessionsError(null);
     try {
-      await refreshSessions();
-      toast.notify({ id: "sessions-reload", title: "Sessions reloaded", tone: "success" });
+      const refreshed = await refreshSessions();
+      if (!reloadOperation.isCurrent(token)) return;
+      if (refreshed) {
+        toast.notify({ id: "sessions-reload", title: "Sessions reloaded", tone: "success" });
+      }
     } catch (error) {
-      setSessionsError(error instanceof Error ? error.message : "Could not reload sessions.");
+      if (reloadOperation.isCurrent(token)) {
+        setSessionsError(userFacingErrorMessage(error, "Could not reload sessions."));
+      }
     } finally {
-      setReloading(false);
+      if (reloadOperation.isCurrent(token)) setReloading(false);
     }
   }
 
@@ -105,6 +115,7 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
             <Button
               aria-label={reloading ? "Reloading sessions" : "Reload sessions"}
               aria-busy={reloading || undefined}
+              disabled={reloading}
               icon="refresh"
               onClick={() => void reloadSessions()}
             >
@@ -134,7 +145,14 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
           onCloseFilters={() => setFiltersOpen(false)}
           onSearchChange={setSearch}
           onToggleFilters={() => setFiltersOpen((open) => !open)}
-          resultSummary={`${filteredSessions.length} of ${connected.sessions.length}${hasCriteria ? " matches" : " sessions"}`}
+          resultSummary={formatListResultSummary({
+            firstItem,
+            hasCriteria,
+            lastItem,
+            plural: "sessions",
+            singular: "session",
+            total: filteredSessions.length,
+          })}
           searchLabel="Session search"
           searchPlaceholder="Search name, ID, or phone"
           searchValue={search}
@@ -175,7 +193,6 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
           sessions={pageSessions}
         />
         <TablePagination
-          label={footerLabel}
           limit={SESSIONS_PAGE_SIZE}
           loading={reloading}
           offset={offset}

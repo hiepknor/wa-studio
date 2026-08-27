@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -37,10 +37,16 @@ const failedSession: RuntimeSession = {
   syncedAt: "2026-08-12T09:00:00.000Z",
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
 function Harness({ onOpenGroups }: { onOpenGroups: () => void }) {
   const { connect, connected } = useRuntimeConnection();
   if (!connected) {
-    return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "key" })}>Connect</button>;
+    return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "0123456789abcdef0123456789abcdef" })}>Connect</button>;
   }
   return <SessionsScreen onOpenGroups={onOpenGroups} />;
 }
@@ -110,7 +116,7 @@ describe("SessionsScreen", () => {
     expect(table).toHaveClass("sessions-table");
     expect(table.querySelector(".sessions-column-workspace")).toBeInTheDocument();
     expect(within(table).getAllByRole("row")).toHaveLength(21);
-    expect(screen.getByText("21 sessions")).toBeInTheDocument();
+    expect(screen.getByText("1–20 of 21")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
@@ -160,6 +166,28 @@ describe("SessionsScreen", () => {
     expect(requestSessionSync).not.toHaveBeenCalled();
     expect(search).toHaveValue("Production");
     expect(await screen.findByText("Sessions reloaded")).toBeInTheDocument();
+  });
+
+  it("does not announce a stale reload after the workspace disconnects", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<RuntimeSession[]>();
+    const listSessions = vi.fn().mockReturnValue(pending.promise);
+    renderSessions({ listSessions });
+    await connect(user);
+
+    await user.click(screen.getByRole("button", { name: "Reload sessions" }));
+    await waitFor(() => expect(listSessions).toHaveBeenCalledOnce());
+    const signal = listSessions.mock.calls[0][0]?.signal as AbortSignal | undefined;
+    await user.click(screen.getByRole("button", { name: "Disconnect workspace" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
+
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      pending.resolve([readySession]);
+      await pending.promise;
+    });
+    expect(screen.queryByText("Sessions reloaded")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
   });
 
   it("does not expose full sync and routes an unsynchronized session to Groups", async () => {

@@ -61,13 +61,46 @@ describe("GroupScopeSelector", () => {
       />,
     );
     const trigger = screen.getByRole("combobox", { name: "Group scope" });
-    await user.click(trigger);
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
     const search = screen.getByRole("searchbox", { name: "Search saved lists" });
     await waitFor(() => expect(search).toHaveFocus());
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("option", { name: /All groups/ })).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(trigger).toHaveFocus();
+  });
+
+  it("consumes search Escape and closes if the selector becomes disabled", async () => {
+    const user = userEvent.setup();
+    const onAncestorKeyDown = vi.fn();
+    const selector = (disabled = false) => (
+      <div onKeyDown={onAncestorKeyDown}>
+        <GroupScopeSelector
+          disabled={disabled}
+          lists={lists}
+          onNewList={vi.fn()}
+          onQueryChange={vi.fn()}
+          onSelectDirectory={vi.fn()}
+          onSelectList={vi.fn()}
+          query=""
+        />
+      </div>
+    );
+    const { rerender } = render(selector());
+    const trigger = screen.getByRole("combobox", { name: "Group scope" });
+
+    await user.click(trigger);
+    await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search saved lists" })).toHaveFocus());
+    onAncestorKeyDown.mockClear();
+    await user.keyboard("{Escape}");
+    expect(onAncestorKeyDown).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    rerender(selector(true));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("keeps New list available in the fixed pane header", async () => {

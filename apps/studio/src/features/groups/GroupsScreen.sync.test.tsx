@@ -12,6 +12,7 @@ import type {
   RuntimeSession,
   RuntimeSyncRun,
 } from "@/shared/api/runtime-client";
+import { RuntimeTransportError } from "@/shared/api/runtime-http";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ToastProvider } from "@/shared/ui/Toast";
 import { GroupsScreen } from "./GroupsScreen";
@@ -74,7 +75,7 @@ const completedRun: RuntimeSyncRun = {
 
 function Harness() {
   const { connect, connected, selectSession } = useRuntimeConnection();
-  if (!connected) return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "key" })}>Connect</button>;
+  if (!connected) return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "0123456789abcdef0123456789abcdef" })}>Connect</button>;
   return (
     <DrawerProvider>
       <button onClick={() => selectSession(secondSession.id)}>Switch session</button>
@@ -197,7 +198,11 @@ describe("GroupsScreen Reload and Sync", () => {
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
 
     await waitFor(() => expect(requestSessionSync).toHaveBeenCalledWith(session.id));
-    expect(getSessionSyncRun).toHaveBeenCalledWith(session.id, pendingRun.id);
+    expect(getSessionSyncRun).toHaveBeenCalledWith(
+      session.id,
+      pendingRun.id,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(await screen.findByText("Sync completed")).toBeInTheDocument();
     await waitFor(() => expect(listSessions).toHaveBeenCalledOnce());
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(2));
@@ -231,6 +236,25 @@ describe("GroupsScreen Reload and Sync", () => {
     expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: /Sync/ })).toBeEnabled();
   });
 
+  it("does not invite a duplicate sync when the POST result is unconfirmed", async () => {
+    const user = userEvent.setup();
+    const requestSessionSync = vi.fn().mockRejectedValue(new RuntimeTransportError(
+      "response lost",
+      { requestDispatched: true },
+    ));
+    renderGroups({ requestSessionSync });
+    const menu = await connectAndOpenMenu(user);
+    await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
+
+    expect(await screen.findByText("Sync request not confirmed")).toBeInTheDocument();
+    expect(screen.getByText(/may still be running/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload groups" })).toBeInTheDocument();
+    expect(requestSessionSync).toHaveBeenCalledTimes(1);
+    expect(pollSessionSync).not.toHaveBeenCalled();
+  });
+
   it("keeps a completed run successful when session metadata reload fails", async () => {
     const user = userEvent.setup();
     vi.mocked(pollSessionSync).mockResolvedValue({ status: "completed", run: completedRun });
@@ -259,7 +283,10 @@ describe("GroupsScreen Reload and Sync", () => {
     await screen.findByText(/Sync pending ·/);
     await user.click(screen.getByRole("button", { name: "Switch session" }));
     resolvePoll({ status: "completed", run: completedRun });
-    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: secondSession.id })));
+    await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sessionId: secondSession.id }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
     expect(screen.queryByText("Sync completed")).not.toBeInTheDocument();
   });
 });

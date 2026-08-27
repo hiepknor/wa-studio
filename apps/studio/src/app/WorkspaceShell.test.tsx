@@ -107,7 +107,7 @@ function WorkspaceHarness({
       <span>Selected: {selectedSessionId ?? "none"}</span>
       <button
         onClick={() =>
-          connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "test-key" })
+          connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" })
         }
         type="button"
       >
@@ -120,7 +120,7 @@ function WorkspaceHarness({
 describe("WorkspaceShell", () => {
   beforeEach(() => window.localStorage.clear());
 
-  it("enters the prototype shell, selects the ready session, and disconnects from Sessions", async () => {
+  it("enters the product shell, selects the ready session, and disconnects from Sessions", async () => {
     const user = userEvent.setup();
     const connectionResult: RuntimeConnectionResult = {
       sessionCount: 1,
@@ -158,7 +158,7 @@ describe("WorkspaceShell", () => {
       "aria-current",
       "page",
     );
-    expect(screen.getByText("Active workspace")).toBeInTheDocument();
+    expect(screen.getByText("Current view")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Active session" }),
     ).toHaveTextContent("dev-session");
@@ -320,7 +320,12 @@ describe("WorkspaceShell", () => {
       .getByRole("button", { name: "Open run" }));
 
     expect(await screen.findByRole("heading", { name: "Runs" })).toBeInTheDocument();
-    await waitFor(() => expect(getCampaignRun).toHaveBeenCalledWith(runId));
+    await waitFor(() =>
+      expect(getCampaignRun).toHaveBeenCalledWith(
+        runId,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
     expect(await screen.findByRole("dialog", { name: "Product release" })).toBeInTheDocument();
   });
 
@@ -539,11 +544,14 @@ describe("WorkspaceShell", () => {
       screen.getByRole("columnheader", { name: "Record synced" }),
     ).toBeInTheDocument();
     await waitFor(() =>
-      expect(listGroups).toHaveBeenCalledWith({
-        sessionId: session.id,
-        limit: 20,
-        offset: 0,
-      }),
+      expect(listGroups).toHaveBeenCalledWith(
+        {
+          sessionId: session.id,
+          limit: 20,
+          offset: 0,
+        },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
     expect(screen.getByText("1–1 of 21")).toBeInTheDocument();
     expect(screen.getByText(group.name)).toHaveClass("data-primary-text");
@@ -557,17 +565,24 @@ describe("WorkspaceShell", () => {
 
     await user.click(screen.getByRole("button", { name: "View Release room" }));
     await waitFor(() =>
-      expect(getGroup).toHaveBeenCalledWith(session.id, group.id),
+      expect(getGroup).toHaveBeenCalledWith(
+        session.id,
+        group.id,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
     expect(listGroupMembers).not.toHaveBeenCalled();
     await user.click(await screen.findByRole("tab", { name: /Members/ }));
     await waitFor(() =>
-      expect(listGroupMembers).toHaveBeenCalledWith({
-        sessionId: session.id,
-        groupId: group.id,
-        limit: 25,
-        offset: 0,
-      }),
+      expect(listGroupMembers).toHaveBeenCalledWith(
+        {
+          sessionId: session.id,
+          groupId: group.id,
+          limit: 25,
+          offset: 0,
+        },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
     expect(
       await screen.findByRole("dialog", { name: "Release room" }),
@@ -616,11 +631,14 @@ describe("WorkspaceShell", () => {
 
     await user.click(screen.getByRole("button", { name: "Next" }));
     await waitFor(() =>
-      expect(listGroups).toHaveBeenLastCalledWith({
-        sessionId: session.id,
-        limit: 20,
-        offset: 20,
-      }),
+      expect(listGroups).toHaveBeenLastCalledWith(
+        {
+          sessionId: session.id,
+          limit: 20,
+          offset: 20,
+        },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
     expect(await screen.findByText("Product room")).toBeInTheDocument();
   });
@@ -706,20 +724,26 @@ describe("WorkspaceShell", () => {
     expect(await screen.findByText("1–1 of 30")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next member page" }));
     await waitFor(() =>
-      expect(listGroupMembers).toHaveBeenCalledWith({
-        sessionId: session.id,
-        groupId: group.id,
-        limit: 25,
-        offset: 25,
-      }),
+      expect(listGroupMembers).toHaveBeenCalledWith(
+        {
+          sessionId: session.id,
+          groupId: group.id,
+          limit: 25,
+          offset: 25,
+        },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
     await waitFor(() =>
-      expect(listGroupMembers).toHaveBeenCalledWith({
-        sessionId: session.id,
-        groupId: group.id,
-        limit: 25,
-        offset: 0,
-      }),
+      expect(listGroupMembers).toHaveBeenCalledWith(
+        {
+          sessionId: session.id,
+          groupId: group.id,
+          limit: 25,
+          offset: 0,
+        },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
     expect(await screen.findByText("Hiep Mai")).toBeInTheDocument();
 
@@ -729,13 +753,16 @@ describe("WorkspaceShell", () => {
     await user.clear(search);
     await user.type(search, "needle");
     await waitFor(() =>
-      expect(listGroupMembers).toHaveBeenLastCalledWith({
-        sessionId: session.id,
-        groupId: group.id,
-        limit: 25,
-        offset: 0,
-        query: "needle",
-      }),
+      expect(listGroupMembers).toHaveBeenLastCalledWith(
+        {
+          sessionId: session.id,
+          groupId: group.id,
+          limit: 25,
+          offset: 0,
+          query: "needle",
+        },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
 
     await user.clear(search);
@@ -769,24 +796,30 @@ describe("WorkspaceShell", () => {
     await user.clear(search);
     await user.type(search, "   ");
     await waitFor(() =>
-      expect(listGroupMembers).toHaveBeenLastCalledWith({
-        sessionId: session.id,
-        groupId: group.id,
-        limit: 25,
-        offset: 0,
-      }),
+      expect(listGroupMembers).toHaveBeenLastCalledWith(
+        {
+          sessionId: session.id,
+          groupId: group.id,
+          limit: 25,
+          offset: 0,
+        },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
 
     await user.clear(search);
     await user.type(search, "no matches");
     await waitFor(() =>
-      expect(listGroupMembers).toHaveBeenLastCalledWith({
-        sessionId: session.id,
-        groupId: group.id,
-        limit: 25,
-        offset: 0,
-        query: "no matches",
-      }),
+      expect(listGroupMembers).toHaveBeenLastCalledWith(
+        {
+          sessionId: session.id,
+          groupId: group.id,
+          limit: 25,
+          offset: 0,
+          query: "no matches",
+        },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
     expect(
       await screen.findByText("No synchronized members match this search."),

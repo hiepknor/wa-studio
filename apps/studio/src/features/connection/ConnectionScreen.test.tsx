@@ -1,8 +1,14 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConnectionScreen } from "./ConnectionScreen";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
 
 function renderScreen(
   probeConnection: NonNullable<Parameters<typeof ConnectionScreen>[0]>["probeConnection"],
@@ -54,6 +60,34 @@ describe("ConnectionScreen", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Attaching external Runtime");
   });
 
+  it("dispatches only one attachment probe for repeated submission", async () => {
+    const user = userEvent.setup();
+    const pendingProbe = deferred<{
+      sessionCount: number;
+      readySessions: number;
+      sessions: [];
+    }>();
+    const probeConnection = vi.fn().mockReturnValue(pendingProbe.promise);
+    renderScreen(probeConnection);
+    await user.type(
+      screen.getByLabelText("External Runtime base URL"),
+      "https://wa-runtime.example.com",
+    );
+    await user.type(screen.getByLabelText("External Runtime API key"), "development-key");
+    const submit = screen.getByRole("button", { name: "Attach external Runtime" });
+
+    act(() => {
+      submit.click();
+      submit.click();
+    });
+
+    expect(probeConnection).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pendingProbe.resolve({ readySessions: 1, sessionCount: 1, sessions: [] });
+      await pendingProbe.promise;
+    });
+  });
+
   it("submits with the keyboard and announces a readiness failure", async () => {
     const user = userEvent.setup();
     const probeConnection = vi
@@ -82,6 +116,21 @@ describe("ConnectionScreen", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("WA Runtime API key was rejected.");
   });
 
+  it("redacts the submitted API key from probe failures", async () => {
+    const apiKey = "development-key";
+    const probeConnection = vi.fn().mockRejectedValue(
+      new Error(`Credential ${apiKey} was rejected.`),
+    );
+    renderScreen(probeConnection);
+
+    await submitConnection();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Credential [redacted] was rejected.",
+    );
+    expect(document.body).not.toHaveTextContent(apiKey);
+  });
+
   it("reports session readiness after a successful probe", async () => {
     const probeConnection = vi
       .fn()
@@ -94,6 +143,6 @@ describe("ConnectionScreen", () => {
     expect(probeConnection).toHaveBeenCalledWith({
       apiKey: "development-key",
       baseUrl: "https://wa-runtime.example.com",
-    });
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 });

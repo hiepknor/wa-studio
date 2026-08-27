@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { AppUpdateProgress, AppUpdateSnapshot } from "@/shared/native/app-updates";
+import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -8,12 +10,13 @@ import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { useToast } from "@/shared/ui/Toast";
 import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
+import type { SettingsTaskNavigationState } from "./settings-types";
 
 interface AppUpdateSettingsProps {
   checkUpdate: () => Promise<AppUpdateSnapshot>;
   error: string | null;
   installUpdate: (acknowledgeRuntimeInterruption: boolean) => Promise<void>;
-  onUpdateStateChange: (state: AppUpdateSnapshot) => void;
+  onNavigationStateChange?: (state: SettingsTaskNavigationState) => void;
   progress: AppUpdateProgress | null;
   runtimeReady: boolean;
   updateState: AppUpdateSnapshot | null;
@@ -39,7 +42,7 @@ export function AppUpdateSettings({
   checkUpdate,
   error: loadError,
   installUpdate,
-  onUpdateStateChange,
+  onNavigationStateChange,
   progress,
   runtimeReady,
   updateState,
@@ -49,13 +52,21 @@ export function AppUpdateSettings({
   const [installing, setInstalling] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
+  const operation = useSingleFlightOperation();
+
+  useEffect(() => {
+    onNavigationStateChange?.({ busy: installing, dirty: installing });
+    return () => onNavigationStateChange?.({ busy: false, dirty: false });
+  }, [installing, onNavigationStateChange]);
 
   async function checkForUpdate() {
+    const token = operation.begin();
+    if (token === null) return;
     setChecking(true);
     setOperationError(null);
     try {
       const next = await checkUpdate();
-      onUpdateStateChange(next);
+      if (!operation.isCurrent(token)) return;
       if (!next.pending) {
         notify({
           description: `Version ${next.currentVersion} is the latest signed release.`,
@@ -64,17 +75,23 @@ export function AppUpdateSettings({
         });
       }
     } catch (caught) {
-      setOperationError(caught instanceof Error ? caught.message : "Could not check for app updates.");
+      if (operation.isCurrent(token)) {
+        setOperationError(userFacingErrorMessage(caught, "Could not check for app updates."));
+      }
     } finally {
-      setChecking(false);
+      if (operation.complete(token)) setChecking(false);
     }
   }
 
   async function confirmUpdate() {
+    if (!pending || !runtimeReady) return;
+    const token = operation.begin();
+    if (token === null) return;
     setInstalling(true);
     setOperationError(null);
     try {
       await installUpdate(true);
+      if (!operation.isCurrent(token)) return;
       setConfirming(false);
       notify({
         description: "Restart WA Studio to start using the new version.",
@@ -82,9 +99,11 @@ export function AppUpdateSettings({
         tone: "success",
       });
     } catch (caught) {
-      setOperationError(caught instanceof Error ? caught.message : "Could not install the app update.");
+      if (operation.isCurrent(token)) {
+        setOperationError(userFacingErrorMessage(caught, "Could not install the app update."));
+      }
     } finally {
-      setInstalling(false);
+      if (operation.complete(token)) setInstalling(false);
     }
   }
 
@@ -100,14 +119,14 @@ export function AppUpdateSettings({
 
   return (
     <div className="settings-panel-stack">
-      {(loadError || operationError) && (
+      {(loadError || (!confirming && operationError)) && (
         <InlineAlert className="settings-notice" title="Update operation failed">{operationError ?? loadError}</InlineAlert>
       )}
 
       <SettingsSection
         action={(
           <Button
-            disabled={!enabled || checking || installing}
+            disabled={!enabled || checking || installing || confirming}
             icon="refresh"
             loading={checking}
             onClick={() => void checkForUpdate()}
@@ -162,8 +181,8 @@ export function AppUpdateSettings({
             <SettingsRow
               action={(
                 <Button
-                  disabled={!runtimeReady || installing}
-                  onClick={() => setConfirming(true)}
+                  disabled={!runtimeReady || checking || installing}
+                  onClick={() => { setOperationError(null); setConfirming(true); }}
                   variant="primary"
                 >
                   Install update
@@ -189,6 +208,8 @@ export function AppUpdateSettings({
         busy={installing}
         busyLabel="Installing…"
         confirmLabel="Pause Runtime and install"
+        error={operationError}
+        errorTitle="Update installation failed"
         onCancel={() => { if (!installing) setConfirming(false); }}
         onConfirm={() => void confirmUpdate()}
         open={confirming}

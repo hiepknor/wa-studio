@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -23,6 +23,8 @@ describe("ConfirmationDialog", () => {
       />,
     );
 
+    expect(trigger).toHaveProperty("inert", true);
+    expect(document.body.style.overflow).toBe("hidden");
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     await user.tab();
     expect(screen.getByRole("button", { name: "Delete" })).toHaveFocus();
@@ -42,6 +44,8 @@ describe("ConfirmationDialog", () => {
       />,
     );
     await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger.inert).not.toBe(true);
+    expect(document.body.style.overflow).toBe("");
     trigger.remove();
   });
 
@@ -68,11 +72,35 @@ describe("ConfirmationDialog", () => {
     expect(dialog).toHaveFocus();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Deleting…" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Close confirmation" }))
+      .not.toBeInTheDocument();
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Close confirmation" }));
+    const backdrop = document.querySelector(".confirmation-dialog-backdrop");
+    expect(backdrop).not.toBeNull();
+    if (backdrop) fireEvent.pointerDown(backdrop);
     await user.click(screen.getByRole("button", { name: "Deleting…" }));
     expect(onCancel).not.toHaveBeenCalled();
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("consumes only one confirmation request per browser task", () => {
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmationDialog
+        body="This action cannot be undone."
+        confirmLabel="Delete"
+        onCancel={vi.fn()}
+        onConfirm={onConfirm}
+        open
+        title="Delete item?"
+      />,
+    );
+
+    const confirm = screen.getByRole("button", { name: "Delete" });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    expect(onConfirm).toHaveBeenCalledOnce();
   });
 
   it("keeps focus trapped when confirmation is disabled", async () => {
@@ -95,5 +123,26 @@ describe("ConfirmationDialog", () => {
     expect(cancel).toHaveFocus();
     await user.tab({ shift: true });
     expect(cancel).toHaveFocus();
+  });
+
+  it("announces an operation error inside the active modal", () => {
+    render(
+      <ConfirmationDialog
+        body="The operation can be retried."
+        confirmLabel="Retry"
+        error="The service rejected the request."
+        errorTitle="Request failed"
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+        open
+        title="Continue?"
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Continue?" });
+    const alert = screen.getByRole("alert");
+    expect(dialog).toContainElement(alert);
+    expect(alert).toHaveTextContent("Request failed");
+    expect(alert).toHaveTextContent("The service rejected the request.");
   });
 });

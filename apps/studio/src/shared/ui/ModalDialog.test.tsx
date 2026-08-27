@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
+import { ConfirmationDialog } from "./ConfirmationDialog";
 import { ModalDialog } from "./ModalDialog";
 
 function Harness({
@@ -33,6 +34,36 @@ function Harness({
   );
 }
 
+function StackedHarness() {
+  const [workflowOpen, setWorkflowOpen] = useState(false);
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  return (
+    <main data-testid="stacked-application">
+      <button onClick={() => setWorkflowOpen(true)} type="button">Open stacked workflow</button>
+      <ModalDialog
+        onClose={() => setWorkflowOpen(false)}
+        open={workflowOpen}
+        title="Edit workflow"
+      >
+        <button onClick={() => setConfirmationOpen(true)} type="button">
+          Review close
+        </button>
+      </ModalDialog>
+      <ConfirmationDialog
+        body="Both modal layers will close in the same commit."
+        confirmLabel="Close workflow"
+        onCancel={() => setConfirmationOpen(false)}
+        onConfirm={() => {
+          setWorkflowOpen(false);
+          setConfirmationOpen(false);
+        }}
+        open={confirmationOpen}
+        title="Close the workflow?"
+      />
+    </main>
+  );
+}
+
 describe("ModalDialog", () => {
   it("portals above the application, traps focus, closes, and restores focus", async () => {
     const user = userEvent.setup();
@@ -45,6 +76,13 @@ describe("ModalDialog", () => {
     expect(dialog).toHaveAccessibleDescription("Choose a reusable snapshot.");
     const applicationRoot = screen.getByTestId("application").parentElement;
     expect(applicationRoot).toHaveProperty("inert", true);
+    expect(document.body.style.overflow).toBe("hidden");
+    expect(screen.queryByRole("button", { name: "Close modal" }))
+      .not.toBeInTheDocument();
+    const latePortal = document.createElement("div");
+    latePortal.dataset.testid = "late-portal";
+    document.body.append(latePortal);
+    await waitFor(() => expect(latePortal).toHaveProperty("inert", true));
     await waitFor(() => expect(screen.getByRole("button", { name: "Close dialog" })).toHaveFocus());
 
     screen.getByRole("button", { name: "Apply" }).focus();
@@ -54,6 +92,43 @@ describe("ModalDialog", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(applicationRoot?.inert).not.toBe(true);
+    expect(latePortal.inert).not.toBe(true);
+    expect(document.body.style.overflow).toBe("");
+    expect(trigger).toHaveFocus();
+    latePortal.remove();
+  });
+
+  it("dismisses from the visual backdrop without exposing a second close control", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Open workflow" }));
+
+    const backdrop = document.querySelector(".modal-dialog-backdrop");
+    expect(backdrop).not.toBeNull();
+    if (backdrop) fireEvent.pointerDown(backdrop);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open workflow" })).toHaveFocus();
+  });
+
+  it("restores application isolation and root focus when stacked layers close together", async () => {
+    const user = userEvent.setup();
+    render(<StackedHarness />);
+    const trigger = screen.getByRole("button", { name: "Open stacked workflow" });
+    await user.click(trigger);
+    await user.click(await screen.findByRole("button", { name: "Review close" }));
+
+    const modalLayer = document.querySelector<HTMLElement>(".modal-dialog-layer");
+    const confirmationLayer = document.querySelector<HTMLElement>(".confirmation-dialog-layer");
+    expect(modalLayer).toHaveProperty("inert", true);
+    expect(confirmationLayer?.inert).not.toBe(true);
+    expect(document.body.style.overflow).toBe("hidden");
+
+    await user.click(screen.getByRole("button", { name: "Close workflow" }));
+
+    await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(screen.getByTestId("stacked-application").parentElement?.inert).not.toBe(true);
+    expect(document.body.style.overflow).toBe("");
     expect(trigger).toHaveFocus();
   });
 

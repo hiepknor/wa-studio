@@ -60,16 +60,13 @@ export function SessionSwitcher({
     return [session.name, session.id, sessionIdentityLabel(session)]
       .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
   });
-  const selectedFilteredIndex = filteredSessions.findIndex(
-    (session) => session.id === selectedSessionId,
-  );
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const highlightedSession = filteredSessions[highlightedIndex] ?? null;
 
   useEffect(() => {
     if (!open) return;
     function closeFromOutside(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(event.target as Node)) close(false);
     }
     document.addEventListener("pointerdown", closeFromOutside);
     return () => document.removeEventListener("pointerdown", closeFromOutside);
@@ -77,8 +74,17 @@ export function SessionSwitcher({
 
   useEffect(() => {
     if (!open) return;
-    setHighlightedIndex(Math.max(selectedFilteredIndex, 0));
-  }, [open, selectedFilteredIndex]);
+    setHighlightedIndex((current) => filteredSessions.length === 0
+      ? 0
+      : Math.min(current, filteredSessions.length - 1));
+  }, [filteredSessions.length, open]);
+
+  useEffect(() => {
+    if (sessions.length === 0) {
+      setOpen(false);
+      setQuery("");
+    }
+  }, [sessions.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -119,11 +125,12 @@ export function SessionSwitcher({
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       close();
       return;
     }
     if (event.key === "Tab") {
-      setOpen(false);
+      close(false);
       return;
     }
     if (filteredSessions.length === 0) return;

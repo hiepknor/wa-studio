@@ -52,7 +52,7 @@
   border-bottom: var(--border-width) solid var(--divider-strong);
 }
 .settings-section-copy { min-width: 0; }
-.settings-section-copy h3 {
+.settings-section-copy h2 {
   margin: var(--space-hair) 0 0;
   color: var(--foreground);
   font-size: var(--type-body);
@@ -157,6 +157,7 @@
   gap: var(--space-panel);
   padding: var(--space-compact) var(--space-panel);
 }
+.settings-form-controls { flex: 0 0 auto; }
 .settings-action-copy {
   min-width: 0;
   display: grid;
@@ -219,7 +220,7 @@
   justify-content: space-between;
   gap: var(--space-panel);
 }
-.settings-recovery-flow-heading h4 { margin: 0; font-size: var(--type-body); font-weight: var(--weight-medium); }
+.settings-recovery-flow-heading h3 { margin: 0; font-size: var(--type-body); font-weight: var(--weight-medium); }
 .settings-recovery-flow-heading p { max-width: var(--copy-line-settings); margin: var(--space-hair) 0 0; color: var(--muted); font-size: var(--type-caption); line-height: var(--leading-ui); }
 .settings-recovery-single-field { max-width: 31rem; }
 
@@ -259,6 +260,7 @@
   .settings-field-grid { grid-template-columns: 1fr; }
   .settings-form-actions { align-items: stretch; flex-direction: column; }
   .settings-form-actions .button { width: 100%; }
+  .settings-form-controls { width: 100%; flex-direction: column-reverse; }
   .settings-row { grid-template-columns: minmax(0, 1fr); }
   .settings-row-action { justify-self: start; }
   .settings-row-actions { flex-wrap: wrap; }

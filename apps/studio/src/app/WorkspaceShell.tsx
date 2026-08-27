@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import { useRuntimeConnection } from "./RuntimeConnectionContext";
 import { SessionSwitcher } from "./SessionSwitcher";
@@ -10,7 +10,6 @@ import {
   type WorkspacePageId,
 } from "./workspace-pages";
 import { SessionsScreen } from "@/features/sessions/SessionsScreen";
-import { SettingsScreen } from "@/features/settings/SettingsScreen";
 import { GroupsWorkspace } from "@/features/groups/GroupsWorkspace";
 import { CampaignsScreen } from "@/features/campaigns/CampaignsScreen";
 import { RunsScreen } from "@/features/runs/RunsScreen";
@@ -27,7 +26,16 @@ import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { StatusDot } from "@/shared/ui/StatusDot";
 import type { FeedbackTone } from "@/shared/ui/feedback-tone";
 import studioPackage from "../../package.json";
-import { WorkspaceNavigationGuardProvider } from "./WorkspaceNavigationGuard";
+import {
+  resolveWorkspaceNavigationDialogCopy,
+  WorkspaceNavigationGuardProvider,
+  type WorkspaceNavigationGuard,
+} from "./WorkspaceNavigationGuard";
+
+const SettingsScreen = lazy(async () => {
+  const module = await import("@/features/settings/SettingsScreen");
+  return { default: module.SettingsScreen };
+});
 
 const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
   activity: "activity",
@@ -49,8 +57,8 @@ interface WorkspaceLocation {
 }
 
 type PendingNavigation =
-  | { kind: "location"; location: WorkspaceLocation }
-  | { kind: "session"; sessionId: string };
+  | { guard: WorkspaceNavigationGuard; kind: "location"; location: WorkspaceLocation }
+  | { guard: WorkspaceNavigationGuard; kind: "session"; sessionId: string };
 
 const WORKSPACE_VIEW_STORAGE_KEY = "wa-studio-view";
 const WORKSPACE_RAIL_STORAGE_KEY = "wa-studio-rail-collapsed";
@@ -110,9 +118,26 @@ function renderPage(
     case "sessions":
       return <SessionsScreen onOpenGroups={() => navigate({ page: "groups" })} />;
     case "settings":
-      return <SettingsScreen />;
+      return (
+        <Suspense
+          fallback={(
+            <div aria-live="polite" className="workspace-page-loading" role="status">
+              <AppIcon className="ui-icon-spin" name="refresh" size="sm" />
+              <span>Loading Settings…</span>
+            </div>
+          )}
+        >
+          <SettingsScreen />
+        </Suspense>
+      );
     case "runs":
-      return <RunsScreen initialRunId={location.runId} onRunSelectionChange={(runId) => navigate({ page: "runs", ...(runId ? { runId } : {}) })} />;
+      return (
+        <RunsScreen
+          initialRunId={location.runId}
+          onOpenCampaigns={() => navigate({ page: "campaigns" })}
+          onRunSelectionChange={(runId) => navigate({ page: "runs", ...(runId ? { runId } : {}) })}
+        />
+      );
     case "activity":
       return (
         <ActivityScreen
@@ -142,8 +167,10 @@ export function WorkspaceShell({
     page: storedWorkspacePage(),
   }));
   const [railCollapsed, setRailCollapsed] = useState(storedRailCollapsed);
-  const [navigationDirty, setNavigationDirty] = useState(false);
+  const [navigationGuard, setNavigationGuard] =
+    useState<WorkspaceNavigationGuard | null>(null);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
+  const pendingNavigationRef = useRef<PendingNavigation | null>(null);
   const activePage = location.page;
   const [openwaBaseUrl, setOpenwaBaseUrl] = useState<string | null>(null);
 
@@ -162,14 +189,14 @@ export function WorkspaceShell({
   }, [getProvisioningProfile, managedRuntime.phase]);
 
   useEffect(() => {
-    if (!navigationDirty) return;
+    if (!navigationGuard) return;
     function preventUnload(event: BeforeUnloadEvent) {
       event.preventDefault();
       event.returnValue = "";
     }
     window.addEventListener("beforeunload", preventUnload);
     return () => window.removeEventListener("beforeunload", preventUnload);
-  }, [navigationDirty]);
+  }, [navigationGuard]);
 
   if (!connected) throw new Error("WorkspaceShell requires a Runtime connection");
 
@@ -178,6 +205,10 @@ export function WorkspaceShell({
   const isManagedWorkspace = openwaBaseUrl !== null || managedRuntime.phase !== "unavailable";
   const activePageLabel = findWorkspacePage(activePage).label;
   const runtime = runtimeStatus(managedRuntime.phase);
+  const navigationDialogCopy = resolveWorkspaceNavigationDialogCopy(
+    navigationGuard,
+    pendingNavigation?.guard ?? null,
+  );
 
   function performNavigation(nextLocation: WorkspaceLocation) {
     setLocation(nextLocation);
@@ -189,8 +220,10 @@ export function WorkspaceShell({
   }
 
   function navigate(nextLocation: WorkspaceLocation) {
-    if (navigationDirty && nextLocation.page !== activePage) {
-      setPendingNavigation({ kind: "location", location: nextLocation });
+    if (navigationGuard && nextLocation.page !== activePage) {
+      const pending = { guard: navigationGuard, kind: "location", location: nextLocation } as const;
+      pendingNavigationRef.current = pending;
+      setPendingNavigation(pending);
       return;
     }
     performNavigation(nextLocation);
@@ -198,20 +231,30 @@ export function WorkspaceShell({
 
   function requestSession(sessionId: string) {
     if (sessionId === selectedSessionId) return;
-    if (navigationDirty) {
-      setPendingNavigation({ kind: "session", sessionId });
+    if (navigationGuard) {
+      const pending = { guard: navigationGuard, kind: "session", sessionId } as const;
+      pendingNavigationRef.current = pending;
+      setPendingNavigation(pending);
       return;
     }
     selectSession(sessionId);
   }
 
   function confirmNavigation() {
-    const pending = pendingNavigation;
+    if (navigationGuard?.busy) return;
+    const pending = pendingNavigationRef.current;
     if (!pending) return;
+    pendingNavigationRef.current = null;
     setPendingNavigation(null);
-    setNavigationDirty(false);
+    setNavigationGuard(null);
     if (pending.kind === "location") performNavigation(pending.location);
     else selectSession(pending.sessionId);
+  }
+
+  function cancelPendingNavigation() {
+    if (navigationGuard?.busy) return;
+    pendingNavigationRef.current = null;
+    setPendingNavigation(null);
   }
 
   function toggleRail() {
@@ -228,7 +271,7 @@ export function WorkspaceShell({
 
   return (
     <DrawerProvider className="workspace-frame">
-      <WorkspaceNavigationGuardProvider onDirtyChange={setNavigationDirty}>
+      <WorkspaceNavigationGuardProvider onGuardChange={setNavigationGuard}>
       <main
         className={`workspace${railCollapsed ? " workspace-rail-collapsed" : ""}`}
         data-rail-collapsed={railCollapsed || undefined}
@@ -300,7 +343,7 @@ export function WorkspaceShell({
           <header aria-label="Workspace toolbar" className="workspace-toolbar">
             <div className="workspace-toolbar-context">
               <span className="workspace-toolbar-copy">
-                <span className="workspace-breadcrumb">Active workspace</span>
+                <span className="workspace-breadcrumb">Current view</span>
                 <strong className="workspace-current-page">{activePageLabel}</strong>
               </span>
             </div>
@@ -346,14 +389,16 @@ export function WorkspaceShell({
       </main>
       </WorkspaceNavigationGuardProvider>
       <ConfirmationDialog
-        body="Unsaved group list details or staged membership will be discarded before leaving this workspace. Runtime data is not changed."
+        body={navigationDialogCopy.message}
+        busy={Boolean(navigationGuard?.busy)}
+        busyLabel={navigationGuard?.busyLabel}
         cancelLabel="Keep editing"
-        confirmLabel="Discard and continue"
+        confirmLabel={navigationGuard ? "Discard and continue" : "Continue"}
         confirmVariant="danger"
-        onCancel={() => setPendingNavigation(null)}
+        onCancel={cancelPendingNavigation}
         onConfirm={confirmNavigation}
         open={Boolean(pendingNavigation)}
-        title="Leave group list draft?"
+        title={navigationDialogCopy.title}
       />
     </DrawerProvider>
   );

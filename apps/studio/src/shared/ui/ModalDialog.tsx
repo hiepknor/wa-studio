@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { Button } from "./Button";
+import { acquireModalIsolation } from "./modal-isolation";
 import "./modal-dialog.css";
 
 const FOCUSABLE = [
@@ -52,23 +53,19 @@ export function ModalDialog({
 
   useEffect(() => {
     if (!open) return;
-    returnFocusRef.current = document.activeElement as HTMLElement | null;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     const layer = layerRef.current;
-    const siblings = Array.from(document.body.children)
-      .filter((element): element is HTMLElement => element instanceof HTMLElement && element !== layer)
-      .map((element) => ({ element, inert: element.inert }));
-    const previousOverflow = document.body.style.overflow;
-    siblings.forEach(({ element }) => { element.inert = true; });
-    document.body.style.overflow = "hidden";
+    if (!layer) return;
+    const releaseIsolation = acquireModalIsolation(layer, returnFocusRef.current);
     const frame = window.requestAnimationFrame(() => {
       (initialFocusRef?.current ?? closeRef.current)?.focus();
     });
 
     return () => {
       window.cancelAnimationFrame(frame);
-      siblings.forEach(({ element, inert }) => { element.inert = inert; });
-      document.body.style.overflow = previousOverflow;
-      if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
+      releaseIsolation();
     };
   }, [initialFocusRef, open]);
 
@@ -106,12 +103,10 @@ export function ModalDialog({
 
   return createPortal(
     <div className="modal-dialog-layer" ref={layerRef}>
-      <button
-        aria-label="Close modal"
+      <div
+        aria-hidden="true"
         className="modal-dialog-backdrop"
-        onClick={requestClose}
-        tabIndex={-1}
-        type="button"
+        onPointerDown={requestClose}
       />
       <section
         aria-describedby={description ? descriptionId : undefined}

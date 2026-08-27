@@ -17,6 +17,8 @@ import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ToastProvider } from "@/shared/ui/Toast";
 import { GroupsScreen } from "./GroupsScreen";
 
+const READ_OPTIONS = expect.objectContaining({ signal: expect.any(AbortSignal) });
+
 const session: RuntimeSession = {
   id: "session-id",
   name: "staging-session-2",
@@ -75,7 +77,7 @@ function GroupsHarness() {
   if (!connected) {
     return (
       <button
-        onClick={() => void connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "key" })}
+        onClick={() => void connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" })}
         type="button"
       >
         Connect
@@ -132,7 +134,7 @@ describe("GroupsScreen global search and filters", () => {
 
     expect(await screen.findByText("No groups were returned for this session."))
       .toBeInTheDocument();
-    expect(screen.getByText("0–0 of 0")).toBeInTheDocument();
+    expect(screen.getByText("0 groups")).toBeInTheDocument();
     expect(screen.getByText("No results")).toBeInTheDocument();
   });
 
@@ -156,7 +158,7 @@ describe("GroupsScreen global search and filters", () => {
       sessionId: session.id,
       limit: 20,
       offset: 0,
-    });
+    }, READ_OPTIONS);
     expect(screen.queryByText("Could not load groups")).not.toBeInTheDocument();
   });
 
@@ -177,7 +179,7 @@ describe("GroupsScreen global search and filters", () => {
       limit: 20,
       offset: 0,
       query: "Release room",
-    }));
+    }, READ_OPTIONS));
     expect(search).toHaveAttribute("type", "search");
     expect(screen.queryByText("Search: Release room")).not.toBeInTheDocument();
   });
@@ -204,7 +206,7 @@ describe("GroupsScreen global search and filters", () => {
       limit: 20,
       offset: 0,
       query,
-    }));
+    }, READ_OPTIONS));
     expect(screen.getByText("Server-selected result")).toBeInTheDocument();
   });
 
@@ -229,7 +231,7 @@ describe("GroupsScreen global search and filters", () => {
       capabilityStatus: ["DENIED", "UNKNOWN"],
       capabilityFreshness: ["STALE"],
       isActive: false,
-    }));
+    }, READ_OPTIONS));
     expect(screen.getByRole("button", { name: "Filters · 3" })).toHaveAttribute(
       "aria-expanded",
       "true",
@@ -254,7 +256,7 @@ describe("GroupsScreen global search and filters", () => {
       capabilityStatus: ["UNKNOWN"],
       capabilityFreshness: ["STALE"],
       isActive: false,
-    }));
+    }, READ_OPTIONS));
     expect(screen.getByRole("button", { name: "Filters · 3" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Close group filters" }));
@@ -291,7 +293,7 @@ describe("GroupsScreen global search and filters", () => {
       limit: 20,
       offset: 0,
       capabilityStatus: ["ALLOWED", "DENIED", "UNKNOWN"],
-    }));
+    }, READ_OPTIONS));
     expect(screen.getByRole("button", { name: "Filters · 1" })).toHaveAttribute(
       "aria-expanded",
       "true",
@@ -332,7 +334,7 @@ describe("GroupsScreen global search and filters", () => {
       offset: 0,
       minParticipants: 20,
       maxParticipants: 500,
-    }));
+    }, READ_OPTIONS));
     expect(screen.getByRole("button", { name: "Filters · 1" })).toBeInTheDocument();
     const minimumChip = screen.getByRole("button", {
       name: "Remove Minimum participants: 20 filter",
@@ -347,7 +349,7 @@ describe("GroupsScreen global search and filters", () => {
       limit: 20,
       offset: 0,
       maxParticipants: 500,
-    }));
+    }, READ_OPTIONS));
   });
 
   it("clears search independently from filters and clears filters independently from search", async () => {
@@ -366,7 +368,7 @@ describe("GroupsScreen global search and filters", () => {
       offset: 0,
       query: "needle",
       capabilityStatus: ["DENIED"],
-    }));
+    }, READ_OPTIONS));
 
     await user.clear(search);
     expect(search).toHaveValue("");
@@ -378,13 +380,13 @@ describe("GroupsScreen global search and filters", () => {
       limit: 20,
       offset: 0,
       capabilityStatus: ["DENIED"],
-    }));
+    }, READ_OPTIONS));
 
     await user.type(search, "keep me");
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith(expect.objectContaining({
       query: "keep me",
       capabilityStatus: ["DENIED"],
-    })));
+    }), READ_OPTIONS));
     await user.click(screen.getByRole("button", { name: "Clear all" }));
     expect(search).toHaveValue("keep me");
     expect(screen.queryByRole("button", {
@@ -395,7 +397,7 @@ describe("GroupsScreen global search and filters", () => {
       limit: 20,
       offset: 0,
       query: "keep me",
-    }));
+    }, READ_OPTIONS));
   });
 
   it("marks retained rows as updating while new criteria are loading", async () => {
@@ -417,7 +419,7 @@ describe("GroupsScreen global search and filters", () => {
     );
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith(expect.objectContaining({
       query: "new result",
-    })));
+    }), READ_OPTIONS));
 
     expect(screen.getByText("Updating results…")).toBeInTheDocument();
     const results = screen.getByRole("table").parentElement;
@@ -466,10 +468,10 @@ describe("GroupsScreen global search and filters", () => {
       limit: 20,
       offset: 0,
       query: "needle",
-    }));
+    }, READ_OPTIONS));
     expect(await screen.findByText("Backend match")).toBeInTheDocument();
     expect(screen.getByText("1–1 of 3 matches")).toBeInTheDocument();
-    expect(screen.getByText("Page 1 of 1")).toBeInTheDocument();
+    expect(screen.getByText("All results shown")).toBeInTheDocument();
   });
 
   it("shows filtered empty results and clamps an out-of-range page", async () => {
@@ -496,7 +498,7 @@ describe("GroupsScreen global search and filters", () => {
       sessionId: session.id,
       limit: 20,
       offset: 0,
-    }));
+    }, READ_OPTIONS));
     expect(await screen.findByText("Release room")).toBeInTheDocument();
 
     await user.type(
@@ -505,7 +507,7 @@ describe("GroupsScreen global search and filters", () => {
     );
     expect(await screen.findByText("No groups match this search or filters."))
       .toBeInTheDocument();
-    expect(screen.getByText("0–0 of 0 matches")).toBeInTheDocument();
+    expect(screen.getByText("0 matches")).toBeInTheDocument();
     expect(screen.getByText("No results")).toBeInTheDocument();
   });
 
@@ -542,7 +544,7 @@ describe("GroupsScreen global search and filters", () => {
     await user.type(search, "old");
     await waitFor(() => expect(listGroups).toHaveBeenCalledWith(expect.objectContaining({
       query: "old",
-    })));
+    }), READ_OPTIONS));
     await user.clear(search);
     await user.type(search, "new");
     expect(await screen.findByText("Newest search")).toBeInTheDocument();

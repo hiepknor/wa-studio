@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,6 +6,10 @@ import {
   RuntimeConnectionProvider,
   useRuntimeConnection,
 } from "@/app/RuntimeConnectionContext";
+import {
+  RuntimeConnectionContext,
+  type RuntimeConnectionContextValue,
+} from "@/app/RuntimeConnectionState";
 import type {
   RuntimeActivityEvent,
   RuntimeApi,
@@ -56,10 +60,46 @@ const event: RuntimeActivityEvent = {
   occurredAt: "2026-08-25T10:00:00.000Z",
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
+function activityContext(
+  api: RuntimeApi,
+  selectedSessionId: string | null,
+): RuntimeConnectionContextValue {
+  return {
+    connect: vi.fn(),
+    connected: {
+      api,
+      profile: {
+        apiKey: "memory-only-test-key",
+        baseUrl: "https://runtime.example",
+      },
+      sessions: [session],
+    },
+    configureManagedRuntime: vi.fn(),
+    disconnect: vi.fn(),
+    managedConnectionError: null,
+    managedConnectionFlow: "manual",
+    managedRuntime: {
+      phase: "unavailable",
+      manifest: null,
+      connection: null,
+      error: null,
+    },
+    refreshSessions: vi.fn().mockResolvedValue(true),
+    selectedSessionId,
+    selectSession: vi.fn(),
+  };
+}
+
 function Harness({ onOpenRun }: { onOpenRun: (id: string) => void }) {
   const { connect, connected } = useRuntimeConnection();
   if (!connected) {
-    return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "key" })}>Connect</button>;
+    return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "0123456789abcdef0123456789abcdef" })}>Connect</button>;
   }
   return <ActivityScreen onOpenRun={onOpenRun} />;
 }
@@ -134,7 +174,7 @@ describe("ActivityScreen", () => {
       categories: [],
       severities: [],
       cursor: undefined,
-    });
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     await user.click(screen.getByRole("button", { name: "Campaign run completed" }));
     const inspector = await screen.findByRole("dialog", { name: "Campaign run completed" });
@@ -151,8 +191,37 @@ describe("ActivityScreen", () => {
       categories: [],
       severities: [],
       cursor: "older-cursor",
-    }));
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     expect(await screen.findByText("Campaign run created")).toBeInTheDocument();
     expect(screen.getByText("Info")).toHaveClass("ui-badge-info");
+  });
+
+  it("ignores a response from the session that was cleared while loading", async () => {
+    const pending = deferred<Awaited<ReturnType<RuntimeApi["listActivity"]>>>();
+    const listActivity = vi.fn<RuntimeApi["listActivity"]>().mockReturnValue(pending.promise);
+    const api = { listActivity } as unknown as RuntimeApi;
+    const content = (selectedSessionId: string | null) => (
+      <RuntimeConnectionContext.Provider value={activityContext(api, selectedSessionId)}>
+        <DrawerProvider><ActivityScreen /><DrawerHost /></DrawerProvider>
+      </RuntimeConnectionContext.Provider>
+    );
+    const view = render(content(session.id));
+    await waitFor(() => expect(listActivity).toHaveBeenCalledOnce());
+    const signal = listActivity.mock.calls[0][1]?.signal;
+
+    view.rerender(content(null));
+
+    expect(signal?.aborted).toBe(true);
+    expect(await screen.findByText("Select a session to view activity.")).toBeInTheDocument();
+    await act(async () => {
+      pending.resolve({
+        data: [event],
+        meta: { limit: 50, nextCursor: null, retentionDays: 90 },
+      });
+      await pending.promise;
+    });
+
+    expect(screen.queryByText("Campaign run completed")).not.toBeInTheDocument();
+    expect(screen.getByText("Retention is Runtime controlled.")).toBeInTheDocument();
   });
 });

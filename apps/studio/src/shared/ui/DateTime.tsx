@@ -6,12 +6,14 @@ import {
   formatRelativeDateTime,
   parseDateTime,
   type DateTimePrecision,
+  type RelativeDateTimeStyle,
 } from "./date-time";
 import "./date-time.css";
 
 interface DateTimeProps extends Omit<HTMLAttributes<HTMLTimeElement>, "children"> {
   fallback?: string;
   precision?: DateTimePrecision;
+  relativeStyle?: RelativeDateTimeStyle;
   timeZone?: string;
   value: string | null | undefined;
   variant?: "absolute" | "relative";
@@ -22,6 +24,7 @@ export function DateTime({
   className,
   fallback = "—",
   precision = "minute",
+  relativeStyle = "long",
   timeZone,
   title,
   value,
@@ -42,7 +45,7 @@ export function DateTime({
       title={title ?? exact}
     >
       {variant === "relative"
-        ? formatRelativeDateTime(value, { fallback, timeZone })
+        ? formatRelativeDateTime(value, { fallback, style: relativeStyle, timeZone })
         : formatDateTime(value, { precision, timeZone })}
     </time>
   );

@@ -5,12 +5,19 @@ import { describe, expect, it, vi } from "vitest";
 import { TablePagination } from "./TablePagination";
 
 describe("TablePagination", () => {
-  it("uses an honest empty label and disables navigation when there are no results", () => {
+  it("keeps page ownership in the footer and disables navigation when there are no results", () => {
     render(<TablePagination limit={50} offset={0} onOffsetChange={vi.fn()} total={0} />);
 
     expect(screen.getByText("No results")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
+  it("avoids page arithmetic when every result already fits", () => {
+    render(<TablePagination limit={50} offset={0} onOffsetChange={vi.fn()} total={1} />);
+
+    expect(screen.getByText("All results shown")).toBeInTheDocument();
+    expect(screen.queryByText("Page 1 of 1")).not.toBeInTheDocument();
   });
 
   it("supports domain-specific labels without changing offset navigation", async () => {

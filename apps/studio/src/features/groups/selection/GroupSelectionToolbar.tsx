@@ -8,6 +8,7 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
 import { FilterOption } from "@/shared/ui/FilterOption";
+import { formatListResultSummary } from "@/shared/ui/list-result-summary";
 import { ParticipantRangeFilter } from "../ParticipantRangeFilter";
 import type { ParticipantFilterErrors } from "../participant-range";
 import "./group-selection.css";
@@ -128,7 +129,14 @@ export function GroupSelectionToolbar({
       onToggleFilters={() => onFiltersOpenChange(!filtersOpen)}
       resultSummary={loading
         ? "Updating results…"
-        : `${firstItem}–${lastItem} of ${total}${hasCriteria ? " matches" : " groups"}`}
+        : formatListResultSummary({
+          firstItem,
+          hasCriteria,
+          lastItem,
+          plural: "groups",
+          singular: "group",
+          total,
+        })}
       searchLabel={searchLabel}
       searchPlaceholder={searchPlaceholder}
       searchValue={inputQuery}

@@ -12,6 +12,7 @@ import {
 } from "@/features/groups/selection/group-selection";
 import {
   RuntimeRequestError,
+  type RuntimeCreateCampaign,
   type RuntimeCampaign,
   type RuntimeCampaignExecutionMode,
   type RuntimeCampaignPage,
@@ -21,6 +22,12 @@ import {
   type RuntimeCampaignTargetSource,
   type RuntimeGroupList,
 } from "@/shared/api/runtime-client";
+import {
+  isUnknownMutationOutcome,
+  unknownMutationOutcomeMessage,
+} from "@/shared/api/runtime-mutation";
+import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
+import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
@@ -71,6 +78,14 @@ type EditorState =
   | { kind: "closed" }
   | { campaign: RuntimeCampaign | null; kind: "open" };
 type CampaignEditorTab = "details" | "targets" | "preflight";
+
+interface CampaignCreateIntent {
+  fingerprint: string;
+  form: CampaignFormValues;
+  key: string;
+  outcomeUnknown: boolean;
+  payload: RuntimeCreateCampaign;
+}
 
 const PAGE_SIZE = 50;
 const NON_TERMINAL_RUN_STATUSES = new Set<RuntimeCampaignRun["status"]>([
@@ -264,7 +279,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const [deleteIntent, setDeleteIntent] = useState<RuntimeCampaign | null>(null);
   const [deletingCampaign, setDeletingCampaign] = useState(false);
   const [campaignDeleteError, setCampaignDeleteError] = useState<string | null>(null);
-  const createKeyRef = useRef<string | null>(null);
+  const createIntentRef = useRef<CampaignCreateIntent | null>(null);
   const launchKeyRef = useRef<{ key: string; mode: RuntimeCampaignExecutionMode } | null>(null);
   const editorEpochRef = useRef(0);
   const targetRequestRef = useRef(0);
@@ -276,9 +291,18 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const pageKeyRef = useRef("");
   const errorKeyRef = useRef("");
   const listStateRef = useRef(listState);
+  const editorRef = useRef(editor);
+  const selectedSessionIdRef = useRef(selectedSessionId);
+  const campaignsRead = useLatestRequest();
+  const targetsRead = useLatestRequest();
+  const runsRead = useLatestRequest();
+  const mutationOperation = useSingleFlightOperation();
+  const preflightOperation = useSingleFlightOperation();
   const currentListRequestKey = campaignListRequestKey(listState);
   listTargetRef.current = currentListRequestKey;
   listStateRef.current = listState;
+  editorRef.current = editor;
+  selectedSessionIdRef.current = selectedSessionId;
   targetsRevisionRef.current = targetsRevision;
 
   const campaign = editor.kind === "open" ? editor.campaign : null;
@@ -342,6 +366,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const loadCampaigns = useCallback(async (state: CampaignListRequestState) => {
     if (!state.sessionId) return;
     const request = ++listRequestRef.current;
+    const signal = campaignsRead.begin();
     const requestKey = campaignListRequestKey(state);
     setListLoading(true);
     setListError(null);
@@ -353,7 +378,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         ...(state.query ? { query: state.query } : {}),
         ...(state.statuses.length ? { statuses: state.statuses } : {}),
         ...(state.scheduleTypes.length ? { scheduleTypes: state.scheduleTypes } : {}),
-      });
+      }, { signal });
       if (request !== listRequestRef.current || requestKey !== listTargetRef.current) return;
       if (state.offset > 0 && page.data.length === 0 && page.meta.total <= state.offset) {
         const lastOffset = page.meta.total === 0
@@ -371,18 +396,25 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       setCampaignPage({ data: [...page.data], meta: { ...page.meta } });
       pageKeyRef.current = requestKey;
     } catch (error) {
+      if (signal.aborted) return;
       if (request !== listRequestRef.current || requestKey !== listTargetRef.current) return;
       errorKeyRef.current = requestKey;
       setListError(campaignErrorMessage(error, "Could not load campaigns."));
     } finally {
+      campaignsRead.complete(signal);
       if (request === listRequestRef.current && requestKey === listTargetRef.current) {
         setListLoading(false);
       }
     }
-  }, [api]);
+  }, [api, campaignsRead]);
 
   useEffect(() => {
     if (listState.sessionId === selectedSessionId) return;
+    mutationOperation.cancel();
+    preflightOperation.cancel();
+    campaignsRead.cancel();
+    targetsRead.cancel();
+    runsRead.cancel();
     listRequestRef.current += 1;
     editorEpochRef.current += 1;
     pageKeyRef.current = "";
@@ -394,11 +426,14 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     setFiltersOpen(false);
     setListLoading(false);
     setListError(null);
+    setSavingDetails(false);
     targetRequestRef.current += 1;
     runRequestRef.current += 1;
+    createIntentRef.current = null;
     launchKeyRef.current = null;
     setTargetsLoading(false);
     setTargetsSaving(false);
+    setPreflightLoading(false);
     setRunsLoading(false);
     setRunMutation(null);
     setLiveLaunchConfirmationOpen(false);
@@ -407,7 +442,15 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     setDeletingCampaign(false);
     setCampaignDeleteError(null);
     setPreflight(null);
-  }, [listState.sessionId, selectedSessionId]);
+  }, [
+    campaignsRead,
+    listState.sessionId,
+    mutationOperation,
+    preflightOperation,
+    runsRead,
+    selectedSessionId,
+    targetsRead,
+  ]);
 
   useEffect(() => {
     if (listState.sessionId !== selectedSessionId || !listState.sessionId) return;
@@ -432,37 +475,82 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     targetRequestRef.current += 1;
     runRequestRef.current += 1;
     deleteRequestRef.current += 1;
+    createIntentRef.current = null;
+    launchKeyRef.current = null;
   }, []);
+
+  useEffect(() => {
+    if (!detailsDirty && !targetsDirty && !revisionRefreshRequired) return;
+    preflightOperation.cancel();
+    launchKeyRef.current = null;
+    setPreflightLoading(false);
+  }, [detailsDirty, preflightOperation, revisionRefreshRequired, targetsDirty]);
 
   async function loadTargets(campaignId: string, epoch: number, preserveError = false) {
     const request = ++targetRequestRef.current;
+    const signal = targetsRead.begin();
     setTargetsLoading(true);
     if (!preserveError) setTargetsError(null);
     try {
-      const result = await api.listCampaignTargets(campaignId);
+      const result = await api.listCampaignTargets(campaignId, { signal });
       if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) return;
       setTargets(result.data);
       setDraftTargetIds(result.data.map((target) => target.groupId));
       setTargetsRevision(result.targetsRevision);
       setTargetSource(result.source);
     } catch (error) {
+      if (signal.aborted) return;
       if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) return;
       setTargetsError(campaignErrorMessage(error, "Could not load campaign targets."));
     } finally {
+      targetsRead.complete(signal);
       if (epoch === editorEpochRef.current && request === targetRequestRef.current) setTargetsLoading(false);
+    }
+  }
+
+  async function reconcileTargetsAfterUnknownOutcome(
+    campaignId: string,
+    epoch: number,
+    request: number,
+  ) {
+    try {
+      const canonical = await api.listCampaignTargets(campaignId);
+      if (
+        epoch !== editorEpochRef.current
+        || request !== targetRequestRef.current
+      ) return;
+      setTargets(canonical.data);
+      setTargetsRevision(canonical.targetsRevision);
+      setTargetSource(canonical.source);
+      setEditor((current) => current.kind === "open" && current.campaign?.id === campaignId
+        ? {
+          campaign: {
+            ...current.campaign,
+            targetCount: canonical.data.length,
+            targetsRevision: canonical.targetsRevision,
+          },
+          kind: "open",
+        }
+        : current);
+      setPreflight(null);
+      setRevisionRefreshRequired(false);
+      void loadCampaigns(listStateRef.current);
+    } catch {
+      // Keep the unknown-outcome warning primary; the operator can reload later.
     }
   }
 
   async function loadRuns(campaignId: string, epoch: number, refreshCampaign = false) {
     const request = ++runRequestRef.current;
+    const signal = runsRead.begin();
     setRunsLoading(true);
     setRunError(null);
     try {
-      const page = await api.listCampaignRuns(campaignId, 20, 0);
+      const page = await api.listCampaignRuns(campaignId, 20, 0, { signal });
       if (epoch !== editorEpochRef.current || request !== runRequestRef.current) return;
       setRuns(page.data);
       if (refreshCampaign) {
-        const refreshed = await api.getCampaign(campaignId);
+        const refreshed = await api.getCampaign(campaignId, { signal });
         if (
           epoch !== editorEpochRef.current
           || request !== runRequestRef.current
@@ -476,21 +564,28 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         void loadCampaigns(listStateRef.current);
       }
     } catch (error) {
+      if (signal.aborted) return;
       if (epoch !== editorEpochRef.current || request !== runRequestRef.current) return;
       setRunError(campaignErrorMessage(error, "Could not load campaign runs."));
     } finally {
+      runsRead.complete(signal);
       if (epoch === editorEpochRef.current && request === runRequestRef.current) setRunsLoading(false);
     }
   }
 
   function openCreate() {
+    mutationOperation.cancel();
+    preflightOperation.cancel();
+    targetsRead.cancel();
+    runsRead.cancel();
     editorEpochRef.current += 1;
-    createKeyRef.current = null;
+    createIntentRef.current = null;
     launchKeyRef.current = null;
     setEditor({ campaign: null, kind: "open" });
     setEditorTab("details");
     setForm(emptyCampaignForm());
     setFormErrors({});
+    setSavingDetails(false);
     setDetailsError(null);
     setTargets([]);
     setDraftTargetIds([]);
@@ -507,6 +602,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     setLiveLaunchConfirmationOpen(false);
     setPreflightMode("DRY_RUN");
     setPreflight(null);
+    setPreflightLoading(false);
     setPreflightError(null);
     setDeleteIntent(null);
     setDeletingCampaign(false);
@@ -514,13 +610,16 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   }
 
   function openCampaign(selected: RuntimeCampaign) {
+    mutationOperation.cancel();
+    preflightOperation.cancel();
     const epoch = ++editorEpochRef.current;
-    createKeyRef.current = null;
+    createIntentRef.current = null;
     launchKeyRef.current = null;
     setEditor({ campaign: selected, kind: "open" });
     setEditorTab("details");
     setForm(campaignFormFromDto(selected));
     setFormErrors({});
+    setSavingDetails(false);
     setDetailsError(null);
     setTargets([]);
     setDraftTargetIds([]);
@@ -531,6 +630,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     setTargetsLoading(false);
     setTargetsSaving(false);
     setPreflight(null);
+    setPreflightLoading(false);
     setPreflightError(null);
     setPreflightMode("DRY_RUN");
     setRuns([]);
@@ -546,12 +646,17 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   }
 
   function closeEditor() {
+    mutationOperation.cancel();
+    preflightOperation.cancel();
+    targetsRead.cancel();
+    runsRead.cancel();
     editorEpochRef.current += 1;
     targetRequestRef.current += 1;
     runRequestRef.current += 1;
-    createKeyRef.current = null;
+    createIntentRef.current = null;
     launchKeyRef.current = null;
     setEditor({ kind: "closed" });
+    setSavingDetails(false);
     setTargetsRevision(null);
     setTargetSource(null);
     setRuns([]);
@@ -561,6 +666,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     setLiveLaunchConfirmationOpen(false);
     setTargetsLoading(false);
     setTargetsSaving(false);
+    setPreflightLoading(false);
     setPreflight(null);
     setDiscardConfirmationOpen(false);
     setDeleteIntent(null);
@@ -591,11 +697,12 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     const detailOpen = editor.kind === "open" && editor.campaign?.id === campaignId;
     const epoch = editorEpochRef.current;
     const request = ++runRequestRef.current;
+    const signal = runsRead.begin();
     if (detailOpen) setRunsLoading(true);
     try {
       const [refreshed, runPage] = await Promise.all([
-        api.getCampaign(campaignId),
-        api.listCampaignRuns(campaignId, 20, 0),
+        api.getCampaign(campaignId, { signal }),
+        api.listCampaignRuns(campaignId, 20, 0, { signal }),
       ]);
       if (
         epoch !== editorEpochRef.current
@@ -614,9 +721,11 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       void loadCampaigns(listStateRef.current);
       return refreshed;
     } catch {
+      if (signal.aborted) return null;
       if (epoch === editorEpochRef.current) void loadCampaigns(listStateRef.current);
       return null;
     } finally {
+      runsRead.complete(signal);
       if (detailOpen && epoch === editorEpochRef.current && request === runRequestRef.current) {
         setRunsLoading(false);
       }
@@ -628,12 +737,18 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     const snapshot = deleteIntent;
     const knownRuns = campaign?.id === snapshot.id ? runs : [];
     if (campaignDeleteDisabledReason(snapshot, knownRuns)) return;
+    const operationToken = mutationOperation.begin();
+    if (operationToken === null) return;
     const request = ++deleteRequestRef.current;
     setDeletingCampaign(true);
     setCampaignDeleteError(null);
     try {
       await api.deleteCampaign(snapshot.id, snapshot.revision, snapshot.targetsRevision);
-      if (request !== deleteRequestRef.current) return;
+      if (
+        !mutationOperation.isCurrent(operationToken)
+        || request !== deleteRequestRef.current
+        || snapshot.sessionId !== selectedSessionIdRef.current
+      ) return;
       setDeleteIntent(null);
       if (campaign?.id === snapshot.id) closeEditor();
       removeCampaignFromPage(snapshot.id);
@@ -645,10 +760,55 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         tone: "success",
       });
     } catch (error) {
-      if (request !== deleteRequestRef.current) return;
+      if (!mutationOperation.isCurrent(operationToken) || request !== deleteRequestRef.current) return;
       const requestError = error instanceof RuntimeRequestError ? error : null;
       const code = requestError?.code;
-      if (code === "CAMPAIGN_NOT_FOUND" || requestError?.status === 404) {
+      if (isUnknownMutationOutcome(error)) {
+        try {
+          const canonical = await api.getCampaign(snapshot.id);
+          if (
+            !mutationOperation.isCurrent(operationToken)
+            || request !== deleteRequestRef.current
+          ) return;
+          setDeleteIntent(null);
+          if (campaign?.id === canonical.id) {
+            setEditor({ campaign: canonical, kind: "open" });
+            setPreflight((current) => current && isPreflightStale(current, canonical)
+              ? null
+              : current);
+          }
+          void loadCampaigns(listStateRef.current);
+          toast.notify({
+            description: unknownMutationOutcomeMessage("canonical-reload"),
+            id: `campaign-delete-unknown-${snapshot.id}`,
+            title: "Delete result not confirmed",
+            tone: "warning",
+          });
+        } catch (reconcileError) {
+          if (
+            !mutationOperation.isCurrent(operationToken)
+            || request !== deleteRequestRef.current
+          ) return;
+          const missing = reconcileError instanceof RuntimeRequestError
+            && (reconcileError.code === "CAMPAIGN_NOT_FOUND" || reconcileError.status === 404);
+          if (missing) {
+            setDeleteIntent(null);
+            if (campaign?.id === snapshot.id) closeEditor();
+            removeCampaignFromPage(snapshot.id);
+            void loadCampaigns(listStateRef.current);
+            toast.notify({
+              description: "Runtime confirmed that the campaign is no longer available.",
+              id: `campaign-delete-reconciled-${snapshot.id}`,
+              title: "Campaign deleted",
+              tone: "success",
+            });
+          } else {
+            setCampaignDeleteError(
+              "WA Runtime did not confirm the delete result, and its latest state could not be reloaded. Reconnect and review the campaign before retrying.",
+            );
+          }
+        }
+      } else if (code === "CAMPAIGN_NOT_FOUND" || requestError?.status === 404) {
         setDeleteIntent(null);
         if (campaign?.id === snapshot.id) closeEditor();
         removeCampaignFromPage(snapshot.id);
@@ -662,6 +822,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       } else if (code === "CAMPAIGN_REVISION_CONFLICT") {
         setDeleteIntent(null);
         await refreshCampaignDeleteContext(snapshot.id);
+        if (!mutationOperation.isCurrent(operationToken) || request !== deleteRequestRef.current) return;
         toast.notify({
           description: "The campaign changed. Review it before deleting.",
           id: `campaign-delete-revision-${snapshot.id}`,
@@ -671,6 +832,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       } else if (code === "CAMPAIGN_DELETE_STATE_CONFLICT") {
         setDeleteIntent(null);
         await refreshCampaignDeleteContext(snapshot.id);
+        if (!mutationOperation.isCurrent(operationToken) || request !== deleteRequestRef.current) return;
         toast.notify({
           description: "Cancel the active run and archive the campaign before deleting it.",
           id: `campaign-delete-state-${snapshot.id}`,
@@ -680,6 +842,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       } else if (code === "CAMPAIGN_DELETE_RUN_CONFLICT") {
         setDeleteIntent(null);
         const refreshed = await refreshCampaignDeleteContext(snapshot.id);
+        if (!mutationOperation.isCurrent(operationToken) || request !== deleteRequestRef.current) return;
         const detailWasOpen = campaign?.id === snapshot.id;
         toast.notify({
           action: refreshed
@@ -697,7 +860,9 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         setCampaignDeleteError("The campaign could not be deleted. Check the Runtime connection and try again.");
       }
     } finally {
-      if (request === deleteRequestRef.current) setDeletingCampaign(false);
+      if (mutationOperation.complete(operationToken) && request === deleteRequestRef.current) {
+        setDeletingCampaign(false);
+      }
     }
   }
 
@@ -727,34 +892,77 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     setDetailsError(null);
   }
 
+  function restoreUnconfirmedCreateIntent() {
+    const intent = createIntentRef.current;
+    if (campaign || !intent?.outcomeUnknown) return;
+    setForm({ ...intent.form });
+    setFormErrors({});
+    setDetailsError(unknownMutationOutcomeMessage("idempotent-retry"));
+  }
+
   async function saveDetails() {
     if (!selectedSessionId || !editable) return;
     const validation = validateCampaignForm(form);
     setFormErrors(validation);
     if (Object.keys(validation).length) return;
 
+    let createIntent: CampaignCreateIntent | null = null;
+    if (!campaign) {
+      const payload = createCampaignPayload(selectedSessionId, form);
+      const fingerprint = JSON.stringify(payload);
+      const existing = createIntentRef.current;
+      if (existing?.outcomeUnknown && existing.fingerprint !== fingerprint) {
+        setDetailsError(
+          "An earlier create result is still unconfirmed. Restore that exact request and retry it, or discard this draft; changing its request key could create a duplicate campaign.",
+        );
+        return;
+      }
+      createIntent = existing && existing.fingerprint === fingerprint
+        ? existing
+        : {
+          fingerprint,
+          form: {
+            name: payload.name,
+            scheduleType: payload.scheduleType,
+            scheduledAt: form.scheduledAt,
+            text: payload.text,
+          },
+          key: crypto.randomUUID(),
+          outcomeUnknown: false,
+          payload,
+        };
+      createIntentRef.current = createIntent;
+    }
+
+    const operationToken = mutationOperation.begin();
+    if (operationToken === null) return;
     const epoch = editorEpochRef.current;
     setSavingDetails(true);
     setDetailsError(null);
     try {
       let saved: RuntimeCampaign;
-      if (!campaign) {
-        createKeyRef.current ??= crypto.randomUUID();
+      if (createIntent) {
         saved = await api.createCampaign(
-          createCampaignPayload(selectedSessionId, form),
-          createKeyRef.current,
+          createIntent.payload,
+          createIntent.key,
         );
-      } else {
+      } else if (campaign) {
         const payload = updateCampaignPayload(campaign, form);
         if (!Object.keys(payload).length) return;
         saved = await api.updateCampaign(campaign.id, payload);
+      } else {
+        return;
       }
-      if (epoch !== editorEpochRef.current || saved.sessionId !== selectedSessionId) return;
+      if (
+        !mutationOperation.isCurrent(operationToken)
+        || epoch !== editorEpochRef.current
+        || saved.sessionId !== selectedSessionIdRef.current
+      ) return;
       const created = !campaign;
       setEditor({ campaign: saved, kind: "open" });
       setForm(campaignFormFromDto(saved));
       setPreflight(null);
-      createKeyRef.current = null;
+      createIntentRef.current = null;
       void loadCampaigns(listStateRef.current);
       if (created) {
         const targetEpoch = editorEpochRef.current;
@@ -767,7 +975,11 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         tone: "success",
       });
     } catch (error) {
-      if (epoch !== editorEpochRef.current) return;
+      if (!mutationOperation.isCurrent(operationToken) || epoch !== editorEpochRef.current) return;
+      const outcomeUnknown = isUnknownMutationOutcome(error);
+      if (createIntent && outcomeUnknown) {
+        createIntentRef.current = { ...createIntent, outcomeUnknown: true };
+      }
       const scheduledAt = scheduleFieldError(error);
       if (error instanceof RuntimeRequestError) {
         setFormErrors((current) => ({
@@ -779,9 +991,31 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       } else if (scheduledAt) {
         setFormErrors((current) => ({ ...current, scheduledAt }));
       }
-      setDetailsError(campaignErrorMessage(error, "Could not save campaign details."));
+      setDetailsError(outcomeUnknown
+        ? unknownMutationOutcomeMessage(campaign ? "canonical-reload" : "idempotent-retry")
+        : campaignErrorMessage(error, "Could not save campaign details."));
+      if (outcomeUnknown && campaign) {
+        try {
+          const canonical = await api.getCampaign(campaign.id);
+          if (
+            mutationOperation.isCurrent(operationToken)
+            && epoch === editorEpochRef.current
+            && canonical.sessionId === selectedSessionIdRef.current
+          ) {
+            setEditor({ campaign: canonical, kind: "open" });
+            setPreflight((current) => current && isPreflightStale(current, canonical)
+              ? null
+              : current);
+            void loadCampaigns(listStateRef.current);
+          }
+        } catch {
+          // Preserve the staged form and unknown-outcome warning.
+        }
+      }
     } finally {
-      if (epoch === editorEpochRef.current) setSavingDetails(false);
+      if (mutationOperation.complete(operationToken) && epoch === editorEpochRef.current) {
+        setSavingDetails(false);
+      }
     }
   }
 
@@ -814,6 +1048,10 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     ) {
       return { message: "This group list is not available in the campaign session.", ok: false };
     }
+    const operationToken = mutationOperation.begin();
+    if (operationToken === null) {
+      return { message: "Another campaign change is already in progress.", ok: false };
+    }
     const epoch = editorEpochRef.current;
     const request = ++targetRequestRef.current;
     const identity = {
@@ -833,12 +1071,13 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         expectedTargetsRevision: targetsRevision,
       });
       if (
-        epoch !== editorEpochRef.current
+        !mutationOperation.isCurrent(operationToken)
+        || epoch !== editorEpochRef.current
         || request !== targetRequestRef.current
-        || editor.kind !== "open"
-        || editor.campaign?.id !== identity.campaignId
-        || editor.campaign.sessionId !== identity.sessionId
-        || editor.campaign.revision !== identity.campaignRevision
+        || editorRef.current.kind !== "open"
+        || editorRef.current.campaign?.id !== identity.campaignId
+        || editorRef.current.campaign.sessionId !== identity.sessionId
+        || editorRef.current.campaign.revision !== identity.campaignRevision
         || targetsRevisionRef.current !== identity.targetsRevision
         || canonical.source?.groupListId !== identity.groupListId
         || canonical.source.membershipRevision !== identity.membershipRevision
@@ -858,13 +1097,22 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       void loadCampaigns(listStateRef.current);
       return { message: "Group list applied.", ok: true };
     } catch (error) {
-      if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) {
+      if (
+        !mutationOperation.isCurrent(operationToken)
+        || epoch !== editorEpochRef.current
+        || request !== targetRequestRef.current
+      ) {
         return { message: "The editor changed while the list was applying.", ok: false };
       }
       const code = error instanceof RuntimeRequestError ? error.code : null;
-      const message = campaignErrorMessage(error, "Could not apply the group list.");
+      const outcomeUnknown = isUnknownMutationOutcome(error);
+      const message = outcomeUnknown
+        ? unknownMutationOutcomeMessage("canonical-reload")
+        : campaignErrorMessage(error, "Could not apply the group list.");
       setTargetsError(message);
-      if (code === "CAMPAIGN_TARGETS_REVISION_CONFLICT") {
+      if (outcomeUnknown) {
+        await reconcileTargetsAfterUnknownOutcome(campaign.id, epoch, request);
+      } else if (code === "CAMPAIGN_TARGETS_REVISION_CONFLICT") {
         setTargetsSaving(false);
         void loadTargets(campaign.id, epoch, true);
       }
@@ -874,7 +1122,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         reloadLists: code === "CAMPAIGN_TARGET_SOURCE_REVISION_CONFLICT",
       };
     } finally {
-      if (epoch === editorEpochRef.current && request === targetRequestRef.current) {
+      if (mutationOperation.complete(operationToken) && epoch === editorEpochRef.current) {
         setTargetsSaving(false);
       }
     }
@@ -917,6 +1165,8 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       setTargetsError(campaignErrorMessage({ code: validation.code }, "Invalid target set."));
       return;
     }
+    const operationToken = mutationOperation.begin();
+    if (operationToken === null) return;
     const epoch = editorEpochRef.current;
     const request = ++targetRequestRef.current;
     const expectedRevision = targetsRevision;
@@ -929,7 +1179,8 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         expectedRevision,
       );
       if (
-        epoch !== editorEpochRef.current
+        !mutationOperation.isCurrent(operationToken)
+        || epoch !== editorEpochRef.current
         || request !== targetRequestRef.current
         || targetsRevisionRef.current !== expectedRevision
       ) return;
@@ -948,14 +1199,23 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       void loadCampaigns(listStateRef.current);
       toast.notify({ id: `targets-saved-${campaign.id}`, title: "Target set saved", tone: "success" });
     } catch (error) {
-      if (epoch !== editorEpochRef.current || request !== targetRequestRef.current) return;
-      setTargetsError(campaignErrorMessage(error, "Could not replace campaign targets."));
-      if (error instanceof RuntimeRequestError && error.code === "CAMPAIGN_TARGETS_REVISION_CONFLICT") {
+      if (
+        !mutationOperation.isCurrent(operationToken)
+        || epoch !== editorEpochRef.current
+        || request !== targetRequestRef.current
+      ) return;
+      const outcomeUnknown = isUnknownMutationOutcome(error);
+      setTargetsError(outcomeUnknown
+        ? unknownMutationOutcomeMessage("canonical-reload")
+        : campaignErrorMessage(error, "Could not replace campaign targets."));
+      if (outcomeUnknown) {
+        await reconcileTargetsAfterUnknownOutcome(campaign.id, epoch, request);
+      } else if (error instanceof RuntimeRequestError && error.code === "CAMPAIGN_TARGETS_REVISION_CONFLICT") {
         setTargetsSaving(false);
         void loadTargets(campaign.id, epoch, true);
       }
     } finally {
-      if (epoch === editorEpochRef.current && request === targetRequestRef.current) {
+      if (mutationOperation.complete(operationToken) && epoch === editorEpochRef.current) {
         setTargetsSaving(false);
       }
     }
@@ -963,6 +1223,8 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
 
   async function runPreflight(executionMode: RuntimeCampaignExecutionMode) {
     if (!campaign || targetsRevision === null || detailsDirty || targetsDirty || revisionRefreshRequired) return;
+    const operationToken = preflightOperation.begin();
+    if (operationToken === null) return;
     const epoch = editorEpochRef.current;
     const campaignId = campaign.id;
     const campaignRevision = campaign.revision;
@@ -973,23 +1235,31 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     try {
       const report = await api.preflightCampaign(campaignId, executionMode);
       if (
-        epoch !== editorEpochRef.current
-        || editor.kind !== "open"
-        || editor.campaign?.id !== campaignId
-        || editor.campaign.sessionId !== selectedSessionId
+        !preflightOperation.isCurrent(operationToken)
+        || epoch !== editorEpochRef.current
+        || editorRef.current.kind !== "open"
+        || editorRef.current.campaign?.id !== campaignId
+        || editorRef.current.campaign.sessionId !== selectedSessionIdRef.current
+        || editorRef.current.campaign.revision !== campaignRevision
+        || targetsRevisionRef.current !== expectedTargetsRevision
         || report.campaignRevision !== campaignRevision
         || report.targetsRevision !== expectedTargetsRevision
+        || report.executionMode !== executionMode
       ) return;
       setPreflight(report);
     } catch (error) {
-      if (epoch !== editorEpochRef.current) return;
+      if (!preflightOperation.isCurrent(operationToken) || epoch !== editorEpochRef.current) return;
       setPreflightError(campaignErrorMessage(error, "Could not run preflight."));
     } finally {
-      if (epoch === editorEpochRef.current) setPreflightLoading(false);
+      if (preflightOperation.complete(operationToken) && epoch === editorEpochRef.current) {
+        setPreflightLoading(false);
+      }
     }
   }
 
   function changePreflightMode(executionMode: RuntimeCampaignExecutionMode) {
+    preflightOperation.cancel();
+    setPreflightLoading(false);
     setPreflightMode(executionMode);
     if (preflight?.executionMode !== executionMode) setPreflight(null);
     launchKeyRef.current = null;
@@ -997,17 +1267,22 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   }
 
   async function refreshCampaignAfterRun(campaignId: string, epoch: number, request: number) {
-    const refreshed = await api.getCampaign(campaignId);
-    if (
-      epoch !== editorEpochRef.current
-      || request !== runRequestRef.current
-      || refreshed.sessionId !== selectedSessionId
-    ) return;
-    setEditor({ campaign: refreshed, kind: "open" });
-    setForm(campaignFormFromDto(refreshed));
-    setPreflight((current) => current && isPreflightStale(current, refreshed) ? null : current);
-    void loadTargets(campaignId, epoch);
-    void loadCampaigns(listStateRef.current);
+    try {
+      const refreshed = await api.getCampaign(campaignId);
+      if (
+        epoch !== editorEpochRef.current
+        || request !== runRequestRef.current
+        || refreshed.sessionId !== selectedSessionIdRef.current
+      ) return false;
+      setEditor({ campaign: refreshed, kind: "open" });
+      setForm(campaignFormFromDto(refreshed));
+      setPreflight((current) => current && isPreflightStale(current, refreshed) ? null : current);
+      void loadTargets(campaignId, epoch);
+      void loadCampaigns(listStateRef.current);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async function launchRun(executionMode: RuntimeCampaignExecutionMode) {
@@ -1020,6 +1295,8 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       || preflight.executionMode !== executionMode
       || (executionMode === "LIVE" && !preflight.liveLaunchToken)
     ) return;
+    const operationToken = mutationOperation.begin();
+    if (operationToken === null) return;
     const epoch = editorEpochRef.current;
     const request = ++runRequestRef.current;
     const identity = {
@@ -1032,7 +1309,6 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       launchKeyRef.current = { key: crypto.randomUUID(), mode: executionMode };
     }
     const key = launchKeyRef.current.key;
-    setLiveLaunchConfirmationOpen(false);
     setRunMutation(`launch:${executionMode}`);
     setRunError(null);
     try {
@@ -1043,18 +1319,26 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         ...(executionMode === "LIVE" ? { preflightToken: preflight.liveLaunchToken! } : {}),
       }, key);
       if (
-        epoch !== editorEpochRef.current
+        !mutationOperation.isCurrent(operationToken)
+        || epoch !== editorEpochRef.current
         || request !== runRequestRef.current
-        || editor.kind !== "open"
-        || editor.campaign?.id !== identity.campaignId
-        || editor.campaign.sessionId !== identity.sessionId
-        || editor.campaign.revision !== identity.campaignRevision
+        || editorRef.current.kind !== "open"
+        || editorRef.current.campaign?.id !== identity.campaignId
+        || editorRef.current.campaign.sessionId !== identity.sessionId
+        || editorRef.current.campaign.revision !== identity.campaignRevision
         || targetsRevisionRef.current !== identity.targetsRevision
       ) return;
+      if (executionMode === "LIVE") setLiveLaunchConfirmationOpen(false);
       setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
       launchKeyRef.current = null;
       if (executionMode === "LIVE") {
-        await refreshCampaignAfterRun(campaign.id, epoch, request);
+        const refreshed = await refreshCampaignAfterRun(campaign.id, epoch, request);
+        if (!mutationOperation.isCurrent(operationToken)) return;
+        if (!refreshed) {
+          setRunError(
+            "The live run was created, but the latest Campaign state could not be refreshed. Reload runs before taking another action.",
+          );
+        }
       }
       toast.notify({
         id: `campaign-run-${run.id}`,
@@ -1062,29 +1346,41 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         tone: "success",
       });
     } catch (error) {
-      if (epoch !== editorEpochRef.current || request !== runRequestRef.current) return;
+      if (
+        !mutationOperation.isCurrent(operationToken)
+        || epoch !== editorEpochRef.current
+        || request !== runRequestRef.current
+      ) return;
       const code = error instanceof RuntimeRequestError ? error.code : null;
-      setRunError(campaignErrorMessage(error, "Could not create campaign run."));
+      setRunError(isUnknownMutationOutcome(error)
+        ? unknownMutationOutcomeMessage("idempotent-retry")
+        : campaignErrorMessage(error, "Could not create campaign run."));
       if (
         code === "CAMPAIGN_RUN_REVISION_CONFLICT"
         || code === "CAMPAIGN_RUN_PREFLIGHT_REQUIRED"
         || code === "CAMPAIGN_RUN_PREFLIGHT_INVALID"
       ) {
+        setLiveLaunchConfirmationOpen(false);
         launchKeyRef.current = null;
         setPreflight(null);
         await refreshCampaignAfterRun(campaign.id, epoch, request);
       } else if (code === "CAMPAIGN_RUN_LAUNCH_CONFLICT") {
+        setLiveLaunchConfirmationOpen(false);
         await refreshCampaignAfterRun(campaign.id, epoch, request);
         setRunMutation(null);
         void loadRuns(campaign.id, epoch);
       }
     } finally {
-      if (epoch === editorEpochRef.current && request === runRequestRef.current) setRunMutation(null);
+      if (mutationOperation.complete(operationToken) && epoch === editorEpochRef.current) {
+        setRunMutation(null);
+      }
     }
   }
 
   async function changeRunState(run: RuntimeCampaignRun, action: "pause" | "resume" | "cancel") {
     if (!campaign) return;
+    const operationToken = mutationOperation.begin();
+    if (operationToken === null) return;
     const epoch = editorEpochRef.current;
     const request = ++runRequestRef.current;
     const campaignId = campaign.id;
@@ -1097,19 +1393,39 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
           ? await api.resumeCampaignRun(run.id)
           : await api.cancelCampaignRun(run.id);
       if (
-        epoch !== editorEpochRef.current
+        !mutationOperation.isCurrent(operationToken)
+        || epoch !== editorEpochRef.current
         || request !== runRequestRef.current
         || updated.campaignId !== campaignId
       ) return;
       setRuns((current) => current.map((item) => item.id === updated.id ? updated : item));
-      await refreshCampaignAfterRun(campaignId, epoch, request);
+      const refreshed = await refreshCampaignAfterRun(campaignId, epoch, request);
+      if (mutationOperation.isCurrent(operationToken) && !refreshed) {
+        setRunError(
+          `Runtime accepted the ${action} action, but the latest Campaign state could not be refreshed. Reload runs before taking another action.`,
+        );
+      }
     } catch (error) {
-      if (epoch !== editorEpochRef.current || request !== runRequestRef.current) return;
-      setRunError(campaignErrorMessage(error, `Could not ${action} campaign run.`));
-      if (error instanceof RuntimeRequestError && error.code === "CAMPAIGN_RUN_STATE_CONFLICT") {
+      if (
+        !mutationOperation.isCurrent(operationToken)
+        || epoch !== editorEpochRef.current
+        || request !== runRequestRef.current
+      ) return;
+      const outcomeUnknown = isUnknownMutationOutcome(error);
+      setRunError(outcomeUnknown
+        ? unknownMutationOutcomeMessage("canonical-reload")
+        : campaignErrorMessage(error, `Could not ${action} campaign run.`));
+      if (
+        outcomeUnknown
+        || (error instanceof RuntimeRequestError && error.code === "CAMPAIGN_RUN_STATE_CONFLICT")
+      ) {
         try {
           const canonical = await api.getCampaignRun(run.id);
-          if (epoch === editorEpochRef.current && request === runRequestRef.current) {
+          if (
+            mutationOperation.isCurrent(operationToken)
+            && epoch === editorEpochRef.current
+            && request === runRequestRef.current
+          ) {
             setRuns((current) => current.map((item) => item.id === canonical.id ? canonical : item));
             await refreshCampaignAfterRun(campaignId, epoch, request);
           }
@@ -1118,7 +1434,9 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         }
       }
     } finally {
-      if (epoch === editorEpochRef.current && request === runRequestRef.current) setRunMutation(null);
+      if (mutationOperation.complete(operationToken) && epoch === editorEpochRef.current) {
+        setRunMutation(null);
+      }
     }
   }
 
@@ -1159,17 +1477,22 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const deleteIntentDisabledReason = deleteIntent
     ? campaignDeleteDisabledReason(deleteIntent, campaign?.id === deleteIntent.id ? runs : [])
     : null;
+  const campaignMutationBusy = savingDetails
+    || targetsSaving
+    || Boolean(runMutation)
+    || deletingCampaign;
   const footerAction = editorTab === "details" ? (
     <>
-      {campaign && <Button disabled={!editable || !detailsDirty || savingDetails} onClick={resetDetailsToSaved} variant="ghost">Reset to saved</Button>}
-      <Button disabled={!editable || savingDetails || (Boolean(campaign) && !detailsDirty)} loading={savingDetails} onClick={() => void saveDetails()} variant="primary">
+      {campaign && <Button disabled={!editable || !detailsDirty || campaignMutationBusy} onClick={resetDetailsToSaved} variant="ghost">Reset to saved</Button>}
+      {!campaign && createIntentRef.current?.outcomeUnknown && <Button disabled={campaignMutationBusy} onClick={restoreUnconfirmedCreateIntent} variant="ghost">Restore unconfirmed request</Button>}
+      <Button disabled={!editable || campaignMutationBusy || (Boolean(campaign) && !detailsDirty)} loading={savingDetails} onClick={() => void saveDetails()} variant="primary">
         {campaign ? "Save details" : "Create draft"}
       </Button>
     </>
   ) : editorTab === "targets" ? (
-    <><Button disabled={!campaign || !editable || !targetsDirty || targetsLoading || targetsSaving} onClick={resetTargetsToSaved} variant="ghost">Reset to saved</Button><Button disabled={!campaign || !editable || !targetsDirty || targetsLoading} loading={targetsSaving} onClick={() => void saveTargets()} variant="primary">Save target set</Button></>
+    <><Button disabled={!campaign || !editable || !targetsDirty || targetsLoading || campaignMutationBusy} onClick={resetTargetsToSaved} variant="ghost">Reset to saved</Button><Button disabled={!campaign || !editable || !targetsDirty || targetsLoading || campaignMutationBusy} loading={targetsSaving} onClick={() => void saveTargets()} variant="primary">Save target set</Button></>
   ) : (
-    <Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired || Boolean(runMutation)} loading={preflightLoading} onClick={() => void runPreflight(preflightMode)} variant="primary">Run preflight</Button>
+    <Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired || campaignMutationBusy || preflightLoading} loading={preflightLoading} onClick={() => void runPreflight(preflightMode)} variant="primary">Run preflight</Button>
   );
 
   return (
@@ -1314,7 +1637,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                 </WorkspaceSummaryCard>}
                 <section aria-labelledby="campaign-group-list-action-title" className="campaign-target-source-action">
                   <div><h4 id="campaign-group-list-action-title">Apply a group list</h4><p>Replace the saved target set immediately with a reusable list snapshot.</p>{targetsDirty && <small>Save or reset manual changes before applying a list.</small>}</div>
-                  <CampaignGroupListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || targetsSaving || targetsDirty} onApply={applyGroupList} sessionId={campaign.sessionId} />
+                  <CampaignGroupListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || campaignMutationBusy || targetsDirty} onApply={applyGroupList} sessionId={campaign.sessionId} />
                 </section>
                 <GroupSelectionPanel
                   afterToolbar={<>{targetNotice && <InlineAlert title="Persisted target snapshot" tone="success">{targetNotice}</InlineAlert>}{groupDirectory.error && <InlineAlert action={<Button onClick={groupDirectory.retry} size="sm">Retry</Button>} title="Could not load groups">{groupDirectory.error}</InlineAlert>}</>}
@@ -1323,7 +1646,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                   pageNote={!groupDirectory.loading && groupDirectory.groups.length === 0 && targetRows.length > 0 ? groupDirectory.hasCriteria ? "No additional synchronized groups match this search or filters. Selected and saved targets remain visible above." : "No additional synchronized groups are available. Selected and saved targets remain visible above." : undefined}
                   pagination={{ limit: groupDirectory.pageSize, loading: groupDirectory.loading, offset: groupDirectory.offset, onOffsetChange: groupDirectory.setOffset, total: groupDirectory.total }}
                   summary={targetDiff.selectedCount >= 900 ? <Badge tone={targetDiff.selectedCount >= 1_000 ? "danger" : "warning"} variant="status">{targetDiff.selectedCount > 1_000 ? `${targetDiff.selectedCount - 1_000} over limit` : targetDiff.selectedCount === 1_000 ? "Limit reached" : `${1_000 - targetDiff.selectedCount} remaining`}</Badge> : undefined}
-                  table={{ caption: "Groups available to the campaign target selection", disabled: !editable || targetsLoading || targetsSaving, emptyMessage: groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found.", loading: groupDirectory.loading || targetsLoading, onToggle: toggleTarget, onTogglePage: toggleAllPageTargets, pageIds: groupPageIds, pinnedIds: pinnedTargetIds, rows: targetRows, selectedIds: draftTargetIdSet, unknownParticipantsTitle: "Participant count is unavailable in the saved target snapshot." }}
+                  table={{ caption: "Groups available to the campaign target selection", disabled: !editable || targetsLoading || campaignMutationBusy, emptyMessage: groupDirectory.hasCriteria ? "No synchronized groups match this search or filters." : "No synchronized groups found.", loading: groupDirectory.loading || targetsLoading, onToggle: toggleTarget, onTogglePage: toggleAllPageTargets, pageIds: groupPageIds, pinnedIds: pinnedTargetIds, rows: targetRows, selectedIds: draftTargetIdSet, unknownParticipantsTitle: "Participant count is unavailable in the saved target snapshot." }}
                   title="Browse groups"
                   titleId="campaign-target-group-directory-title"
                   toolbar={{ filterAriaLabel: "Target group filters", filterTitle: "Filter target groups", filters: groupDirectory.filters, filtersOpen: groupDirectory.filtersOpen, idPrefix: "campaign-target", inputQuery: groupDirectory.inputQuery, loading: groupDirectory.loading, onFiltersChange: groupDirectory.setFilters, onFiltersOpenChange: groupDirectory.setFiltersOpen, onParticipantErrorsClear: () => groupDirectory.setParticipantErrors({}), onSearchChange: groupDirectory.setSearch, pageItemCount: groupDirectory.groups.length, pageOffset: groupDirectory.offset, participantErrors: groupDirectory.participantErrors, total: groupDirectory.total }}
@@ -1342,23 +1665,23 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                     <span className="campaign-preflight-setup-icon"><AppIcon name="settings" size="sm" /></span>
                     <div><h4 id="preflight-configuration-title">Review configuration</h4><p>Choose the Runtime policy context for this persisted campaign snapshot.</p></div>
                   </div>
-                  <div className="campaign-preflight-mode"><SelectMenu description="This evaluates policy only. It does not create a run or send messages." disabled={preflightLoading || Boolean(runMutation)} label="Preflight mode" onChange={changePreflightMode} options={PREFLIGHT_MODE_OPTIONS} value={preflightMode} /></div>
+                  <div className="campaign-preflight-mode"><SelectMenu description="This evaluates policy only. It does not create a run or send messages." disabled={preflightLoading || campaignMutationBusy} label="Preflight mode" onChange={changePreflightMode} options={PREFLIGHT_MODE_OPTIONS} value={preflightMode} /></div>
                   <div className="campaign-preflight-basis" aria-label="Persisted revisions under review"><span>Review basis</span><strong>Campaign r{campaign.revision} · targets r{targetsRevision ?? campaign.targetsRevision}</strong></div>
                 </section>
                 {preflightError && <InlineAlert title="Preflight failed">{preflightError}</InlineAlert>}
                 {preflight && <PreflightReport report={preflight} stale={reportStale} />}
                 {!preflight && !preflightError && <WorkspaceEmptyState className="campaign-preflight-empty" icon="activity" title="Ready for evaluation">Run preflight to receive Runtime's authoritative readiness decision for the persisted revisions above.</WorkspaceEmptyState>}
-                {runError && <InlineAlert title="Campaign run update">{runError}</InlineAlert>}
+                {runError && !liveLaunchConfirmationOpen && <InlineAlert title="Campaign run update">{runError}</InlineAlert>}
                 {campaign.status === "DRAFT" && preflight && !reportStale && preflight.status !== "BLOCK" && <section className="campaign-launch-panel">
                   <span className="campaign-launch-icon"><AppIcon name="runs" size="md" /></span><div><strong>{preflight.executionMode === "DRY_RUN" ? "Create a dry run" : "Launch this campaign"}</strong><p>Use campaign r{preflight.campaignRevision} and targets r{preflight.targetsRevision}. Runtime verifies both revisions again.</p></div>
                   {preflight.executionMode === "DRY_RUN"
-                    ? <Button disabled={Boolean(runMutation)} loading={runMutation === "launch:DRY_RUN"} onClick={() => void launchRun("DRY_RUN")} variant="primary">Create dry run</Button>
-                    : <Button disabled={Boolean(runMutation)} loading={runMutation === "launch:LIVE"} onClick={() => setLiveLaunchConfirmationOpen(true)} variant="primary">Launch live campaign</Button>}
+                    ? <Button disabled={campaignMutationBusy || preflightLoading} loading={runMutation === "launch:DRY_RUN"} onClick={() => void launchRun("DRY_RUN")} variant="primary">Create dry run</Button>
+                    : <Button disabled={campaignMutationBusy || preflightLoading} loading={runMutation === "launch:LIVE"} onClick={() => { setRunError(null); setLiveLaunchConfirmationOpen(true); }} variant="primary">Launch live campaign</Button>}
                 </section>}
                 <CampaignRunsPanel
                   campaignStatus={campaign.status}
                   loading={runsLoading}
-                  mutation={runMutation}
+                  mutation={runMutation ?? (campaignMutationBusy ? "campaign" : null)}
                   onAction={changeRunState}
                   onReload={() => void loadRuns(campaign.id, editorEpochRef.current, true)}
                   onOpenRun={onOpenRun}
@@ -1381,21 +1704,27 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       />
       <ConfirmationDialog
         body="Create the single LIVE run for these reviewed campaign and target revisions? Runtime may begin or schedule real message delivery, and the campaign will become read-only."
+        busy={runMutation === "launch:LIVE"}
+        busyLabel="Launching…"
         cancelLabel="Keep reviewing"
         confirmLabel="Launch live campaign"
+        error={runError}
+        errorTitle="Could not launch campaign"
         onCancel={() => setLiveLaunchConfirmationOpen(false)}
         onConfirm={() => void launchRun("LIVE")}
         open={liveLaunchConfirmationOpen}
         title="Launch LIVE campaign?"
       />
       <ConfirmationDialog
-        body={<><p>Campaign “{deleteIntent?.name}” will be removed from the workspace. Run and message delivery history will remain available for audit. You cannot undo this action in WA Studio.</p>{campaignDeleteError && <InlineAlert title="Could not delete campaign">{campaignDeleteError}</InlineAlert>}</>}
+        body={<p>Campaign “{deleteIntent?.name}” will be removed from the workspace. Run and message delivery history will remain available for audit. You cannot undo this action in WA Studio.</p>}
         busy={deletingCampaign}
         busyLabel="Deleting…"
         cancelLabel="Cancel"
-        confirmDisabled={Boolean(deleteIntentDisabledReason)}
+        confirmDisabled={Boolean(deleteIntentDisabledReason) || (campaignMutationBusy && !deletingCampaign)}
         confirmLabel="Delete campaign"
         confirmVariant="danger"
+        error={campaignDeleteError}
+        errorTitle="Could not delete campaign"
         onCancel={cancelCampaignDelete}
         onConfirm={() => void deleteCampaign()}
         open={Boolean(deleteIntent)}

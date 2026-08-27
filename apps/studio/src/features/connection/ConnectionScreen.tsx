@@ -3,8 +3,12 @@ import { FormEvent, useState } from "react";
 import {
   probeRuntimeConnection,
   type RuntimeConnectionInput,
+  type RuntimeReadOptions,
   type RuntimeConnectionResult,
 } from "@/shared/api/runtime-client";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
+import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
+import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
 import { Button } from "@/shared/ui/Button";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { TextField } from "@/shared/ui/TextField";
@@ -17,29 +21,55 @@ type ConnectionState =
   | { status: "failed"; message: string };
 
 interface ConnectionScreenProps {
-  probeConnection?: (input: RuntimeConnectionInput) => Promise<RuntimeConnectionResult>;
+  probeConnection?: (
+    input: RuntimeConnectionInput,
+    options?: RuntimeReadOptions,
+  ) => Promise<RuntimeConnectionResult>;
+}
+
+function probeExternalRuntime(
+  input: RuntimeConnectionInput,
+  options?: RuntimeReadOptions,
+): Promise<RuntimeConnectionResult> {
+  return probeRuntimeConnection(input, undefined, options);
 }
 
 export function ConnectionScreen({
-  probeConnection = probeRuntimeConnection,
+  probeConnection = probeExternalRuntime,
 }: ConnectionScreenProps = {}) {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [state, setState] = useState<ConnectionState>({ status: "idle" });
+  const connectionRead = useLatestRequest();
+  const connectionOperation = useSingleFlightOperation();
   const isChecking = state.status === "checking";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const token = connectionOperation.begin();
+    if (token === null) return;
+    const signal = connectionRead.begin();
     setState({ status: "checking" });
 
     try {
-      const result = await probeConnection({ baseUrl, apiKey });
+      const result = await probeConnection({ baseUrl, apiKey }, { signal });
+      if (
+        !connectionOperation.isCurrent(token)
+        || !connectionRead.isCurrent(signal)
+      ) return;
       setState({ status: "connected", result });
     } catch (error) {
+      if (
+        !connectionOperation.isCurrent(token)
+        || !connectionRead.isCurrent(signal)
+      ) return;
       setState({
         status: "failed",
-        message: error instanceof Error ? error.message : "Connection failed.",
+        message: userFacingErrorMessage(error, "Connection failed.", [apiKey]),
       });
+    } finally {
+      connectionRead.complete(signal);
+      connectionOperation.complete(token);
     }
   }
 
@@ -60,6 +90,7 @@ export function ConnectionScreen({
         </div>
         <div className="connection-fields">
           <TextField
+            description="Use HTTPS for remote hosts; plain HTTP is limited to localhost."
             disabled={isChecking}
             icon="server"
             id="runtime-url"

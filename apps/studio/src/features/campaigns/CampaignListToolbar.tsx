@@ -4,6 +4,7 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
 import { FilterOption } from "@/shared/ui/FilterOption";
+import { formatListResultSummary } from "@/shared/ui/list-result-summary";
 import {
   activeCampaignFilterCount,
   CAMPAIGN_SCHEDULE_OPTIONS,
@@ -49,7 +50,14 @@ export function CampaignListToolbar({
       onToggleFilters={() => setFiltersOpen((open) => !open)}
       resultSummary={loading
         ? "Updating results…"
-        : `${firstItem}–${lastItem} of ${total}${hasCriteria ? " matches" : ""}`}
+        : formatListResultSummary({
+          firstItem,
+          hasCriteria,
+          lastItem,
+          plural: "campaigns",
+          singular: "campaign",
+          total,
+        })}
       searchLabel="Search campaigns"
       searchPlaceholder="Search campaign name or exact UUID"
       searchValue={state.inputQuery}

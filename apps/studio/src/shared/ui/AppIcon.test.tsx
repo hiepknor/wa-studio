@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { AppIcon } from "./AppIcon";
 
 describe("AppIcon", () => {
-  it("renders the accepted OpenDesign path for core product icons", () => {
+  it("renders the product-owned WARP path for core icons", () => {
     const { container } = render(<AppIcon name="groups" />);
     const svg = container.querySelector("svg");
 

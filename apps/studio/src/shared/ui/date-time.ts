@@ -1,4 +1,5 @@
 export type DateTimePrecision = "minute" | "second";
+export type RelativeDateTimeStyle = "compact" | "long";
 
 export interface FormatDateTimeOptions {
   fallback?: string;
@@ -60,10 +61,12 @@ export function formatRelativeDateTime(
   {
     fallback = "—",
     now = new Date(),
+    style = "long",
     timeZone,
   }: {
     fallback?: string;
     now?: Date;
+    style?: RelativeDateTimeStyle;
     timeZone?: string;
   } = {},
 ): string {
@@ -72,11 +75,26 @@ export function formatRelativeDateTime(
 
   const elapsedMs = Math.max(0, now.getTime() - date.getTime());
   const elapsedMinutes = Math.floor(elapsedMs / 60_000);
-  if (elapsedMinutes < 1) return "Just now";
-  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago`;
+  if (elapsedMinutes < 1) return style === "compact" ? "Now" : "Just now";
+  if (elapsedMinutes < 60) {
+    return style === "compact" ? `${elapsedMinutes}m ago` : `${elapsedMinutes} min ago`;
+  }
 
   const elapsedHours = Math.floor(elapsedMs / 3_600_000);
-  if (elapsedHours < 24) return `${elapsedHours} hr ago`;
+  if (elapsedHours < 24) {
+    return style === "compact" ? `${elapsedHours}h ago` : `${elapsedHours} hr ago`;
+  }
+
+  const elapsedDays = Math.floor(elapsedMs / 86_400_000);
+  if (style === "compact") {
+    if (elapsedDays < 7) return `${elapsedDays}d ago`;
+    const compactDateFormatter = new Intl.DateTimeFormat(LOCALE, {
+      day: "2-digit",
+      month: "short",
+      ...(timeZone ? { timeZone } : {}),
+    });
+    return compactDateFormatter.format(date);
+  }
 
   const timeFormatter = new Intl.DateTimeFormat(LOCALE, {
     hour: "2-digit",
@@ -86,7 +104,6 @@ export function formatRelativeDateTime(
   });
   if (elapsedHours < 48) return `Yesterday, ${timeFormatter.format(date)}`;
 
-  const elapsedDays = Math.floor(elapsedMs / 86_400_000);
   if (elapsedDays < 7) return `${elapsedDays} days ago`;
 
   const dateFormatter = new Intl.DateTimeFormat(LOCALE, {

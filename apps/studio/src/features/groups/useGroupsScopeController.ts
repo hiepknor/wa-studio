@@ -7,6 +7,11 @@ import {
   type RuntimeGroupListGroup,
   type RuntimeGroupListMembership,
 } from "@/shared/api/runtime-client";
+import {
+  isUnknownMutationOutcome,
+  unknownMutationOutcomeMessage,
+} from "@/shared/api/runtime-mutation";
+import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
 import type { GroupsTableRow } from "./GroupsTable";
 import {
   createGroupListDraft,
@@ -32,6 +37,18 @@ type ScopeTransition =
 interface ScopeError {
   body: string;
   title: string;
+}
+
+interface GroupListCreateIntent {
+  fingerprint: string;
+  key: string;
+  outcomeUnknown: boolean;
+  payload: {
+    description: string | null;
+    groupIds: string[];
+    name: string;
+    sessionId: string;
+  };
 }
 
 interface UseGroupsScopeControllerInput {
@@ -91,7 +108,12 @@ export function useGroupsScopeController({
   const [catalogRevision, setCatalogRevision] = useState(0);
   const membershipRequestRef = useRef(0);
   const catalogRequestRef = useRef(0);
+  const saveRequestRef = useRef(0);
+  const saveActiveRequestRef = useRef<number | null>(null);
+  const createIntentRef = useRef<GroupListCreateIntent | null>(null);
   const sessionRef = useRef(sessionId);
+  const catalogRead = useLatestRequest();
+  const membershipRead = useLatestRequest();
 
   const selectedList = scope.mode === "list:view"
     ? scope.list
@@ -104,8 +126,13 @@ export function useGroupsScopeController({
   useEffect(() => {
     if (sessionRef.current === sessionId) return;
     sessionRef.current = sessionId;
+    catalogRead.cancel();
+    membershipRead.cancel();
     membershipRequestRef.current += 1;
     catalogRequestRef.current += 1;
+    saveRequestRef.current += 1;
+    saveActiveRequestRef.current = null;
+    createIntentRef.current = null;
     setScope({ mode: "directory" });
     setDirectoryIds([]);
     setKnownRows({});
@@ -127,9 +154,16 @@ export function useGroupsScopeController({
     setCatalogTotal(0);
     setCatalogLoading(false);
     setCatalogError(null);
-  }, [sessionId]);
+  }, [catalogRead, membershipRead, sessionId]);
+
+  useEffect(() => () => {
+    saveRequestRef.current += 1;
+    saveActiveRequestRef.current = null;
+    createIntentRef.current = null;
+  }, []);
 
   useEffect(() => {
+    catalogRead.cancel();
     const normalized = catalogInputQuery.trim();
     const timeout = window.setTimeout(() => {
       setCatalogQuery((current) => {
@@ -139,7 +173,7 @@ export function useGroupsScopeController({
       });
     }, 250);
     return () => window.clearTimeout(timeout);
-  }, [catalogInputQuery]);
+  }, [catalogInputQuery, catalogRead]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -155,6 +189,7 @@ export function useGroupsScopeController({
       return;
     }
     const request = ++catalogRequestRef.current;
+    const signal = catalogRead.begin();
     setCatalogLoading(true);
     setCatalogError(null);
     void api.listGroupLists({
@@ -162,8 +197,12 @@ export function useGroupsScopeController({
       limit: CATALOG_PAGE_SIZE,
       offset: catalogOffset,
       ...(catalogQuery ? { query: catalogQuery } : {}),
-    }).then((page) => {
-      if (request !== catalogRequestRef.current || sessionRef.current !== sessionId) return;
+    }, { signal }).then((page) => {
+      if (
+        !catalogRead.isCurrent(signal)
+        || request !== catalogRequestRef.current
+        || sessionRef.current !== sessionId
+      ) return;
       if (page.data.some((list) => list.sessionId !== sessionId)) {
         throw new Error("Runtime returned group lists outside the active session.");
       }
@@ -172,22 +211,31 @@ export function useGroupsScopeController({
         : mergeCatalog(current, page.data));
       setCatalogTotal(page.meta.total);
     }).catch((error: unknown) => {
+      if (!catalogRead.isCurrent(signal)) return;
       if (request !== catalogRequestRef.current) return;
       setCatalogError(runtimeErrorMessage(error, "Could not load saved lists."));
     }).finally(() => {
-      if (request === catalogRequestRef.current) setCatalogLoading(false);
+      const current = catalogRead.isCurrent(signal);
+      catalogRead.complete(signal);
+      if (current && request === catalogRequestRef.current) setCatalogLoading(false);
     });
-  }, [api, catalogOffset, catalogQuery, catalogRevision, sessionId]);
+    return () => catalogRead.cancel();
+  }, [api, catalogOffset, catalogQuery, catalogRead, catalogRevision, sessionId]);
 
   useEffect(() => {
     if (scope.mode !== "list:view") return;
     const list = scope.list;
     const request = ++membershipRequestRef.current;
+    const signal = membershipRead.begin();
     setMembership(null);
     setMembershipLoading(true);
     setMembershipError(null);
-    void api.getGroupListMembership(list.id).then((next) => {
-      if (request !== membershipRequestRef.current || sessionRef.current !== sessionId) return;
+    void api.getGroupListMembership(list.id, { signal }).then((next) => {
+      if (
+        !membershipRead.isCurrent(signal)
+        || request !== membershipRequestRef.current
+        || sessionRef.current !== sessionId
+      ) return;
       if (next.list.sessionId !== sessionId || next.list.archivedAt !== null) {
         throw new Error("This saved list is not available in the active session.");
       }
@@ -200,13 +248,17 @@ export function useGroupsScopeController({
         ? { list: next.list, mode: "list:view" }
         : current);
     }).catch((error: unknown) => {
+      if (!membershipRead.isCurrent(signal)) return;
       if (request === membershipRequestRef.current) {
         setMembershipError(runtimeErrorMessage(error, "Could not load saved list membership."));
       }
     }).finally(() => {
-      if (request === membershipRequestRef.current) setMembershipLoading(false);
+      const current = membershipRead.isCurrent(signal);
+      membershipRead.complete(signal);
+      if (current && request === membershipRequestRef.current) setMembershipLoading(false);
     });
-  }, [api, membershipRevision, scope.mode === "list:view" ? scope.list.id : null, sessionId]);
+    return () => membershipRead.cancel();
+  }, [api, membershipRead, membershipRevision, scope.mode === "list:view" ? scope.list.id : null, sessionId]);
 
   useEffect(() => () => {
     membershipRequestRef.current += 1;
@@ -214,12 +266,18 @@ export function useGroupsScopeController({
   }, []);
 
   const applyTransition = useCallback((transition: ScopeTransition) => {
+    saveRequestRef.current += 1;
+    saveActiveRequestRef.current = null;
+    setSaving(false);
+    createIntentRef.current = null;
     setSelectionError(null);
     setSaveError(null);
     setFieldErrors({});
     if (transition.kind === "directory") {
+      membershipRead.cancel();
       membershipRequestRef.current += 1;
       setMembership(null);
+      setMembershipLoading(false);
       setMembershipError(null);
       setScope({ mode: "directory" });
       return;
@@ -230,7 +288,7 @@ export function useGroupsScopeController({
     }
     setMetadataSeedIds([...transition.seedIds]);
     setMetadataOpen(true);
-  }, []);
+  }, [membershipRead]);
 
   const requestTransition = useCallback((transition: ScopeTransition) => {
     if (isGroupsScopeDirty(scope)) {
@@ -293,6 +351,7 @@ export function useGroupsScopeController({
 
   function continueMetadata(metadata: { description: string; name: string }) {
     if (!sessionId) return;
+    createIntentRef.current = null;
     const draft = createGroupListDraft({
       ...metadata,
       idempotencyKey: crypto.randomUUID(),
@@ -308,6 +367,7 @@ export function useGroupsScopeController({
 
   function startEdit() {
     if (!membership || !selectedList) return;
+    createIntentRef.current = null;
     setScope({
       draft: editGroupListDraft(membership, crypto.randomUUID()),
       mode: "list:edit",
@@ -350,11 +410,14 @@ export function useGroupsScopeController({
     applyDraftSelection((draft) => toggleGroupListDraftPage(draft, pageIds));
   }
 
-  async function reloadCanonicalPreservingDraft(draft: GroupListDraft) {
+  async function reloadCanonicalPreservingDraft(
+    draft: GroupListDraft,
+    requestIsCurrent: () => boolean,
+  ) {
     if (!draft.canonical) return;
     try {
       const latest = await api.getGroupListMembership(draft.canonical.id);
-      if (latest.list.sessionId !== sessionId) return;
+      if (!requestIsCurrent() || latest.list.sessionId !== sessionId) return;
       const canonicalDraft = editGroupListDraft(latest, draft.createIdempotencyKey);
       setKnownRows((current) => ({
         ...current,
@@ -378,14 +441,49 @@ export function useGroupsScopeController({
   }
 
   async function saveDraft(): Promise<RuntimeGroupList | null> {
-    if ((scope.mode !== "list:create" && scope.mode !== "list:edit") || saving) return null;
+    if (
+      (scope.mode !== "list:create" && scope.mode !== "list:edit")
+      || saveActiveRequestRef.current !== null
+    ) return null;
     const draft = scope.draft;
+    const request = ++saveRequestRef.current;
+    const targetSessionId = sessionId;
+    const requestIsCurrent = () => request === saveRequestRef.current
+      && sessionRef.current === targetSessionId;
     const name = draft.name.trim();
     if (!name) {
       setFieldErrors({ name: "Name is required." });
       return null;
     }
     const diff = groupListDraftDiff(draft);
+    let createIntent: GroupListCreateIntent | null = null;
+    if (!draft.canonical) {
+      const payload = {
+        sessionId: draft.sessionId,
+        name,
+        description: draft.description.trim() || null,
+        groupIds: [...draft.memberIds],
+      };
+      const fingerprint = JSON.stringify(payload);
+      const existing = createIntentRef.current;
+      if (existing?.outcomeUnknown && existing.fingerprint !== fingerprint) {
+        setSaveError({
+          title: "Create result not confirmed",
+          body: "Restore the exact unconfirmed request before retrying it, or discard this draft. Changing its request key could create a duplicate group list.",
+        });
+        return null;
+      }
+      createIntent = existing && existing.fingerprint === fingerprint
+        ? existing
+        : {
+          fingerprint,
+          key: draft.createIdempotencyKey,
+          outcomeUnknown: false,
+          payload,
+      };
+      createIntentRef.current = createIntent;
+    }
+    saveActiveRequestRef.current = request;
     setSaving(true);
     setSaveError(null);
     setFieldErrors({});
@@ -394,15 +492,15 @@ export function useGroupsScopeController({
     try {
       let savedList: RuntimeGroupList;
       let savedMembership: RuntimeGroupListMembership;
-      if (!draft.canonical) {
-        savedList = await api.createGroupList({
-          sessionId: draft.sessionId,
-          name,
-          description: draft.description.trim() || null,
-          groupIds: draft.memberIds,
-        }, draft.createIdempotencyKey);
+      if (createIntent) {
+        savedList = await api.createGroupList(
+          createIntent.payload,
+          createIntent.key,
+        );
+        if (!requestIsCurrent()) return null;
         savedMembership = await api.getGroupListMembership(savedList.id);
       } else {
+        if (!draft.canonical) return null;
         savedList = draft.canonical;
         if (diff.metadataDirty) {
           savedList = await api.updateGroupList(savedList.id, {
@@ -410,6 +508,7 @@ export function useGroupsScopeController({
             description: draft.description.trim() || null,
             expectedRevision: savedList.revision,
           });
+          if (!requestIsCurrent()) return null;
           metadataCommitted = true;
         }
         if (diff.membershipDirty) {
@@ -419,13 +518,18 @@ export function useGroupsScopeController({
             draft.memberIds,
             savedList.membershipRevision,
           );
+          if (!requestIsCurrent()) return null;
           savedList = savedMembership.list;
         } else {
           savedMembership = await api.getGroupListMembership(savedList.id);
           savedList = savedMembership.list;
         }
       }
-      if (savedList.sessionId !== sessionId || savedMembership.list.sessionId !== sessionId) {
+      if (!requestIsCurrent()) return null;
+      if (
+        savedList.sessionId !== targetSessionId
+        || savedMembership.list.sessionId !== targetSessionId
+      ) {
         throw new Error("This saved list belongs to a different Runtime session.");
       }
       setMembership(savedMembership);
@@ -436,8 +540,14 @@ export function useGroupsScopeController({
       setScope({ list: savedMembership.list, mode: "list:view" });
       setCatalogLists((current) => mergeCatalog(current, [savedMembership.list]));
       setCatalogRevision((revision) => revision + 1);
+      createIntentRef.current = null;
       return savedMembership.list;
     } catch (error) {
+      if (!requestIsCurrent()) return null;
+      const outcomeUnknown = isUnknownMutationOutcome(error);
+      if (createIntent && outcomeUnknown) {
+        createIntentRef.current = { ...createIntent, outcomeUnknown: true };
+      }
       if (error instanceof RuntimeRequestError) {
         setFieldErrors({
           description: error.fieldErrors.description?.[0],
@@ -450,7 +560,9 @@ export function useGroupsScopeController({
           && error.code === "GROUP_LIST_REVISION_CONFLICT";
         setSaveError({
           title: "Group selection was not saved",
-          body: conflict
+          body: outcomeUnknown
+            ? unknownMutationOutcomeMessage("canonical-reload")
+            : conflict
             ? `${metadataCommitted ? "List details were saved, but membership" : "Membership"} changed concurrently. Runtime's canonical membership was reloaded; your staged changes remain available for review.`
             : `${metadataCommitted ? "List details were saved, but group membership" : "Group membership"} was not updated. Runtime keeps the previous saved membership; your staged changes remain available to retry.`,
         });
@@ -459,13 +571,22 @@ export function useGroupsScopeController({
           title: draft.canonical && diff.metadataDirty
             ? "List details were not saved"
             : "Could not save group list",
-          body: runtimeErrorMessage(error, "Could not save group list."),
+          body: outcomeUnknown
+            ? unknownMutationOutcomeMessage(
+              draft.canonical ? "canonical-reload" : "idempotent-retry",
+            )
+            : runtimeErrorMessage(error, "Could not save group list."),
         });
       }
-      if (draft.canonical) await reloadCanonicalPreservingDraft(draft);
+      if (draft.canonical) {
+        await reloadCanonicalPreservingDraft(draft, requestIsCurrent);
+      }
       return null;
     } finally {
-      setSaving(false);
+      if (saveActiveRequestRef.current === request) {
+        saveActiveRequestRef.current = null;
+      }
+      if (requestIsCurrent()) setSaving(false);
     }
   }
 
@@ -479,6 +600,28 @@ export function useGroupsScopeController({
     setCatalogTotal((current) => Math.max(0, current - 1));
     if (selectedList?.id === listId) applyTransition({ kind: "directory" });
     setCatalogRevision((revision) => revision + 1);
+  }
+
+  function restoreUnconfirmedCreateIntent() {
+    const intent = createIntentRef.current;
+    if (!intent?.outcomeUnknown) return;
+    setScope((current) => current.mode === "list:create"
+      && current.draft.createIdempotencyKey === intent.key
+      ? {
+        ...current,
+        draft: {
+          ...current.draft,
+          description: intent.payload.description ?? "",
+          memberIds: [...intent.payload.groupIds],
+          name: intent.payload.name,
+        },
+      }
+      : current);
+    setFieldErrors({});
+    setSaveError({
+      title: "Create result not confirmed",
+      body: unknownMutationOutcomeMessage("idempotent-retry"),
+    });
   }
 
   return {
@@ -503,6 +646,7 @@ export function useGroupsScopeController({
     membershipLoading,
     metadataOpen,
     metadataSeedCount: metadataSeedIds.length,
+    hasUnconfirmedCreateIntent: Boolean(createIntentRef.current?.outcomeUnknown),
     rememberRows,
     requestDirectory: () => requestTransition({ kind: "directory" }),
     requestList: (list: RuntimeGroupList) => requestTransition({ kind: "list", list }),
@@ -521,6 +665,7 @@ export function useGroupsScopeController({
     setCatalogInputQuery,
     setMetadataOpen,
     reloadMembership: () => setMembershipRevision((revision) => revision + 1),
+    restoreUnconfirmedCreateIntent,
     startEdit,
     toggleDirectory,
     toggleDirectoryPage,

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeSyncRun } from "@/shared/api/runtime-client";
 import { pollSessionSync, SESSION_SYNC_POLL_DELAYS_MS } from "./session-sync";
@@ -43,6 +43,11 @@ const completedRun: RuntimeSyncRun = {
 };
 
 const immediateWait = vi.fn().mockResolvedValue(undefined);
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("pollSessionSync", () => {
   it("uses a terminal status explicitly returned by Runtime without extra polling", async () => {
@@ -131,5 +136,37 @@ describe("pollSessionSync", () => {
       wait: vi.fn().mockRejectedValue(new DOMException("Aborted", "AbortError")),
     })).resolves.toEqual({ status: "cancelled", run: pendingRun });
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it("cancels immediately when the signal was already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const read = vi.fn();
+
+    await expect(pollSessionSync({
+      initialRun: pendingRun,
+      onObservation: vi.fn(),
+      read,
+      signal: controller.signal,
+    })).resolves.toEqual({ status: "cancelled", run: pendingRun });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("removes the abort listener after a polling delay completes", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const removeEventListener = vi.spyOn(controller.signal, "removeEventListener");
+    const poll = pollSessionSync({
+      initialRun: pendingRun,
+      onObservation: vi.fn(),
+      read: vi.fn().mockResolvedValue(completedRun),
+      signal: controller.signal,
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(poll).resolves.toEqual({ status: "completed", run: completedRun });
+    expect(removeEventListener).toHaveBeenCalledWith("abort", expect.any(Function));
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

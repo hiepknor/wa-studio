@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import {
+  resolveWorkspaceNavigationDialogCopy,
+  useWorkspaceNavigationGuard,
+  type WorkspaceNavigationGuard,
+} from "@/app/WorkspaceNavigationGuard";
+import {
   checkForAppUpdate,
   getAppUpdateState,
   installAppUpdate,
@@ -21,14 +26,18 @@ import {
   type ManagedRuntimeBackup,
   type ManagedRuntimeDiagnostics,
 } from "@/shared/native/managed-runtime";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
+import { useLatestOperation } from "@/shared/hooks/useLatestOperation";
+import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
+import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { Tabs, type TabItem } from "@/shared/ui/Tabs";
 import { AppUpdateSettings } from "./AppUpdateSettings";
 import { BackupRecoverySettings } from "./BackupRecoverySettings";
 import { ManagedRuntimeConfigurationPanel } from "./ManagedRuntimeConfigurationPanel";
 import { SettingsOverviewPanel } from "./SettingsOverviewPanel";
-import type { SettingsTab } from "./settings-types";
+import type { SettingsTab, SettingsTaskNavigationState } from "./settings-types";
 import "./settings.css";
 
 interface SettingsScreenProps {
@@ -53,6 +62,44 @@ const SETTINGS_TABS: readonly TabItem<SettingsTab>[] = [
   { id: "updates", label: "Updates" },
 ];
 
+const CONNECTION_NAVIGATION_GUARD = {
+  message: "Unsaved OpenWA endpoint, credential, or live-send changes will be discarded. WA Runtime is not changed.",
+  title: "Leave connection changes?",
+} as const;
+
+const RECOVERY_DRAFT_NAVIGATION_GUARD = {
+  message: "Entered recovery passphrases will be cleared before leaving this task. No archive operation has started.",
+  title: "Leave recovery setup?",
+} as const;
+
+const RECOVERY_BUSY_NAVIGATION_GUARD = {
+  busy: true,
+  busyLabel: "Finishing operation…",
+  message: "A backup or recovery operation is still running. Keep Settings open until it finishes.",
+  settledMessage: "The backup or recovery operation has finished. Continue to the requested destination.",
+  settledTitle: "Recovery operation finished",
+  title: "Recovery operation in progress",
+} as const;
+
+const UPDATE_BUSY_NAVIGATION_GUARD = {
+  busy: true,
+  busyLabel: "Installing update…",
+  message: "WA Studio is installing a signed update and WA Runtime may be paused. Keep Settings open until the operation finishes.",
+  settledMessage: "The update installation has finished. Continue to the requested destination.",
+  settledTitle: "Update operation finished",
+  title: "Update installation in progress",
+} as const;
+
+const CLEAN_TASK_NAVIGATION_STATE: SettingsTaskNavigationState = {
+  busy: false,
+  dirty: false,
+};
+
+interface PendingSettingsTab {
+  guard: WorkspaceNavigationGuard;
+  tab: SettingsTab;
+}
+
 export function SettingsScreen({
   checkUpdate = checkForAppUpdate,
   createBackup = createManagedRuntimeBackup,
@@ -69,6 +116,13 @@ export function SettingsScreen({
 }: SettingsScreenProps = {}) {
   const { managedRuntime } = useRuntimeConnection();
   const [activeTab, setActiveTab] = useState<SettingsTab>("overview");
+  const [connectionNavigation, setConnectionNavigation] =
+    useState<SettingsTaskNavigationState>(CLEAN_TASK_NAVIGATION_STATE);
+  const [recoveryNavigation, setRecoveryNavigation] =
+    useState<SettingsTaskNavigationState>(CLEAN_TASK_NAVIGATION_STATE);
+  const [updateNavigation, setUpdateNavigation] =
+    useState<SettingsTaskNavigationState>(CLEAN_TASK_NAVIGATION_STATE);
+  const [pendingTab, setPendingTab] = useState<PendingSettingsTab | null>(null);
   const [backups, setBackups] = useState<ManagedRuntimeBackup[]>([]);
   const [diagnostics, setDiagnostics] = useState<ManagedRuntimeDiagnostics | null>(null);
   const [runtimeLoading, setRuntimeLoading] = useState(true);
@@ -77,32 +131,93 @@ export function SettingsScreen({
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateProgress, setUpdateProgress] = useState<AppUpdateProgress | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const runtimeLoad = useLatestOperation();
+  const updateLoad = useLatestOperation();
+  const refreshOperation = useSingleFlightOperation();
+  const settingsNavigationGuard: WorkspaceNavigationGuard | null = connectionNavigation.dirty
+    ? connectionNavigation.busy
+      ? { ...CONNECTION_NAVIGATION_GUARD, busy: true, busyLabel: "Saving connection…" }
+      : CONNECTION_NAVIGATION_GUARD
+    : recoveryNavigation.dirty
+      ? recoveryNavigation.busy
+        ? RECOVERY_BUSY_NAVIGATION_GUARD
+        : RECOVERY_DRAFT_NAVIGATION_GUARD
+      : updateNavigation.dirty
+        ? UPDATE_BUSY_NAVIGATION_GUARD
+        : null;
+  const settingsNavigationDialogCopy = resolveWorkspaceNavigationDialogCopy(
+    settingsNavigationGuard,
+    pendingTab?.guard ?? null,
+  );
+  const settingsNavigationSettled = !settingsNavigationGuard && Boolean(pendingTab?.guard.busy);
+  useWorkspaceNavigationGuard(
+    settingsNavigationGuard !== null,
+    settingsNavigationGuard ?? CONNECTION_NAVIGATION_GUARD,
+  );
 
-  const loadRuntime = useCallback(async () => {
+  const loadRuntime = useCallback(async (): Promise<boolean> => {
+    const token = runtimeLoad.begin();
+    if (!runtimeLoad.isCurrent(token)) return false;
     setRuntimeLoading(true);
     setRuntimeError(null);
     try {
-      const [nextBackups, nextDiagnostics] = await Promise.all([
+      const [backupsResult, diagnosticsResult] = await Promise.allSettled([
         listBackups(),
         getDiagnostics(),
       ]);
-      setBackups(nextBackups);
-      setDiagnostics(nextDiagnostics);
-    } catch (caught) {
-      setRuntimeError(caught instanceof Error ? caught.message : "Could not inspect Runtime status.");
+      if (!runtimeLoad.isCurrent(token)) return false;
+      if (backupsResult.status === "fulfilled") setBackups(backupsResult.value);
+      if (diagnosticsResult.status === "fulfilled") {
+        setDiagnostics(diagnosticsResult.value);
+      }
+      const failures = [
+        backupsResult.status === "rejected"
+          ? userFacingErrorMessage(backupsResult.reason, "Could not list Runtime backups.")
+          : null,
+        diagnosticsResult.status === "rejected"
+          ? userFacingErrorMessage(diagnosticsResult.reason, "Could not inspect Runtime diagnostics.")
+          : null,
+      ].filter((message): message is string => Boolean(message));
+      setRuntimeError(failures.length ? failures.join(" ") : null);
+      return failures.length === 0;
     } finally {
-      setRuntimeLoading(false);
+      if (runtimeLoad.isCurrent(token)) setRuntimeLoading(false);
     }
-  }, [getDiagnostics, listBackups]);
+  }, [getDiagnostics, listBackups, runtimeLoad]);
 
-  const loadUpdates = useCallback(async () => {
+  const loadUpdates = useCallback(async (): Promise<boolean> => {
+    const token = updateLoad.begin();
+    if (!updateLoad.isCurrent(token)) return false;
     setUpdateError(null);
     try {
-      setUpdateState(await getUpdateState());
+      const next = await getUpdateState();
+      if (!updateLoad.isCurrent(token)) return false;
+      setUpdateState(next);
+      return true;
     } catch (caught) {
-      setUpdateError(caught instanceof Error ? caught.message : "Could not inspect app updates.");
+      if (!updateLoad.isCurrent(token)) return false;
+      setUpdateError(userFacingErrorMessage(caught, "Could not inspect app updates."));
+      return false;
     }
-  }, [getUpdateState]);
+  }, [getUpdateState, updateLoad]);
+
+  const checkUpdates = useCallback(async (): Promise<AppUpdateSnapshot> => {
+    const token = updateLoad.begin();
+    if (!updateLoad.isCurrent(token)) {
+      throw new Error("Settings is no longer active.");
+    }
+    setUpdateError(null);
+    try {
+      const next = await checkUpdate();
+      if (updateLoad.isCurrent(token)) setUpdateState(next);
+      return next;
+    } catch (caught) {
+      if (updateLoad.isCurrent(token)) {
+        setUpdateError(userFacingErrorMessage(caught, "Could not check for app updates."));
+      }
+      throw caught;
+    }
+  }, [checkUpdate, updateLoad]);
 
   useEffect(() => {
     void loadRuntime();
@@ -112,12 +227,14 @@ export function SettingsScreen({
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void subscribeUpdateProgress(setUpdateProgress).then(listener => {
+    void subscribeUpdateProgress(progress => {
+      if (!disposed) setUpdateProgress(progress);
+    }).then(listener => {
       if (disposed) listener();
       else unlisten = listener;
     }).catch(caught => {
       if (!disposed) {
-        setUpdateError(caught instanceof Error ? caught.message : "Could not watch app update progress.");
+        setUpdateError(userFacingErrorMessage(caught, "Could not watch app update progress."));
       }
     });
     return () => {
@@ -127,12 +244,38 @@ export function SettingsScreen({
   }, [subscribeUpdateProgress]);
 
   async function refreshAll() {
+    const token = refreshOperation.begin();
+    if (token === null) return;
     setRefreshing(true);
-    await Promise.all([loadRuntime(), loadUpdates()]);
-    setRefreshing(false);
+    try {
+      await Promise.all([loadRuntime(), loadUpdates()]);
+    } finally {
+      if (refreshOperation.complete(token)) setRefreshing(false);
+    }
+  }
+
+  function requestTab(nextTab: SettingsTab) {
+    if (nextTab === activeTab) return;
+    if (settingsNavigationGuard) {
+      setPendingTab({ guard: settingsNavigationGuard, tab: nextTab });
+      return;
+    }
+    setActiveTab(nextTab);
+  }
+
+  function discardSettingsChangesAndNavigate() {
+    if (!pendingTab || settingsNavigationGuard?.busy) return;
+    setConnectionNavigation(CLEAN_TASK_NAVIGATION_STATE);
+    setRecoveryNavigation(CLEAN_TASK_NAVIGATION_STATE);
+    setUpdateNavigation(CLEAN_TASK_NAVIGATION_STATE);
+    setActiveTab(pendingTab.tab);
+    setPendingTab(null);
   }
 
   const runtimeReady = managedRuntime.phase === "ready";
+  const overviewError = [runtimeError, updateError]
+    .filter((message): message is string => Boolean(message))
+    .join(" ") || null;
   const tabs = SETTINGS_TABS.map(tab => ({
     ...tab,
     warning: tab.id === "connection"
@@ -158,7 +301,7 @@ export function SettingsScreen({
             activeTab={activeTab}
             ariaLabel="Settings sections"
             idPrefix="settings"
-            onChange={setActiveTab}
+            onChange={requestTab}
             orientation="vertical"
             tabs={tabs}
           />
@@ -176,15 +319,14 @@ export function SettingsScreen({
             className="settings-tab-panel"
             id={`settings-${activeTab}-panel`}
             role="tabpanel"
-            tabIndex={0}
           >
             {activeTab === "overview" && (
               <SettingsOverviewPanel
                 diagnostics={diagnostics}
-                error={runtimeError ?? updateError}
+                error={overviewError}
                 loading={runtimeLoading}
                 managedRuntime={managedRuntime}
-                onNavigate={setActiveTab}
+                onNavigate={requestTab}
                 onRefresh={() => void refreshAll()}
                 refreshing={refreshing}
                 updateState={updateState}
@@ -193,6 +335,7 @@ export function SettingsScreen({
             {activeTab === "connection" && (
               <ManagedRuntimeConfigurationPanel
                 getProfile={getProvisioningProfile}
+                onNavigationStateChange={setConnectionNavigation}
                 phase={managedRuntime.phase}
                 saveProfile={saveProvisioningProfile}
               />
@@ -203,7 +346,9 @@ export function SettingsScreen({
                 createBackup={createBackup}
                 diagnostics={diagnostics}
                 exportRecoveryArchive={exportRecoveryArchive}
+                loadError={runtimeError}
                 loading={runtimeLoading}
+                onNavigationStateChange={setRecoveryNavigation}
                 onReload={loadRuntime}
                 restoreBackup={restoreBackup}
                 restoreRecoveryArchive={restoreRecoveryArchive}
@@ -212,10 +357,10 @@ export function SettingsScreen({
             )}
             {activeTab === "updates" && (
               <AppUpdateSettings
-                checkUpdate={checkUpdate}
+                checkUpdate={checkUpdates}
                 error={updateError}
                 installUpdate={installUpdate}
-                onUpdateStateChange={setUpdateState}
+                onNavigationStateChange={setUpdateNavigation}
                 progress={updateProgress}
                 runtimeReady={runtimeReady}
                 updateState={updateState}
@@ -224,6 +369,27 @@ export function SettingsScreen({
           </div>
         </div>
       </div>
+
+      <ConfirmationDialog
+        body={settingsNavigationDialogCopy.message}
+        busy={Boolean(settingsNavigationGuard?.busy)}
+        busyLabel={settingsNavigationGuard?.busyLabel}
+        cancelLabel="Keep editing"
+        confirmLabel={settingsNavigationGuard ? "Discard and continue" : "Continue"}
+        confirmVariant="danger"
+        onCancel={() => setPendingTab(null)}
+        onConfirm={discardSettingsChangesAndNavigate}
+        open={pendingTab !== null}
+        title={settingsNavigationSettled
+          ? settingsNavigationDialogCopy.title
+          : settingsNavigationGuard?.busy
+            ? settingsNavigationGuard.title
+            : settingsNavigationGuard === RECOVERY_DRAFT_NAVIGATION_GUARD
+              ? "Discard recovery setup?"
+              : settingsNavigationGuard
+                ? "Discard connection changes?"
+                : pendingTab?.guard.title ?? "Discard Settings changes?"}
+      />
     </div>
   );
 }

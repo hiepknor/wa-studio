@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { RuntimeApi, RuntimeGroupList } from "@/shared/api/runtime-client";
+import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
+import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DateTime } from "@/shared/ui/DateTime";
@@ -45,6 +47,8 @@ export function CampaignGroupListActions({
   const listRequestRef = useRef(0);
   const applyRequestRef = useRef(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const listsRead = useLatestRequest();
+  const applyOperation = useSingleFlightOperation();
   const context = `${sessionId}:${campaignId}`;
   const contextRef = useRef(context);
   const normalizedInput = inputQuery.trim();
@@ -53,6 +57,8 @@ export function CampaignGroupListActions({
   targetRef.current = listTarget;
 
   const close = useCallback((restoreFocus = false) => {
+    applyOperation.cancel();
+    listsRead.cancel();
     listRequestRef.current += 1;
     applyRequestRef.current += 1;
     setOpen(false);
@@ -66,7 +72,7 @@ export function CampaignGroupListActions({
     setSelected(null);
     setError(null);
     if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
-  }, []);
+  }, [applyOperation, listsRead]);
 
   function openDialog() {
     setStep("select");
@@ -76,6 +82,7 @@ export function CampaignGroupListActions({
   const loadLists = useCallback(async (preserveError = false) => {
     if (!open || contextRef.current !== context) return;
     const request = ++listRequestRef.current;
+    const signal = listsRead.begin();
     const requestContext = context;
     const requestTarget = listTarget;
     setLoading(true);
@@ -86,7 +93,7 @@ export function CampaignGroupListActions({
         limit: LIST_PAGE_SIZE,
         offset,
         ...(query ? { query } : {}),
-      });
+      }, { signal });
       if (
         request !== listRequestRef.current
         || requestContext !== contextRef.current
@@ -103,17 +110,21 @@ export function CampaignGroupListActions({
       setLists(activeLists);
       setTotal(page.meta.total);
     } catch (nextError) {
+      if (signal.aborted) return;
       if (request === listRequestRef.current && requestContext === contextRef.current) {
         setError(groupListErrorMessage(nextError, "Could not load group lists."));
       }
     } finally {
+      listsRead.complete(signal);
       if (request === listRequestRef.current && requestContext === contextRef.current) setLoading(false);
     }
-  }, [api, context, listTarget, offset, open, query, sessionId]);
+  }, [api, context, listTarget, listsRead, offset, open, query, sessionId]);
 
   useEffect(() => {
     if (contextRef.current === context) return;
     contextRef.current = context;
+    applyOperation.cancel();
+    listsRead.cancel();
     listRequestRef.current += 1;
     applyRequestRef.current += 1;
     setOpen(false);
@@ -126,7 +137,7 @@ export function CampaignGroupListActions({
     setSelected(null);
     setApplying(false);
     setError(null);
-  }, [context]);
+  }, [applyOperation, context, listsRead]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setQuery(normalizedInput), 300);
@@ -144,6 +155,7 @@ export function CampaignGroupListActions({
   }, []);
 
   function changeSearch(value: string) {
+    listsRead.cancel();
     listRequestRef.current += 1;
     setInputQuery(value);
     setOffset(0);
@@ -152,12 +164,14 @@ export function CampaignGroupListActions({
   }
 
   function changeList(list: RuntimeGroupList) {
+    if (applying) return;
     applyRequestRef.current += 1;
     setSelected(list);
     setError(null);
   }
 
   function changeOffset(nextOffset: number) {
+    listsRead.cancel();
     listRequestRef.current += 1;
     setOffset(nextOffset);
     setLoading(true);
@@ -167,26 +181,45 @@ export function CampaignGroupListActions({
   async function apply() {
     const selectedList = selected;
     if (!selectedList) return;
+    const operationToken = applyOperation.begin();
+    if (operationToken === null) return;
     const request = ++applyRequestRef.current;
     const requestContext = contextRef.current;
     setApplying(true);
     setError(null);
-    const outcome = await onApply(selectedList);
-    if (
-      request !== applyRequestRef.current
-      || requestContext !== contextRef.current
-    ) return;
-    setApplying(false);
-    if (!outcome.ok) {
-      setStep("select");
-      setError(outcome.message);
-      if (outcome.reloadLists) {
-        setSelected(null);
-        void loadLists(true);
+    try {
+      const outcome = await onApply(selectedList);
+      if (
+        !applyOperation.isCurrent(operationToken)
+        || request !== applyRequestRef.current
+        || requestContext !== contextRef.current
+      ) return;
+      if (!outcome.ok) {
+        setStep("select");
+        setError(outcome.message);
+        if (outcome.reloadLists) {
+          setSelected(null);
+          void loadLists(true);
+        }
+        return;
       }
-      return;
+      close(true);
+    } catch (nextError) {
+      if (
+        applyOperation.isCurrent(operationToken)
+        && request === applyRequestRef.current
+        && requestContext === contextRef.current
+      ) {
+        setStep("select");
+        setError(groupListErrorMessage(nextError, "Could not apply the group list."));
+      }
+    } finally {
+      if (
+        applyOperation.complete(operationToken)
+        && request === applyRequestRef.current
+        && requestContext === contextRef.current
+      ) setApplying(false);
     }
-    close(true);
   }
 
   const selectedVisible = Boolean(selected && lists.some((list) => list.id === selected.id));
@@ -246,7 +279,7 @@ export function CampaignGroupListActions({
               {selected && !selectedVisible && (
                 <div className="campaign-group-list-picker-retained">
                   <div><span>Selected outside current results</span><strong>{selected.name}</strong></div>
-                  <Button onClick={() => setSelected(null)} size="sm" variant="ghost">Clear</Button>
+                  <Button disabled={applying} onClick={() => setSelected(null)} size="sm" variant="ghost">Clear</Button>
                 </div>
               )}
               <div aria-label="Available group lists" className="campaign-group-list-picker-results" role="radiogroup">
@@ -255,7 +288,7 @@ export function CampaignGroupListActions({
                 ) : lists.length ? lists.map((list) => {
                   const checked = selected?.id === list.id;
                   return (
-                    <button aria-checked={checked} className="campaign-group-list-picker-row" data-selected={checked || undefined} key={list.id} onClick={() => changeList(list)} role="radio" type="button">
+                    <button aria-checked={checked} className="campaign-group-list-picker-row" data-selected={checked || undefined} disabled={applying} key={list.id} onClick={() => changeList(list)} role="radio" type="button">
                       <span className="campaign-group-list-picker-radio">{checked && <AppIcon name="check" size="xs" />}</span>
                       <span className="campaign-group-list-picker-copy"><strong>{list.name}</strong><small>{list.description || "No description"}</small></span>
                       <span className="campaign-group-list-picker-metadata"><strong>{list.groupCount.toLocaleString()} {list.groupCount === 1 ? "group" : "groups"}</strong><small>Membership r{list.membershipRevision} · Updated <DateTime value={list.updatedAt} /></small></span>
@@ -265,7 +298,7 @@ export function CampaignGroupListActions({
                   <div className="campaign-group-list-picker-state"><AppIcon name="groups" size="sm" /><strong>{query ? "No matching group lists" : "No group lists yet"}</strong><span>{query ? `No active lists match “${query}”.` : "Create a reusable list from the Groups workspace first."}</span></div>
                 )}
               </div>
-              {total > 0 && <TablePagination limit={LIST_PAGE_SIZE} loading={loading} offset={offset} onOffsetChange={changeOffset} total={total} />}
+              {total > 0 && <TablePagination limit={LIST_PAGE_SIZE} loading={loading || applying} offset={offset} onOffsetChange={changeOffset} total={total} />}
             </div>
           </div>
         ) : selected ? (

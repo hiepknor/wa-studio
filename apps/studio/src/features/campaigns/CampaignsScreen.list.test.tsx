@@ -17,6 +17,8 @@ import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ToastProvider } from "@/shared/ui/Toast";
 import { CampaignsScreen } from "./CampaignsScreen";
 
+const READ_OPTIONS = expect.objectContaining({ signal: expect.any(AbortSignal) });
+
 const primarySession: RuntimeSession = {
   id: "primary-session", name: "Primary", status: "ready", phone: null, pushName: null,
   connectedAt: null, lastActiveAt: null, engineLoaded: true, lastError: null,
@@ -45,7 +47,7 @@ function deferred<T>() {
 
 function Harness({ allowSwitch = false }: { allowSwitch?: boolean }) {
   const { connect, connected, selectSession } = useRuntimeConnection();
-  if (!connected) return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "key" })}>Connect</button>;
+  if (!connected) return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "0123456789abcdef0123456789abcdef" })}>Connect</button>;
   return <>{allowSwitch && <button onClick={() => selectSession(secondarySession.id)}>Switch session</button>}<CampaignsScreen /></>;
 }
 
@@ -88,7 +90,7 @@ describe("CampaignsScreen server-side list", () => {
     expect(listCampaigns).toHaveBeenLastCalledWith(expect.objectContaining({
       offset: 0,
       query: "needle",
-    }));
+    }), READ_OPTIONS);
   });
 
   it("applies multi-select filters, removes individual values, and clears all", async () => {
@@ -100,7 +102,10 @@ describe("CampaignsScreen server-side list", () => {
     await connect(user);
     await waitFor(() => expect(listCampaigns).toHaveBeenCalledTimes(1));
     await user.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() => expect(listCampaigns).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 50 })));
+    await waitFor(() => expect(listCampaigns).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 50 }),
+      READ_OPTIONS,
+    ));
     await user.click(screen.getByRole("button", { name: "Filters" }));
     const panel = screen.getByRole("region", { name: "Campaign filters" });
     await user.click(within(panel).getByRole("checkbox", { name: "Draft" }));
@@ -111,17 +116,20 @@ describe("CampaignsScreen server-side list", () => {
       offset: 0,
       statuses: ["DRAFT", "PAUSED"],
       scheduleTypes: ["IMMEDIATE", "ONCE"],
-    })));
+    }), READ_OPTIONS));
     expect(screen.getByRole("button", { name: "Filters · 2" })).toBeInTheDocument();
 
     await user.click(within(panel).getByRole("button", { name: "Remove Draft filter" }));
-    await waitFor(() => expect(listCampaigns).toHaveBeenLastCalledWith(expect.objectContaining({ statuses: ["PAUSED"] })));
+    await waitFor(() => expect(listCampaigns).toHaveBeenLastCalledWith(
+      expect.objectContaining({ statuses: ["PAUSED"] }),
+      READ_OPTIONS,
+    ));
     await user.click(within(panel).getByRole("button", { name: "Clear all" }));
     await waitFor(() => expect(listCampaigns).toHaveBeenLastCalledWith({
       sessionId: primarySession.id,
       limit: 50,
       offset: 0,
-    }));
+    }, READ_OPTIONS));
   });
 
   it("uses filtered meta.total for pagination and recovers an out-of-range page", async () => {
@@ -135,7 +143,10 @@ describe("CampaignsScreen server-side list", () => {
     expect(await screen.findByText("Page 1 of 2")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByText("Recovered")).toBeInTheDocument();
-    expect(listCampaigns).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 }));
+    expect(listCampaigns).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 0 }),
+      READ_OPTIONS,
+    );
   });
 
   it("distinguishes unfiltered and filtered empty states", async () => {
@@ -180,7 +191,10 @@ describe("CampaignsScreen server-side list", () => {
     await connect(user);
     await user.type(screen.getByRole("searchbox", { name: "Search campaigns" }), "x".repeat(201));
     expect(await screen.findByText("Campaign search must be 200 characters or fewer.")).toBeInTheDocument();
-    expect(listCampaigns).toHaveBeenLastCalledWith(expect.objectContaining({ query: "x".repeat(201) }));
+    expect(listCampaigns).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: "x".repeat(201) }),
+      READ_OPTIONS,
+    );
   });
 
   it("prevents late search and filter responses from overwriting newer criteria", async () => {
@@ -196,9 +210,13 @@ describe("CampaignsScreen server-side list", () => {
     const search = screen.getByRole("searchbox", { name: "Search campaigns" });
     await user.type(search, "old");
     await waitFor(() => expect(listCampaigns).toHaveBeenCalledTimes(2));
+    const oldSignal = listCampaigns.mock.calls[1][1]?.signal;
+    expect(oldSignal).toBeInstanceOf(AbortSignal);
     await user.clear(search);
     await user.type(search, "new");
     await waitFor(() => expect(listCampaigns).toHaveBeenCalledTimes(3));
+    expect(oldSignal?.aborted).toBe(true);
+    expect(listCampaigns.mock.calls[2][1]?.signal?.aborted).toBe(false);
     newSearch.resolve(page([campaign("new", "New result")], 1));
     expect(await screen.findByText("New result")).toBeInTheDocument();
     oldSearch.resolve(page([campaign("old", "Old result")], 1));
@@ -262,7 +280,7 @@ describe("CampaignsScreen server-side list", () => {
       sessionId: secondarySession.id,
       limit: 50,
       offset: 0,
-    }));
+    }, READ_OPTIONS));
   });
 
   it("invalidates a pending page request when the screen unmounts", async () => {
@@ -272,8 +290,10 @@ describe("CampaignsScreen server-side list", () => {
     const view = renderList(listCampaigns);
     await connect(user);
     await waitFor(() => expect(listCampaigns).toHaveBeenCalledTimes(1));
+    const signal = listCampaigns.mock.calls[0][1]?.signal;
 
     view.unmount();
+    expect(signal?.aborted).toBe(true);
     pending.resolve(page([campaign("late", "Late result")], 1));
     await act(() => Promise.resolve());
 

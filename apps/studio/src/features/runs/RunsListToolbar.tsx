@@ -4,6 +4,7 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
 import { FilterOption } from "@/shared/ui/FilterOption";
+import { formatListResultSummary } from "@/shared/ui/list-result-summary";
 import type {
   RuntimeCampaignExecutionMode,
   RuntimeCampaignRunStatus,
@@ -51,7 +52,14 @@ export function RunsListToolbar({
       onToggleFilters={() => setFiltersOpen((open) => !open)}
       resultSummary={loading
         ? "Updating results…"
-        : `${firstItem}–${lastItem} of ${total}${hasCriteria ? " matches" : ""}`}
+        : formatListResultSummary({
+          firstItem,
+          hasCriteria,
+          lastItem,
+          plural: "runs",
+          singular: "run",
+          total,
+        })}
       searchLabel="Search runs"
       searchPlaceholder="Search campaign, campaign ID, or run ID"
       searchValue={state.inputQuery}

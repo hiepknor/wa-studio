@@ -8,6 +8,7 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
 import { FilterOption as FilterOptionControl } from "@/shared/ui/FilterOption";
+import { formatLoadedResultSummary } from "@/shared/ui/list-result-summary";
 import {
   activityCategoryLabel,
   activitySeverityLabel,
@@ -38,7 +39,6 @@ export function ActivityToolbar({
   count,
   filtersOpen,
   loading,
-  retentionDays,
   setFiltersOpen,
   setState,
   state,
@@ -46,7 +46,6 @@ export function ActivityToolbar({
   count: number;
   filtersOpen: boolean;
   loading: boolean;
-  retentionDays: number | null;
   setFiltersOpen: Dispatch<SetStateAction<boolean>>;
   setState: Dispatch<SetStateAction<ActivityListState>>;
   state: ActivityListState;
@@ -60,7 +59,9 @@ export function ActivityToolbar({
     onCloseFilters={() => setFiltersOpen(false)}
     onSearchChange={(inputQuery) => setState((current) => ({ ...current, inputQuery }))}
     onToggleFilters={() => setFiltersOpen((open) => !open)}
-    resultSummary={loading ? "Updating activity…" : `${count} loaded${retentionDays ? ` · ${retentionDays}-day retention` : ""}`}
+    resultSummary={loading
+      ? "Updating activity…"
+      : formatLoadedResultSummary(count, "event", "events")}
     searchLabel="Search activity"
     searchPlaceholder="Search subject, ID, event, or correlation"
     searchValue={state.inputQuery}

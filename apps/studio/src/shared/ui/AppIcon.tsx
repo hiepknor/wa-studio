@@ -56,9 +56,9 @@ const FALLBACK_ICONS: Partial<Record<AppIconName, LucideIcon>> = {
   view: Eye,
 };
 
-// These paths are the accepted OpenDesign WARP prototype icon set. Keep core
-// navigation, selector, and state silhouettes independent from icon packages.
-const PROTOTYPE_ICONS: Partial<Record<AppIconName, ReactNode>> = {
+// Product-owned WARP icons keep core navigation, selector, and state
+// silhouettes independent from third-party icon packages.
+const WARP_ICONS: Partial<Record<AppIconName, ReactNode>> = {
   activity: <path d="M3 12h4l2-6 4 12 2-6h6" />,
   campaigns: (
     <>
@@ -144,9 +144,9 @@ const ICON_SIZES: Record<AppIconSize, number> = {
 };
 
 export function AppIcon({ className = "", name, size = "md" }: AppIconProps) {
-  const prototypeIcon = PROTOTYPE_ICONS[name];
+  const warpIcon = WARP_ICONS[name];
   const classes = `ui-icon ui-icon-${size} ${className}`.trim();
-  if (prototypeIcon) {
+  if (warpIcon) {
     return (
       <svg
         aria-hidden="true"
@@ -156,7 +156,7 @@ export function AppIcon({ className = "", name, size = "md" }: AppIconProps) {
         viewBox="0 0 24 24"
         width={ICON_SIZES[size]}
       >
-        {prototypeIcon}
+        {warpIcon}
       </svg>
     );
   }

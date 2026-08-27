@@ -69,7 +69,7 @@ export function ActivityTable({
                 <span className="data-identifier" title={event.subject.id}>{event.subject.id}</span>
               </td>
               <td className="data-cell-status"><Badge tone={activityTone(event.severity)} variant="status">{activitySeverityLabel(event.severity)}</Badge></td>
-              <td className="data-cell-time"><DateTime value={event.occurredAt} variant="relative" /></td>
+              <td className="data-cell-time"><DateTime relativeStyle="compact" value={event.occurredAt} variant="relative" /></td>
               <td className="data-cell-action">
                 <Button aria-label={`Inspect ${activityTitle(event)}`} icon="chevron-right" onClick={() => onInspect(event)} variant="ghost" />
               </td>

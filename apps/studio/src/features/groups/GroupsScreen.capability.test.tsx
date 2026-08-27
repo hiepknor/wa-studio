@@ -12,6 +12,7 @@ import type {
   RuntimeGroupDetail,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
+import { RuntimeTransportError } from "@/shared/api/runtime-http";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ToastProvider } from "@/shared/ui/Toast";
 
@@ -114,7 +115,7 @@ function GroupsHarness() {
     return (
       <button
         onClick={() =>
-          void connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "key" })
+          void connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" })
         }
         type="button"
       >
@@ -253,7 +254,7 @@ describe("GroupsScreen capability refresh", () => {
         limit: 25,
         offset: 0,
         query: "needle",
-      }),
+      }, expect.objectContaining({ signal: expect.any(AbortSignal) })),
     );
     await user.click(screen.getByRole("button", { name: "Next member page" }));
     expect(await screen.findByText("Last member")).toBeInTheDocument();
@@ -325,6 +326,36 @@ describe("GroupsScreen capability refresh", () => {
     expect(api.getGroup).toHaveBeenCalledTimes(detailCalls);
     expect(listGroupMembers).toHaveBeenCalledTimes(memberCalls);
     expect(pollCapabilityRefresh).not.toHaveBeenCalled();
+  });
+
+  it("continues observing capability state after the POST result is unconfirmed", async () => {
+    const user = userEvent.setup();
+    const refreshed = {
+      ...detail,
+      sendCapability: {
+        ...detail.sendCapability,
+        checkedAt: "2026-08-13T01:01:00.000Z",
+        invalidatedAt: null,
+        revision: 9,
+        status: "ALLOWED" as const,
+      },
+    };
+    pollCapabilityRefresh.mockResolvedValue({
+      detail: refreshed,
+      status: "completed",
+    });
+    renderGroups({
+      requestGroupCapabilityRefresh: vi.fn().mockRejectedValue(
+        new RuntimeTransportError("response lost", { requestDispatched: true }),
+      ),
+    });
+    await openInspector(user);
+
+    await user.click(screen.getByRole("button", { name: "Refresh capability" }));
+
+    expect(await screen.findByText("Capability updated")).toBeInTheDocument();
+    expect(pollCapabilityRefresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("The latest capability result is now shown.")).toBeInTheDocument();
   });
 
   it("aborts and ignores the pending refresh when the inspector closes", async () => {

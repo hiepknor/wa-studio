@@ -488,6 +488,14 @@ h1 { margin: 10px 0 12px; font-family: var(--font-display); font-size: var(--typ
   overflow: auto;
   background: transparent;
 }
+.workspace-page-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-compact);
+  padding: var(--space-panel);
+  color: var(--text-tertiary);
+  font-size: var(--type-caption);
+}
 .status-bar {
   display: flex;
   align-items: center;
@@ -638,6 +646,7 @@ tbody tr[data-selected="true"] td:first-child::before { position: absolute; inse
 .data-cell-action > .menu { display: inline-flex; }
 .align-end { text-align: right; }
 .data-table-empty { height: 100px; color: var(--dim); font-size: var(--type-caption); line-height: var(--leading-ui); text-align: center; }
+.data-table-empty-state { display: grid; justify-items: center; gap: var(--space-2); }
 progress { width: 100%; height: var(--progress-track-height); overflow: hidden; border: 0; border-radius: 0; background: var(--surface-raised); accent-color: var(--text-secondary); }
 progress::-webkit-progress-bar { background: var(--surface-raised); }
 progress::-webkit-progress-value { background: var(--text-secondary); }

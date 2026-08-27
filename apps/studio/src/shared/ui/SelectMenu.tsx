@@ -98,6 +98,7 @@ export function SelectMenu<T extends string>({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listboxRef = useRef<HTMLDivElement>(null);
+  const openingFocusRef = useRef<"first" | "last" | "selected">("selected");
   const [open, setOpen] = useState(false);
   const [listboxLayout, setListboxLayout] = useState({
     maxHeight: LISTBOX_MAX_HEIGHT,
@@ -110,8 +111,9 @@ export function SelectMenu<T extends string>({
     if (restoreFocus) triggerRef.current?.focus();
   }
 
-  function openListbox() {
+  function openListbox(initialFocus: "first" | "last" | "selected" = "selected") {
     if (disabled) return;
+    openingFocusRef.current = initialFocus;
     setOpen(true);
   }
 
@@ -162,7 +164,12 @@ export function SelectMenu<T extends string>({
     if (!open) return;
     const items = enabledOptions(listboxRef.current);
     const selected = items.find((item) => item.dataset.value === value);
-    (selected ?? items[0])?.focus();
+    const initialItem = openingFocusRef.current === "last"
+      ? items[items.length - 1]
+      : openingFocusRef.current === "first"
+        ? items[0]
+        : selected ?? items[0];
+    initialItem?.focus();
 
     function closeFromOutside(event: PointerEvent) {
       if (!rootRef.current?.contains(event.target as Node)) close();
@@ -172,10 +179,18 @@ export function SelectMenu<T extends string>({
     return () => document.removeEventListener("pointerdown", closeFromOutside);
   }, [open, value]);
 
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
   function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (!["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) return;
     event.preventDefault();
-    open ? close({ restoreFocus: true }) : openListbox();
+    if (open) {
+      close({ restoreFocus: true });
+      return;
+    }
+    openListbox(event.key === "ArrowUp" ? "last" : event.key === "ArrowDown" ? "first" : "selected");
   }
 
   function handleListboxKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -223,7 +238,7 @@ export function SelectMenu<T extends string>({
           aria-labelledby={labelId}
           className={`select-menu-trigger ${className}`.trim()}
           disabled={disabled}
-          onClick={() => open ? close({ restoreFocus: true }) : openListbox()}
+          onClick={() => open ? close({ restoreFocus: true }) : openListbox("selected")}
           onKeyDown={handleTriggerKeyDown}
           ref={triggerRef}
           role="combobox"

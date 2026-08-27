@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 
 interface SettingsRowProps {
   action?: ReactNode;
@@ -13,11 +13,18 @@ export function SettingsRow({
   description,
   label,
 }: SettingsRowProps) {
+  const labelId = useId();
+  const descriptionId = useId();
   return (
-    <div className={`settings-row ${className}`.trim()}>
+    <div
+      aria-describedby={description ? descriptionId : undefined}
+      aria-labelledby={labelId}
+      className={`settings-row ${className}`.trim()}
+      role="group"
+    >
       <div className="settings-row-copy">
-        <strong>{label}</strong>
-        {description && <small>{description}</small>}
+        <strong id={labelId}>{label}</strong>
+        {description && <small id={descriptionId}>{description}</small>}
       </div>
       {action !== undefined && <div className="settings-row-action">{action}</div>}
     </div>

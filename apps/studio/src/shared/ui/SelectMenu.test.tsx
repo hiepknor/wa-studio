@@ -83,6 +83,7 @@ describe("SelectMenu", () => {
 
     await user.keyboard("{ArrowUp}");
     expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Once/ })).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
@@ -101,6 +102,32 @@ describe("SelectMenu", () => {
     );
 
     await user.click(screen.getByRole("combobox", { name: "Schedule" }));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("closes an open listbox when the control becomes disabled", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <SelectMenu
+        label="Schedule"
+        onChange={vi.fn()}
+        options={OPTIONS}
+        value="IMMEDIATE"
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Schedule" }));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    rerender(
+      <SelectMenu
+        disabled
+        label="Schedule"
+        onChange={vi.fn()}
+        options={OPTIONS}
+        value="IMMEDIATE"
+      />,
+    );
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 

@@ -19,7 +19,9 @@ describe("workspace page registry", () => {
     expect(findWorkspacePage("groups").available).toBe(true);
   });
 
-  it("matches the prototype rail hierarchy and keeps Settings in the footer", () => {
+  it("matches the product rail hierarchy and keeps Settings in the footer", () => {
+    expect(WORKSPACE_SECTIONS.find((section) => section.id === "workspaces")?.label)
+      .toBe("Workspace");
     expect(WORKSPACE_SECTIONS.find((section) => section.id === "workspaces")?.pages.map((page) => page.id))
       .toEqual(["sessions", "groups", "campaigns"]);
     expect(WORKSPACE_SECTIONS.find((section) => section.id === "operations")?.pages.map((page) => page.id))

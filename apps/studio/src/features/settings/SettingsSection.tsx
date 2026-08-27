@@ -24,7 +24,7 @@ export function SettingsSection({
       <header className="settings-section-header">
         <div className="settings-section-copy">
           {kicker && <span className="settings-card-label">{kicker}</span>}
-          <h3 id={titleId}>{title}</h3>
+          <h2 id={titleId}>{title}</h2>
           {description && <p>{description}</p>}
         </div>
         {action && <div className="settings-section-action">{action}</div>}

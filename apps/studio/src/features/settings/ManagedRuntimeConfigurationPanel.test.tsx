@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -11,6 +11,12 @@ const profile = {
   openwaBaseUrl: "https://openwa.onio.cc",
   eventInboxBaseUrl: "https://wa-events.onio.cc",
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
 
 describe("ManagedRuntimeConfigurationPanel", () => {
   it("re-pairs from fresh OpenWA credentials and explicit live-send confirmation", async () => {
@@ -70,6 +76,105 @@ describe("ManagedRuntimeConfigurationPanel", () => {
       allowLiveSends: false,
       openwaApiKey: "replacement-openwa-key",
       openwaBaseUrl: "https://openwa.onio.cc",
+    });
+  });
+
+  it("reports and discards an unsaved connection draft without exposing the key", async () => {
+    const user = userEvent.setup();
+    const onNavigationStateChange = vi.fn();
+    render(
+      <ToastProvider>
+        <ManagedRuntimeConfigurationPanel
+          getProfile={vi.fn().mockResolvedValue(profile)}
+          onNavigationStateChange={onNavigationStateChange}
+          phase="ready"
+          saveProfile={vi.fn()}
+        />
+      </ToastProvider>,
+    );
+
+    const endpoint = await screen.findByLabelText("OpenWA base URL");
+    const key = screen.getByLabelText("OpenWA API key");
+    const liveSends = screen.getByRole("switch", { name: /Allow live sends/ });
+    await user.clear(endpoint);
+    await user.type(endpoint, "https://replacement-openwa.onio.cc");
+    await user.type(key, "replacement-openwa-key");
+    await user.click(liveSends);
+
+    expect(screen.getByText("Unsaved connection changes")).toBeInTheDocument();
+    await waitFor(() => expect(onNavigationStateChange).toHaveBeenLastCalledWith({
+      busy: false,
+      dirty: true,
+    }));
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+
+    expect(endpoint).toHaveValue(profile.openwaBaseUrl);
+    expect(key).toHaveValue("");
+    expect(liveSends).not.toBeChecked();
+    expect(document.body).not.toHaveTextContent("replacement-openwa-key");
+    expect(screen.getByText("Connection is saved")).toBeInTheDocument();
+    await waitFor(() => expect(onNavigationStateChange).toHaveBeenLastCalledWith({
+      busy: false,
+      dirty: false,
+    }));
+  });
+
+  it("redacts the submitted OpenWA key from native errors", async () => {
+    const user = userEvent.setup();
+    const apiKey = "replacement-openwa-key";
+    const saveProfile = vi.fn().mockRejectedValue(
+      new Error(`Credential ${apiKey} rejected`),
+    );
+    render(
+      <ToastProvider>
+        <ManagedRuntimeConfigurationPanel
+          getProfile={vi.fn().mockResolvedValue(profile)}
+          phase="ready"
+          saveProfile={saveProfile}
+        />
+      </ToastProvider>,
+    );
+
+    await screen.findByDisplayValue("https://openwa.onio.cc");
+    await user.type(screen.getByLabelText("OpenWA API key"), apiKey);
+    await user.click(screen.getByRole("button", { name: "Verify and restart Runtime" }));
+    await user.click(screen.getByRole("button", { name: "Save and restart" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Update Runtime connection?" });
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent("Connection verification failed");
+    expect(alert).toHaveTextContent("Credential [redacted] rejected");
+    expect(document.body).not.toHaveTextContent(apiKey);
+  });
+
+  it("dispatches only one Runtime reconfiguration for repeated confirmation", async () => {
+    const user = userEvent.setup();
+    const pendingSave = deferred<typeof profile>();
+    const saveProfile = vi.fn().mockReturnValue(pendingSave.promise);
+    render(
+      <ToastProvider>
+        <ManagedRuntimeConfigurationPanel
+          getProfile={vi.fn().mockResolvedValue(profile)}
+          phase="ready"
+          saveProfile={saveProfile}
+        />
+      </ToastProvider>,
+    );
+
+    await screen.findByDisplayValue(profile.openwaBaseUrl);
+    await user.type(screen.getByLabelText("OpenWA API key"), "replacement-openwa-key");
+    await user.click(screen.getByRole("button", { name: "Verify and restart Runtime" }));
+    const confirm = screen.getByRole("button", { name: "Save and restart" });
+
+    act(() => {
+      confirm.click();
+      confirm.click();
+    });
+
+    expect(saveProfile).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pendingSave.resolve(profile);
+      await pendingSave.promise;
     });
   });
 });

@@ -108,7 +108,7 @@ describe("shared UI primitives", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Sessions" })).toHaveAttribute("id", "sessions-title");
+    expect(screen.getByRole("heading", { level: 1, name: "Sessions" })).toHaveAttribute("id", "sessions-title");
     expect(screen.getByText("Selected")).toHaveClass("ui-badge-success");
   });
 });

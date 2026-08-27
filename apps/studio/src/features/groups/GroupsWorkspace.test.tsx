@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,6 +14,7 @@ import type {
   RuntimeSession,
 } from "@/shared/api/runtime-client";
 import { RuntimeRequestError } from "@/shared/api/runtime-client";
+import { RuntimeTransportError } from "@/shared/api/runtime-http";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ToastProvider } from "@/shared/ui/Toast";
 import { GroupsWorkspace } from "./GroupsWorkspace";
@@ -80,17 +81,26 @@ const member: RuntimeGroupListGroup = {
   syncedAt: group.syncedAt,
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
 function Harness() {
-  const { connect, connected } = useRuntimeConnection();
+  const { connect, connected, selectSession } = useRuntimeConnection();
   if (!connected) {
     return (
-      <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "key" })}>
+      <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "0123456789abcdef0123456789abcdef" })}>
         Connect
       </button>
     );
   }
   return (
     <DrawerProvider>
+      <button onClick={() => selectSession("other-session")} type="button">
+        Switch session
+      </button>
       <GroupsWorkspace />
       <DrawerHost />
     </DrawerProvider>
@@ -154,8 +164,14 @@ describe("GroupsWorkspace unified canvas", () => {
     expect(await screen.findByText(group.name)).toBeInTheDocument();
     await user.click(screen.getByRole("combobox", { name: "Group scope" }));
     expect(await screen.findByRole("option", { name: /Launch groups/ })).toBeInTheDocument();
-    expect(api.listGroups).toHaveBeenCalledWith(expect.objectContaining({ sessionId: session.id }));
-    expect(api.listGroupLists).toHaveBeenCalledWith({ sessionId: session.id, limit: 50, offset: 0 });
+    expect(api.listGroups).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: session.id }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(api.listGroupLists).toHaveBeenCalledWith(
+      { sessionId: session.id, limit: 50, offset: 0 },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("renders a saved list in the same table without editable selection", async () => {
@@ -165,7 +181,10 @@ describe("GroupsWorkspace unified canvas", () => {
     await chooseScope(user, /Launch groups/);
 
     expect(await screen.findByText("Saved static list")).toBeInTheDocument();
-    expect(api.getGroupListMembership).toHaveBeenCalledWith(savedList.id);
+    expect(api.getGroupListMembership).toHaveBeenCalledWith(
+      savedList.id,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     const table = screen.getByRole("table", { name: `Groups saved in ${savedList.name}` });
     expect(within(table).queryByRole("checkbox")).not.toBeInTheDocument();
     expect(within(table).getByText(group.name)).toBeInTheDocument();
@@ -258,6 +277,48 @@ describe("GroupsWorkspace unified canvas", () => {
     expect(screen.getByRole("combobox", { name: "Group scope" })).toHaveTextContent("All groups");
   });
 
+  it("reports a saved-list delete failure inside the active confirmation", async () => {
+    const user = userEvent.setup();
+    renderWorkspace({ archiveGroupList: vi.fn().mockRejectedValue(new Error("Runtime unavailable.")) });
+    await connect(user);
+    await chooseScope(user, /Launch groups/);
+    await screen.findByText("Saved static list");
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${savedList.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete list/ }));
+    const confirmation = screen.getByRole("dialog", { name: "Delete group list?" });
+    await user.click(within(confirmation).getByRole("button", { name: "Delete list" }));
+
+    const alert = await within(confirmation).findByRole("alert");
+    expect(alert).toHaveTextContent("Could not delete group list");
+    expect(alert).toHaveTextContent("The group list could not be deleted.");
+  });
+
+  it("reconciles an unconfirmed delete as successful when the list is missing", async () => {
+    const user = userEvent.setup();
+    renderWorkspace({
+      archiveGroupList: vi.fn().mockRejectedValue(new RuntimeTransportError(
+        "response lost",
+        { requestDispatched: true },
+      )),
+      getGroupList: vi.fn().mockRejectedValue(new RuntimeRequestError("missing", {
+        code: "GROUP_LIST_NOT_FOUND",
+        status: 404,
+      })),
+    });
+    await connect(user);
+    await chooseScope(user, /Launch groups/);
+    await screen.findByText("Saved static list");
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${savedList.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete list/ }));
+    await user.click(within(screen.getByRole("dialog", { name: "Delete group list?" }))
+      .getByRole("button", { name: "Delete list" }));
+
+    expect(await screen.findByText("Group list deleted")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Group scope" })).toHaveTextContent("All groups");
+  });
+
   it("saves edited metadata before membership with canonical revisions", async () => {
     const user = userEvent.setup();
     const metadataList = { ...savedList, name: "Launch groups v2", revision: 5 };
@@ -296,6 +357,36 @@ describe("GroupsWorkspace unified canvas", () => {
     expect(await screen.findByText("Saved static list")).toBeInTheDocument();
   });
 
+  it("does not continue a multi-step save after the active session changes", async () => {
+    const user = userEvent.setup();
+    const metadata = deferred<RuntimeGroupList>();
+    const updateGroupList = vi.fn().mockReturnValue(metadata.promise);
+    const replaceGroupListGroups = vi.fn();
+    renderWorkspace({ replaceGroupListGroups, updateGroupList });
+    await connect(user);
+    await chooseScope(user, /Launch groups/);
+    await screen.findByText("Saved static list");
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("checkbox", { name: `Select ${group.name}` }));
+    await user.click(screen.getByRole("button", { name: "Details" }));
+    const details = screen.getByRole("dialog", { name: "Edit list details" });
+    const name = within(details).getByRole("textbox", { name: "Name" });
+    await user.clear(name);
+    await user.type(name, "Launch groups v2");
+    await user.click(within(details).getByRole("button", { name: "Apply details" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateGroupList).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: "Switch session" }));
+    await act(async () => {
+      metadata.resolve({ ...savedList, name: "Launch groups v2", revision: 5 });
+      await metadata.promise;
+    });
+
+    expect(replaceGroupListGroups).not.toHaveBeenCalled();
+    expect(screen.queryByText("Saved static list")).not.toBeInTheDocument();
+  });
+
   it("reloads canonical membership after a conflict while retaining staged changes", async () => {
     const user = userEvent.setup();
     const latest = { ...savedList, membershipRevision: 3, revision: 5 };
@@ -327,7 +418,10 @@ describe("GroupsWorkspace unified canvas", () => {
   it("reuses the create idempotency key across a retry", async () => {
     const user = userEvent.setup();
     const createGroupList = vi.fn()
-      .mockRejectedValueOnce(new TypeError("network down"))
+      .mockRejectedValueOnce(new RuntimeTransportError(
+        "response lost",
+        { requestDispatched: true },
+      ))
       .mockResolvedValue(savedList);
     renderWorkspace({ createGroupList });
     await connect(user);
@@ -337,7 +431,13 @@ describe("GroupsWorkspace unified canvas", () => {
     await user.type(within(metadata).getByRole("textbox", { name: "Name" }), savedList.name);
     await user.click(within(metadata).getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByText("network down")).toBeInTheDocument();
+    expect(await screen.findByText(/same request key/)).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: `Select ${group.name}` }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/could create a duplicate group list/)).toBeInTheDocument();
+    expect(createGroupList).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Restore request" }));
+    expect(screen.getByRole("checkbox", { name: `Select ${group.name}` })).not.toBeChecked();
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(createGroupList).toHaveBeenCalledTimes(2));
     expect(createGroupList.mock.calls[0]?.[1]).toBe(createGroupList.mock.calls[1]?.[1]);

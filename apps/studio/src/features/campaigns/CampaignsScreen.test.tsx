@@ -17,9 +17,12 @@ import {
   type RuntimeGroupList,
   type RuntimeSession,
 } from "@/shared/api/runtime-client";
+import { RuntimeTransportError } from "@/shared/api/runtime-http";
 import { ToastProvider } from "@/shared/ui/Toast";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { CampaignsScreen } from "./CampaignsScreen";
+
+const READ_OPTIONS = expect.objectContaining({ signal: expect.any(AbortSignal) });
 
 const session: RuntimeSession = {
   id: "session-id", name: "Primary", status: "ready", phone: null, pushName: null,
@@ -56,7 +59,7 @@ function deferred<T>() {
 
 function Harness() {
   const { connect, connected } = useRuntimeConnection();
-  if (!connected) return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "key" })}>Connect</button>;
+  if (!connected) return <button onClick={() => void connect({ baseUrl: "https://runtime.example", apiKey: "0123456789abcdef0123456789abcdef" })}>Connect</button>;
   return <CampaignsScreen />;
 }
 
@@ -229,6 +232,26 @@ describe("CampaignsScreen", () => {
     expect(screen.getByRole("button", { name: "New campaign" })).toBeEnabled();
   });
 
+  it("reloads canonical details without discarding staged input after an unconfirmed update", async () => {
+    const user = userEvent.setup();
+    const updateCampaign = vi.fn().mockRejectedValue(new RuntimeTransportError(
+      "response lost",
+      { requestDispatched: true },
+    ));
+    const getCampaign = vi.fn().mockResolvedValue(campaign);
+    renderCampaigns({ getCampaign, updateCampaign });
+    await connect(user);
+    await openCampaign(user);
+    const name = screen.getByRole("textbox", { name: "Campaign name" });
+    await user.type(name, " updated");
+    await user.click(screen.getByRole("button", { name: "Save details" }));
+
+    expect(await screen.findByText(/did not confirm the result/)).toBeInTheDocument();
+    expect(getCampaign).toHaveBeenCalledWith(campaign.id);
+    expect(screen.getByRole("textbox", { name: "Campaign name" })).toHaveValue("Release updated");
+    expect(screen.getByText("Campaign r3 · Unsaved changes")).toBeInTheDocument();
+  });
+
   it("uses the shared confirmation dialog before discarding drawer edits", async () => {
     const user = userEvent.setup();
     renderCampaigns({}, []);
@@ -251,7 +274,10 @@ describe("CampaignsScreen", () => {
     const user = userEvent.setup();
     const created = { ...campaign, id: "created-id", name: "New release", revision: 1, targetsRevision: 0, targetCount: 0 };
     const createCampaign = vi.fn()
-      .mockRejectedValueOnce(new TypeError("response lost"))
+      .mockRejectedValueOnce(new RuntimeTransportError(
+        "response lost",
+        { requestDispatched: true },
+      ))
       .mockResolvedValueOnce(created);
     const listCampaigns = vi.fn()
       .mockResolvedValueOnce({ data: [], meta: { total: 0, limit: 50, offset: 0 } })
@@ -264,7 +290,7 @@ describe("CampaignsScreen", () => {
     await user.type(screen.getByRole("textbox", { name: "Message text" }), "Ship it");
 
     await user.click(screen.getByRole("button", { name: "Create draft" }));
-    expect(await screen.findByText("response lost")).toBeInTheDocument();
+    expect(await screen.findByText(/same request key/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create draft" }));
     await screen.findByText("Campaign draft created");
 
@@ -275,6 +301,99 @@ describe("CampaignsScreen", () => {
     });
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
     expect(await screen.findAllByText("New release")).toHaveLength(1);
+  });
+
+  it("admits only one create mutation before React can render its busy state", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<RuntimeCampaign>();
+    const createCampaign = vi.fn().mockReturnValue(pending.promise);
+    renderCampaigns({ createCampaign }, []);
+    await connect(user);
+    await user.click(screen.getByRole("button", { name: "New campaign" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus());
+    await user.type(screen.getByRole("textbox", { name: "Campaign name" }), "Single flight");
+    await user.type(screen.getByRole("textbox", { name: "Message text" }), "Ship once");
+
+    const submit = screen.getByRole("button", { name: "Create draft" });
+    act(() => {
+      submit.click();
+      submit.click();
+    });
+
+    expect(createCampaign).toHaveBeenCalledOnce();
+    await act(async () => pending.resolve({
+      ...campaign,
+      id: "single-flight-id",
+      name: "Single flight",
+      revision: 1,
+      targetCount: 0,
+      targetsRevision: 0,
+    }));
+    expect(await screen.findByText("Campaign draft created")).toBeInTheDocument();
+  });
+
+  it("clears mutation ownership when a pending editor is discarded", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<RuntimeCampaign>();
+    const updateCampaign = vi.fn().mockReturnValue(pending.promise);
+    renderCampaigns({ updateCampaign });
+    await connect(user);
+    await openCampaign(user);
+    await user.type(screen.getByRole("textbox", { name: "Campaign name" }), " pending");
+    await user.click(screen.getByRole("button", { name: "Save details" }));
+    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+
+    await user.click(screen.getByRole("button", { name: "Release" }));
+    const name = await screen.findByRole("textbox", { name: "Campaign name" });
+    await user.type(name, " next");
+    expect(screen.getByRole("button", { name: "Save details" })).toBeEnabled();
+
+    await act(async () => pending.resolve({ ...campaign, name: "Release pending", revision: 4 }));
+    expect(name).toHaveValue("Release next");
+    expect(screen.queryByText("Campaign details saved")).not.toBeInTheDocument();
+  });
+
+  it("blocks payload drift until an unconfirmed Campaign create is restored", async () => {
+    const user = userEvent.setup();
+    const created = { ...campaign, id: "created-id", name: "New release", revision: 1, targetsRevision: 0, targetCount: 0 };
+    const createCampaign = vi.fn()
+      .mockRejectedValueOnce(new RuntimeTransportError(
+        "response lost",
+        { requestDispatched: true },
+      ))
+      .mockResolvedValueOnce(created);
+    renderCampaigns({ createCampaign }, []);
+    await connect(user);
+    await user.click(screen.getByRole("button", { name: "New campaign" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus(),
+    );
+    const name = screen.getByRole("textbox", { name: "Campaign name" });
+    await user.type(name, "New release");
+    await user.type(screen.getByRole("textbox", { name: "Message text" }), "Ship it");
+    await user.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByRole("button", { name: "Restore unconfirmed request" })).toBeInTheDocument();
+    expect(createCampaign.mock.calls[0][0]).toMatchObject({
+      name: "New release",
+      text: "Ship it",
+    });
+
+    await user.clear(name);
+    await user.type(name, "Changed release");
+    await user.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText(/could create a duplicate campaign/)).toBeInTheDocument();
+    expect(createCampaign).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Restore unconfirmed request" }));
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Campaign name" }))
+        .toHaveValue("New release"),
+    );
+    await user.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(await screen.findByText("Campaign draft created")).toBeInTheDocument();
+    expect(createCampaign).toHaveBeenCalledTimes(2);
+    expect(createCampaign.mock.calls[0][1]).toBe(createCampaign.mock.calls[1][1]);
   });
 
   it("does not alter scheduling on content PATCH and maps typed scheduling/edit conflicts", async () => {
@@ -386,7 +505,7 @@ describe("CampaignsScreen", () => {
 
     expect(listGroups).toHaveBeenLastCalledWith({
       sessionId: session.id, limit: 20, offset: 20,
-    });
+    }, READ_OPTIONS);
     expect(await screen.findByText("Second page group")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).toBeChecked();
     const selectPage = screen.getByRole("checkbox", { name: "Select all groups on this page" });
@@ -434,7 +553,7 @@ describe("CampaignsScreen", () => {
       isActive: false,
       minParticipants: 50,
       maxParticipants: 500,
-    }));
+    }, READ_OPTIONS));
     expect(within(panel).queryByRole("button", { name: "Apply range" })).not.toBeInTheDocument();
     expect(within(targetSection!).getByRole("button", { name: "Filters · 4" })).toBeInTheDocument();
     expect(within(panel).getByRole("button", { name: "Remove ≥ 50 participants filter" })).toBeInTheDocument();
@@ -443,7 +562,7 @@ describe("CampaignsScreen", () => {
     await user.click(within(panel).getByRole("button", { name: "Clear all" }));
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
       sessionId: session.id, limit: 20, offset: 0,
-    }));
+    }, READ_OPTIONS));
     expect(within(targetSection!).getByRole("button", { name: "Filters" })).toBeInTheDocument();
   });
 
@@ -517,7 +636,7 @@ describe("CampaignsScreen", () => {
       limit: 20,
       offset: 0,
       capabilityStatus: ["ALLOWED", "UNKNOWN"],
-    });
+    }, READ_OPTIONS);
   });
 
   it("recovers an out-of-range target page from Runtime metadata", async () => {
@@ -539,8 +658,8 @@ describe("CampaignsScreen", () => {
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(3));
     expect(listGroups).toHaveBeenLastCalledWith({
       sessionId: session.id, limit: 20, offset: 0,
-    });
-    expect(await within(targetSection!).findByText("Page 1 of 1")).toBeInTheDocument();
+    }, READ_OPTIONS);
+    expect(await within(targetSection!).findByText("All results shown")).toBeInTheDocument();
   });
 
   it("does not render a late target-page response after a new search intent", async () => {
@@ -570,7 +689,7 @@ describe("CampaignsScreen", () => {
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(3));
     expect(listGroups).toHaveBeenLastCalledWith({
       sessionId: session.id, limit: 20, offset: 0, query: "fresh",
-    });
+    }, READ_OPTIONS);
     const freshGroup = { ...unknownGroup, id: "fresh@g.us", name: "Fresh search result" };
     await act(async () => searchResult.resolve({ data: [freshGroup], meta: { total: 1, limit: 20, offset: 0 } }));
     expect(await screen.findByText("Fresh search result")).toBeInTheDocument();
@@ -594,14 +713,14 @@ describe("CampaignsScreen", () => {
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(2));
     expect(listGroups).toHaveBeenLastCalledWith({
       sessionId: session.id, limit: 20, offset: 0, query: "room",
-    });
+    }, READ_OPTIONS);
 
     await user.clear(search);
     await user.type(search, "   ");
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(3));
     expect(listGroups).toHaveBeenLastCalledWith({
       sessionId: session.id, limit: 20, offset: 0,
-    });
+    }, READ_OPTIONS);
     expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
   });
 
@@ -731,7 +850,10 @@ describe("CampaignsScreen", () => {
     const user = userEvent.setup();
     const created = campaignRun("DRY_RUN");
     const createCampaignRun = vi.fn()
-      .mockRejectedValueOnce(new TypeError("response lost"))
+      .mockRejectedValueOnce(new RuntimeTransportError(
+        "response lost",
+        { requestDispatched: true },
+      ))
       .mockResolvedValueOnce(created);
     renderCampaigns({
       createCampaignRun,
@@ -743,7 +865,7 @@ describe("CampaignsScreen", () => {
     await runPreflight(user);
     await screen.findByText("GROUP_CAPABILITY");
     await user.click(screen.getByRole("button", { name: "Create dry run" }));
-    expect(await screen.findByText("response lost")).toBeInTheDocument();
+    expect(await screen.findByText(/same request key/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create dry run" }));
     expect(await screen.findByText("Dry run created")).toBeInTheDocument();
     expect(createCampaignRun).toHaveBeenCalledTimes(2);
@@ -809,6 +931,51 @@ describe("CampaignsScreen", () => {
     expect(screen.getByRole("textbox", { name: "Campaign name" })).toBeDisabled();
   });
 
+  it("keeps a failed LIVE launch retry inside the active confirmation", async () => {
+    const user = userEvent.setup();
+    renderCampaigns({
+      createCampaignRun: vi.fn().mockRejectedValue(new Error("Runtime unavailable.")),
+      preflightCampaign: vi.fn().mockResolvedValue(report("LIVE", "PASS")),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await runPreflight(user, "LIVE");
+    await screen.findByText("GROUP_CAPABILITY");
+    await user.click(screen.getByRole("button", { name: "Launch live campaign" }));
+    const confirmation = screen.getByRole("dialog", { name: "Launch LIVE campaign?" });
+
+    await user.click(within(confirmation).getByRole("button", { name: "Launch live campaign" }));
+
+    const alert = await within(confirmation).findByRole("alert");
+    expect(alert).toHaveTextContent("Could not launch campaign");
+    expect(alert).toHaveTextContent("Runtime unavailable.");
+    expect(screen.getAllByText("Runtime unavailable.")).toHaveLength(1);
+  });
+
+  it("reports a committed LIVE launch separately from a failed follow-up refresh", async () => {
+    const user = userEvent.setup();
+    const createCampaignRun = vi.fn().mockResolvedValue(campaignRun("LIVE", "RUNNING"));
+    renderCampaigns({
+      createCampaignRun,
+      getCampaign: vi.fn().mockRejectedValue(new TypeError("refresh offline")),
+      preflightCampaign: vi.fn().mockResolvedValue(report("LIVE", "PASS")),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await runPreflight(user, "LIVE");
+    await screen.findByText("GROUP_CAPABILITY");
+    await user.click(screen.getByRole("button", { name: "Launch live campaign" }));
+    await user.click(within(screen.getByRole("dialog", { name: "Launch LIVE campaign?" }))
+      .getByRole("button", { name: "Launch live campaign" }));
+
+    expect(await screen.findByText("Live campaign launched")).toBeInTheDocument();
+    expect(await screen.findByText(/live run was created, but the latest Campaign state/)).toBeInTheDocument();
+    expect(screen.queryByText("Could not create campaign run.")).not.toBeInTheDocument();
+    expect(createCampaignRun).toHaveBeenCalledOnce();
+  });
+
   it("does not retry a launch revision conflict and requires a new preflight", async () => {
     const user = userEvent.setup();
     const createCampaignRun = vi.fn().mockRejectedValue(new RuntimeRequestError("opaque", {
@@ -857,6 +1024,28 @@ describe("CampaignsScreen", () => {
     expect(await screen.findByText(/Campaign lifecycle: Active/)).toBeInTheDocument();
   });
 
+  it("keeps a committed pause when the Campaign refresh fails", async () => {
+    const user = userEvent.setup();
+    const running = campaignRun("LIVE", "RUNNING");
+    const pauseCampaignRun = vi.fn().mockResolvedValue({ ...running, status: "PAUSED" as const });
+    renderCampaigns({
+      getCampaign: vi.fn().mockRejectedValue(new TypeError("refresh offline")),
+      listCampaignRuns: vi.fn().mockResolvedValue({
+        data: [running], meta: { total: 1, limit: 20, offset: 0 },
+      }),
+      pauseCampaignRun,
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(await screen.findByRole("button", { name: "Pause" }));
+
+    expect(await screen.findByText(/Runtime accepted the pause action/)).toBeInTheDocument();
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.queryByText("Could not pause campaign run.")).not.toBeInTheDocument();
+    expect(pauseCampaignRun).toHaveBeenCalledOnce();
+  });
+
   it("keeps Campaign PAUSED and reloads a BLOCKED run when resume preflight conflicts", async () => {
     const user = userEvent.setup();
     const paused = campaignRun("LIVE", "PAUSED");
@@ -877,6 +1066,36 @@ describe("CampaignsScreen", () => {
     await user.click(await screen.findByRole("button", { name: "Resume" }));
     expect(await screen.findByText(/Campaign lifecycle: Paused/)).toBeInTheDocument();
     expect(screen.getByText("Blocked")).toBeInTheDocument();
+  });
+
+  it("reloads canonical run and Campaign state after an unconfirmed pause result", async () => {
+    const user = userEvent.setup();
+    const running = campaignRun("LIVE", "RUNNING");
+    const paused = { ...running, status: "PAUSED" as const };
+    const getCampaign = vi.fn().mockResolvedValue({ ...campaign, status: "PAUSED" });
+    const getCampaignRun = vi.fn().mockResolvedValue(paused);
+    renderCampaigns({
+      getCampaign,
+      getCampaignRun,
+      listCampaignRuns: vi.fn().mockResolvedValue({
+        data: [running],
+        meta: { total: 1, limit: 20, offset: 0 },
+      }),
+      pauseCampaignRun: vi.fn().mockRejectedValue(new RuntimeTransportError(
+        "response lost",
+        { requestDispatched: true },
+      )),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(await screen.findByRole("button", { name: "Pause" }));
+
+    expect(await screen.findByText(/did not confirm the result/)).toBeInTheDocument();
+    await waitFor(() => expect(getCampaignRun).toHaveBeenCalledWith(running.id));
+    expect(getCampaign).toHaveBeenCalledWith(campaign.id);
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.getByText(/Campaign lifecycle: Paused/)).toBeInTheDocument();
   });
 
   it("renders an ARCHIVED Campaign after a terminal LIVE cancellation", async () => {
@@ -981,6 +1200,26 @@ describe("CampaignsScreen", () => {
     expect(screen.queryByText("GROUP_CAPABILITY")).not.toBeInTheDocument();
   });
 
+  it("invalidates an in-flight preflight as soon as persisted input becomes dirty", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<RuntimeCampaignPreflight>();
+    const preflightCampaign = vi.fn().mockReturnValue(pending.promise);
+    renderCampaigns({ preflightCampaign });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await runPreflight(user);
+    await user.click(screen.getByRole("tab", { name: "Details" }));
+    await user.type(screen.getByRole("textbox", { name: "Message text" }), " changed");
+
+    await act(async () => pending.resolve(report("DRY_RUN", "PASS")));
+    await user.click(screen.getByRole("tab", { name: /Preflight/ }));
+
+    expect(screen.queryByText("GROUP_CAPABILITY")).not.toBeInTheDocument();
+    expect(screen.getByText("No preflight result yet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run preflight" })).toBeDisabled();
+  });
+
   it("ignores a late run launch response after the editor closes", async () => {
     const user = userEvent.setup();
     const pending = deferred<RuntimeCampaignRun>();
@@ -1046,6 +1285,54 @@ describe("CampaignsScreen", () => {
     expect(screen.getByText("Materialized from a saved list; this is not a live link.")).toBeInTheDocument();
   });
 
+  it("locks the Group List review while applying and dispatches the snapshot once", async () => {
+    const user = userEvent.setup();
+    const list: RuntimeGroupList = {
+      id: "81111111-1111-4111-8111-111111111111", sessionId: session.id,
+      name: "Single apply list", description: null, groupCount: 1,
+      revision: 1, membershipRevision: 2, archivedAt: null,
+      createdAt: "2026-08-15T00:00:00.000Z", updatedAt: "2026-08-15T00:00:00.000Z",
+    };
+    const pending = deferred<Awaited<ReturnType<RuntimeApi["applyGroupListToCampaignTargets"]>>>();
+    const applyGroupListToCampaignTargets = vi.fn().mockReturnValue(pending.promise);
+    renderCampaigns({
+      applyGroupListToCampaignTargets,
+      listGroupLists: vi.fn().mockResolvedValue({
+        data: [list], meta: { total: 1, limit: 100, offset: 0 },
+      }),
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    const picker = await openSavedListPicker(user);
+    await user.click(await within(picker).findByRole("radio", { name: /Single apply list/ }));
+    await user.click(within(picker).getByRole("button", { name: "Review" }));
+    const review = screen.getByRole("dialog", { name: "Review target replacement" });
+    const applyButton = within(review).getByRole("button", { name: "Apply list" });
+
+    act(() => {
+      applyButton.click();
+      applyButton.click();
+    });
+
+    expect(applyGroupListToCampaignTargets).toHaveBeenCalledOnce();
+    expect(within(review).getByRole("button", { name: "Back" })).toBeDisabled();
+    expect(within(review).getByRole("button", { name: "Close dialog" })).toBeDisabled();
+
+    await act(async () => pending.resolve({
+      data: [deniedTarget],
+      targetsRevision: 5,
+      source: {
+        type: "GROUP_LIST",
+        groupListId: list.id,
+        groupListNameSnapshot: list.name,
+        membershipRevision: list.membershipRevision,
+        appliedAt: "2026-08-15T01:00:00.000Z",
+      },
+    }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Review target replacement" })).not.toBeInTheDocument());
+  });
+
   it("paginates Group List results on the server and retains selection outside the current page", async () => {
     const user = userEvent.setup();
     const firstList: RuntimeGroupList = {
@@ -1079,7 +1366,7 @@ describe("CampaignsScreen", () => {
       sessionId: session.id,
       limit: 5,
       offset: 5,
-    });
+    }, READ_OPTIONS);
   });
 
   it("ignores a late atomic list apply response after the editor closes", async () => {
@@ -1250,6 +1537,28 @@ describe("CampaignsScreen", () => {
     expect(screen.getByText("Empty target set · No unsaved changes")).toBeInTheDocument();
   });
 
+  it("reloads canonical targets while preserving staged selection after an unconfirmed save", async () => {
+    const user = userEvent.setup();
+    const listCampaignTargets = vi.fn()
+      .mockResolvedValueOnce({ data: [deniedTarget], targetsRevision: 4, source: null })
+      .mockResolvedValueOnce({ data: [deniedTarget], targetsRevision: 4, source: null });
+    const replaceCampaignTargets = vi.fn().mockRejectedValue(
+      new RuntimeTransportError("response lost", { requestDispatched: true }),
+    );
+    renderCampaigns({ listCampaignTargets, replaceCampaignTargets });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Unknown room" }));
+    await user.click(screen.getByRole("button", { name: "Save target set" }));
+
+    expect(await screen.findByText(/did not confirm the result/)).toBeInTheDocument();
+    await waitFor(() => expect(listCampaignTargets).toHaveBeenCalledTimes(2));
+    expect(replaceCampaignTargets).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).toBeChecked();
+    expect(screen.getByText("Changes not saved · 1 saved targets retained")).toBeInTheDocument();
+  });
+
   it("reloads a stale Group List revision and never retries atomic apply automatically", async () => {
     const user = userEvent.setup();
     const list: RuntimeGroupList = {
@@ -1396,8 +1705,8 @@ describe("CampaignsScreen", () => {
 
     expect(await screen.findByText("Cancel the active run and archive the campaign before deleting it.")).toBeInTheDocument();
     expect(deleteCampaign).toHaveBeenCalledTimes(1);
-    expect(api.getCampaign).toHaveBeenCalledWith(campaign.id);
-    expect(api.listCampaignRuns).toHaveBeenCalledWith(campaign.id, 20, 0);
+    expect(api.getCampaign).toHaveBeenCalledWith(campaign.id, READ_OPTIONS);
+    expect(api.listCampaignRuns).toHaveBeenCalledWith(campaign.id, 20, 0, READ_OPTIONS);
   });
 
   it("refreshes unfinished runs after a delete conflict and links to the run panel", async () => {
@@ -1438,10 +1747,37 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
     await user.click(screen.getByRole("button", { name: "Delete campaign" }));
 
-    expect(await screen.findByText("The campaign could not be deleted. Check the Runtime connection and try again.")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Delete campaign?" })).toBeInTheDocument();
+    const confirmation = screen.getByRole("dialog", { name: "Delete campaign?" });
+    expect(await within(confirmation).findByText("The campaign could not be deleted. Check the Runtime connection and try again.")).toBeInTheDocument();
+    expect(within(confirmation).getByText("Could not delete campaign")).toBeInTheDocument();
     expect(screen.getByText(campaign.name)).toBeInTheDocument();
     expect(deleteCampaign).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles an unconfirmed delete as successful when the campaign is missing", async () => {
+    const user = userEvent.setup();
+    const deleteCampaign = vi.fn().mockRejectedValue(new RuntimeTransportError(
+      "response lost",
+      { requestDispatched: true },
+    ));
+    const getCampaign = vi.fn().mockRejectedValue(new RuntimeRequestError("missing", {
+      code: "CAMPAIGN_NOT_FOUND",
+      status: 404,
+    }));
+    const listCampaigns = vi.fn()
+      .mockResolvedValueOnce({ data: [campaign], meta: { total: 1, limit: 50, offset: 0 } })
+      .mockResolvedValue({ data: [], meta: { total: 0, limit: 50, offset: 0 } });
+    renderCampaigns({ deleteCampaign, getCampaign, listCampaigns });
+    await connect(user);
+    await screen.findByText(campaign.name);
+
+    await user.click(screen.getByRole("button", { name: `More actions for ${campaign.name}` }));
+    await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
+    await user.click(screen.getByRole("button", { name: "Delete campaign" }));
+
+    expect(await screen.findByText("Campaign deleted")).toBeInTheDocument();
+    expect(getCampaign).toHaveBeenCalledWith(campaign.id);
+    expect(screen.queryByText(campaign.name)).not.toBeInTheDocument();
   });
 
   it("removes a stale campaign when Runtime reports it missing", async () => {

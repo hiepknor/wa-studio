@@ -2,7 +2,8 @@
  * WARP focus contract
  *
  * Focus is a keyboard-navigation affordance, not a component state. Every
- * focusable control gets the same crisp 1px outer outline with a 2px offset.
+ * focusable control gets the same crisp 1px outer outline, contiguous with its
+ * strengthened border so the indicator reads as one shape instead of two rings.
  * Neutral bordered controls also strengthen their existing border; semantic
  * borders remain untouched. Compound and visually-hidden inputs delegate the
  * outer outline to their visible owner so only one ring is ever rendered.

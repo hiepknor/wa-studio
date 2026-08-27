@@ -87,7 +87,7 @@ export function SessionsTable({
                 </Badge>
               </td>
               <td className="data-cell-time">
-                <DateTime fallback="Not synced" value={session.syncedAt} variant="relative" />
+                <DateTime fallback="Not synced" relativeStyle="compact" value={session.syncedAt} variant="relative" />
               </td>
               <td className="data-cell-action">
                 {!session.syncedAt && onOpenGroups ? (

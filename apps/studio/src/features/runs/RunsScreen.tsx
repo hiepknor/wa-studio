@@ -8,6 +8,13 @@ import type {
   RuntimeCampaignRunSummary,
   RuntimeCampaignRunSummaryPage,
 } from "@/shared/api/runtime-client";
+import {
+  isUnknownMutationOutcome,
+  unknownMutationOutcomeMessage,
+} from "@/shared/api/runtime-mutation";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
+import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
+import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -48,15 +55,13 @@ const DELIVERY_STATUSES: RuntimeCampaignDeliveryStatus[] = [
 
 interface RunsScreenProps {
   initialRunId?: string | null;
+  onOpenCampaigns?: () => void;
   onRunSelectionChange?: (runId: string | null) => void;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
 }
 
 export function RunsScreen({
   initialRunId = null,
+  onOpenCampaigns,
   onRunSelectionChange,
 }: RunsScreenProps = {}) {
   const { connected, selectedSessionId } = useRuntimeConnection();
@@ -85,7 +90,16 @@ export function RunsScreen({
   const listRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
   const deliveryRequestRef = useRef(0);
+  const mutationRequestRef = useRef(0);
   const sessionRef = useRef(selectedSessionId);
+  const selectedSessionIdRef = useRef(selectedSessionId);
+  const selectedRunIdRef = useRef(selectedRunId);
+  const runsRead = useLatestRequest();
+  const runDetailRead = useLatestRequest();
+  const deliveriesRead = useLatestRequest();
+  const mutationOperation = useSingleFlightOperation();
+  selectedSessionIdRef.current = selectedSessionId;
+  selectedRunIdRef.current = selectedRunId;
 
   const selectedSummary = useMemo(
     () => page?.data.find((candidate) => candidate.id === selectedRunId) ?? null,
@@ -113,12 +127,16 @@ export function RunsScreen({
 
   const loadRuns = useCallback(async (state: RunsListState, background = false) => {
     if (!selectedSessionId) {
+      runsRead.cancel();
+      listRequestRef.current += 1;
       setPage(null);
       setListLoading(false);
       setListRefreshing(false);
+      setListError(null);
       return;
     }
     const request = ++listRequestRef.current;
+    const signal = runsRead.begin();
     if (background) setListRefreshing(true);
     else {
       setListLoading(true);
@@ -133,36 +151,67 @@ export function RunsScreen({
         query: state.query,
         statuses: state.statuses,
         executionModes: state.executionModes,
-      });
-      if (request !== listRequestRef.current) return;
+      }, { signal });
+      if (request !== listRequestRef.current || !runsRead.isCurrent(signal)) return;
       if (state.offset > 0 && result.meta.total <= state.offset) {
-        setListState((current) => ({ ...current, offset: Math.max(0, result.meta.total - RUNS_PAGE_SIZE) }));
+        const lastOffset = result.meta.total === 0
+          ? 0
+          : Math.floor((result.meta.total - 1) / RUNS_PAGE_SIZE) * RUNS_PAGE_SIZE;
+        setListState((current) => ({ ...current, offset: lastOffset }));
         return;
       }
       setPage(result);
     } catch (error) {
+      if (!runsRead.isCurrent(signal)) return;
       if (request === listRequestRef.current) {
-        setListError(errorMessage(error, "Could not load campaign runs."));
+        setListError(userFacingErrorMessage(error, "Could not load campaign runs."));
       }
     } finally {
-      if (request === listRequestRef.current) {
+      const current = request === listRequestRef.current && runsRead.isCurrent(signal);
+      runsRead.complete(signal);
+      if (current) {
         setListLoading(false);
         setListRefreshing(false);
       }
     }
-  }, [api, selectedSessionId]);
+  }, [api, runsRead, selectedSessionId]);
 
   useEffect(() => {
     if (sessionRef.current === selectedSessionId) return;
     sessionRef.current = selectedSessionId;
+    mutationOperation.cancel();
+    runsRead.cancel();
+    runDetailRead.cancel();
+    deliveriesRead.cancel();
+    listRequestRef.current += 1;
+    detailRequestRef.current += 1;
+    deliveryRequestRef.current += 1;
+    mutationRequestRef.current += 1;
     setPage(null);
+    setListLoading(false);
+    setListRefreshing(false);
+    setListError(null);
     setSelectedRunId(null);
     setRun(null);
+    setRunLoading(false);
+    setRunError(null);
+    setMutation(null);
+    setCancelConfirmationOpen(false);
+    setDeliveryPage(null);
+    setDeliveriesLoading(false);
+    setDeliveriesError(null);
     setListState(initialRunsListState());
     setFiltersOpen(false);
-  }, [selectedSessionId]);
+  }, [deliveriesRead, mutationOperation, runDetailRead, runsRead, selectedSessionId]);
 
   useEffect(() => { void loadRuns(listState); }, [listState, loadRuns]);
+
+  useEffect(() => () => {
+    listRequestRef.current += 1;
+    detailRequestRef.current += 1;
+    deliveryRequestRef.current += 1;
+    mutationRequestRef.current += 1;
+  }, []);
 
   const hasActiveRun = page?.data.some((candidate) => !RUN_TERMINAL_STATUSES.has(candidate.status)) ?? false;
   useEffect(() => {
@@ -178,41 +227,61 @@ export function RunsScreen({
     setSelectedRunId(initialRunId);
   }, [initialRunId]);
 
-  const loadRun = useCallback(async (runId: string, background = false) => {
+  const loadRun = useCallback(async (
+    runId: string,
+    background = false,
+    preserveError = false,
+  ) => {
     const request = ++detailRequestRef.current;
+    const signal = runDetailRead.begin();
     if (!background) setRunLoading(true);
-    setRunError(null);
+    if (!preserveError) setRunError(null);
     try {
-      const result = await api.getCampaignRun(runId);
-      if (request === detailRequestRef.current && result.sessionId === selectedSessionId) setRun(result);
+      const result = await api.getCampaignRun(runId, { signal });
+      if (
+        request === detailRequestRef.current
+        && runDetailRead.isCurrent(signal)
+        && result.sessionId === selectedSessionId
+      ) setRun(result);
     } catch (error) {
-      if (request === detailRequestRef.current) {
-        setRunError(errorMessage(error, "Could not load run details."));
+      if (!runDetailRead.isCurrent(signal)) return;
+      if (request === detailRequestRef.current && !preserveError) {
+        setRunError(userFacingErrorMessage(error, "Could not load run details."));
       }
     } finally {
-      if (request === detailRequestRef.current && !background) setRunLoading(false);
+      const current = request === detailRequestRef.current
+        && runDetailRead.isCurrent(signal);
+      runDetailRead.complete(signal);
+      if (current && !background) setRunLoading(false);
     }
-  }, [api, selectedSessionId]);
+  }, [api, runDetailRead, selectedSessionId]);
 
   useEffect(() => {
     if (!selectedRunId) {
+      runDetailRead.cancel();
       setRun(null);
       return;
     }
     void loadRun(selectedRunId);
-  }, [loadRun, selectedRunId]);
+  }, [loadRun, runDetailRead, selectedRunId]);
 
   useEffect(() => {
-    if (!run || RUN_TERMINAL_STATUSES.has(run.status)) return;
+    if (!run || mutation || RUN_TERMINAL_STATUSES.has(run.status)) return;
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void loadRun(run.id, true);
     }, 3_000);
     return () => window.clearInterval(interval);
-  }, [loadRun, run]);
+  }, [loadRun, mutation, run]);
 
   const loadDeliveries = useCallback(async () => {
-    if (!selectedRunId || inspectorTab !== "deliveries") return;
+    if (!selectedRunId || inspectorTab !== "deliveries") {
+      deliveriesRead.cancel();
+      deliveryRequestRef.current += 1;
+      setDeliveriesLoading(false);
+      return;
+    }
     const request = ++deliveryRequestRef.current;
+    const signal = deliveriesRead.begin();
     setDeliveriesLoading(true);
     setDeliveriesError(null);
     try {
@@ -222,23 +291,43 @@ export function RunsScreen({
         offset: deliveryOffset,
         query: deliveryQuery,
         statuses: deliveryFilter === "ALL" ? [] : [deliveryFilter],
-      });
-      if (request === deliveryRequestRef.current) setDeliveryPage(result);
+      }, { signal });
+      if (
+        request === deliveryRequestRef.current
+        && deliveriesRead.isCurrent(signal)
+      ) setDeliveryPage(result);
     } catch (error) {
+      if (!deliveriesRead.isCurrent(signal)) return;
       if (request === deliveryRequestRef.current) {
-        setDeliveriesError(errorMessage(error, "Could not load deliveries."));
+        setDeliveriesError(userFacingErrorMessage(error, "Could not load deliveries."));
       }
     } finally {
-      if (request === deliveryRequestRef.current) setDeliveriesLoading(false);
+      const current = request === deliveryRequestRef.current
+        && deliveriesRead.isCurrent(signal);
+      deliveriesRead.complete(signal);
+      if (current) setDeliveriesLoading(false);
     }
-  }, [api, deliveryFilter, deliveryOffset, deliveryQuery, inspectorTab, selectedRunId]);
+  }, [api, deliveriesRead, deliveryFilter, deliveryOffset, deliveryQuery, inspectorTab, selectedRunId]);
 
   useEffect(() => { void loadDeliveries(); }, [loadDeliveries]);
 
   function selectRun(item: RuntimeCampaignRunSummary) {
+    mutationOperation.cancel();
+    runDetailRead.cancel();
+    deliveriesRead.cancel();
+    detailRequestRef.current += 1;
+    deliveryRequestRef.current += 1;
+    mutationRequestRef.current += 1;
     setSelectedRunId(item.id);
+    setRun(null);
+    setRunLoading(false);
+    setRunError(null);
+    setMutation(null);
+    setCancelConfirmationOpen(false);
     setInspectorTab("overview");
     setDeliveryPage(null);
+    setDeliveriesLoading(false);
+    setDeliveriesError(null);
     setDeliveryInputQuery("");
     setDeliveryQuery("");
     setDeliveryFilter("ALL");
@@ -247,35 +336,69 @@ export function RunsScreen({
   }
 
   function closeInspector() {
+    mutationOperation.cancel();
+    runDetailRead.cancel();
+    deliveriesRead.cancel();
     detailRequestRef.current += 1;
     deliveryRequestRef.current += 1;
+    mutationRequestRef.current += 1;
     setSelectedRunId(null);
     setRun(null);
+    setRunLoading(false);
     setRunError(null);
+    setMutation(null);
     setCancelConfirmationOpen(false);
     onRunSelectionChange?.(null);
   }
 
+  function requestRunCancellation() {
+    setRunError(null);
+    setCancelConfirmationOpen(true);
+  }
+
   async function changeRunState(action: RunAction) {
     if (!run) return;
+    const operationToken = mutationOperation.begin();
+    if (operationToken === null) return;
+    const targetRun = run;
+    const request = ++mutationRequestRef.current;
+    runDetailRead.cancel();
+    detailRequestRef.current += 1;
     setMutation(action);
     setRunError(null);
     try {
       const updated = action === "pause"
-        ? await api.pauseCampaignRun(run.id)
+        ? await api.pauseCampaignRun(targetRun.id)
         : action === "resume"
-          ? await api.resumeCampaignRun(run.id)
-          : await api.cancelCampaignRun(run.id);
+          ? await api.resumeCampaignRun(targetRun.id)
+          : await api.cancelCampaignRun(targetRun.id);
+      if (
+        !mutationOperation.isCurrent(operationToken)
+        || request !== mutationRequestRef.current
+        || selectedRunIdRef.current !== targetRun.id
+        || updated.id !== targetRun.id
+        || updated.sessionId !== selectedSessionIdRef.current
+        || updated.campaignId !== targetRun.campaignId
+      ) return;
       setRun(updated);
       setCancelConfirmationOpen(false);
       void loadRuns(listState, true);
       if (inspectorTab === "deliveries") void loadDeliveries();
     } catch (error) {
-      setRunError(errorMessage(error, `Could not ${action} campaign run.`));
-      void loadRun(run.id, true);
+      if (
+        !mutationOperation.isCurrent(operationToken)
+        || request !== mutationRequestRef.current
+        || selectedRunIdRef.current !== targetRun.id
+      ) return;
+      setRunError(isUnknownMutationOutcome(error)
+        ? unknownMutationOutcomeMessage("canonical-reload")
+        : userFacingErrorMessage(error, `Could not ${action} campaign run.`));
+      void loadRun(targetRun.id, true, true);
       void loadRuns(listState, true);
     } finally {
-      setMutation(null);
+      if (mutationOperation.complete(operationToken) && request === mutationRequestRef.current) {
+        setMutation(null);
+      }
     }
   }
 
@@ -315,6 +438,9 @@ export function RunsScreen({
         />
         {listError && <InlineAlert action={<Button onClick={() => void loadRuns(listState)} size="sm">Retry</Button>} className="data-table-error" title="Could not load runs">{listError}</InlineAlert>}
         <RunsTable
+          emptyAction={selectedSessionId && total === 0 && !listError && !hasCriteria && onOpenCampaigns
+            ? <Button onClick={onOpenCampaigns} size="sm">Open Campaigns</Button>
+            : undefined}
           emptyMessage={emptyMessage}
           loading={listLoading}
           onInspect={selectRun}
@@ -322,21 +448,21 @@ export function RunsScreen({
           selectedRunId={selectedRunId}
           updating={listRefreshing}
         />
-        {total > 0 && <TablePagination label={`${total} durable ${total === 1 ? "run" : "runs"}`} limit={limit} loading={listLoading || listRefreshing} offset={offset} onOffsetChange={(nextOffset) => setListState((current) => ({ ...current, offset: nextOffset }))} total={total} />}
+        <TablePagination limit={limit} loading={listLoading || listRefreshing} offset={offset} onOffsetChange={(nextOffset) => setListState((current) => ({ ...current, offset: nextOffset }))} total={total} />
       </div>
 
       <WorkspaceDrawer
         contentKey={`${selectedRunId ?? "none"}:${inspectorTab}`}
         description={currentRun ? `Campaign ${currentRun.campaignNameSnapshot}` : "Durable campaign execution"}
         eyebrow={currentRun ? `Run ${shortId(currentRun.id)}` : "Run inspector"}
-        footer={run && <RunActions mutation={mutation} onAction={(action) => action === "cancel" ? setCancelConfirmationOpen(true) : void changeRunState(action)} run={run} />}
+        footer={run && <RunActions mutation={mutation} onAction={(action) => action === "cancel" ? requestRunCancellation() : void changeRunState(action)} run={run} />}
         navigation={<Tabs activeTab={inspectorTab} ariaLabel="Run inspector sections" idPrefix="run-inspector" onChange={setInspectorTab} tabs={[{ id: "overview", label: "Overview" }, { id: "deliveries", label: "Deliveries", meta: currentRun?.totalTargets }]} />}
         onClose={closeInspector}
         open={Boolean(selectedRunId)}
         title={currentRun?.campaignNameSnapshot ?? "Run inspector"}
       >
         {runLoading && !run && <p className="workspace-loading">Loading run details…</p>}
-        {runError && <InlineAlert action={selectedRunId ? <Button onClick={() => void loadRun(selectedRunId)} size="sm">Retry</Button> : undefined} title="Run needs attention">{runError}</InlineAlert>}
+        {runError && !cancelConfirmationOpen && <InlineAlert action={selectedRunId ? <Button onClick={() => void loadRun(selectedRunId)} size="sm">Retry</Button> : undefined} title="Run needs attention">{runError}</InlineAlert>}
         {run && inspectorTab === "overview" && <RunOverview run={run} />}
         {selectedRunId && inspectorTab === "deliveries" && (
           <RunDeliveries
@@ -358,6 +484,8 @@ export function RunsScreen({
         confirmLabel="Cancel run"
         confirmVariant="danger"
         busy={mutation === "cancel"}
+        error={runError}
+        errorTitle="Could not cancel run"
         onCancel={() => setCancelConfirmationOpen(false)}
         onConfirm={() => void changeRunState("cancel")}
         open={cancelConfirmationOpen}

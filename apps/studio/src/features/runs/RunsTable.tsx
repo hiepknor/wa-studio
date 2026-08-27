@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type { RuntimeCampaignRunSummary } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
@@ -10,6 +12,7 @@ import {
 } from "./run-presentation";
 
 interface RunsTableProps {
+  emptyAction?: ReactNode;
   emptyMessage: string;
   loading: boolean;
   onInspect: (run: RuntimeCampaignRunSummary) => void;
@@ -19,6 +22,7 @@ interface RunsTableProps {
 }
 
 export function RunsTable({
+  emptyAction,
   emptyMessage,
   loading,
   onInspect,
@@ -60,7 +64,12 @@ export function RunsTable({
         </thead>
         <tbody>
           {tableMessage ? (
-            <tr><td className="data-table-empty" colSpan={6}>{tableMessage}</td></tr>
+            <tr><td className="data-table-empty" colSpan={6}>
+              <div className="data-table-empty-state">
+                <span>{tableMessage}</span>
+                {!loading && emptyAction}
+              </div>
+            </td></tr>
           ) : runs.map((run) => {
             const resolved = resolvedTargets(run);
             const attention = run.progress.failed + run.progress.blocked;
@@ -86,7 +95,7 @@ export function RunsTable({
                   </div>
                 </td>
                 <td className="data-cell-value runs-mode-col priority-low">{run.executionMode === "LIVE" ? "Live" : "Dry run"}</td>
-                <td className="data-cell-time"><DateTime value={run.updatedAt} variant="relative" /></td>
+                <td className="data-cell-time"><DateTime relativeStyle="compact" value={run.updatedAt} variant="relative" /></td>
                 <td className="data-cell-action">
                   <Button aria-label={`Inspect run ${shortId(run.id)}`} icon="chevron-right" onClick={() => onInspect(run)} variant="ghost" />
                 </td>

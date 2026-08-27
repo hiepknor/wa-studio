@@ -11,6 +11,11 @@ import type {
   RuntimeSyncRun,
 } from "@/shared/api/runtime-client";
 import { RuntimeRequestError } from "@/shared/api/runtime-client";
+import {
+  isUnknownMutationOutcome,
+  unknownMutationOutcomeMessage,
+} from "@/shared/api/runtime-mutation";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -33,6 +38,7 @@ import {
   WorkspaceSummaryCard,
 } from "@/shared/ui/WorkspaceDrawer";
 import { useSessionSync } from "@/shared/hooks/useSessionSync";
+import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
 import { pollCapabilityRefresh } from "./capability-refresh";
 import {
   groupListRequestKey,
@@ -112,10 +118,6 @@ function booleanLabel(
   return value ? positive : negative;
 }
 
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
-
 function syncProgressCopy(run: RuntimeSyncRun): string {
   const start = new Date(run.startedAt ?? run.requestedAt).getTime();
   const end = run.completedAt
@@ -154,7 +156,10 @@ export function GroupsScreen() {
     api: runtimeApi,
     sessionId: selectedSessionId,
   });
-  useWorkspaceNavigationGuard(groupsScope.dirty);
+  useWorkspaceNavigationGuard(groupsScope.dirty, {
+    message: "Unsaved group list details or staged membership will be discarded before leaving this workspace. Runtime data is not changed.",
+    title: "Leave group list draft?",
+  });
   const [page, setPage] = useState<RuntimeGroupPage | null>(null);
   const [listState, setListState] = useState<GroupListState>(() =>
     initialGroupListState(selectedSessionId),
@@ -212,6 +217,8 @@ export function GroupsScreen() {
   const memberRequestKeyRef = useRef("");
   const memberTargetKeyRef = useRef("");
   const capabilityRevision = useRef(0);
+  const deleteRequestRef = useRef(0);
+  const deleteActiveRequestRef = useRef<number | null>(null);
   const capabilityAbortRef = useRef<AbortController | null>(null);
   const capabilityTargetRef = useRef<{
     sessionId: string;
@@ -219,6 +226,9 @@ export function GroupsScreen() {
   } | null>(null);
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
   const groupSearchRef = useRef<HTMLInputElement | null>(null);
+  const groupsRead = useLatestRequest();
+  const groupDetailRead = useLatestRequest();
+  const membersRead = useLatestRequest();
   capabilityTargetRef.current =
     selectedSessionId &&
     selectedGroup &&
@@ -271,6 +281,7 @@ export function GroupsScreen() {
       if (!state.sessionId || state.sessionId !== selectedSessionId)
         return false;
       const revision = ++listRevision.current;
+      const signal = groupsRead.begin();
       const requestKey = groupListRequestKey(state);
       setListLoadReason(reason);
       setListError(null);
@@ -293,7 +304,7 @@ export function GroupsScreen() {
           ...(state.maxParticipants === undefined
             ? {}
             : { maxParticipants: state.maxParticipants }),
-        });
+        }, { signal });
         if (
           revision !== listRevision.current ||
           requestKey !== listTargetRef.current
@@ -317,14 +328,16 @@ export function GroupsScreen() {
         setPage(nextPage);
         return true;
       } catch (error) {
+        if (signal.aborted) return false;
         if (
           revision === listRevision.current &&
           requestKey === listTargetRef.current
         ) {
-          setListError(errorMessage(error, "Could not load groups."));
+          setListError(userFacingErrorMessage(error, "Could not load groups."));
         }
         return false;
       } finally {
+        groupsRead.complete(signal);
         if (
           revision === listRevision.current &&
           requestKey === listTargetRef.current
@@ -333,7 +346,7 @@ export function GroupsScreen() {
         }
       }
     },
-    [runtimeApi, selectedSessionId],
+    [groupsRead, runtimeApi, selectedSessionId],
   );
 
   const sync = useSessionSync({
@@ -343,9 +356,10 @@ export function GroupsScreen() {
     onCompleted: async () => {
       const warnings: string[] = [];
       try {
-        await refreshSessions();
+        const refreshed = await refreshSessions();
+        if (!refreshed) warnings.push("Session metadata was not refreshed.");
       } catch (error) {
-        warnings.push(errorMessage(error, "Reload session metadata manually."));
+        warnings.push(userFacingErrorMessage(error, "Reload session metadata manually."));
       }
       if (groupsScope.scope.mode === "list:view") {
         groupsScope.reloadMembership();
@@ -373,6 +387,7 @@ export function GroupsScreen() {
       query: string,
     ) => {
       const revision = ++membersRevision.current;
+      const signal = membersRead.begin();
       let requestOffset = nextOffset;
       let requestKey = memberPageKey(
         sessionId,
@@ -392,7 +407,7 @@ export function GroupsScreen() {
             limit: MEMBER_PAGE_SIZE,
             offset: requestOffset,
             ...(query ? { query } : {}),
-          });
+          }, { signal });
           if (
             revision !== membersRevision.current ||
             requestKey !== memberTargetKeyRef.current
@@ -452,26 +467,33 @@ export function GroupsScreen() {
           return;
         }
       } catch (error) {
+        if (signal.aborted) return;
         if (
           revision === membersRevision.current &&
           requestKey === memberTargetKeyRef.current
         ) {
-          setMembersError(errorMessage(error, "Could not load group members."));
+          setMembersError(userFacingErrorMessage(error, "Could not load group members."));
         }
       } finally {
+        membersRead.complete(signal);
         if (memberRequestKeyRef.current === requestKey)
           memberRequestKeyRef.current = "";
         if (revision === membersRevision.current) setMembersLoading(false);
       }
     },
-    [runtimeApi],
+    [membersRead, runtimeApi],
   );
 
   useEffect(() => {
     if (listState.sessionId === selectedSessionId) return;
+    groupsRead.cancel();
+    groupDetailRead.cancel();
+    membersRead.cancel();
     listRevision.current += 1;
     detailRevision.current += 1;
     membersRevision.current += 1;
+    deleteRequestRef.current += 1;
+    deleteActiveRequestRef.current = null;
     cancelCapabilityRefresh();
     setPage(null);
     setListState(initialGroupListState(selectedSessionId));
@@ -502,10 +524,11 @@ export function GroupsScreen() {
     setDeleteIntent(null);
     setDeleting(false);
     setDeleteError(null);
-  }, [cancelCapabilityRefresh, listState.sessionId, selectedSessionId]);
+  }, [cancelCapabilityRefresh, groupDetailRead, groupsRead, listState.sessionId, membersRead, selectedSessionId]);
 
   useEffect(() => {
     if (scopeKeyRef.current === scopeKey) return;
+    groupsRead.cancel();
     scopeKeyRef.current = scopeKey;
     listRevision.current += 1;
     setPage(null);
@@ -518,7 +541,7 @@ export function GroupsScreen() {
     if (groupsScope.scope.mode === "list:create") {
       window.requestAnimationFrame(() => groupSearchRef.current?.focus());
     }
-  }, [groupsScope.scope.mode, scopeKey, selectedSessionId]);
+  }, [groupsRead, groupsScope.scope.mode, scopeKey, selectedSessionId]);
 
   useEffect(() => {
     const {
@@ -561,8 +584,11 @@ export function GroupsScreen() {
     () => () => {
       listRevision.current += 1;
       listTargetRef.current = "";
+      detailRevision.current += 1;
       membersRevision.current += 1;
       memberTargetKeyRef.current = "";
+      deleteRequestRef.current += 1;
+      deleteActiveRequestRef.current = null;
     },
     [],
   );
@@ -588,13 +614,14 @@ export function GroupsScreen() {
     const normalizedQuery = memberFilter.trim();
     const timeout = window.setTimeout(() => {
       if (normalizedQuery === memberQuery) return;
+      membersRead.cancel();
       membersRevision.current += 1;
       memberRequestKeyRef.current = "";
       setMemberOffset(0);
       setMemberQuery(normalizedQuery);
     }, 300);
     return () => window.clearTimeout(timeout);
-  }, [memberFilter, memberQuery]);
+  }, [memberFilter, memberQuery, membersRead]);
 
   useEffect(() => {
     if (
@@ -628,9 +655,19 @@ export function GroupsScreen() {
     selectedSessionId,
   ]);
 
+  useEffect(() => {
+    if (inspectorTab === "members") return;
+    membersRead.cancel();
+    membersRevision.current += 1;
+    memberRequestKeyRef.current = "";
+    setMembersLoading(false);
+  }, [inspectorTab, membersRead]);
+
   async function openGroup(group: GroupsTableRow, trigger: HTMLButtonElement) {
     if (!selectedSessionId) return;
     const revision = ++detailRevision.current;
+    const signal = groupDetailRead.begin();
+    membersRead.cancel();
     cancelCapabilityRefresh();
     membersRevision.current += 1;
     detailTriggerRef.current = trigger;
@@ -654,18 +691,27 @@ export function GroupsScreen() {
     setMembersError(null);
     setSyncedMemberTotal(null);
     try {
-      const nextDetail = await runtimeApi.getGroup(selectedSessionId, group.id);
-      if (revision === detailRevision.current) setDetail(nextDetail);
+      const nextDetail = await runtimeApi.getGroup(selectedSessionId, group.id, { signal });
+      if (
+        revision === detailRevision.current
+        && groupDetailRead.isCurrent(signal)
+      ) setDetail(nextDetail);
     } catch (error) {
+      if (!groupDetailRead.isCurrent(signal)) return;
       if (revision === detailRevision.current) {
-        setDetailError(errorMessage(error, "Could not load group details."));
+        setDetailError(userFacingErrorMessage(error, "Could not load group details."));
       }
     } finally {
-      if (revision === detailRevision.current) setDetailLoading(false);
+      const current = revision === detailRevision.current
+        && groupDetailRead.isCurrent(signal);
+      groupDetailRead.complete(signal);
+      if (current) setDetailLoading(false);
     }
   }
 
   function closeDetail() {
+    groupDetailRead.cancel();
+    membersRead.cancel();
     detailRevision.current += 1;
     membersRevision.current += 1;
     cancelCapabilityRefresh();
@@ -696,7 +742,8 @@ export function GroupsScreen() {
       !selectedGroup ||
       selectedGroup.sessionId !== selectedSessionId ||
       !detail ||
-      refreshingCapability
+      refreshingCapability ||
+      capabilityAbortRef.current !== null
     )
       return;
     cancelCapabilityRefresh();
@@ -710,15 +757,25 @@ export function GroupsScreen() {
     setCapabilityError(null);
     setCapabilityNotice(null);
     try {
-      await runtimeApi.requestGroupCapabilityRefresh(sessionId, groupId);
+      let requestOutcomeUnknown = false;
+      try {
+        await runtimeApi.requestGroupCapabilityRefresh(sessionId, groupId);
+      } catch (error) {
+        if (!isUnknownMutationOutcome(error)) throw error;
+        requestOutcomeUnknown = true;
+      }
       if (!capabilityFlowIsCurrent(revision, sessionId, groupId)) return;
       setCapabilityRefreshState("pending");
-      setCapabilityNotice("Waiting for WA Runtime to publish a new result…");
+      setCapabilityNotice(requestOutcomeUnknown
+        ? "WA Runtime did not confirm the request. Checking for a published result…"
+        : "Waiting for WA Runtime to publish a new result…");
 
       const result = await pollCapabilityRefresh({
         baseline,
         signal: controller.signal,
-        read: () => runtimeApi.getGroup(sessionId, groupId),
+        read: () => runtimeApi.getGroup(sessionId, groupId, {
+          signal: controller.signal,
+        }),
         onObservation: (nextDetail) => {
           if (capabilityFlowIsCurrent(revision, sessionId, groupId))
             setDetail(nextDetail);
@@ -741,7 +798,7 @@ export function GroupsScreen() {
         setCapabilityNotice("Reopen or retry shortly.");
         if (result.error) {
           setCapabilityError(
-            errorMessage(
+            userFacingErrorMessage(
               result.error,
               "Could not read the latest capability result.",
             ),
@@ -752,7 +809,7 @@ export function GroupsScreen() {
       if (capabilityFlowIsCurrent(revision, sessionId, groupId)) {
         setCapabilityRefreshState("failed");
         setCapabilityError(
-          errorMessage(error, "Could not refresh send capability."),
+          userFacingErrorMessage(error, "Could not refresh send capability."),
         );
       }
     } finally {
@@ -803,12 +860,15 @@ export function GroupsScreen() {
   }
 
   async function deleteGroupList() {
-    if (!deleteIntent || deleting) return;
+    if (!deleteIntent || deleteActiveRequestRef.current !== null) return;
     const snapshot = deleteIntent;
+    const request = ++deleteRequestRef.current;
+    deleteActiveRequestRef.current = request;
     setDeleting(true);
     setDeleteError(null);
     try {
       await runtimeApi.archiveGroupList(snapshot.id, snapshot.revision);
+      if (request !== deleteRequestRef.current) return;
       setDeleteIntent(null);
       groupsScope.savedListDeleted(snapshot.id);
       toast.notify({
@@ -818,8 +878,40 @@ export function GroupsScreen() {
         tone: "success",
       });
     } catch (error) {
+      if (request !== deleteRequestRef.current) return;
       const code = error instanceof RuntimeRequestError ? error.code : null;
-      if (
+      if (isUnknownMutationOutcome(error)) {
+        try {
+          const canonical = await runtimeApi.getGroupList(snapshot.id);
+          if (request !== deleteRequestRef.current) return;
+          setDeleteIntent(null);
+          groupsScope.savedListUpdated(canonical);
+          toast.notify({
+            description: unknownMutationOutcomeMessage("canonical-reload"),
+            id: `group-list-delete-unknown-${snapshot.id}`,
+            title: "Delete result not confirmed",
+            tone: "warning",
+          });
+        } catch (reconcileError) {
+          if (request !== deleteRequestRef.current) return;
+          const missing = reconcileError instanceof RuntimeRequestError
+            && (reconcileError.code === "GROUP_LIST_NOT_FOUND" || reconcileError.status === 404);
+          if (missing) {
+            setDeleteIntent(null);
+            groupsScope.savedListDeleted(snapshot.id);
+            toast.notify({
+              description: "Runtime confirmed that the saved list is no longer available.",
+              id: `group-list-delete-reconciled-${snapshot.id}`,
+              title: "Group list deleted",
+              tone: "success",
+            });
+          } else {
+            setDeleteError(
+              "WA Runtime did not confirm the delete result, and its latest state could not be reloaded. Reconnect and review the list before retrying.",
+            );
+          }
+        }
+      } else if (
         code === "GROUP_LIST_NOT_FOUND"
         || (error instanceof RuntimeRequestError && error.status === 404)
       ) {
@@ -834,7 +926,9 @@ export function GroupsScreen() {
       } else if (code === "GROUP_LIST_REVISION_CONFLICT") {
         setDeleteIntent(null);
         try {
-          groupsScope.savedListUpdated(await runtimeApi.getGroupList(snapshot.id));
+          const canonical = await runtimeApi.getGroupList(snapshot.id);
+          if (request !== deleteRequestRef.current) return;
+          groupsScope.savedListUpdated(canonical);
         } catch {
           // The catalog refresh requested below can recover once Runtime is reachable.
         }
@@ -848,7 +942,10 @@ export function GroupsScreen() {
         setDeleteError("The group list could not be deleted. Check the Runtime connection and try again.");
       }
     } finally {
-      setDeleting(false);
+      if (deleteActiveRequestRef.current === request) {
+        deleteActiveRequestRef.current = null;
+      }
+      if (request === deleteRequestRef.current) setDeleting(false);
     }
   }
 
@@ -1160,6 +1257,21 @@ export function GroupsScreen() {
         </InlineAlert>
       )}
 
+      {syncState === "unknown" && (
+        <InlineAlert
+          action={
+            <Button onClick={() => void reloadGroups()} size="sm">
+              Reload groups
+            </Button>
+          }
+          indicator
+          title="Sync request not confirmed"
+          tone="warning"
+        >
+          {syncError}
+        </InlineAlert>
+      )}
+
       {!selectedSessionId && (
         <InlineAlert title="No active session" tone="warning">
           Select a Gateway session before loading groups.
@@ -1222,6 +1334,16 @@ export function GroupsScreen() {
               </div>
               <div className="group-list-context-actions">
                 <Button onClick={() => setDraftDetailsOpen(true)} size="sm" variant="ghost">Details</Button>
+                {groupsScope.scope.mode === "list:create" && groupsScope.hasUnconfirmedCreateIntent && (
+                  <Button
+                    disabled={groupsScope.saving}
+                    onClick={groupsScope.restoreUnconfirmedCreateIntent}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    Restore request
+                  </Button>
+                )}
                 <Button
                   disabled={groupsScope.saving}
                   onClick={() => groupsScope.scope.mode === "list:edit" && groupsScope.scope.draft.canonical
@@ -1418,17 +1540,17 @@ export function GroupsScreen() {
         />
 
         <ConfirmationDialog
-          body={<>
-            <p>Group list “{deleteIntent?.name}” will be removed from saved lists. Existing campaigns and their current targets will not be changed.</p>
-            {deleteError && <InlineAlert title="Could not delete group list">{deleteError}</InlineAlert>}
-          </>}
+          body={<p>Group list “{deleteIntent?.name}” will be removed from saved lists. Existing campaigns and their current targets will not be changed.</p>}
           busy={deleting}
           busyLabel="Deleting…"
           cancelLabel="Cancel"
           confirmLabel="Delete list"
           confirmVariant="danger"
+          error={deleteError}
+          errorTitle="Could not delete group list"
           onCancel={() => {
             if (deleting) return;
+            deleteRequestRef.current += 1;
             setDeleteIntent(null);
             setDeleteError(null);
           }}

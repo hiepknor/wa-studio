@@ -1,6 +1,8 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import type { ManagedConnectionFlow } from "@/app/RuntimeConnectionState";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
+import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
 import {
   getManagedRuntimeProvisioningProfile,
   listManagedRuntimeBackups,
@@ -26,6 +28,8 @@ interface ManagedRuntimeSetupScreenProps {
   restoreBackup?: (backupId: string) => Promise<void>;
   snapshot: ManagedRuntimeSnapshot;
 }
+
+type SetupOperation = "connect" | "restore" | null;
 
 const progressCopy = {
   booting: ["Preparing local workspace", "Inspecting the bundled Runtime…"],
@@ -53,9 +57,15 @@ export function ManagedRuntimeSetupScreen({
   const [apiKey, setApiKey] = useState("");
   const [storedProfileLoaded, setStoredProfileLoaded] = useState(false);
   const [backups, setBackups] = useState<ManagedRuntimeBackup[]>([]);
+  const [backupsLoading, setBackupsLoading] = useState(false);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [selectedBackup, setSelectedBackup] = useState<ManagedRuntimeBackup | null>(null);
-  const [restoringBackup, setRestoringBackup] = useState(false);
+  const [operation, setOperation] = useState<SetupOperation>(null);
+  const baseUrlEditedRef = useRef(false);
+  const operationLifecycle = useSingleFlightOperation();
+  const operationBusy = operation !== null;
+  const connecting = operation === "connect";
+  const restoringBackup = operation === "restore";
   const showForm = flow === "configure" || flow === "error";
   const step = activeStep(flow);
   const progress = flow in progressCopy
@@ -66,7 +76,7 @@ export function ManagedRuntimeSetupScreen({
     if (!showForm) return;
     let disposed = false;
     void getProfile().then(profile => {
-      if (!disposed && profile) {
+      if (!disposed && profile && !baseUrlEditedRef.current) {
         setBaseUrl(profile.openwaBaseUrl);
         setStoredProfileLoaded(true);
       }
@@ -75,14 +85,25 @@ export function ManagedRuntimeSetupScreen({
   }, [getProfile, showForm]);
 
   useEffect(() => {
-    if (snapshot.phase !== "degraded") return;
+    if (snapshot.phase !== "degraded") {
+      setBackups([]);
+      setBackupsLoading(false);
+      setBackupError(null);
+      setSelectedBackup(null);
+      return;
+    }
     let disposed = false;
+    setBackups([]);
+    setBackupsLoading(true);
+    setBackupError(null);
     void listBackups().then(available => {
       if (!disposed) setBackups(available);
     }).catch(caught => {
       if (!disposed) {
-        setBackupError(caught instanceof Error ? caught.message : "Could not list recovery points.");
+        setBackupError(userFacingErrorMessage(caught, "Could not list recovery points."));
       }
+    }).finally(() => {
+      if (!disposed) setBackupsLoading(false);
     });
     return () => { disposed = true; };
   }, [listBackups, snapshot.phase]);
@@ -95,24 +116,35 @@ export function ManagedRuntimeSetupScreen({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (operationBusy) return;
+    const token = operationLifecycle.begin();
+    if (token === null) return;
+    setOperation("connect");
     try {
       await onConnect({ openwaBaseUrl: baseUrl.trim(), openwaApiKey: apiKey.trim() });
     } catch {
       // The controller owns and renders the failure state.
+    } finally {
+      if (operationLifecycle.complete(token)) setOperation(null);
     }
   }
 
   async function confirmRestore() {
-    if (!selectedBackup) return;
-    setRestoringBackup(true);
+    if (!selectedBackup || operationBusy) return;
+    const token = operationLifecycle.begin();
+    if (token === null) return;
+    setOperation("restore");
     setBackupError(null);
     try {
       await restoreBackup(selectedBackup.id);
+      if (!operationLifecycle.isCurrent(token)) return;
       setSelectedBackup(null);
     } catch (caught) {
-      setBackupError(caught instanceof Error ? caught.message : "Could not restore the recovery point.");
+      if (operationLifecycle.isCurrent(token)) {
+        setBackupError(userFacingErrorMessage(caught, "Could not restore the recovery point."));
+      }
     } finally {
-      setRestoringBackup(false);
+      if (operationLifecycle.complete(token)) setOperation(null);
     }
   }
 
@@ -133,8 +165,8 @@ export function ManagedRuntimeSetupScreen({
             <header className="connection-section-label"><span>OpenWA gateway</span></header>
             <div className="connection-card-heading"><h2>Connect to OpenWA</h2><p>Studio validates the gateway before starting the managed local workspace.</p></div>
             <div className="connection-fields">
-              <TextField autoFocus={baseUrl.length === 0} icon="server" id="openwa-url" inputMode="url" label="OpenWA base URL" monospace onChange={event => setBaseUrl(event.currentTarget.value)} placeholder="https://openwa.company.com" required spellCheck={false} type="url" value={baseUrl} />
-              <TextField autoComplete="new-password" autoFocus={baseUrl.length > 0} description="Saved in the protected local app store after validation." icon="key" id="openwa-api-key" label="OpenWA API key" monospace onChange={event => setApiKey(event.currentTarget.value)} required type="password" value={apiKey} />
+              <TextField autoFocus={baseUrl.length === 0} disabled={operationBusy} icon="server" id="openwa-url" inputMode="url" label="OpenWA base URL" monospace onChange={event => { baseUrlEditedRef.current = true; setStoredProfileLoaded(false); setBaseUrl(event.currentTarget.value); }} placeholder="https://openwa.company.com" required spellCheck={false} type="url" value={baseUrl} />
+              <TextField autoComplete="new-password" autoFocus={baseUrl.length > 0} description="Saved in the protected local app store after validation." disabled={operationBusy} icon="key" id="openwa-api-key" label="OpenWA API key" monospace onChange={event => setApiKey(event.currentTarget.value)} required type="password" value={apiKey} />
             </div>
             {flow === "error" ? <InlineAlert className="connection-status" indicator title="Could not connect">{connectionError ?? snapshot.error ?? "Check the connection and try again."}</InlineAlert> : <InlineAlert className="connection-status" indicator title="Local by default" tone="neutral">Runtime and data stay on this Mac.</InlineAlert>}
             {snapshot.phase === "degraded" && (
@@ -144,10 +176,10 @@ export function ManagedRuntimeSetupScreen({
                   <h3 id="degraded-recovery-title">Restore a verified local backup</h3>
                   <p>The failed PostgreSQL directory will be quarantined, never deleted.</p>
                 </div>
-                {backupError && <InlineAlert title="Recovery unavailable">{backupError}</InlineAlert>}
-                {backups.length === 0 ? <small>No local recovery points are available.</small> : (
+                {backupError && !selectedBackup && <InlineAlert title="Recovery unavailable">{backupError}</InlineAlert>}
+                {backupsLoading ? <small>Loading verified recovery points…</small> : backups.length === 0 ? <small>No local recovery points are available.</small> : (
                   <div className="managed-runtime-recovery-list">
-                    {backups.map(backup => <Button disabled={restoringBackup} key={backup.id} onClick={() => setSelectedBackup(backup)} size="sm" type="button">Restore {new Date(backup.createdAtMs).toLocaleString()}</Button>)}
+                    {backups.map(backup => <Button disabled={operationBusy} key={backup.id} onClick={() => { setBackupError(null); setSelectedBackup(backup); }} size="sm" type="button">Restore {new Date(backup.createdAtMs).toLocaleString()}</Button>)}
                   </div>
                 )}
               </section>
@@ -156,7 +188,7 @@ export function ManagedRuntimeSetupScreen({
               <span aria-hidden="true" className="connection-status-mark"><AppIcon name="server" size="sm" /></span>
               <span><strong>WA Runtime managed locally</strong><small>v{snapshot.manifest?.version ?? "bundled"} · PostgreSQL-backed</small></span>
             </div>
-            <Button className="connection-submit-button" size="lg" type="submit" variant="primary">Connect OpenWA</Button>
+            <Button className="connection-submit-button" disabled={operationBusy} loading={connecting} size="lg" type="submit" variant="primary">Connect OpenWA</Button>
             <p className="connection-setup-footnote">Connection settings can be changed later without moving local data.</p>
           </form>
         ) : (
@@ -192,7 +224,9 @@ export function ManagedRuntimeSetupScreen({
         busyLabel="Recovering…"
         confirmLabel="Quarantine and restore"
         confirmVariant="danger"
-        onCancel={() => { if (!restoringBackup) setSelectedBackup(null); }}
+        error={backupError}
+        errorTitle="Could not restore recovery point"
+        onCancel={() => { if (!operationBusy) setSelectedBackup(null); }}
         onConfirm={() => void confirmRestore()}
         open={selectedBackup !== null}
         title="Recover the local Runtime database?"

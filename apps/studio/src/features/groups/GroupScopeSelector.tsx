@@ -77,6 +77,10 @@ export function GroupScopeSelector({
   }, [loading]);
 
   useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  useEffect(() => {
     if (!open) return;
     const frame = window.requestAnimationFrame(() => searchRef.current?.focus());
     function closeFromOutside(event: PointerEvent) {
@@ -99,12 +103,19 @@ export function GroupScopeSelector({
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       close(true);
     } else if (event.key === "ArrowDown") {
       moveOption(event, 0);
     } else if (event.key === "ArrowUp") {
       moveOption(event, -1);
     }
+  }
+
+  function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (!["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    if (!disabled) setOpen(true);
   }
 
   function handleListboxKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -158,6 +169,7 @@ export function GroupScopeSelector({
         className="group-scope-trigger"
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
+        onKeyDown={handleTriggerKeyDown}
         ref={triggerRef}
         role="combobox"
         type="button"

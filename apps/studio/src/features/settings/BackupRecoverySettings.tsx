@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
+import { userFacingErrorMessage } from "@/shared/errors/error-message";
 import type {
   ManagedRuntimeBackup,
   ManagedRuntimeDiagnostics,
@@ -15,20 +17,24 @@ import { TextField } from "@/shared/ui/TextField";
 import { useToast } from "@/shared/ui/Toast";
 import { SettingsRow } from "./SettingsRow";
 import { SettingsSection } from "./SettingsSection";
+import type { SettingsTaskNavigationState } from "./settings-types";
 
 interface BackupRecoverySettingsProps {
   backups: ManagedRuntimeBackup[];
   createBackup: () => Promise<void>;
   diagnostics: ManagedRuntimeDiagnostics | null;
   exportRecoveryArchive: (passphrase: string) => Promise<string | null>;
+  loadError: string | null;
   loading: boolean;
-  onReload: () => Promise<void>;
+  onNavigationStateChange?: (state: SettingsTaskNavigationState) => void;
+  onReload: () => Promise<boolean>;
   restoreBackup: (backupId: string) => Promise<void>;
   restoreRecoveryArchive: (passphrase: string) => Promise<boolean>;
   runtimeReady: boolean;
 }
 
 type RecoveryFlow = "export" | "import" | null;
+type RecoveryOperation = "create-backup" | "export" | "import" | "restore-backup" | null;
 type ProtectionTone = "danger" | "neutral" | "success" | "warning";
 
 function backupKind(kind: ManagedRuntimeBackup["kind"]): string {
@@ -60,7 +66,9 @@ export function BackupRecoverySettings({
   createBackup,
   diagnostics,
   exportRecoveryArchive,
+  loadError,
   loading,
+  onNavigationStateChange,
   onReload,
   restoreBackup,
   restoreRecoveryArchive,
@@ -68,21 +76,43 @@ export function BackupRecoverySettings({
 }: BackupRecoverySettingsProps) {
   const { notify } = useToast();
   const [selectedBackup, setSelectedBackup] = useState<ManagedRuntimeBackup | null>(null);
-  const [creatingBackup, setCreatingBackup] = useState(false);
-  const [restoringBackup, setRestoringBackup] = useState(false);
+  const [operation, setOperation] = useState<RecoveryOperation>(null);
   const [recoveryFlow, setRecoveryFlow] = useState<RecoveryFlow>(null);
   const [exportPassphrase, setExportPassphrase] = useState("");
   const [exportConfirmation, setExportConfirmation] = useState("");
   const [importPassphrase, setImportPassphrase] = useState("");
-  const [exportingArchive, setExportingArchive] = useState(false);
-  const [importingArchive, setImportingArchive] = useState(false);
   const [confirmingImport, setConfirmingImport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [passphraseError, setPassphraseError] = useState<string | null>(null);
+  const operationLifecycle = useSingleFlightOperation();
   const protection = protectionPresentation(diagnostics?.recoveryFreshness);
+  const creatingBackup = operation === "create-backup";
+  const restoringBackup = operation === "restore-backup";
+  const exportingArchive = operation === "export";
+  const importingArchive = operation === "import";
+  const operationBusy = operation !== null;
+  const recoveryDraftDirty = Boolean(
+    exportPassphrase || exportConfirmation || importPassphrase,
+  );
+
+  useEffect(() => {
+    onNavigationStateChange?.({
+      busy: operationBusy,
+      dirty: operationBusy || recoveryDraftDirty,
+    });
+    return () => onNavigationStateChange?.({ busy: false, dirty: false });
+  }, [onNavigationStateChange, operationBusy, recoveryDraftDirty]);
+
+  async function reloadAfterCommittedOperation(): Promise<boolean> {
+    try {
+      return await onReload();
+    } catch {
+      return false;
+    }
+  }
 
   function closeRecoveryFlow() {
-    if (exportingArchive || importingArchive) return;
+    if (operationBusy) return;
     setRecoveryFlow(null);
     setPassphraseError(null);
     setExportPassphrase("");
@@ -91,44 +121,62 @@ export function BackupRecoverySettings({
   }
 
   async function createManualBackup() {
-    setCreatingBackup(true);
+    if (operationBusy) return;
+    const token = operationLifecycle.begin();
+    if (token === null) return;
+    setOperation("create-backup");
     setError(null);
     try {
       await createBackup();
-      await onReload();
+      if (!operationLifecycle.isCurrent(token)) return;
+      const refreshed = await reloadAfterCommittedOperation();
+      if (!operationLifecycle.isCurrent(token)) return;
       notify({
-        description: "The encrypted recovery point was verified and saved on this device.",
-        title: "Backup created",
-        tone: "success",
+        description: refreshed
+          ? "The encrypted recovery point was verified and saved on this device."
+          : "The backup was created, but the recovery-point list could not be refreshed.",
+        title: refreshed ? "Backup created" : "Backup created; refresh needed",
+        tone: refreshed ? "success" : "warning",
       });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create a manual backup.");
+      if (operationLifecycle.isCurrent(token)) {
+        setError(userFacingErrorMessage(caught, "Could not create a manual backup."));
+      }
     } finally {
-      setCreatingBackup(false);
+      if (operationLifecycle.complete(token)) setOperation(null);
     }
   }
 
   async function confirmRestoreBackup() {
-    if (!selectedBackup) return;
-    setRestoringBackup(true);
+    if (!selectedBackup || operationBusy) return;
+    const token = operationLifecycle.begin();
+    if (token === null) return;
+    setOperation("restore-backup");
     setError(null);
     try {
       await restoreBackup(selectedBackup.id);
+      if (!operationLifecycle.isCurrent(token)) return;
       setSelectedBackup(null);
-      await onReload();
+      const refreshed = await reloadAfterCommittedOperation();
+      if (!operationLifecycle.isCurrent(token)) return;
       notify({
-        description: "WA Runtime is restarting with the selected local data.",
-        title: "Backup restored",
-        tone: "success",
+        description: refreshed
+          ? "WA Runtime is restarting with the selected local data."
+          : "The restore completed, but Runtime diagnostics could not be refreshed yet.",
+        title: refreshed ? "Backup restored" : "Backup restored; refresh needed",
+        tone: refreshed ? "success" : "warning",
       });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not restore the backup.");
+      if (operationLifecycle.isCurrent(token)) {
+        setError(userFacingErrorMessage(caught, "Could not restore the backup."));
+      }
     } finally {
-      setRestoringBackup(false);
+      if (operationLifecycle.complete(token)) setOperation(null);
     }
   }
 
   async function exportArchive() {
+    if (operationBusy) return;
     if (exportPassphrase.length < 16) {
       setPassphraseError("Use at least 16 characters.");
       return;
@@ -137,11 +185,14 @@ export function BackupRecoverySettings({
       setPassphraseError("Passphrases do not match.");
       return;
     }
-    setExportingArchive(true);
+    const token = operationLifecycle.begin();
+    if (token === null) return;
+    setOperation("export");
     setError(null);
     setPassphraseError(null);
     try {
       const name = await exportRecoveryArchive(exportPassphrase);
+      if (!operationLifecycle.isCurrent(token)) return;
       if (name) {
         notify({
           description: `${name} was encrypted and verified.`,
@@ -153,41 +204,66 @@ export function BackupRecoverySettings({
         setExportConfirmation("");
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not export a recovery archive.");
+      if (operationLifecycle.isCurrent(token)) {
+        setError(userFacingErrorMessage(
+          caught,
+          "Could not export a recovery archive.",
+          [exportPassphrase],
+        ));
+      }
     } finally {
-      setExportingArchive(false);
+      if (operationLifecycle.complete(token)) setOperation(null);
     }
   }
 
   async function confirmImportArchive() {
-    setImportingArchive(true);
+    if (operationBusy) return;
+    const token = operationLifecycle.begin();
+    if (token === null) return;
+    setOperation("import");
     setError(null);
     try {
       const restored = await restoreRecoveryArchive(importPassphrase);
+      if (!operationLifecycle.isCurrent(token)) return;
       setConfirmingImport(false);
       if (restored) {
         setRecoveryFlow(null);
         setImportPassphrase("");
-        await onReload();
+        const refreshed = await reloadAfterCommittedOperation();
+        if (!operationLifecycle.isCurrent(token)) return;
         notify({
-          description: "WA Runtime is restarting with the imported data.",
-          title: "Recovery archive restored",
-          tone: "success",
+          description: refreshed
+            ? "WA Runtime is restarting with the imported data."
+            : "The archive was restored, but Runtime diagnostics could not be refreshed yet.",
+          title: refreshed
+            ? "Recovery archive restored"
+            : "Archive restored; refresh needed",
+          tone: refreshed ? "success" : "warning",
         });
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not restore the recovery archive.");
+      if (operationLifecycle.isCurrent(token)) {
+        setError(userFacingErrorMessage(
+          caught,
+          "Could not restore the recovery archive.",
+          [importPassphrase],
+        ));
+      }
     } finally {
-      setImportingArchive(false);
+      if (operationLifecycle.complete(token)) setOperation(null);
     }
   }
 
   return (
     <div className="settings-panel-stack">
-      <InlineAlert className="settings-notice" title="WA Runtime recovery controls" tone="warning">
-        Restoring a recovery point replaces local Runtime data and briefly pauses managed services.
-      </InlineAlert>
-      {error && <InlineAlert className="settings-notice" title="Recovery operation failed">{error}</InlineAlert>}
+      {((!selectedBackup && !confirmingImport && error) || loadError) && (
+        <InlineAlert
+          className="settings-notice"
+          title={error ? "Recovery operation failed" : "Recovery data could not be refreshed"}
+        >
+          {error ?? loadError}
+        </InlineAlert>
+      )}
 
       <SettingsSection
         action={<Badge tone={protection.tone} variant="status">{protection.label}</Badge>}
@@ -222,7 +298,7 @@ export function BackupRecoverySettings({
           <div className="settings-section-actions">
             <Badge tone="neutral">{backups.length} retained</Badge>
             <Button
-              disabled={!runtimeReady || creatingBackup || restoringBackup}
+              disabled={!runtimeReady || operationBusy}
               icon="refresh"
               loading={creatingBackup}
               onClick={() => void createManualBackup()}
@@ -263,8 +339,8 @@ export function BackupRecoverySettings({
                   <td className="data-cell-number">{bytes(backup.sizeBytes)}</td>
                   <td className="data-cell-action">
                     <Button
-                      disabled={!runtimeReady || restoringBackup}
-                      onClick={() => setSelectedBackup(backup)}
+                      disabled={!runtimeReady || operationBusy}
+                      onClick={() => { setError(null); setSelectedBackup(backup); }}
                       size="sm"
                       variant="ghost"
                     >
@@ -289,7 +365,7 @@ export function BackupRecoverySettings({
           <div className="settings-recovery-choice-grid">
             <button
               className="settings-operation-row"
-              disabled={!runtimeReady}
+              disabled={!runtimeReady || operationBusy}
               onClick={() => setRecoveryFlow("export")}
               type="button"
             >
@@ -301,7 +377,7 @@ export function BackupRecoverySettings({
             </button>
             <button
               className="settings-operation-row"
-              disabled={!runtimeReady}
+              disabled={!runtimeReady || operationBusy}
               onClick={() => setRecoveryFlow("import")}
               type="button"
             >
@@ -315,14 +391,14 @@ export function BackupRecoverySettings({
         ) : recoveryFlow === "export" ? (
           <div className="settings-recovery-flow stack stack-md">
             <div className="settings-recovery-flow-heading">
-              <div><h4>Export a protected archive</h4><p>Create a passphrase you can store separately from this device.</p></div>
-              <Button disabled={exportingArchive} onClick={closeRecoveryFlow} size="sm" variant="ghost">Cancel</Button>
+              <div><h3>Export a protected archive</h3><p>Create a passphrase you can store separately from this device.</p></div>
+              <Button disabled={operationBusy} onClick={closeRecoveryFlow} size="sm" variant="ghost">Cancel</Button>
             </div>
             <div className="settings-field-grid">
               <TextField
                 autoComplete="new-password"
                 autoFocus
-                disabled={exportingArchive}
+                disabled={operationBusy}
                 error={passphraseError ?? undefined}
                 id="recovery-export-passphrase"
                 label="New recovery passphrase"
@@ -333,7 +409,7 @@ export function BackupRecoverySettings({
               />
               <TextField
                 autoComplete="new-password"
-                disabled={exportingArchive}
+                disabled={operationBusy}
                 id="recovery-export-confirmation"
                 label="Confirm passphrase"
                 minLength={16}
@@ -347,7 +423,7 @@ export function BackupRecoverySettings({
             </InlineAlert>
             <div className="settings-form-actions">
               <Button
-                disabled={exportPassphrase.length < 16 || exportConfirmation.length < 16}
+                disabled={operationBusy || exportPassphrase.length < 16 || exportConfirmation.length < 16}
                 loading={exportingArchive}
                 onClick={() => void exportArchive()}
                 variant="primary"
@@ -359,14 +435,14 @@ export function BackupRecoverySettings({
         ) : (
           <div className="settings-recovery-flow stack stack-md">
             <div className="settings-recovery-flow-heading">
-              <div><h4>Import a protected archive</h4><p>Enter the passphrase used when the portable archive was created.</p></div>
-              <Button disabled={importingArchive} onClick={closeRecoveryFlow} size="sm" variant="ghost">Cancel</Button>
+              <div><h3>Import a protected archive</h3><p>Enter the passphrase used when the portable archive was created.</p></div>
+              <Button disabled={operationBusy} onClick={closeRecoveryFlow} size="sm" variant="ghost">Cancel</Button>
             </div>
             <TextField
               autoComplete="current-password"
               autoFocus
               containerClassName="settings-recovery-single-field"
-              disabled={importingArchive}
+              disabled={operationBusy}
               id="recovery-import-passphrase"
               label="Archive passphrase"
               minLength={16}
@@ -379,8 +455,8 @@ export function BackupRecoverySettings({
             </InlineAlert>
             <div className="settings-form-actions">
               <Button
-                disabled={importPassphrase.length < 16}
-                onClick={() => setConfirmingImport(true)}
+                disabled={operationBusy || importPassphrase.length < 16}
+                onClick={() => { setError(null); setConfirmingImport(true); }}
                 variant="danger"
               >
                 Choose archive and restore
@@ -401,7 +477,9 @@ export function BackupRecoverySettings({
         busyLabel="Restoring…"
         confirmLabel="Restore backup"
         confirmVariant="danger"
-        onCancel={() => { if (!restoringBackup) setSelectedBackup(null); }}
+        error={error}
+        errorTitle="Backup restore failed"
+        onCancel={() => { if (!operationBusy) setSelectedBackup(null); }}
         onConfirm={() => void confirmRestoreBackup()}
         open={selectedBackup !== null}
         title="Restore this backup?"
@@ -417,7 +495,9 @@ export function BackupRecoverySettings({
         busyLabel="Restoring…"
         confirmLabel="Choose archive and restore"
         confirmVariant="danger"
-        onCancel={() => { if (!importingArchive) setConfirmingImport(false); }}
+        error={error}
+        errorTitle="Archive restore failed"
+        onCancel={() => { if (!operationBusy) setConfirmingImport(false); }}
         onConfirm={() => void confirmImportArchive()}
         open={confirmingImport}
         title="Restore a portable archive?"

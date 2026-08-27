@@ -116,7 +116,7 @@ function Harness() {
     return (
       <button
         onClick={() =>
-          void connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "key" })
+          void connect({ baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" })
         }
       >
         Connect
@@ -200,7 +200,7 @@ describe("GroupsScreen Contacts v2 members", () => {
       limit: 25,
       offset: 0,
       query: "missing",
-    });
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it("renders deterministic enriched identity fallbacks without trusting LID phoneNumber", async () => {
@@ -371,7 +371,7 @@ describe("GroupsScreen Contacts v2 members", () => {
       limit: 25,
       offset: 0,
       query: "needle",
-    });
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     await act(async () =>
       resolveOldPage?.(
@@ -413,7 +413,7 @@ describe("GroupsScreen Contacts v2 members", () => {
     expect(await screen.findByText("First")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Next member page" }));
     expect(await screen.findByText("Only member")).toBeInTheDocument();
-    expect(screen.getAllByText("1–1 of 1")).toHaveLength(2);
+    expect(screen.getByText("1–1 of 1")).toBeInTheDocument();
 
     await user.type(
       screen.getByRole("searchbox", { name: "Search synchronized members" }),

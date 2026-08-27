@@ -1,5 +1,5 @@
 :root {
-  /* WARP foundation. Keep these values aligned with the OpenDesign source. */
+  /* Product-owned WARP foundation. */
   --bg: #161412;
   --surface: #1f1d1b;
   --surface-warm: var(--surface);
@@ -58,16 +58,16 @@
   --control-surface-default: var(--surface-control);
   --control-surface-hover: var(--surface-hover);
   --control-surface-disabled: var(--surface-disabled);
-  --control-border-default: var(--border-subtle);
-  --control-border-hover: var(--border-strong);
+  --control-border-default: color-mix(in oklab, var(--fg) 38%, transparent);
+  --control-border-hover: color-mix(in oklab, var(--fg) 52%, transparent);
   --control-border-disabled: var(--border-subtle);
   --divider: var(--border-subtle);
   --divider-strong: var(--border);
   --divider-focus: var(--fg-2);
   --active-rail: var(--fg-2);
-  --focus-outer-color: var(--fg-2);
-  --focus-inner-border: var(--fg-2);
-  --focus-offset: 2px;
+  --focus-outer-color: var(--muted);
+  --focus-inner-border: var(--muted);
+  --focus-offset: 0px;
   --text-primary: var(--fg);
   --text-secondary: var(--fg-2);
   --text-tertiary: var(--muted);

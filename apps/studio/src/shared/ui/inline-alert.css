@@ -11,9 +11,9 @@
   color: var(--text-secondary);
   font-size: var(--type-body);
 }
-.inline-alert-copy { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
-.inline-alert-copy strong { flex: 0 0 auto; }
-.inline-alert-copy span { min-width: 0; overflow: hidden; opacity: .78; text-overflow: ellipsis; white-space: nowrap; }
+.inline-alert-copy { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.inline-alert-copy strong { min-width: 0; flex: 0 1 auto; overflow-wrap: anywhere; }
+.inline-alert-copy span { min-width: 0; opacity: .78; overflow-wrap: anywhere; }
 .inline-alert-action { flex: 0 0 auto; }
 .inline-alert-neutral { color: var(--muted); }
 .inline-alert-danger { border-color: var(--state-danger-border); background: var(--danger-soft); color: var(--state-danger); }

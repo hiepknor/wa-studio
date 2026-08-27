@@ -6,6 +6,7 @@ import {
   type RuntimeGroup,
   type RuntimeGroupPage,
 } from "@/shared/api/runtime-client";
+import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
 import {
   activeGroupSelectionFilterCount,
   emptyGroupSelectionFilters,
@@ -51,6 +52,7 @@ export function useGroupDirectoryQuery({
   const [error, setError] = useState<string | null>(null);
   const [reloadRevision, setReloadRevision] = useState(0);
   const requestRevision = useRef(0);
+  const directoryRead = useLatestRequest();
   const context = `${sessionId ?? ""}:${scopeKey}`;
   const contextRef = useRef(context);
   const contextIsCurrent = contextRef.current === context;
@@ -66,6 +68,7 @@ export function useGroupDirectoryQuery({
   targetRef.current = targetKey;
 
   const reset = useCallback(() => {
+    directoryRead.cancel();
     requestRevision.current += 1;
     targetRef.current = "";
     setInputQuery("");
@@ -79,7 +82,7 @@ export function useGroupDirectoryQuery({
     setKnownGroups({});
     setLoading(false);
     setError(null);
-  }, []);
+  }, [directoryRead]);
 
   useEffect(() => {
     if (contextRef.current === context) return;
@@ -89,10 +92,11 @@ export function useGroupDirectoryQuery({
 
   useEffect(() => {
     if (enabled) return;
+    directoryRead.cancel();
     requestRevision.current += 1;
     targetRef.current = "";
     setLoading(false);
-  }, [enabled]);
+  }, [directoryRead, enabled]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -106,6 +110,7 @@ export function useGroupDirectoryQuery({
   const load = useCallback(async () => {
     if (!enabled || !sessionId || !committedKey) return;
     const revision = ++requestRevision.current;
+    const signal = directoryRead.begin();
     setLoading(true);
     setError(null);
     setGroups([]);
@@ -128,7 +133,7 @@ export function useGroupDirectoryQuery({
         ...(filters.maxParticipants === undefined
           ? {}
           : { maxParticipants: filters.maxParticipants }),
-      });
+      }, { signal });
       if (revision !== requestRevision.current || committedKey !== targetRef.current) return;
       if (offset > 0 && page.data.length === 0 && page.meta.total <= offset) {
         const lastOffset = page.meta.total === 0
@@ -147,6 +152,7 @@ export function useGroupDirectoryQuery({
         return next;
       });
     } catch (nextError) {
+      if (signal.aborted) return;
       if (revision !== requestRevision.current || committedKey !== targetRef.current) return;
       if (nextError instanceof RuntimeRequestError) {
         setParticipantErrors({
@@ -156,11 +162,12 @@ export function useGroupDirectoryQuery({
       }
       setError(nextError instanceof Error ? nextError.message : "Could not load groups.");
     } finally {
+      directoryRead.complete(signal);
       if (revision === requestRevision.current && committedKey === targetRef.current) {
         setLoading(false);
       }
     }
-  }, [api, committedKey, enabled, filters, offset, pageSize, query, sessionId]);
+  }, [api, committedKey, directoryRead, enabled, filters, offset, pageSize, query, sessionId]);
 
   useEffect(() => {
     if (!committedKey || committedKey !== targetKey) return;
@@ -173,14 +180,16 @@ export function useGroupDirectoryQuery({
   }, []);
 
   const setSearch = useCallback((value: string) => {
+    directoryRead.cancel();
     requestRevision.current += 1;
     setInputQuery(value);
     setGroups([]);
     setLoading(true);
     setError(null);
-  }, []);
+  }, [directoryRead]);
 
   const setFilters = useCallback((next: GroupSelectionFilters) => {
+    directoryRead.cancel();
     requestRevision.current += 1;
     setFiltersState(next);
     setOffsetState(0);
@@ -189,15 +198,16 @@ export function useGroupDirectoryQuery({
     setError(null);
     setParticipantErrors({});
     setReloadRevision((revision) => revision + 1);
-  }, []);
+  }, [directoryRead]);
 
   const setOffset = useCallback((next: number) => {
+    directoryRead.cancel();
     requestRevision.current += 1;
     setOffsetState(next);
     setGroups([]);
     setLoading(true);
     setError(null);
-  }, []);
+  }, [directoryRead]);
 
   const rememberGroups = useCallback((items: RuntimeGroup[]) => {
     setKnownGroups((current) => {
