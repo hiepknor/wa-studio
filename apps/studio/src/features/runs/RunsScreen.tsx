@@ -22,7 +22,7 @@ import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SearchField } from "@/shared/ui/SearchField";
-import { SelectMenu } from "@/shared/ui/SelectMenu";
+import { SearchSelect } from "@/shared/ui/SearchSelect";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import { Tabs } from "@/shared/ui/Tabs";
 import { WorkspaceDrawer } from "@/shared/ui/WorkspaceDrawer";
@@ -52,6 +52,14 @@ const DELIVERY_STATUSES: RuntimeCampaignDeliveryStatus[] = [
   "SENT", "DELIVERED", "READ", "FAILED", "UNKNOWN",
   "BLOCKED_CAPABILITY_CHANGED", "CANCELLED",
 ];
+
+function deliveryStatusGroup(status: RuntimeCampaignDeliveryStatus): string {
+  if (["PENDING", "MATERIALIZED", "PROCESSING"].includes(status)) return "Queue";
+  if (["DRY_RUN_COMPLETED", "ACCEPTED", "SENT", "DELIVERED", "READ"].includes(status)) {
+    return "Successful";
+  }
+  return "Exceptions";
+}
 
 interface RunsScreenProps {
   initialRunId?: string | null;
@@ -594,11 +602,22 @@ function RunDeliveries({
   return <div aria-labelledby="run-inspector-deliveries-tab" className="run-deliveries stack stack-md" id="run-inspector-deliveries-panel" role="tabpanel">
     <div className="run-deliveries-toolbar">
       <SearchField label="Search deliveries" loading={loading} onChange={onQueryChange} placeholder="Search group name or ID" value={inputQuery} variant="toolbar" />
-      <SelectMenu
+      <SearchSelect
         id="run-delivery-status"
         label="Delivery status"
+        labelHidden
         onChange={onFilterChange}
-        options={[{ label: "All statuses", value: "ALL" }, ...DELIVERY_STATUSES.map((status) => ({ label: runStatusLabel(status), value: status }))]}
+        options={[
+          { label: "All statuses", value: "ALL" },
+          ...DELIVERY_STATUSES.map((status) => ({
+            group: deliveryStatusGroup(status),
+            keywords: status,
+            label: runStatusLabel(status),
+            value: status,
+          })),
+        ]}
+        searchLabel="Search delivery statuses"
+        searchPlaceholder="Search statuses"
         value={deliveryFilter}
       />
     </div>

@@ -19,24 +19,13 @@
   font-weight: var(--weight-regular);
   cursor: pointer;
 }
-.tabs-trigger::after {
-  position: absolute;
-  right: 0;
-  top: -1px;
-  left: 0;
-  height: var(--selection-rail-width);
-  background: transparent;
-  content: "";
-}
 .tabs-trigger:hover { background: var(--surface-hover); color: var(--text-primary); }
 .tabs-trigger:disabled { color: var(--text-disabled); cursor: not-allowed; }
 .tabs-trigger:disabled:hover { color: var(--text-disabled); }
 .tabs-trigger[aria-selected="true"] {
-  background: var(--surface-active);
+  background: var(--surface-selected);
   color: var(--text-primary);
-}
-.tabs-trigger[aria-selected="true"]::after {
-  background: var(--active-rail);
+  font-weight: var(--weight-medium);
 }
 .tabs-meta {
   color: var(--text-tertiary);
@@ -73,9 +62,8 @@
   text-align: left;
 }
 .tabs-steps .tabs-trigger + .tabs-trigger { border-left: 1px solid var(--border); }
-.tabs-steps .tabs-trigger::after { display: none; }
 .tabs-steps .tabs-trigger[aria-selected="true"] {
-  background: var(--surface-active);
+  background: var(--surface-selected);
   color: var(--text-primary);
 }
 .tabs-step-index {
@@ -118,13 +106,7 @@
   text-align: left;
 }
 
-.tabs-vertical .tabs-trigger[aria-selected="true"],
-.tabs-vertical .tabs-trigger[aria-selected="true"]:hover {
+.tabs-vertical .tabs-trigger[aria-selected="true"] {
   background: transparent;
 }
-
-.tabs-vertical .tabs-trigger::after {
-  inset: 0 auto 0 0;
-  width: var(--selection-rail-width);
-  height: auto;
-}
+.tabs-vertical .tabs-trigger[aria-selected="true"]:hover { background: var(--surface-subtle); }

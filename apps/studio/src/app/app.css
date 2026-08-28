@@ -273,8 +273,8 @@ h1 { margin: 10px 0 12px; font-family: var(--font-display); font-size: var(--typ
   white-space: nowrap;
 }
 .workspace-nav-button:hover:not(:disabled):not([aria-current="page"]) { background: var(--surface-hover); color: var(--foreground); }
-.workspace-nav-button[aria-current="page"] { background: transparent; color: var(--foreground); border-color: transparent; border-radius: 0; box-shadow: none; }
-.workspace-nav-button[aria-current="page"]::before { position: absolute; top: calc(var(--border-width) * -1); bottom: calc(var(--border-width) * -1); left: calc((var(--space-2) + var(--border-width)) * -1); width: var(--selection-rail-width); background: var(--active-rail); content: ""; }
+.workspace-nav-button[aria-current="page"] { border-color: transparent; background: transparent; color: var(--foreground); font-weight: var(--weight-medium); }
+.workspace-nav-button[aria-current="page"]:hover:not(:disabled) { background: var(--surface-subtle); }
 .workspace-nav-button:disabled { background: transparent; color: var(--text-disabled); }
 .workspace-nav-icon { width: var(--icon-lg); height: var(--icon-lg); color: var(--text-tertiary); }
 .workspace-nav-button[aria-current="page"] .workspace-nav-icon { color: var(--foreground); }
@@ -288,7 +288,6 @@ h1 { margin: 10px 0 12px; font-family: var(--font-display); font-size: var(--typ
 .workspace-rail-collapsed .workspace-build-line > span:not(.status-dot) { display: none; }
 .workspace-rail-collapsed .workspace-navigation { padding-inline: var(--space-1); }
 .workspace-rail-collapsed .workspace-nav-button { grid-template-columns: var(--icon-lg); justify-content: center; padding-inline: 0; }
-.workspace-rail-collapsed .workspace-nav-button[aria-current="page"]::before { left: calc((var(--space-1) + var(--border-width)) * -1); }
 .workspace-sidebar-bottom { display: grid; gap: var(--space-2); margin-top: auto; }
 .workspace-settings-button { width: auto; margin-inline: var(--space-2); }
 .workspace-rail-collapsed .workspace-settings-button { margin-inline: var(--space-1); }
@@ -442,7 +441,7 @@ h1 { margin: 10px 0 12px; font-family: var(--font-display); font-size: var(--typ
 .workspace-session-option {
   position: relative;
   width: 100%;
-  min-height: var(--row-height-relaxed);
+  min-height: var(--table-row-height);
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: center;
@@ -456,8 +455,7 @@ h1 { margin: 10px 0 12px; font-family: var(--font-display); font-size: var(--typ
   text-align: left;
 }
 .workspace-session-option[data-highlighted="true"] { background: var(--surface-hover); }
-.workspace-session-option[aria-selected="true"] { position: relative; background: var(--surface-active); color: var(--text-primary); }
-.workspace-session-option[aria-selected="true"]::before { position: absolute; inset-block: -1px; left: -5px; width: var(--selection-rail-width); background: var(--active-rail); content: ""; }
+.workspace-session-option[aria-selected="true"] { background: var(--surface-selected); color: var(--text-primary); }
 .workspace-session-option-copy { min-width: 0; display: grid; gap: var(--space-hair); }
 .workspace-session-option-copy strong { overflow: hidden; color: var(--text-primary); font-size: var(--type-ui); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
 .workspace-session-option-meta { min-width: 0; display: flex; gap: var(--space-2); overflow: hidden; color: var(--text-tertiary); font-size: var(--type-micro); white-space: nowrap; }
@@ -587,9 +585,7 @@ td { border-bottom: 1px solid var(--border-subtle); }
 td { color: var(--text-secondary); }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover { background: var(--surface-hover); }
-tbody tr[data-selected="true"] { background: transparent; }
-tbody tr[data-selected="true"] td:first-child { position: relative; }
-tbody tr[data-selected="true"] td:first-child::before { position: absolute; inset-block: 0; left: 0; width: var(--selection-rail-width); background: var(--active-rail); content: ""; }
+tbody tr[data-selected="true"] { background: var(--surface-selected); }
 .data-primary-text, .data-secondary-text, .data-identifier {
   display: block;
   overflow: hidden;

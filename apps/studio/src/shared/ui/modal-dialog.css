@@ -27,6 +27,13 @@
   background: var(--surface-chrome);
   box-shadow: var(--elev-raised);
 }
+.modal-dialog-layer-workflow { padding: 16px; }
+.modal-dialog[data-size="workflow"] {
+  width: min(1080px, 100%);
+  height: min(820px, calc(100vh - 32px));
+  height: min(820px, calc(100dvh - 32px));
+  max-height: none;
+}
 .modal-dialog-header {
   display: flex;
   align-items: flex-start;
@@ -37,6 +44,7 @@
   background: var(--surface-subtle);
 }
 .modal-dialog-heading { min-width: 0; }
+.modal-dialog-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .modal-dialog-eyebrow { color: var(--text-tertiary); font-size: var(--type-micro); font-weight: var(--weight-medium); letter-spacing: var(--tracking-label); text-transform: uppercase; }
 .modal-dialog-title { margin: 5px 0 0; color: var(--text-primary); font-size: var(--type-emphasis); font-weight: var(--weight-regular); letter-spacing: var(--tracking-title); }
 .modal-dialog-description { margin: 6px 0 0; color: var(--muted); font-size: var(--type-caption); line-height: var(--leading-ui); }
@@ -53,7 +61,13 @@
 
 @media (max-width: 600px) {
   .modal-dialog-layer { padding: 14px; }
+  .modal-dialog-layer-workflow { padding: 10px; }
   .modal-dialog { max-height: calc(100vh - 28px); }
+  .modal-dialog[data-size="workflow"] {
+    height: calc(100vh - 20px);
+    height: calc(100dvh - 20px);
+    max-height: none;
+  }
   .modal-dialog-header { padding: 16px; }
   .modal-dialog-body { padding: 16px; }
   .modal-dialog-footer { align-items: stretch; flex-direction: column; padding: 12px 16px; }

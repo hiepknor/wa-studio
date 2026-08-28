@@ -109,33 +109,30 @@ function renderGroups(overrides: Partial<RuntimeApi> = {}) {
   return api;
 }
 
-async function connectAndOpenMenu(user: ReturnType<typeof userEvent.setup>) {
+async function connectAndGetActions(user: ReturnType<typeof userEvent.setup>) {
   const connectButton = screen.queryByRole("button", { name: "Connect" });
   if (connectButton) await user.click(connectButton);
-  const trigger = await screen.findByRole("button", { name: "Update groups" });
-  await user.click(trigger);
-  return screen.getByRole("menu", { name: "Group data actions" });
+  return {
+    reload: await screen.findByRole("button", { name: "Reload groups" }),
+    sync: screen.getByRole("button", { name: "Sync groups" }),
+  };
 }
 
 afterEach(() => vi.mocked(pollSessionSync).mockReset());
 
 describe("GroupsScreen Reload and Sync", () => {
-  it("shows the two actions with supporting copy and keyboard focus behavior", async () => {
+  it("shows two direct actions with supporting titles and keyboard order", async () => {
     const user = userEvent.setup();
     renderGroups();
-    await user.click(screen.getByRole("button", { name: "Connect" }));
-    const trigger = await screen.findByRole("button", { name: "Update groups" });
-    trigger.focus();
-    await user.keyboard("{ArrowDown}");
-    const menu = screen.getByRole("menu", { name: "Group data actions" });
-    expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
-    expect(within(menu).getByText("Reload groups currently stored in WA Runtime.")).toBeInTheDocument();
-    expect(within(menu).getByText("Synchronize groups and members from OpenWA.")).toBeInTheDocument();
-    expect(within(menu).getByRole("menuitem", { name: /Reload/ })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(within(menu).getByRole("menuitem", { name: /Sync/ })).toHaveFocus();
-    await user.keyboard("{Escape}");
-    await waitFor(() => expect(trigger).toHaveFocus());
+    const { reload, sync } = await connectAndGetActions(user);
+    expect(reload).toHaveTextContent("Reload");
+    expect(sync).toHaveTextContent("Sync");
+    expect(reload).toHaveAttribute("title", "Reload groups currently stored in WA Runtime.");
+    expect(sync).toHaveAttribute("title", "Synchronize groups and members from OpenWA.");
+    expect(screen.queryByRole("menu", { name: "Group data actions" })).not.toBeInTheDocument();
+    reload.focus();
+    await user.tab();
+    expect(sync).toHaveFocus();
   });
 
   it("Reload only reloads the current read-model query", async () => {
@@ -143,9 +140,9 @@ describe("GroupsScreen Reload and Sync", () => {
     const requestSessionSync = vi.fn();
     const listGroups = vi.fn().mockResolvedValue(page);
     renderGroups({ listGroups, requestSessionSync });
-    const menu = await connectAndOpenMenu(user);
+    const { reload } = await connectAndGetActions(user);
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(1));
-    await user.click(within(menu).getByRole("menuitem", { name: /Reload/ }));
+    await user.click(reload);
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(2));
     expect(requestSessionSync).not.toHaveBeenCalled();
     expect(await screen.findByText("Groups reloaded")).toBeInTheDocument();
@@ -155,8 +152,8 @@ describe("GroupsScreen Reload and Sync", () => {
     const user = userEvent.setup();
     const requestSessionSync = vi.fn();
     renderGroups({ requestSessionSync });
-    const menu = await connectAndOpenMenu(user);
-    await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
+    const { sync } = await connectAndGetActions(user);
+    await user.click(sync);
     const dialog = screen.getByRole("dialog", { name: "Sync groups and members?" });
     expect(dialog).toHaveTextContent("for prod-session from OpenWA");
     expect(dialog).toHaveTextContent("Large sessions may take several minutes");
@@ -173,9 +170,9 @@ describe("GroupsScreen Reload and Sync", () => {
     renderGroups({ listGroups });
     await user.click(screen.getByRole("button", { name: "Connect" }));
 
-    const trigger = await screen.findByRole("button", { name: "Update groups" });
-    expect(trigger).toHaveTextContent("Update");
-    expect(trigger).not.toHaveTextContent("Reloading");
+    const reload = await screen.findByRole("button", { name: "Reload groups" });
+    expect(reload).toHaveTextContent("Reload");
+    expect(reload).not.toHaveTextContent("Reloading");
     resolveList(page);
     await waitFor(() => expect(listGroups).toHaveBeenCalledOnce());
   });
@@ -193,8 +190,8 @@ describe("GroupsScreen Reload and Sync", () => {
     });
     const getSessionSyncRun = vi.fn().mockResolvedValue(completedRun);
     renderGroups({ getSessionSyncRun, listGroups, listSessions, requestSessionSync });
-    const menu = await connectAndOpenMenu(user);
-    await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
+    const { sync } = await connectAndGetActions(user);
+    await user.click(sync);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
 
     await waitFor(() => expect(requestSessionSync).toHaveBeenCalledWith(session.id));
@@ -217,8 +214,8 @@ describe("GroupsScreen Reload and Sync", () => {
       run: { ...pendingRun, status: "FAILED", error: "Safe failure" },
     });
     renderGroups({ listGroupMembers, listGroups });
-    let menu = await connectAndOpenMenu(user);
-    await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
+    let actions = await connectAndGetActions(user);
+    await user.click(actions.sync);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
     expect(await screen.findByText("Sync failed")).toBeInTheDocument();
     expect(screen.getByText("Safe failure")).toBeInTheDocument();
@@ -227,13 +224,12 @@ describe("GroupsScreen Reload and Sync", () => {
     expect(listGroupMembers).not.toHaveBeenCalled();
 
     vi.mocked(pollSessionSync).mockResolvedValue({ status: "background", run: pendingRun });
-    menu = await connectAndOpenMenu(user);
-    await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
+    actions = await connectAndGetActions(user);
+    await user.click(actions.sync);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
     expect(await screen.findByText("Sync continues in the background")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reload groups" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Update groups" }));
-    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: /Sync/ })).toBeEnabled();
+    expect(screen.getAllByRole("button", { name: "Reload groups" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Sync groups" })).toBeEnabled();
   });
 
   it("does not invite a duplicate sync when the POST result is unconfirmed", async () => {
@@ -243,14 +239,14 @@ describe("GroupsScreen Reload and Sync", () => {
       { requestDispatched: true },
     ));
     renderGroups({ requestSessionSync });
-    const menu = await connectAndOpenMenu(user);
-    await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
+    const { sync } = await connectAndGetActions(user);
+    await user.click(sync);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
 
     expect(await screen.findByText("Sync request not confirmed")).toBeInTheDocument();
     expect(screen.getByText(/may still be running/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reload groups" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Reload groups" })).toHaveLength(2);
     expect(requestSessionSync).toHaveBeenCalledTimes(1);
     expect(pollSessionSync).not.toHaveBeenCalled();
   });
@@ -263,8 +259,8 @@ describe("GroupsScreen Reload and Sync", () => {
       listGroups,
       listSessions: vi.fn().mockRejectedValue(new Error("metadata unavailable")),
     });
-    const menu = await connectAndOpenMenu(user);
-    await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
+    const { sync } = await connectAndGetActions(user);
+    await user.click(sync);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
     expect(await screen.findByText("Sync completed with an update warning"))
       .toBeInTheDocument();
@@ -277,8 +273,8 @@ describe("GroupsScreen Reload and Sync", () => {
     vi.mocked(pollSessionSync).mockReturnValue(new Promise((resolve) => { resolvePoll = resolve; }));
     const listGroups = vi.fn().mockResolvedValue(page);
     renderGroups({ listGroups });
-    const menu = await connectAndOpenMenu(user);
-    await user.click(within(menu).getByRole("menuitem", { name: /Sync/ }));
+    const { sync } = await connectAndGetActions(user);
+    await user.click(sync);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
     await screen.findByText(/Sync pending ·/);
     await user.click(screen.getByRole("button", { name: "Switch session" }));

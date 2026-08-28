@@ -64,7 +64,6 @@
   --divider: var(--border-subtle);
   --divider-strong: var(--border);
   --divider-focus: var(--fg-2);
-  --active-rail: var(--fg-2);
   --focus-outer-color: var(--muted);
   --focus-inner-border: var(--muted);
   --focus-offset: 0px;
@@ -135,7 +134,6 @@
   --workspace-bottom: 24px;
 
   --border-width: 1px;
-  --selection-rail-width: 1px;
   --focus-width: 1px;
   --disabled-opacity: .62;
   --press-shift: 1px;

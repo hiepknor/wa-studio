@@ -166,14 +166,13 @@ async function runPreflight(
   mode: "DRY_RUN" | "LIVE" = "DRY_RUN",
 ) {
   if (mode === "LIVE") {
-    await user.click(screen.getByRole("combobox", { name: "Preflight mode" }));
-    await user.click(screen.getByRole("option", { name: /Live policy/ }));
+    await user.click(screen.getByRole("radio", { name: "Live policy" }));
   }
   await user.click(screen.getByRole("button", { name: "Run preflight" }));
 }
 
 describe("CampaignsScreen", () => {
-  it("uses the shared drawer, tabs, fields, badges, and actions in a structured workspace", async () => {
+  it("uses the shared workflow dialog, tabs, fields, badges, and actions in a structured workspace", async () => {
     const user = userEvent.setup();
     renderCampaigns();
     await connect(user);
@@ -194,35 +193,37 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("button", { name: "Reset to saved" }));
     expect(screen.getByRole("textbox", { name: "Campaign name" })).toHaveValue("Release");
     expect(screen.getByText("Campaign r3 · All changes saved")).toBeInTheDocument();
-    const schedule = screen.getByRole("combobox", { name: "Schedule" });
-    await user.click(schedule);
-    await user.click(screen.getByRole("option", { name: /Once/ }));
-    expect(screen.getByLabelText("Scheduled date and time")).toBeInTheDocument();
-    await user.click(schedule);
-    await user.click(screen.getByRole("option", { name: /Immediate/ }));
-    expect(screen.queryByLabelText("Scheduled date and time")).not.toBeInTheDocument();
-    await user.click(schedule);
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("listbox", { name: "Schedule" })).not.toBeInTheDocument();
+    const schedule = screen.getByRole("radiogroup", { name: "Schedule" });
+    expect(screen.getByRole("heading", { name: "Delivery timing" })).toBeInTheDocument();
+    expect(screen.getByText("Runtime managed")).toBeInTheDocument();
+    await user.click(within(schedule).getByRole("radio", { name: "Once" }));
+    expect(screen.getByLabelText("Run at")).toBeInTheDocument();
+    await user.click(within(schedule).getByRole("radio", { name: "Immediate" }));
+    expect(screen.queryByLabelText("Run at")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Release" })).toBeInTheDocument();
 
-    const drawerBody = document.querySelector<HTMLElement>(".drawer-body");
-    expect(drawerBody).not.toBeNull();
-    drawerBody!.scrollTop = 120;
+    const workspace = screen.getByRole("dialog", { name: campaign.name });
+    expect(workspace.querySelector(".campaign-details-grid")).toBeInTheDocument();
+    expect(within(workspace).getByRole("button", { name: `More actions for ${campaign.name}` })).toBeInTheDocument();
+    const dialogBody = workspace.querySelector<HTMLElement>(".modal-dialog-body");
+    expect(dialogBody).not.toBeNull();
+    dialogBody!.scrollTop = 120;
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
-    expect(drawerBody).toHaveProperty("scrollTop", 0);
+    expect(dialogBody).toHaveProperty("scrollTop", 0);
     expect(screen.getByText("1 saved target · No unsaved changes")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Custom selection" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Apply a group list" })).toBeInTheDocument();
+    const targetOverview = screen.getByRole("region", { name: "Custom selection" });
+    expect(targetOverview).toHaveClass("campaign-target-overview");
+    expect(screen.queryByRole("region", { name: "Apply a group list" })).not.toBeInTheDocument();
     const browseGroups = screen.getByRole("heading", { name: "Browse groups" }).closest("section");
     expect(browseGroups).not.toBeNull();
     expect(within(browseGroups!).queryByRole("button", { name: "Apply group list" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apply group list" })).toBeInTheDocument();
+    expect(within(targetOverview).getByRole("button", { name: "Apply group list" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
+    expect(workspace.querySelector(".campaign-review-grid")).toBeInTheDocument();
     expect(screen.getByText("Ready for evaluation")).toBeInTheDocument();
     expect(screen.getByText("No preflight result yet")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Preflight mode" })).toHaveTextContent("Dry run");
+    expect(screen.getByRole("radio", { name: "Dry run" })).toBeChecked();
     expect(screen.getByRole("button", { name: "Run preflight" })).toBeInTheDocument();
   });
 
@@ -254,20 +255,20 @@ describe("CampaignsScreen", () => {
     expect(screen.getByText("Campaign r3 · Unsaved changes")).toBeInTheDocument();
   });
 
-  it("uses the shared confirmation dialog before discarding drawer edits", async () => {
+  it("uses the shared confirmation dialog before discarding workspace edits", async () => {
     const user = userEvent.setup();
     renderCampaigns({}, []);
     await connect(user);
     await user.click(screen.getByRole("button", { name: "New campaign" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close dialog" })).toHaveFocus());
     expect(screen.getByRole("tab", { name: "Targets" })).toBeDisabled();
-    expect(screen.getByRole("tab", { name: "Preflight" })).toBeDisabled();
+    expect(screen.getByRole("tab", { name: "Review & launch" })).toBeDisabled();
     await user.type(screen.getByRole("textbox", { name: "Campaign name" }), "Unsaved");
-    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
     expect(screen.getByRole("dialog", { name: "Discard campaign changes?" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(screen.getByRole("textbox", { name: "Campaign name" })).toHaveValue("Unsaved");
-    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "New campaign draft" })).not.toBeInTheDocument());
   });
@@ -287,7 +288,7 @@ describe("CampaignsScreen", () => {
     renderCampaigns({ createCampaign, listCampaigns }, []);
     await connect(user);
     await user.click(screen.getByRole("button", { name: "New campaign" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close dialog" })).toHaveFocus());
     await user.type(screen.getByRole("textbox", { name: "Campaign name" }), "New release");
     await user.type(screen.getByRole("textbox", { name: "Message text" }), "Ship it");
 
@@ -302,7 +303,7 @@ describe("CampaignsScreen", () => {
       sessionId: session.id, name: "New release",
       content: { type: "TEXT", text: "Ship it" }, scheduleType: "IMMEDIATE",
     });
-    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
     expect(await screen.findAllByText("New release")).toHaveLength(1);
   });
 
@@ -367,10 +368,13 @@ describe("CampaignsScreen", () => {
     }, []);
     await connect(user);
     await user.click(screen.getByRole("button", { name: "New campaign" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close dialog" })).toHaveFocus());
     await user.type(screen.getByRole("textbox", { name: "Campaign name" }), "Media release");
-    await user.click(screen.getByRole("combobox", { name: "Message type" }));
-    await user.click(screen.getByRole("option", { name: /Image/ }));
+    const messageType = screen.getByRole("radiogroup", { name: "Message type" });
+    expect(within(messageType).getByRole("radio", { name: "Text" })).toBeChecked();
+    await user.click(within(messageType).getByRole("radio", { name: "Image" }));
+    expect(within(messageType).getByRole("radio", { name: "Image" })).toBeChecked();
+    expect(screen.getByText("JPEG, PNG, or WebP with an optional caption.")).toBeVisible();
     await waitFor(() => expect(screen.getByRole("button", { name: "Choose file" })).toBeEnabled());
     const file = new File([
       new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -401,7 +405,7 @@ describe("CampaignsScreen", () => {
     renderCampaigns({ createCampaign }, []);
     await connect(user);
     await user.click(screen.getByRole("button", { name: "New campaign" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close dialog" })).toHaveFocus());
     await user.type(screen.getByRole("textbox", { name: "Campaign name" }), "Single flight");
     await user.type(screen.getByRole("textbox", { name: "Message text" }), "Ship once");
 
@@ -432,7 +436,7 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
     await user.type(screen.getByRole("textbox", { name: "Campaign name" }), " pending");
     await user.click(screen.getByRole("button", { name: "Save details" }));
-    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
@@ -440,7 +444,7 @@ describe("CampaignsScreen", () => {
     await waitFor(() => expect(release.closest("[inert]")).toBeNull());
     await user.click(release);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus(),
+      expect(screen.getByRole("button", { name: "Close dialog" })).toHaveFocus(),
     );
     const name = await screen.findByRole("textbox", { name: "Campaign name" });
     await user.type(name, " next");
@@ -464,7 +468,7 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await user.click(screen.getByRole("button", { name: "New campaign" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus(),
+      expect(screen.getByRole("button", { name: "Close dialog" })).toHaveFocus(),
     );
     const name = screen.getByRole("textbox", { name: "Campaign name" });
     await user.type(name, "New release");
@@ -855,7 +859,7 @@ describe("CampaignsScreen", () => {
     expect(await screen.findByText("New result")).toBeInTheDocument();
   });
 
-  it("invalidates an in-flight group response when the drawer closes", async () => {
+  it("invalidates an in-flight group response when the workspace dialog closes", async () => {
     const user = userEvent.setup();
     const oldResult = deferred<Awaited<ReturnType<RuntimeApi["listGroups"]>>>();
     const currentGroup = { ...unknownGroup, id: "current@g.us", name: "Current result" };
@@ -867,7 +871,7 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(1));
 
-    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     expect(await screen.findByText("Current result")).toBeInTheDocument();
@@ -891,8 +895,8 @@ describe("CampaignsScreen", () => {
     renderCampaigns({ preflightCampaign });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
-    expect(screen.getByRole("heading", { name: "Review configuration" })).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
+    expect(screen.getByRole("heading", { name: "Run control" })).toBeInTheDocument();
     await runPreflight(user, mode);
     const result = await screen.findByRole("region", { name: "Preflight result" });
     expect(within(result).getByRole("heading", {
@@ -940,7 +944,7 @@ describe("CampaignsScreen", () => {
     renderCampaigns({ preflightCampaign: vi.fn().mockResolvedValue(next) });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user, "LIVE");
     expect(await screen.findByText("TARGET_CAPABILITY_STALE")).toBeInTheDocument();
     expect(screen.getByText("FUTURE_RUNTIME_CHECK")).toBeInTheDocument();
@@ -962,7 +966,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user);
     await screen.findByText("GROUP_CAPABILITY");
     await user.click(screen.getByRole("button", { name: "Create dry run" }));
@@ -990,7 +994,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user);
     await screen.findByText("GROUP_CAPABILITY");
     await user.click(screen.getByRole("button", { name: "Create dry run" }));
@@ -1013,7 +1017,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user, "LIVE");
     await screen.findByText("GROUP_CAPABILITY");
     await user.click(screen.getByRole("button", { name: "Launch live campaign" }));
@@ -1028,7 +1032,7 @@ describe("CampaignsScreen", () => {
       preflightToken: "clp1.test-payload.test-signature-with-sufficient-length",
     }, expect.any(String));
     expect(await screen.findByText(/Runtime status is Active/)).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Details" }));
+    await user.click(screen.getByRole("tab", { name: "Content" }));
     expect(screen.getByRole("textbox", { name: "Campaign name" })).toBeDisabled();
   });
 
@@ -1040,7 +1044,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user, "LIVE");
     await screen.findByText("GROUP_CAPABILITY");
     await user.click(screen.getByRole("button", { name: "Launch live campaign" }));
@@ -1064,7 +1068,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user, "LIVE");
     await screen.findByText("GROUP_CAPABILITY");
     await user.click(screen.getByRole("button", { name: "Launch live campaign" }));
@@ -1089,7 +1093,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user);
     await screen.findByText("GROUP_CAPABILITY");
     await user.click(screen.getByRole("button", { name: "Create dry run" }));
@@ -1116,7 +1120,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await user.click(await screen.findByRole("button", { name: "Pause" }));
     await waitFor(() => expect(pauseCampaignRun).toHaveBeenCalledWith(running.id));
     expect(await screen.findByText(/Campaign lifecycle: Paused/)).toBeInTheDocument();
@@ -1138,7 +1142,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await user.click(await screen.findByRole("button", { name: "Pause" }));
 
     expect(await screen.findByText(/Runtime accepted the pause action/)).toBeInTheDocument();
@@ -1163,7 +1167,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await user.click(await screen.findByRole("button", { name: "Resume" }));
     expect(await screen.findByText(/Campaign lifecycle: Paused/)).toBeInTheDocument();
     expect(screen.getByText("Blocked")).toBeInTheDocument();
@@ -1189,7 +1193,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await user.click(await screen.findByRole("button", { name: "Pause" }));
 
     expect(await screen.findByText(/did not confirm the result/)).toBeInTheDocument();
@@ -1210,7 +1214,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(await screen.findByText(/Campaign lifecycle: Archived/)).toBeInTheDocument();
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
@@ -1229,7 +1233,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await screen.findByText("Running");
     await user.click(screen.getByRole("button", { name: "Reload runs" }));
     expect(await screen.findByText("Completed")).toBeInTheDocument();
@@ -1255,7 +1259,7 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
 
     expect(await screen.findByText(/From saved list: Original launch list/)).toBeInTheDocument();
     expect(screen.getByText(/membership r9/)).toBeInTheDocument();
@@ -1267,23 +1271,23 @@ describe("CampaignsScreen", () => {
     renderCampaigns({ preflightCampaign: vi.fn().mockResolvedValue(report("DRY_RUN", "PASS")) });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user);
     await screen.findByText("GROUP_CAPABILITY");
 
-    await user.click(screen.getByRole("tab", { name: "Details" }));
+    await user.click(screen.getByRole("tab", { name: "Content" }));
     await user.type(screen.getByRole("textbox", { name: "Message text" }), " changed");
-    await user.click(screen.getByRole("tab", { name: /Preflight/ }));
+    await user.click(screen.getByRole("tab", { name: /Review & launch/ }));
     expect(screen.getByText("Preflight result is stale")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run preflight" })).toBeDisabled();
-    await user.click(screen.getByRole("tab", { name: /Details/ }));
+    expect(screen.getByRole("button", { name: "Run preflight again" })).toBeDisabled();
+    await user.click(screen.getByRole("tab", { name: /Content/ }));
     await user.clear(screen.getByRole("textbox", { name: "Message text" }));
     await user.type(screen.getByRole("textbox", { name: "Message text" }), campaign.text);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     await user.click(await screen.findByRole("checkbox", { name: "Select Unknown room" }));
-    await user.click(screen.getByRole("tab", { name: /Preflight/ }));
+    await user.click(screen.getByRole("tab", { name: /Review & launch/ }));
     expect(screen.getByText("Preflight result is stale")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Run preflight" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Run preflight again" })).toBeDisabled();
   });
 
   it("ignores a late preflight response after the editor closes", async () => {
@@ -1293,9 +1297,9 @@ describe("CampaignsScreen", () => {
     renderCampaigns({ preflightCampaign: vi.fn().mockReturnValue(pending) });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user);
-    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
     resolveReport(report("DRY_RUN", "PASS"));
     await waitFor(() => expect(screen.getByRole("heading", { name: "Campaigns" })).toBeInTheDocument());
     expect(screen.queryByText("GROUP_CAPABILITY")).not.toBeInTheDocument();
@@ -1308,13 +1312,13 @@ describe("CampaignsScreen", () => {
     renderCampaigns({ preflightCampaign });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user);
-    await user.click(screen.getByRole("tab", { name: "Details" }));
+    await user.click(screen.getByRole("tab", { name: "Content" }));
     await user.type(screen.getByRole("textbox", { name: "Message text" }), " changed");
 
     await act(async () => pending.resolve(report("DRY_RUN", "PASS")));
-    await user.click(screen.getByRole("tab", { name: /Preflight/ }));
+    await user.click(screen.getByRole("tab", { name: /Review & launch/ }));
 
     expect(screen.queryByText("GROUP_CAPABILITY")).not.toBeInTheDocument();
     expect(screen.getByText("No preflight result yet")).toBeInTheDocument();
@@ -1330,11 +1334,11 @@ describe("CampaignsScreen", () => {
     });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: "Preflight" }));
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await runPreflight(user);
     await screen.findByText("GROUP_CAPABILITY");
     await user.click(screen.getByRole("button", { name: "Create dry run" }));
-    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
     await act(async () => pending.resolve(campaignRun("DRY_RUN")));
     expect(screen.queryByText(/dry_run-run-id/)).not.toBeInTheDocument();
     expect(screen.queryByText("Dry run created")).not.toBeInTheDocument();
@@ -1490,7 +1494,8 @@ describe("CampaignsScreen", () => {
     await user.click(await within(picker).findByRole("radio", { name: /Late list/ }));
     await user.click(screen.getByRole("button", { name: "Review" }));
     await user.click(within(screen.getByRole("dialog", { name: "Review target replacement" })).getByRole("button", { name: "Apply list" }));
-    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await user.click(within(screen.getByRole("dialog", { name: campaign.name }))
+      .getByRole("button", { name: "Close dialog" }));
     await act(async () => pending.resolve({
       data: [], targetsRevision: 5,
       source: { type: "GROUP_LIST", groupListId: list.id, groupListNameSnapshot: "Late list snapshot", membershipRevision: 0, appliedAt: "2026-08-15T01:00:00.000Z" },
@@ -1515,9 +1520,9 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: /Targets/ }));
     expect(listGroupLists).not.toHaveBeenCalled();
-    await openSavedListPicker(user);
+    const openedPicker = await openSavedListPicker(user);
     await waitFor(() => expect(listGroupLists).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole("button", { name: "Close dialog" }));
+    await user.click(within(openedPicker).getByRole("button", { name: "Close dialog" }));
     latePage.resolve({ data: [{ ...currentList, id: "late", name: "Late list" }], meta: { total: 1, limit: 100, offset: 0 } });
     await Promise.resolve();
     expect(screen.queryByRole("dialog", { name: "Apply group list" })).not.toBeInTheDocument();
@@ -1824,8 +1829,8 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
 
-    const drawer = screen.getByRole("dialog", { name: campaign.name });
-    await user.click(within(drawer).getByRole("button", { name: `More actions for ${campaign.name}` }));
+    const workspace = screen.getByRole("dialog", { name: campaign.name });
+    await user.click(within(workspace).getByRole("button", { name: `More actions for ${campaign.name}` }));
     await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
     await user.click(screen.getByRole("button", { name: "Delete campaign" }));
 
@@ -1833,7 +1838,7 @@ describe("CampaignsScreen", () => {
     expect(listCampaignRuns).toHaveBeenCalledTimes(2);
     expect(deleteCampaign).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole("button", { name: "View runs" }));
-    expect(screen.getByRole("tab", { name: "Preflight" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Review & launch" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByText("Running")).toBeInTheDocument();
   });
 
@@ -1902,7 +1907,7 @@ describe("CampaignsScreen", () => {
     expect(screen.queryByText(campaign.name)).not.toBeInTheDocument();
   });
 
-  it("closes the Campaign detail drawer after successful deletion", async () => {
+  it("closes the Campaign workspace dialog after successful deletion", async () => {
     const user = userEvent.setup();
     const deleteCampaign = vi.fn().mockResolvedValue(undefined);
     const listCampaigns = vi.fn()
@@ -1911,9 +1916,9 @@ describe("CampaignsScreen", () => {
     renderCampaigns({ deleteCampaign, listCampaigns });
     await connect(user);
     await openCampaign(user);
-    const drawer = screen.getByRole("dialog", { name: campaign.name });
+    const workspace = screen.getByRole("dialog", { name: campaign.name });
 
-    await user.click(within(drawer).getByRole("button", { name: `More actions for ${campaign.name}` }));
+    await user.click(within(workspace).getByRole("button", { name: `More actions for ${campaign.name}` }));
     await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
     await user.click(screen.getByRole("button", { name: "Delete campaign" }));
 

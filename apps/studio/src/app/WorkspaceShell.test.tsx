@@ -534,9 +534,8 @@ describe("WorkspaceShell", () => {
     expect(
       screen.getByText(`Groups synchronized for ${session.name}.`),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Update groups" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload groups" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sync groups" })).toBeInTheDocument();
     expect(
       screen.getByRole("columnheader", { name: "Participants" }),
     ).toBeInTheDocument();

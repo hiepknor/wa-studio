@@ -53,11 +53,22 @@ const groupSelectionToolbarSource = readFileSync(
   "utf8",
 );
 const groupsCss = readFileSync("src/features/groups/groups.css", "utf8");
+const groupSelectionCss = readFileSync(
+  "src/features/groups/selection/group-selection.css",
+  "utf8",
+);
+const campaignsCss = readFileSync("src/features/campaigns/campaigns.css", "utf8");
 const dataFilterToolbarCss = readFileSync("src/shared/ui/data-filter-toolbar.css", "utf8");
 const dataFilterToolbarSource = readFileSync("src/shared/ui/DataFilterToolbar.tsx", "utf8");
 const workspaceShell = readFileSync("src/app/WorkspaceShell.tsx", "utf8");
 const searchFieldCss = readFileSync("src/shared/ui/search-field.css", "utf8");
+const searchSelectCss = readFileSync("src/shared/ui/search-select.css", "utf8");
+const searchSelectSource = readFileSync("src/shared/ui/SearchSelect.tsx", "utf8");
 const selectMenuCss = readFileSync("src/shared/ui/select-menu.css", "utf8");
+const segmentedControlCss = readFileSync("src/shared/ui/segmented-control.css", "utf8");
+const segmentedControlSource = readFileSync("src/shared/ui/SegmentedControl.tsx", "utf8");
+const decisionGroupCss = readFileSync("src/shared/ui/decision-group.css", "utf8");
+const decisionGroupSource = readFileSync("src/shared/ui/DecisionGroup.tsx", "utf8");
 const switchCss = readFileSync("src/shared/ui/switch-field.css", "utf8");
 const textFieldCss = readFileSync("src/shared/ui/text-field.css", "utf8");
 const settingsCss = readFileSync("src/features/settings/settings.css", "utf8");
@@ -371,6 +382,52 @@ describe("WARP design-system contract", () => {
     expect(appCss).toMatch(
       /\.workspace-session-search input:hover:not\(:disabled\)\s*\{[^}]*border-color: var\(--control-border-hover\);[^}]*background: var\(--control-surface-hover\)/s,
     );
+  });
+
+  it("uses surface and typography states without persistent selection rails", () => {
+    const allCss = cssFiles("src").map((path) => readFileSync(path, "utf8")).join("\n");
+
+    expect(tokensCss).not.toContain("--active-rail");
+    expect(tokensCss).not.toContain("--selection-rail-width");
+    expect(allCss).not.toMatch(
+      /\[(?:aria-current|aria-selected|data-selected)="true"\][^{]*::(?:before|after)/,
+    );
+    expect(appCss).toContain(
+      'tbody tr[data-selected="true"] { background: var(--surface-selected); }',
+    );
+    expect(selectMenuCss).toContain(
+      '.select-menu-option[aria-selected="true"] { background: var(--surface-selected);',
+    );
+    expect(tabsCss).toContain(
+      '.tabs-trigger[aria-selected="true"] {\n  background: var(--surface-selected);',
+    );
+    expect(groupsCss).toContain(
+      '.group-scope-option[aria-selected="true"] { background: var(--surface-selected);',
+    );
+    expect(groupSelectionCss).toContain(
+      'tbody tr[data-selected="true"] { background: var(--surface-selected);',
+    );
+    expect(segmentedControlCss).toContain(
+      '.segmented-control-option:has(.segmented-control-input:checked) {\n  background: var(--surface-selected);',
+    );
+  });
+
+  it("assigns selector geometry by option cardinality and consequence", () => {
+    expect(segmentedControlSource).toContain('role="radiogroup"');
+    expect(segmentedControlSource).toContain('type="radio"');
+    expect(segmentedControlCss).toContain("height: var(--field-control-height)");
+    expect(segmentedControlCss).toContain("grid-auto-flow: column");
+    expect(decisionGroupSource).toContain('role="radiogroup"');
+    expect(decisionGroupSource).toContain('className="decision-group-copy"');
+    expect(decisionGroupCss).toContain("min-height: 52px");
+    expect(searchSelectSource).toContain('searchLabel = "Search options"');
+    expect(searchSelectSource).toContain('role="listbox"');
+    expect(searchSelectCss).toContain("height: var(--field-control-height)");
+    expect(searchSelectCss).toContain("width: max(100%, 280px)");
+    expect(focusCss).toContain(".segmented-control-input:focus-visible");
+    expect(focusCss).toContain(".decision-group-input:focus-visible");
+    expect(focusCss).toContain(".search-select-trigger");
+    expect(campaignsCss).not.toContain("campaign-content-type-control");
   });
 
   it("anchors filter controls and result counts to opposite toolbar edges", () => {

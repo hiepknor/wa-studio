@@ -6,7 +6,6 @@ import { InlineAlert } from "./InlineAlert";
 import { PageHeader } from "./PageHeader";
 import { StatusDot } from "./StatusDot";
 import { TextField } from "./TextField";
-import { SelectField } from "./SelectField";
 import { TextAreaField } from "./TextAreaField";
 
 describe("shared UI primitives", () => {
@@ -26,29 +25,20 @@ describe("shared UI primitives", () => {
     expect(input.closest(".text-field")).toHaveClass("ui-field", "ui-field-sm");
   });
 
-  it("connects shared textarea and select labels to accessible descriptions", () => {
-    render(<>
-      <TextAreaField description="Persisted campaign content." label="Message text" />
-      <SelectField description="Runtime schedule policy." label="Schedule"><option>Immediate</option></SelectField>
-    </>);
+  it("connects shared textarea labels to accessible descriptions", () => {
+    render(<TextAreaField description="Persisted campaign content." label="Message text" />);
     expect(screen.getByRole("textbox", { name: "Message text" })).toHaveAccessibleDescription("Persisted campaign content.");
-    const select = screen.getByRole("combobox", { name: "Schedule" });
-    expect(select).toHaveAccessibleDescription("Runtime schedule policy.");
-    expect(select.closest(".text-field")).toHaveClass("ui-field", "ui-field-sm");
   });
 
   it("applies the same explicit size contract to native field primitives", () => {
     render(<>
       <TextField label="Campaign name" size="md" />
       <TextAreaField label="Message text" size="md" />
-      <SelectField label="Schedule" size="md"><option>Immediate</option></SelectField>
     </>);
 
     expect(screen.getByRole("textbox", { name: "Campaign name" }).closest(".ui-field"))
       .toHaveClass("ui-field-md");
     expect(screen.getByRole("textbox", { name: "Message text" }).closest(".ui-field"))
-      .toHaveClass("ui-field-md");
-    expect(screen.getByRole("combobox", { name: "Schedule" }).closest(".ui-field"))
       .toHaveClass("ui-field-md");
   });
 

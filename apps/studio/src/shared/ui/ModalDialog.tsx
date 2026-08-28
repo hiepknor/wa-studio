@@ -22,32 +22,43 @@ const FOCUSABLE = [
 ].join(",");
 
 interface ModalDialogProps {
+  bodyClassName?: string;
   children: ReactNode;
+  className?: string;
   closeDisabled?: boolean;
+  contentKey?: string;
   description?: ReactNode;
   eyebrow?: ReactNode;
   footer?: ReactNode;
+  headerActions?: ReactNode;
   initialFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   open: boolean;
+  size?: "default" | "workflow";
   title: ReactNode;
 }
 
 export function ModalDialog({
+  bodyClassName = "",
   children,
+  className = "",
   closeDisabled = false,
+  contentKey,
   description,
   eyebrow,
   footer,
+  headerActions,
   initialFocusRef,
   onClose,
   open,
+  size = "default",
   title,
 }: ModalDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
   const layerRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
 
@@ -68,6 +79,11 @@ export function ModalDialog({
       releaseIsolation();
     };
   }, [initialFocusRef, open]);
+
+  useEffect(() => {
+    if (!open || contentKey === undefined || !bodyRef.current) return;
+    bodyRef.current.scrollTop = 0;
+  }, [contentKey, open]);
 
   function requestClose() {
     if (!closeDisabled) onClose();
@@ -102,7 +118,10 @@ export function ModalDialog({
   if (!open) return null;
 
   return createPortal(
-    <div className="modal-dialog-layer" ref={layerRef}>
+    <div
+      className={`modal-dialog-layer modal-dialog-layer-${size}`}
+      ref={layerRef}
+    >
       <div
         aria-hidden="true"
         className="modal-dialog-backdrop"
@@ -112,7 +131,8 @@ export function ModalDialog({
         aria-describedby={description ? descriptionId : undefined}
         aria-labelledby={titleId}
         aria-modal="true"
-        className="modal-dialog"
+        className={`modal-dialog ${className}`.trim()}
+        data-size={size}
         onKeyDown={handleKeyDown}
         ref={surfaceRef}
         role="dialog"
@@ -124,18 +144,26 @@ export function ModalDialog({
             <h2 className="modal-dialog-title" id={titleId}>{title}</h2>
             {description && <p className="modal-dialog-description" id={descriptionId}>{description}</p>}
           </div>
-          <Button
-            aria-label="Close dialog"
-            className="modal-dialog-close"
-            disabled={closeDisabled}
-            icon="close"
-            onClick={requestClose}
-            ref={closeRef}
-            size="sm"
-            variant="ghost"
-          />
+          <div className="modal-dialog-header-actions">
+            {headerActions}
+            <Button
+              aria-label="Close dialog"
+              className="modal-dialog-close"
+              disabled={closeDisabled}
+              icon="close"
+              onClick={requestClose}
+              ref={closeRef}
+              size="sm"
+              variant="ghost"
+            />
+          </div>
         </header>
-        <div className="modal-dialog-body">{children}</div>
+        <div
+          className={`modal-dialog-body ${bodyClassName}`.trim()}
+          ref={bodyRef}
+        >
+          {children}
+        </div>
         {footer && <footer className="modal-dialog-footer">{footer}</footer>}
       </section>
     </div>,

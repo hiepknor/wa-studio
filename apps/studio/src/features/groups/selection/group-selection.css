@@ -47,7 +47,7 @@
 .group-selection-table td { height: 54px; padding: 7px 9px; border-bottom: 1px solid var(--border); font-size: var(--type-label); }
 .group-selection-table tbody tr { transition: background 120ms ease; }
 .group-selection-table tbody tr:hover { background: var(--surface-hover); }
-.group-selection-table tbody tr[data-selected="true"] { background: transparent; box-shadow: inset var(--selection-rail-width) 0 var(--active-rail); }
+.group-selection-table tbody tr[data-selected="true"] { background: var(--surface-selected); }
 .group-selection-table tbody tr:last-child td { border-bottom: 0; }
 .group-selection-table .group-selection-divider { background: var(--surface-chrome); }
 .group-selection-table .group-selection-divider:hover { background: var(--surface-chrome); }

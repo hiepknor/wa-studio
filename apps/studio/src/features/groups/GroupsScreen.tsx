@@ -24,11 +24,10 @@ import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SearchField } from "@/shared/ui/SearchField";
-import { SelectMenu } from "@/shared/ui/SelectMenu";
+import { SegmentedControl } from "@/shared/ui/SegmentedControl";
 import { Tabs } from "@/shared/ui/Tabs";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import { useToast } from "@/shared/ui/Toast";
-import { UpdateActionTrigger } from "@/shared/ui/UpdateActionTrigger";
 import {
   WorkspaceDrawer,
   WorkspaceDisclosurePanel,
@@ -1165,54 +1164,30 @@ export function GroupsScreen() {
     <div className="groups-screen stack stack-lg">
       <PageHeader
         actions={
-          <DropdownMenu
-            ariaLabel="Group data actions"
-            disabled={!selectedSessionId}
-            contentClassName="action-menu"
-            trigger={(triggerProps) => (
-              <UpdateActionTrigger
-                ariaLabel={
-                  syncState === "updating"
-                    ? "Updating groups view"
-                    : syncForeground
-                      ? "Syncing groups"
-                      : reloadingCurrentView
-                        ? "Reloading groups"
-                        : "Update groups"
-                }
-                busy={syncForeground || reloadingCurrentView}
-                label={
-                  syncState === "updating"
-                    ? "Updating view…"
-                    : syncForeground
-                      ? "Syncing…"
-                      : reloadingCurrentView
-                        ? "Reloading…"
-                        : "Update"
-                }
-                triggerProps={triggerProps}
-              />
-            )}
-          >
-            <DropdownMenuItem
-              disabled={loading || groupsScope.membershipLoading}
+          <div className="groups-page-actions">
+            <Button
+              aria-label={reloadingCurrentView ? "Reloading groups" : "Reload groups"}
+              disabled={!selectedSessionId || loading || groupsScope.membershipLoading}
               icon="refresh"
-              onSelect={() => void reloadGroups()}
-              description={groupsScope.scope.mode === "list:view"
+              loading={reloadingCurrentView}
+              onClick={() => void reloadGroups()}
+              title={groupsScope.scope.mode === "list:view"
                 ? "Reload this saved list and its persisted membership."
                 : "Reload groups currently stored in WA Runtime."}
             >
               Reload
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={syncActive}
+            </Button>
+            <Button
+              aria-label={syncState === "updating" ? "Updating groups view" : syncForeground ? "Syncing groups" : "Sync groups"}
+              disabled={!selectedSessionId || syncActive}
               icon="sync"
-              onSelect={() => setSyncConfirmationOpen(true)}
-              description="Synchronize groups and members from OpenWA."
+              loading={syncForeground}
+              onClick={() => setSyncConfirmationOpen(true)}
+              title="Synchronize groups and members from OpenWA."
             >
               Sync
-            </DropdownMenuItem>
-          </DropdownMenu>
+            </Button>
+          </div>
         }
         description={groupsDescription}
         title="Groups"
@@ -1368,7 +1343,7 @@ export function GroupsScreen() {
 
           <GroupSearchToolbar
             actions={activeDraft ? (
-              <SelectMenu
+              <SegmentedControl
                 containerClassName="groups-membership-filter"
                 label="Membership"
                 labelHidden
@@ -1378,7 +1353,6 @@ export function GroupsScreen() {
                   { label: "In list", value: "in-list" },
                   { label: "Not in list", value: "not-in-list" },
                 ]}
-                size="sm"
                 value={membershipFilter}
               />
             ) : groupsScope.scope.mode === "directory" && groupsScope.directoryIds.length > 0 ? (
