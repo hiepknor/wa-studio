@@ -18,7 +18,7 @@ const runtimeRequire = createRequire(resolve(runtimeRoot, "package.json"));
 const { Pool } = runtimeRequire("pg");
 
 const sessionId = "00000000-0000-4000-8000-000000000001";
-const runtimePort = 34_100;
+let runtimePort = 34_100;
 const testRuntimeApiKey = "packaged-e2e-runtime-key-with-at-least-32-characters";
 const testOpenWaApiKey = "packaged-e2e-openwa-api-key";
 const eventInboxMasterSecret =
@@ -62,6 +62,12 @@ async function main() {
     throw new Error(`WA Studio application binary does not exist at ${appBinary}.`);
   }
 
+  runtimePort = process.env.WA_RUNTIME_E2E_PORT
+    ? parseRuntimePort(process.env.WA_RUNTIME_E2E_PORT)
+    : oneShot
+      ? await availablePort()
+      : 34_100;
+
   const profile = withEventInbox ? eventInboxTestProfile() : developmentProfile();
   const databaseEnvironment = useExternalPostgres
     ? externalDatabaseEnvironment()
@@ -96,6 +102,7 @@ async function main() {
         ...process.env,
         ...databaseEnvironment,
         WA_DESKTOP_DEV_RUNTIME: "1",
+        WA_DESKTOP_RUNTIME_PORT: String(runtimePort),
         WA_DESKTOP_RUNTIME_NODE_ENV: withEventInbox ? "test" : "development",
         WA_DESKTOP_RUNTIME_API_KEY: profile.runtimeApiKey,
         WA_DESKTOP_OPENWA_BASE_URL: openwaBaseUrl,
@@ -714,6 +721,14 @@ async function availablePort() {
   server.close();
   await once(server, "close");
   return port;
+}
+
+function parseRuntimePort(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+    throw new Error("WA_RUNTIME_E2E_PORT must be an integer between 1 and 65535.");
+  }
+  return parsed;
 }
 
 async function assertPortAvailable(port, label) {
