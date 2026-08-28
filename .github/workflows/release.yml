@@ -120,9 +120,12 @@ jobs:
           printf '%s' "$APPLE_API_PRIVATE_KEY" > "$APPLE_API_KEY_PATH"
       - run: npm ci
       - run: npm -w @wa/studio run check:native
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - run: npm run check:release
       - name: Build signed desktop update
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
