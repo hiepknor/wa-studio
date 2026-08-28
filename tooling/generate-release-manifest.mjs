@@ -30,8 +30,10 @@ function validateComponents() {
     "utf8",
   );
 
-  assert.equal(components.schemaVersion, 3);
+  assert.equal(components.schemaVersion, 4);
   assert.equal(components.product, "wa-studio");
+  assert(["canary", "stable"].includes(components.releaseChannel),
+    "release/components.json must declare releaseChannel as canary or stable");
   assert.equal(components.runtimeService, "wa-runtime");
   assert.equal(studioPackage.name, "@wa/studio");
   assert.equal(runtimePackage.name, "@wa/runtime");

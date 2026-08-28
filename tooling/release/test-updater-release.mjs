@@ -125,11 +125,14 @@ try {
   const releaseWorkflow = readFileSync(resolve(import.meta.dirname, "../../.github/workflows/release.yml"), "utf8");
   for (const requiredReleaseGate of [
     "needs: [event-inbox-image, desktop]",
+    "environment: release",
     "contents: write",
     "release:verify-updater",
     "gh release create \"$GITHUB_REF_NAME\" --draft",
     "gh release upload \"$GITHUB_REF_NAME\"",
-    "gh release edit \"$GITHUB_REF_NAME\" --draft=false --latest",
+    "require('./release/components.json').releaseChannel",
+    "gh release edit \"$GITHUB_REF_NAME\" --draft=false --prerelease=true",
+    "gh release edit \"$GITHUB_REF_NAME\" --draft=false --prerelease=false --latest",
     "actions/attest-build-provenance@",
     "anchore/sbom-action@",
   ]) {

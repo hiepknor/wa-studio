@@ -84,7 +84,7 @@ function sha256(value) {
 }
 
 function metadataFromComponents(components) {
-  assert.equal(components.schemaVersion, 3, "Unsupported release component schema");
+  assert.equal(components.schemaVersion, 4, "Unsupported release component schema");
   const releaseTag = normalizeReleaseTag(components.openwaReleaseTag);
   const contractSha256 = String(components.openwaContractSha256 ?? "");
   assert(

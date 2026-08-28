@@ -1,6 +1,7 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "product": "wa-studio",
+  "releaseChannel": "canary",
   "runtimeService": "wa-runtime",
   "studioVersion": "0.2.0",
   "runtimeVersion": "0.1.0",

@@ -61,7 +61,7 @@ function fixture() {
   writeFileSync(
     resolve(root, "release/components.json"),
     `${JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       product: "wa-studio",
       runtimeService: "wa-runtime",
       studioVersion: "0.2.0",
