@@ -81,6 +81,36 @@ so it takes session ownership with a v2 token. Verify the old v1 token is reject
 and a live callback drains to local PostgreSQL. Remove the grace setting after its deadline; do not
 extend it on later restarts.
 
+## Reversible Event Inbox canary
+
+The `canary` Compose profile runs the candidate image on loopback port 34201 while the accepted
+primary remains on 34200. Candidate migrations run from the candidate digest first. Every schema
+change used during a canary must remain readable and writable by the primary image; destructive or
+one-way migrations require a separate expand/migrate/contract release sequence.
+
+Stage an attested candidate digest and confirm private readiness before changing public traffic:
+
+~~~bash
+export WA_EVENT_INBOX_CANARY_IMAGE='ghcr.io/hiepknor/wa-event-inbox@sha256:<digest>'
+docker compose --env-file event-inbox.env --profile canary up -d event-inbox-canary
+curl --fail http://127.0.0.1:34201/api/v1/health/ready
+sudo env WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201 \
+  caddy validate --config /etc/caddy/Caddyfile
+sudo env WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201 \
+  caddy reload --config /etc/caddy/Caddyfile
+curl --fail https://wa-events.onio.cc/api/v1/health/live
+~~~
+
+The committed Caddy route defaults to 34200, so an ordinary reload or restart without the explicit
+environment value fails back to the accepted primary. For immediate rollback, reload Caddy with
+`WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34200`; do not stop either slot until liveness and a callback
+round trip are green through the public endpoint.
+
+After the 24-hour acceptance window, keep traffic on 34201, replace `WA_EVENT_INBOX_IMAGE` in the
+mode-0600 `event-inbox.env` with the exact accepted digest, converge `migrate` and `event-inbox`,
+verify readiness on 34200, switch Caddy back to 34200, and only then stop the canary profile. This
+restores the fail-safe default without an exposed service gap.
+
 ## Bounded storage
 
 The default profile enforces seven-day expiry, 100,000 stored events, 256 MiB aggregate payloads,
@@ -122,21 +152,35 @@ Install the files using these fixed paths:
 - mode-0600 rclone config: `/etc/wa-event-inbox/rclone.conf`;
 - mode-0400 age identity: `/etc/wa-event-inbox/backup.agekey`;
 - mode-0600 backup environment: `/etc/wa-event-inbox/backup.env`.
+- node-exporter textfile metrics: `/var/lib/node-exporter/textfile/`.
 
 Example `backup.env`:
 
 ~~~dotenv
 EVENT_INBOX_DEPLOY_DIR=/opt/wa-event-inbox
+EVENT_INBOX_BACKUP_METRICS_DIR=/var/lib/node-exporter/textfile
 EVENT_INBOX_BACKUP_REMOTE=offsite:wa-event-inbox/production
+EVENT_INBOX_BACKUP_STAGING_REMOTE=offsite:wa-event-inbox/staging
 EVENT_INBOX_BACKUP_AGE_RECIPIENT=age1...
 EVENT_INBOX_BACKUP_AGE_IDENTITY_FILE=/etc/wa-event-inbox/backup.agekey
 RCLONE_CONFIG=/etc/wa-event-inbox/rclone.conf
 ~~~
 
+The staging prefix must not have an object lock because the verified `.partial` object is moved out
+of it. Apply a 35-day bucket lock to the production prefix, expire production objects after 90 days,
+and expire abandoned staging objects after one day.
+
+For Cloudflare R2, create one private bucket and an Object Read & Write S3 token scoped only to that
+bucket. Configure the rclone endpoint as `https://<account-id>.r2.cloudflarestorage.com`, add a
+35-day bucket-lock rule for the `production/` prefix, a 90-day lifecycle expiration for
+`production/`, and a one-day lifecycle expiration for `staging/`. R2 lock rules take precedence over
+lifecycle deletion, so the 90-day rule cannot remove a still-locked object. Verify the effective
+lock and lifecycle rules in Cloudflare before enabling either systemd timer.
+
 Install and enable `wa-event-inbox-backup.service/.timer` for daily backups. The backup takes a
 consistent custom-format `pg_dump`, checks it with `pg_restore --list`, encrypts it with the public
-age recipient, uploads it under a timestamped immutable name, reads the remote object back to verify
-SHA-256, and writes the checksum marker last.
+age recipient, uploads it to the unlocked staging prefix, reads it back to verify SHA-256, moves the
+verified object to the locked production prefix, and writes the checksum marker last.
 
 Install `wa-event-inbox-restore-drill.service/.timer` only where the age identity is intentionally
 available. The monthly drill downloads the latest complete backup, verifies its checksum, decrypts

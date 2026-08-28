@@ -67,3 +67,57 @@ groups:
         annotations:
           summary: WA Event Inbox is blocking pairing attempts
           description: Pairing abuse or a misconfigured client is exhausting a current rate-limit window.
+
+      - alert: WAProductionEndpointUnavailable
+        expr: probe_success{job=~"wa-production-endpoints|wa-studio-discovery"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: A public WA production endpoint is unavailable
+          description: Public liveness or protocol-v2 discovery has failed for two minutes.
+
+      - alert: WAProductionCertificateExpiring
+        expr: probe_ssl_earliest_cert_expiry{job=~"wa-production-endpoints|wa-studio-discovery"} - time() < 14 * 24 * 60 * 60
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: A WA production TLS certificate expires within 14 days
+          description: Renew or diagnose the public certificate before clients lose connectivity.
+
+      - alert: WAVpsDiskSpaceLow
+        expr: node_filesystem_avail_bytes{job="wa-vps",mountpoint="/"} / node_filesystem_size_bytes{job="wa-vps",mountpoint="/"} < 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA VPS disk space is below 20 percent
+          description: Database, backup, or container growth requires operator attention.
+
+      - alert: WAVpsDiskSpaceCritical
+        expr: node_filesystem_avail_bytes{job="wa-vps",mountpoint="/"} / node_filesystem_size_bytes{job="wa-vps",mountpoint="/"} < 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA VPS disk space is below 10 percent
+          description: Free space immediately before writes or database availability fail.
+
+      - alert: WAEventInboxBackupMissing
+        expr: absent(wa_event_inbox_backup_last_success_timestamp_seconds) == 1 or time() - wa_event_inbox_backup_last_success_timestamp_seconds > 26 * 60 * 60
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Event Inbox has no recent offsite backup
+          description: The last verified encrypted upload is missing or older than 26 hours.
+
+      - alert: WAEventInboxRestoreDrillOverdue
+        expr: absent(wa_event_inbox_restore_drill_last_success_timestamp_seconds) == 1 or time() - wa_event_inbox_restore_drill_last_success_timestamp_seconds > 40 * 24 * 60 * 60
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Event Inbox restore drill is overdue
+          description: No successful isolated restore has been recorded within 40 days.

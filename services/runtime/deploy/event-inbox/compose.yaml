@@ -98,6 +98,16 @@ services:
       postgres:
         condition: service_healthy
 
+  migrate-canary:
+    <<: *event-inbox
+    profiles: [canary]
+    image: ${WA_EVENT_INBOX_CANARY_IMAGE:-${WA_EVENT_INBOX_IMAGE:?WA_EVENT_INBOX_IMAGE must be an immutable image digest}}
+    restart: "no"
+    command: ["node", "dist/src/entrypoints/event-inbox-migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   event-inbox:
     <<: *event-inbox
     restart: unless-stopped
@@ -116,6 +126,30 @@ services:
     stop_grace_period: 20s
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  event-inbox-canary:
+    <<: *event-inbox
+    profiles: [canary]
+    image: ${WA_EVENT_INBOX_CANARY_IMAGE:-${WA_EVENT_INBOX_IMAGE:?WA_EVENT_INBOX_IMAGE must be an immutable image digest}}
+    restart: unless-stopped
+    command: ["node", "dist/src/entrypoints/event-inbox.js"]
+    ports:
+      - "127.0.0.1:34201:34200"
+    networks:
+      - event-inbox-internal
+      - event-inbox-edge
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:34200/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    stop_grace_period: 20s
+    depends_on:
+      migrate-canary:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy

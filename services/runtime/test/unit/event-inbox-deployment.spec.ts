@@ -19,10 +19,13 @@ describe('Event Inbox deployment contract', () => {
     expect(backup).toContain('pg_restore --list');
     expect(backup).toContain('age --encrypt');
     expect(backup).toContain('rclone cat');
+    expect(backup).toContain('EVENT_INBOX_BACKUP_STAGING_REMOTE');
+    expect(backup).toContain('wa_event_inbox_backup_last_success_timestamp_seconds');
     expect(restore).toContain('sha256sum --check');
     expect(restore).toContain('age --decrypt');
     expect(restore).toContain('wa_event_inbox_restore_');
     expect(restore).toContain('event_inbox_usage');
+    expect(restore).toContain('wa_event_inbox_restore_drill_last_success_timestamp_seconds');
     expect(restore).not.toContain('dropdb --all');
   });
 
@@ -48,9 +51,21 @@ describe('Event Inbox deployment contract', () => {
       expect(service).toContain('NoNewPrivileges=true');
       expect(service).toContain('ProtectSystem=strict');
       expect(service).toContain('UMask=0077');
+      expect(service).toContain('/var/lib/node-exporter/textfile');
     }
     expect(backupTimer).toContain('OnCalendar=*-*-* 01:15:00 UTC');
     expect(restoreTimer).toContain('OnCalendar=monthly');
+  });
+
+  it('ships a private, resource-bounded Event Inbox observability overlay', () => {
+    const compose = readFileSync(resolve(deployRoot, 'observability.compose.yaml'), 'utf8');
+    for (const service of ['prometheus:', 'alertmanager:', 'blackbox-exporter:', 'node-exporter:']) {
+      expect(compose).toContain(service);
+    }
+    expect(compose).toContain('WA_PROMETHEUS_IMAGE:?');
+    expect(compose).toContain('/etc/wa-event-inbox/telegram-bot-token');
+    expect(compose).toContain('/var/lib/node-exporter/textfile:/textfile:ro');
+    expect(compose).not.toMatch(/ports:\s*\n/u);
   });
 
   it('wires bounded pairing limits into the production Compose profile', () => {
@@ -59,11 +74,16 @@ describe('Event Inbox deployment contract', () => {
     expect(compose).toContain('EVENT_INBOX_PAIR_GLOBAL_RATE_LIMIT_MAX_ATTEMPTS');
     expect(compose).toContain('EVENT_INBOX_PAIR_RATE_LIMIT_WINDOW_SECONDS');
     expect(compose).toContain('EVENT_INBOX_METRICS_TOKEN:?EVENT_INBOX_METRICS_TOKEN is required');
+    expect(compose).toContain('event-inbox-canary:');
+    expect(compose).toContain('migrate-canary:');
+    expect(compose).toContain('WA_EVENT_INBOX_CANARY_IMAGE');
+    expect(compose).toContain('127.0.0.1:34201:34200');
   });
 
   it('keeps detailed readiness and metrics off the public Caddy route set', () => {
     const caddy = readFileSync(resolve(deployRoot, 'Caddyfile.wa-events'), 'utf8');
     expect(caddy).toContain('path /api/v1/health/live');
+    expect(caddy).toContain('{$WA_EVENT_INBOX_UPSTREAM:127.0.0.1:34200}');
     expect(caddy).not.toContain('/api/v1/health/ready');
     expect(caddy).not.toContain('/api/v1/metrics');
   });

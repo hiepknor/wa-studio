@@ -22,12 +22,15 @@ try {
   const fakeBin = resolve(root, 'bin');
   const deploy = resolve(root, 'deploy');
   const remote = resolve(root, 'remote');
+  const staging = resolve(root, 'staging');
   const work = resolve(root, 'work');
+  const metrics = resolve(root, 'metrics');
   const createdMarker = resolve(root, 'created-database');
   const droppedMarker = resolve(root, 'dropped-database');
   mkdirSync(fakeBin, { recursive: true });
   mkdirSync(deploy, { recursive: true });
   mkdirSync(remote, { recursive: true });
+  mkdirSync(staging, { recursive: true });
   writeFileSync(resolve(deploy, 'compose.yaml'), 'services: {}\n');
   writeFileSync(resolve(deploy, 'event-inbox.env'), 'POSTGRES_DB=test\n');
   writeFileSync(resolve(root, 'identity.agekey'), 'AGE-SECRET-KEY-TEST\n');
@@ -61,9 +64,11 @@ try {
     import { copyFileSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs';
     import { dirname, resolve } from 'node:path';
     const [command, source, destination] = process.argv.slice(2);
-    const path = value => value.startsWith('fake:')
-      ? resolve(process.env.FAKE_REMOTE_ROOT, value.slice('fake:'.length))
-      : value;
+    const path = value => value.startsWith('fake-staging:')
+      ? resolve(process.env.FAKE_STAGING_ROOT, value.slice('fake-staging:'.length))
+      : value.startsWith('fake:')
+        ? resolve(process.env.FAKE_REMOTE_ROOT, value.slice('fake:'.length))
+        : value;
     if (command === 'copyto') {
       mkdirSync(dirname(path(destination)), { recursive: true });
       copyFileSync(path(source), path(destination));
@@ -99,10 +104,13 @@ try {
     PATH: `${fakeBin}:/usr/bin:/bin`,
     EVENT_INBOX_DEPLOY_DIR: deploy,
     EVENT_INBOX_BACKUP_WORK_DIR: work,
+    EVENT_INBOX_BACKUP_METRICS_DIR: metrics,
     EVENT_INBOX_BACKUP_REMOTE: 'fake:production',
+    EVENT_INBOX_BACKUP_STAGING_REMOTE: 'fake-staging:uploads',
     EVENT_INBOX_BACKUP_AGE_RECIPIENT: 'age1testrecipient',
     EVENT_INBOX_BACKUP_AGE_IDENTITY_FILE: resolve(root, 'identity.agekey'),
     FAKE_REMOTE_ROOT: remote,
+    FAKE_STAGING_ROOT: staging,
     FAKE_CREATED_MARKER: createdMarker,
     FAKE_DROPPED_MARKER: droppedMarker,
   };
@@ -117,6 +125,11 @@ try {
   const archiveName = remoteFiles.find(name => name.endsWith('.dump.age'));
   assert.ok(archiveName);
   assert.ok(remoteFiles.includes(`${archiveName}.sha256`));
+  assert.deepEqual(readdirSync(resolve(staging, 'uploads')), []);
+  assert.match(
+    readFileSync(resolve(metrics, 'wa-event-inbox-backup.prom'), 'utf8'),
+    /^wa_event_inbox_backup_last_success_timestamp_seconds [0-9]+\n$/u,
+  );
 
   const restore = spawnSync('/bin/bash', [restoreScript, archiveName], {
     cwd: runtimeRoot,
@@ -126,6 +139,10 @@ try {
   assert.equal(restore.status, 0, restore.stderr || restore.stdout);
   assert.equal(existsSync(createdMarker), true);
   assert.equal(existsSync(droppedMarker), true);
+  assert.match(
+    readFileSync(resolve(metrics, 'wa-event-inbox-restore-drill.prom'), 'utf8'),
+    /^wa_event_inbox_restore_drill_last_success_timestamp_seconds [0-9]+\n$/u,
+  );
 
   const archivePath = resolve(remote, 'production', archiveName);
   writeFileSync(archivePath, `${readFileSync(archivePath, 'utf8')}-tampered`);

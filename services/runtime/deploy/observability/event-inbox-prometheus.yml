@@ -6,6 +6,12 @@ global:
 rule_files:
   - /etc/prometheus/rules/event-inbox-alerts.yml
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
 scrape_configs:
   - job_name: wa-event-inbox
     metrics_path: /api/v1/metrics
@@ -16,3 +22,38 @@ scrape_configs:
     static_configs:
       - targets:
           - event-inbox:34200
+
+  - job_name: wa-production-endpoints
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://wa-events.onio.cc/api/v1/health/live
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: wa-studio-discovery
+    metrics_path: /probe
+    params:
+      module: [wa_studio_discovery]
+    static_configs:
+      - targets:
+          - https://openwa.onio.cc/.well-known/wa-studio
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: wa-vps
+    static_configs:
+      - targets:
+          - node-exporter:9100

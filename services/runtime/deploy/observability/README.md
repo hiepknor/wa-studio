@@ -15,6 +15,17 @@ The VPS Event Inbox exposes the same path with its own mandatory production cred
 detailed readiness or metrics. Scrape `event-inbox:34200` from its private Docker network using the
 separate `event-inbox-prometheus.yml` configuration.
 
+The production Event Inbox deployment also includes `observability.compose.yaml` with private
+Prometheus, Alertmanager, node-exporter and blackbox-exporter services. Install the overlay at
+`/opt/wa-event-inbox/observability.compose.yaml`, copy this configuration directory to
+`/opt/wa-event-inbox/observability`, and start it on the Event Inbox Compose project. None of these
+services publishes a host port; use an SSH tunnel or `docker compose exec` for operator inspection.
+
+Copy `observability.env.example` to `/etc/wa-event-inbox/observability.env`, retain mode 0600, and
+review every digest before deployment. The checked-in set was resolved and configuration-tested
+together; Alertmanager must remain at 0.31 or newer because the Telegram chat ID is file-backed.
+Do not replace a digest with `latest` or another mutable tag.
+
 ## Provision the scrape credential
 
 Create one random credential on the deployment host and keep it outside Git:
@@ -35,6 +46,16 @@ Provision a different Event Inbox token in the same way, pass it as
 `/run/secrets/wa_event_inbox_metrics_token`. Neither metrics token may reuse a general API or master
 encryption secret.
 
+Create mode-0400 `/etc/wa-event-inbox/telegram-bot-token` and
+`/etc/wa-event-inbox/telegram-chat-id` files for the dedicated production alert bot. Alertmanager
+reads both values from files and routes firing and resolved alerts without placing credentials in
+the committed configuration. Send one synthetic firing/resolved alert pair before accepting the
+deployment.
+
+Create `/var/lib/node-exporter/textfile` mode 0755. The backup and restore-drill services atomically
+publish their last-success timestamps there. Missing daily backups after 26 hours and missing monthly
+restore drills after 40 days are critical alerts.
+
 Validate configuration before rollout:
 
 ```bash
@@ -42,6 +63,25 @@ promtool check config services/runtime/deploy/observability/prometheus.yml
 promtool check rules services/runtime/deploy/observability/runtime-alerts.yml
 promtool check config services/runtime/deploy/observability/event-inbox-prometheus.yml
 promtool check rules services/runtime/deploy/observability/event-inbox-alerts.yml
+amtool check-config services/runtime/deploy/observability/alertmanager.yml
+blackbox_exporter --config.file=services/runtime/deploy/observability/blackbox.yml --config.check
+```
+
+Validate and start the complete private overlay from `/opt/wa-event-inbox`:
+
+```bash
+docker compose \
+  --env-file event-inbox.env \
+  --env-file /etc/wa-event-inbox/observability.env \
+  -f compose.yaml \
+  -f observability.compose.yaml \
+  config --quiet
+docker compose \
+  --env-file event-inbox.env \
+  --env-file /etc/wa-event-inbox/observability.env \
+  -f compose.yaml \
+  -f observability.compose.yaml \
+  up -d
 ```
 
 Then verify one scrape from the private network:

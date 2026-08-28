@@ -9,7 +9,7 @@ wa-events.onio.cc {
 		request_body {
 			max_size 256KB
 		}
-		reverse_proxy 127.0.0.1:34200
+		reverse_proxy {$WA_EVENT_INBOX_UPSTREAM:127.0.0.1:34200}
 	}
 
 	@pair {
@@ -20,7 +20,7 @@ wa-events.onio.cc {
 		request_body {
 			max_size 16KB
 		}
-		reverse_proxy 127.0.0.1:34200
+		reverse_proxy {$WA_EVENT_INBOX_UPSTREAM:127.0.0.1:34200}
 	}
 
 	@delivery {
@@ -31,7 +31,7 @@ wa-events.onio.cc {
 		request_body {
 			max_size 64KB
 		}
-		reverse_proxy 127.0.0.1:34200 {
+		reverse_proxy {$WA_EVENT_INBOX_UPSTREAM:127.0.0.1:34200} {
 			transport http {
 				response_header_timeout 35s
 			}
@@ -43,7 +43,7 @@ wa-events.onio.cc {
 		path /api/v1/health/live
 	}
 	handle @health {
-		reverse_proxy 127.0.0.1:34200
+		reverse_proxy {$WA_EVENT_INBOX_UPSTREAM:127.0.0.1:34200}
 	}
 
 	handle {

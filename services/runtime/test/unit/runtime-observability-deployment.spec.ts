@@ -33,6 +33,9 @@ describe('Runtime observability deployment contract', () => {
     expect(config).toContain('credentials_file: /run/secrets/wa_event_inbox_metrics_token');
     expect(config).toContain('- event-inbox:34200');
     expect(config).not.toContain('EVENT_INBOX_MASTER_SECRET');
+    expect(config).toContain('alertmanager:9093');
+    expect(config).toContain('blackbox-exporter:9115');
+    expect(config).toContain('node-exporter:9100');
   });
 
   it('ships availability, dependency, heartbeat, error-rate and latency alerts', () => {
@@ -59,16 +62,32 @@ describe('Runtime observability deployment contract', () => {
       'WAEventInboxEventCapacityHigh',
       'WAEventInboxByteCapacityHigh',
       'WAEventInboxPairingRateLimited',
+      'WAProductionEndpointUnavailable',
+      'WAProductionCertificateExpiring',
+      'WAVpsDiskSpaceLow',
+      'WAVpsDiskSpaceCritical',
+      'WAEventInboxBackupMissing',
+      'WAEventInboxRestoreDrillOverdue',
     ]) {
       expect(inboxRules).toContain(`alert: ${alert}`);
     }
+    expect(deploymentFile('alertmanager.yml')).toContain('telegram_configs:');
+    expect(deploymentFile('alertmanager.yml')).toContain('bot_token_file:');
+    expect(deploymentFile('blackbox.yml')).toContain('wa_studio_discovery:');
   });
 
-  it('validates both Prometheus configurations in CI with a digest-pinned promtool image', () => {
+  it('validates all observability configurations in CI with digest-pinned images', () => {
     const workflow = readFileSync(resolve(process.cwd(), '../../.github/workflows/ci.yml'), 'utf8');
     expect(workflow).toContain('prom/prometheus@sha256:');
+    expect(workflow).toContain('prom/alertmanager@sha256:');
+    expect(workflow).toContain('prom/blackbox-exporter@sha256:');
+    expect(workflow).toContain('caddy@sha256:');
     expect(workflow).toContain('deploy/observability/prometheus.yml');
     expect(workflow).toContain('deploy/observability/event-inbox-prometheus.yml');
+    expect(workflow).toContain('check-config /etc/alertmanager/alertmanager.yml');
+    expect(workflow).toContain('--config.check');
+    expect(workflow).toContain('caddy validate --config /etc/caddy/Caddyfile');
+    expect(workflow).toContain('config --no-interpolate --quiet');
     expect(workflow).not.toContain('prom/prometheus:latest');
   });
 });

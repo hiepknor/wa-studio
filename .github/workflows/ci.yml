@@ -37,9 +37,12 @@ jobs:
       - run: cargo audit --file apps/studio/src-tauri/Cargo.lock
       - run: npm run check:security
       - run: npm run openwa:server:verify
-      - name: Validate Prometheus configuration and alert rules
+      - name: Validate production observability configuration
         env:
-          PROMTOOL_IMAGE: prom/prometheus@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
+          PROMTOOL_IMAGE: prom/prometheus@sha256:508729e0e2d18e11fd742a5a5ca70e557b940a93948c3c95fd0123a6fd538b69
+          ALERTMANAGER_IMAGE: prom/alertmanager@sha256:9e082985f56f4c8c9f724e18f2288c6708f472e56a5286b8863d080434ea065d
+          BLACKBOX_EXPORTER_IMAGE: prom/blackbox-exporter@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
+          CADDY_IMAGE: caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
         run: |
           docker run --rm \
             -v "$PWD/services/runtime/deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
@@ -55,6 +58,27 @@ jobs:
             --entrypoint /bin/promtool \
             "$PROMTOOL_IMAGE" \
             check config /etc/prometheus/prometheus.yml
+          docker run --rm \
+            -v "$PWD/services/runtime/deploy/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro" \
+            -v "/dev/null:/run/secrets/telegram_bot_token:ro" \
+            -v "/dev/null:/run/secrets/telegram_chat_id:ro" \
+            --entrypoint /bin/amtool \
+            "$ALERTMANAGER_IMAGE" \
+            check-config /etc/alertmanager/alertmanager.yml
+          docker run --rm \
+            -v "$PWD/services/runtime/deploy/observability/blackbox.yml:/etc/blackbox_exporter/config.yml:ro" \
+            "$BLACKBOX_EXPORTER_IMAGE" \
+            --config.file=/etc/blackbox_exporter/config.yml \
+            --config.check
+          docker run --rm \
+            -e WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201 \
+            -v "$PWD/services/runtime/deploy/event-inbox/Caddyfile.wa-events:/etc/caddy/Caddyfile:ro" \
+            "$CADDY_IMAGE" \
+            caddy validate --config /etc/caddy/Caddyfile
+          docker compose \
+            -f services/runtime/deploy/event-inbox/compose.yaml \
+            -f services/runtime/deploy/event-inbox/observability.compose.yaml \
+            --profile canary config --no-interpolate --quiet
       - run: npm run contract:check
       - run: npm run check:runtime
       - run: npm run test:integration

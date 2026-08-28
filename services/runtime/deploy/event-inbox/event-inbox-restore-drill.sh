@@ -5,6 +5,7 @@ umask 077
 
 deploy_dir="${EVENT_INBOX_DEPLOY_DIR:-/opt/wa-event-inbox}"
 work_root="${EVENT_INBOX_BACKUP_WORK_DIR:-/var/lib/wa-event-inbox-backup}"
+metrics_directory="${EVENT_INBOX_BACKUP_METRICS_DIR:-/var/lib/node-exporter/textfile}"
 remote="${EVENT_INBOX_BACKUP_REMOTE:?EVENT_INBOX_BACKUP_REMOTE is required}"
 identity_file="${EVENT_INBOX_BACKUP_AGE_IDENTITY_FILE:?EVENT_INBOX_BACKUP_AGE_IDENTITY_FILE is required}"
 compose_file="${deploy_dir}/compose.yaml"
@@ -89,5 +90,13 @@ verification="$("${compose[@]}" exec -T postgres sh -ceu \
   'exec psql --username "$POSTGRES_USER" --dbname "$1" --no-align --tuples-only --set ON_ERROR_STOP=1 --command "$2"' \
   sh "${drill_database}" "${verification_sql}")"
 test "${verification}" = "ok"
+
+install -d -m 0755 "${metrics_directory}"
+metrics_path="${metrics_directory}/wa-event-inbox-restore-drill.prom"
+metrics_temporary="$(mktemp "${metrics_path}.XXXXXX")"
+printf 'wa_event_inbox_restore_drill_last_success_timestamp_seconds %s\n' "$(date -u +%s)" \
+  > "${metrics_temporary}"
+chmod 0644 "${metrics_temporary}"
+mv -f "${metrics_temporary}" "${metrics_path}"
 
 printf 'Event Inbox restore drill passed: %s\n' "${archive_name}"

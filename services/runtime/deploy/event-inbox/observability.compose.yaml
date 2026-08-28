@@ -1,0 +1,104 @@
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  prometheus:
+    image: ${WA_PROMETHEUS_IMAGE:?WA_PROMETHEUS_IMAGE must be an immutable image digest}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - /opt/wa-event-inbox/observability/event-inbox-prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /opt/wa-event-inbox/observability/event-inbox-alerts.yml:/etc/prometheus/rules/event-inbox-alerts.yml:ro
+      - /etc/wa-event-inbox/metrics-token:/run/secrets/wa_event_inbox_metrics_token:ro
+      - prometheus-data:/prometheus
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.50
+    logging: *bounded-logging
+    networks: [event-inbox-internal]
+    depends_on:
+      alertmanager:
+        condition: service_started
+      blackbox-exporter:
+        condition: service_started
+      event-inbox:
+        condition: service_healthy
+      node-exporter:
+        condition: service_started
+
+  alertmanager:
+    image: ${WA_ALERTMANAGER_IMAGE:?WA_ALERTMANAGER_IMAGE must be an immutable image digest}
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --data.retention=120h
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - /opt/wa-event-inbox/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - /etc/wa-event-inbox/telegram-bot-token:/run/secrets/telegram_bot_token:ro
+      - /etc/wa-event-inbox/telegram-chat-id:/run/secrets/telegram_chat_id:ro
+      - alertmanager-data:/alertmanager
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    logging: *bounded-logging
+    networks: [event-inbox-internal, event-inbox-edge]
+
+  blackbox-exporter:
+    image: ${WA_BLACKBOX_EXPORTER_IMAGE:?WA_BLACKBOX_EXPORTER_IMAGE must be an immutable image digest}
+    command: [--config.file=/etc/blackbox_exporter/config.yml]
+    restart: unless-stopped
+    read_only: true
+    volumes:
+      - /opt/wa-event-inbox/observability/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 64m
+    cpus: 0.25
+    logging: *bounded-logging
+    networks: [event-inbox-internal, event-inbox-edge]
+
+  node-exporter:
+    image: ${WA_NODE_EXPORTER_IMAGE:?WA_NODE_EXPORTER_IMAGE must be an immutable image digest}
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+)($|/)
+      - --collector.textfile.directory=/textfile
+    restart: unless-stopped
+    read_only: true
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+      - /var/lib/node-exporter/textfile:/textfile:ro
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 64m
+    cpus: 0.25
+    logging: *bounded-logging
+    networks: [event-inbox-internal]
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
