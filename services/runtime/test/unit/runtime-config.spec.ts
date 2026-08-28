@@ -27,6 +27,12 @@ describe('runtime worker concurrency configuration', () => {
       RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: false,
       RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: false,
       CAMPAIGN_LIVE_PREFLIGHT_TTL_SECONDS: 120,
+      CAMPAIGN_MEDIA_IMAGE_MAX_BYTES: 8_388_608,
+      CAMPAIGN_MEDIA_STORAGE_MAX_BYTES: 536_870_912,
+      CAMPAIGN_MEDIA_UPLOAD_TTL_SECONDS: 86_400,
+      CAMPAIGN_MEDIA_ORPHAN_RETENTION_HOURS: 24,
+      CAMPAIGN_MEDIA_SEND_MEMORY_BUDGET_BYTES: 33_554_432,
+      MESSAGE_SAFE_RETRY_MAX_ATTEMPTS: 5,
       DATABASE_POOL_MAX: 10,
       DATABASE_CONNECTION_TIMEOUT_MS: 5_000,
       DATABASE_IDLE_TIMEOUT_MS: 30_000,
@@ -104,6 +110,13 @@ describe('runtime worker concurrency configuration', () => {
     ['CAMPAIGN_WORKER_CONCURRENCY', 'not-a-number'],
   ])('rejects invalid %s values', (name, value) => {
     expect(() => parseRuntimeConfig({ ...validEnvironment(), [name]: value })).toThrow();
+  });
+
+  it('keeps the image send memory budget large enough for one maximum-size V1 image', () => {
+    expect(() => parseRuntimeConfig({
+      ...validEnvironment(),
+      CAMPAIGN_MEDIA_SEND_MEMORY_BUDGET_BYTES: '33554431',
+    })).toThrow();
   });
 });
 

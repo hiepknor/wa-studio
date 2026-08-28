@@ -1,3 +1,5 @@
+import type { CampaignContentDto } from '../../contracts/campaigns/campaign-content.dto';
+
 export const MESSAGE_JOB_STATUSES = [
   'SCHEDULED',
   'QUEUED',
@@ -19,7 +21,7 @@ export interface MessageJob {
   idempotencyKey: string;
   sessionId: string;
   recipientId: string;
-  payload: { text: string };
+  payload: CampaignContentDto;
   scheduledAt: Date;
   status: MessageJobStatus;
   dryRun: boolean;

@@ -51,6 +51,7 @@ describe(`OpenWA ${REVIEWED_OPENWA_RELEASE} contract review`, () => {
       ['/api/sessions/{sessionId}/webhooks/{id}', 'put'],
       ['/api/sessions/{sessionId}/webhooks/{id}', 'delete'],
       ['/api/sessions/{sessionId}/messages/send-text', 'post'],
+      ['/api/sessions/{sessionId}/messages/send-image', 'post'],
     ] as const) {
       expect(operation(current, path, method)).toEqual(operation(priorReviewed, path, method));
     }
@@ -68,6 +69,7 @@ describe(`OpenWA ${REVIEWED_OPENWA_RELEASE} contract review`, () => {
       'HealthCheckResponseDto',
       'MessageResponseDto',
       'SendTextMessageDto',
+      'SendMediaMessageDto',
       'SessionGroupSummaryDto',
       'SessionResponseDto',
       'UpdateWebhookDto',
@@ -147,6 +149,7 @@ describe(`OpenWA ${REVIEWED_OPENWA_RELEASE} contract review`, () => {
       'GroupSummaryDto',
       'MessageResponseDto',
       'SendTextMessageDto',
+      'SendMediaMessageDto',
     ]) {
       expect(schema(current, name)).toEqual(schema(previous, name));
     }

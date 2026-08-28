@@ -334,7 +334,7 @@ describe('saved group lists HTTP API', () => {
     const campaignId = randomUUID();
     await pool.query(
       `INSERT INTO campaigns (id, session_id, name, payload)
-       VALUES ($1, $2, 'Snapshot campaign', '{"text":"hello"}'::jsonb)`,
+       VALUES ($1, $2, 'Snapshot campaign', '{"type":"TEXT","text":"hello"}'::jsonb)`,
       [campaignId, INTEGRATION_SESSION_ID],
     );
     await pool.query(

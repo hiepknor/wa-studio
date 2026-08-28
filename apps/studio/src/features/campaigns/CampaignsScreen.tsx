@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import {
@@ -21,6 +21,7 @@ import {
   type RuntimeCampaignTarget,
   type RuntimeCampaignTargetSource,
   type RuntimeGroupList,
+  type RuntimeMediaAssetPolicy,
 } from "@/shared/api/runtime-client";
 import {
   isUnknownMutationOutcome,
@@ -72,6 +73,11 @@ import {
   type CampaignFormErrors,
   type CampaignFormValues,
 } from "./campaign-domain";
+import {
+  formatBytes,
+  uploadCampaignMedia,
+  type CampaignMediaUploadProgress,
+} from "./campaign-media";
 import "./campaigns.css";
 
 type EditorState =
@@ -107,6 +113,10 @@ const SCHEDULE_OPTIONS = [
     value: "ONCE",
   },
 ] as const;
+const CONTENT_TYPE_OPTIONS = [
+  { description: "A plain-text WhatsApp message.", label: "Text", value: "TEXT" },
+  { description: "JPEG, PNG, or WebP with an optional caption.", label: "Image", value: "IMAGE" },
+] as const;
 const PREFLIGHT_MODE_OPTIONS = [
   {
     description: "Evaluate the campaign as a simulation.",
@@ -122,6 +132,7 @@ const PREFLIGHT_MODE_OPTIONS = [
 
 const PREFLIGHT_CHECK_LABELS: Partial<Record<RuntimeCampaignPreflight["checks"][number]["code"], string>> = {
   CONTENT_VALID: "Campaign content",
+  MEDIA_READY: "Media asset",
   GROUP_CAPABILITY: "Group capability",
   LIVE_SEND_ALLOWED: "Live sending policy",
   SESSION_SENDABLE: "Runtime session",
@@ -258,6 +269,12 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const [formErrors, setFormErrors] = useState<CampaignFormErrors>({});
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [mediaPolicy, setMediaPolicy] = useState<RuntimeMediaAssetPolicy | null>(null);
+  const [mediaPolicyLoading, setMediaPolicyLoading] = useState(false);
+  const [mediaPolicyRequest, setMediaPolicyRequest] = useState(0);
+  const [mediaUploadProgress, setMediaUploadProgress] = useState<CampaignMediaUploadProgress | null>(null);
+  const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
+  const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
   const [targets, setTargets] = useState<RuntimeCampaignTarget[]>([]);
   const [draftTargetIds, setDraftTargetIds] = useState<string[]>([]);
   const [targetsRevision, setTargetsRevision] = useState<number | null>(null);
@@ -287,6 +304,8 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const targetsRevisionRef = useRef<number | null>(null);
   const listRequestRef = useRef(0);
   const deleteRequestRef = useRef(0);
+  const mediaFileInputRef = useRef<HTMLInputElement>(null);
+  const mediaUploadAbortRef = useRef<AbortController | null>(null);
   const listTargetRef = useRef(campaignListRequestKey(listState));
   const pageKeyRef = useRef("");
   const errorKeyRef = useRef("");
@@ -361,7 +380,14 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   );
   const hasEditorChanges = campaign
     ? detailsDirty || targetsDirty
-    : Boolean(form.name || form.text || form.scheduledAt || form.scheduleType !== "IMMEDIATE");
+    : Boolean(
+      form.name
+      || form.text
+      || form.mediaAsset
+      || form.contentType !== "TEXT"
+      || form.scheduledAt
+      || form.scheduleType !== "IMMEDIATE",
+    );
 
   const loadCampaigns = useCallback(async (state: CampaignListRequestState) => {
     if (!state.sessionId) return;
@@ -419,6 +445,11 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     editorEpochRef.current += 1;
     pageKeyRef.current = "";
     errorKeyRef.current = "";
+    mediaUploadAbortRef.current?.abort();
+    mediaUploadAbortRef.current = null;
+    setMediaUploadProgress(null);
+    setMediaUploadError(null);
+    setMediaPreviewUrl(null);
     setEditor({ kind: "closed" });
     setDiscardConfirmationOpen(false);
     setCampaignPage(null);
@@ -468,7 +499,30 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     return () => window.clearTimeout(timeout);
   }, [listState.inputQuery]);
 
+  useEffect(() => {
+    if (editor.kind !== "open" || form.contentType === "TEXT" || mediaPolicy) return;
+    const controller = new AbortController();
+    setMediaPolicyLoading(true);
+    setMediaUploadError(null);
+    void api.getCampaignMediaPolicy({ signal: controller.signal })
+      .then(setMediaPolicy)
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setMediaUploadError(campaignErrorMessage(error, "Could not load media upload policy."));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setMediaPolicyLoading(false);
+      });
+    return () => controller.abort();
+  }, [api, editor.kind, form.contentType, mediaPolicy, mediaPolicyRequest]);
+
   useEffect(() => () => {
+    if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl);
+  }, [mediaPreviewUrl]);
+
+  useEffect(() => () => {
+    mediaUploadAbortRef.current?.abort();
     listRequestRef.current += 1;
     listTargetRef.current = "";
     editorEpochRef.current += 1;
@@ -573,6 +627,15 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     }
   }
 
+  function resetMediaEditorState() {
+    mediaUploadAbortRef.current?.abort();
+    mediaUploadAbortRef.current = null;
+    setMediaUploadProgress(null);
+    setMediaUploadError(null);
+    setMediaPreviewUrl(null);
+    if (mediaFileInputRef.current) mediaFileInputRef.current.value = "";
+  }
+
   function openCreate() {
     mutationOperation.cancel();
     preflightOperation.cancel();
@@ -587,6 +650,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     setFormErrors({});
     setSavingDetails(false);
     setDetailsError(null);
+    resetMediaEditorState();
     setTargets([]);
     setDraftTargetIds([]);
     setTargetsRevision(null);
@@ -621,6 +685,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     setFormErrors({});
     setSavingDetails(false);
     setDetailsError(null);
+    resetMediaEditorState();
     setTargets([]);
     setDraftTargetIds([]);
     setTargetsRevision(selected.targetsRevision);
@@ -656,6 +721,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     createIntentRef.current = null;
     launchKeyRef.current = null;
     setEditor({ kind: "closed" });
+    resetMediaEditorState();
     setSavingDetails(false);
     setTargetsRevision(null);
     setTargetSource(null);
@@ -885,9 +951,95 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     setFormErrors((current) => ({ ...current, [field]: undefined }));
   }
 
+  function updateContentType(contentType: CampaignFormValues["contentType"]) {
+    mediaUploadAbortRef.current?.abort();
+    mediaUploadAbortRef.current = null;
+    setMediaUploadProgress(null);
+    setMediaUploadError(null);
+    setMediaPreviewUrl(null);
+    if (mediaFileInputRef.current) mediaFileInputRef.current.value = "";
+    setForm((current) => ({
+      ...current,
+      contentType,
+      mediaAsset: current.mediaAsset?.kind === contentType ? current.mediaAsset : null,
+    }));
+    setFormErrors((current) => ({ ...current, mediaAsset: undefined, text: undefined }));
+  }
+
+  async function selectMediaFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !selectedSessionId || !mediaPolicy || form.contentType === "TEXT") return;
+    const expectedType = form.contentType;
+    const epoch = editorEpochRef.current;
+    mediaUploadAbortRef.current?.abort();
+    const controller = new AbortController();
+    mediaUploadAbortRef.current = controller;
+    setMediaUploadError(null);
+    setFormErrors((current) => ({ ...current, mediaAsset: undefined }));
+    try {
+      const { asset, optimization, uploadedFile } = await uploadCampaignMedia({
+        api,
+        file,
+        policy: mediaPolicy,
+        sessionId: selectedSessionId,
+        signal: controller.signal,
+        onProgress: setMediaUploadProgress,
+      });
+      if (
+        controller.signal.aborted
+        || epoch !== editorEpochRef.current
+        || selectedSessionId !== selectedSessionIdRef.current
+        || asset.kind !== expectedType
+      ) return;
+      setForm((current) => current.contentType === expectedType
+        ? {
+          ...current,
+          mediaAsset: {
+            id: asset.id,
+            kind: asset.kind,
+            filename: asset.filename,
+            mimeType: asset.mimeType,
+            byteSize: asset.byteSize,
+            sha256: asset.sha256,
+          },
+        }
+        : current);
+      if (asset.kind === "IMAGE") setMediaPreviewUrl(URL.createObjectURL(uploadedFile));
+      if (optimization.applied) {
+        toast.notify({
+          description: `${formatBytes(optimization.originalByteSize)} → ${formatBytes(optimization.uploadedByteSize)} · dimensions and pixels verified`,
+          id: `campaign-image-optimized-${asset.id}`,
+          title: "Image optimized without quality loss",
+          tone: "success",
+        });
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setMediaUploadError(campaignErrorMessage(error, "Could not upload campaign media."));
+      }
+    } finally {
+      if (mediaUploadAbortRef.current === controller) {
+        mediaUploadAbortRef.current = null;
+        setMediaUploadProgress(null);
+      }
+    }
+  }
+
+  function removeMediaAsset() {
+    mediaUploadAbortRef.current?.abort();
+    mediaUploadAbortRef.current = null;
+    setMediaUploadProgress(null);
+    setMediaUploadError(null);
+    setMediaPreviewUrl(null);
+    setForm((current) => ({ ...current, mediaAsset: null }));
+    setFormErrors((current) => ({ ...current, mediaAsset: undefined }));
+  }
+
   function resetDetailsToSaved() {
     if (!campaign) return;
     setForm(campaignFormFromDto(campaign));
+    resetMediaEditorState();
     setFormErrors({});
     setDetailsError(null);
   }
@@ -922,10 +1074,9 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         : {
           fingerprint,
           form: {
+            ...form,
+            mediaAsset: form.mediaAsset ? { ...form.mediaAsset } : null,
             name: payload.name,
-            scheduleType: payload.scheduleType,
-            scheduledAt: form.scheduledAt,
-            text: payload.text,
           },
           key: crypto.randomUUID(),
           outcomeUnknown: false,
@@ -986,6 +1137,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
           ...current,
           name: error.fieldErrors.name?.[0] ?? current.name,
           scheduledAt: scheduledAt ?? current.scheduledAt,
+          mediaAsset: error.fieldErrors.content?.[0] ?? current.mediaAsset,
           text: error.fieldErrors.text?.[0] ?? current.text,
         }));
       } else if (scheduledAt) {
@@ -1478,6 +1630,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     ? campaignDeleteDisabledReason(deleteIntent, campaign?.id === deleteIntent.id ? runs : [])
     : null;
   const campaignMutationBusy = savingDetails
+    || Boolean(mediaUploadProgress)
     || targetsSaving
     || Boolean(runMutation)
     || deletingCampaign;
@@ -1585,16 +1738,81 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                 metrics={[
                   { label: "Revision", value: campaign ? `r${campaign.revision}` : "—" },
                   { label: "Schedule", value: form.scheduleType === "IMMEDIATE" ? "Immediate" : "Once" },
-                  { label: "Message", value: `${form.text.length} chars` },
+                  {
+                    label: "Content",
+                    value: form.contentType === "TEXT"
+                      ? `${form.text.length} chars`
+                      : form.mediaAsset?.filename ?? "Image",
+                  },
                 ]}
                 status={!campaign ? <Badge variant="status">New draft</Badge> : detailsDirty ? <Badge tone="warning" variant="status">Unsaved changes</Badge> : <Badge tone="success" variant="status">Saved</Badge>}
                 title={campaign ? "Persisted details" : "New campaign draft"}
                 titleId="campaign-details-card-title"
               >
                 <section aria-labelledby="campaign-content-title" className="workspace-summary-section stack stack-md">
-                  <div className="campaign-form-section-heading"><div><h4 id="campaign-content-title">Message content</h4><p>Name this campaign and prepare the plain-text message used by future runs.</p></div></div>
+                  <div className="campaign-form-section-heading"><div><h4 id="campaign-content-title">Message content</h4><p>Name this campaign and choose the immutable content snapshot used by future runs.</p></div></div>
                   <TextField error={formErrors.name} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} />
-                  <TextAreaField description={<span className="campaign-message-description"><span>Plain-text message used by future campaign runs.</span><span>{form.text.length} characters</span></span>} disabled={!editable} error={formErrors.text} label="Message text" onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} />
+                  <SelectMenu
+                    description="One content item is sent to every target in this campaign run."
+                    disabled={!editable || Boolean(mediaUploadProgress)}
+                    label="Message type"
+                    onChange={updateContentType}
+                    options={CONTENT_TYPE_OPTIONS}
+                    value={form.contentType}
+                  />
+                  {form.contentType === "TEXT" ? (
+                    <TextAreaField description={<span className="campaign-message-description"><span>Plain-text message used by future campaign runs.</span><span>{form.text.length} / 4,096</span></span>} disabled={!editable} error={formErrors.text} label="Message text" maxLength={4_096} onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} />
+                  ) : (
+                    <div className="campaign-media-field stack stack-sm">
+                      <div className="campaign-media-label-row">
+                        <span className="text-field-label">Image</span>
+                        {mediaPolicy && <span>Maximum {formatBytes(mediaPolicy.imageMaxBytes)} after lossless optimization</span>}
+                      </div>
+                      <input
+                        accept="image/jpeg,image/png,image/webp"
+                        aria-label="Choose an image"
+                        className="campaign-media-input"
+                        disabled={!editable || !mediaPolicy || Boolean(mediaUploadProgress)}
+                        onChange={(event) => void selectMediaFile(event)}
+                        ref={mediaFileInputRef}
+                        type="file"
+                      />
+                      {form.mediaAsset ? (
+                        <div className="campaign-media-asset">
+                          {mediaPreviewUrl ? <img alt="Selected campaign media preview" src={mediaPreviewUrl} /> : <div aria-hidden="true" className="campaign-media-file-icon"><AppIcon name="campaigns" size="lg" /></div>}
+                          <div className="campaign-media-asset-copy">
+                            <strong>{form.mediaAsset.filename}</strong>
+                            <span>{form.mediaAsset.mimeType} · {formatBytes(form.mediaAsset.byteSize)}</span>
+                            <span>Verified · {form.mediaAsset.sha256.slice(0, 12)}…</span>
+                          </div>
+                          <Button disabled={!editable || Boolean(mediaUploadProgress)} onClick={removeMediaAsset} size="sm" variant="ghost">Remove</Button>
+                        </div>
+                      ) : (
+                        <div className={`campaign-media-dropzone ${formErrors.mediaAsset ? "campaign-media-dropzone-error" : ""}`.trim()}>
+                          <div>
+                            <strong>No image uploaded</strong>
+                            <span>The file is verified and stored by WA Runtime before this draft can be saved.</span>
+                          </div>
+                          <Button
+                            disabled={!editable || !mediaPolicy || Boolean(mediaUploadProgress)}
+                            loading={mediaPolicyLoading}
+                            onClick={() => mediaFileInputRef.current?.click()}
+                            size="sm"
+                          >Choose file</Button>
+                        </div>
+                      )}
+                      {mediaUploadProgress && (
+                        <div className="campaign-media-progress" role="status">
+                          <div><span>{mediaUploadProgress.phase === "optimizing" ? "Optimizing without quality loss" : mediaUploadProgress.phase === "hashing" ? "Preparing file" : mediaUploadProgress.phase === "verifying" ? "Verifying upload" : "Uploading"}</span>{mediaUploadProgress.phase !== "optimizing" && <span>{Math.round((mediaUploadProgress.bytesCompleted / mediaUploadProgress.bytesTotal) * 100)}%</span>}</div>
+                          <progress max={mediaUploadProgress.bytesTotal} value={mediaUploadProgress.phase === "optimizing" ? undefined : mediaUploadProgress.bytesCompleted} />
+                          <Button onClick={() => mediaUploadAbortRef.current?.abort()} size="sm" variant="ghost">Cancel upload</Button>
+                        </div>
+                      )}
+                      {formErrors.mediaAsset && <span className="text-field-error campaign-media-error" role="alert">{formErrors.mediaAsset}</span>}
+                      {mediaUploadError && <InlineAlert action={!mediaPolicy && !mediaPolicyLoading ? <Button onClick={() => setMediaPolicyRequest((value) => value + 1)} size="sm">Retry</Button> : undefined} title="Image upload failed">{mediaUploadError}</InlineAlert>}
+                      <TextAreaField description={<span className="campaign-message-description"><span>Optional text shown with the attachment.</span><span>{form.text.length} / 1,024</span></span>} disabled={!editable} error={formErrors.text} label="Caption · Optional" maxLength={1_024} onChange={(event) => updateForm("text", event.target.value)} rows={3} value={form.text} />
+                    </div>
+                  )}
                 </section>
                 <section aria-labelledby="campaign-timing-title" className="workspace-summary-section stack stack-md">
                   <div className="campaign-form-section-heading"><div><h4 id="campaign-timing-title">Delivery timing</h4><p>Choose when Runtime should make this campaign eligible to run.</p></div><span>Managed by Runtime</span></div>

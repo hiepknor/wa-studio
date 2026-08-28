@@ -6,6 +6,13 @@ import type {
   CampaignTargetSourceDto,
 } from '../../contracts/campaigns/campaign-target.dto';
 import type { CampaignScheduleType } from '../../contracts/campaigns/create-campaign.dto';
+import {
+  campaignContentFromPayload,
+  campaignContentMediaAssetId,
+  campaignContentMessageType,
+  campaignContentText,
+  type CampaignContentDto,
+} from '../../contracts/campaigns/campaign-content.dto';
 import { DatabaseService } from '../../core/database/database.service';
 import type { GroupSendCapabilityStatus } from '../gateway/group-capability';
 import { GroupListRepository } from '../group-lists/group-list.repository';
@@ -14,7 +21,9 @@ interface CampaignRow {
   id: string;
   session_id: string;
   name: string;
-  payload: { text: string };
+  message_type: string;
+  media_asset_id: string | null;
+  payload: unknown;
   schedule_type: CampaignScheduleType;
   scheduled_at: Date | null;
   status: CampaignStatus;
@@ -59,20 +68,24 @@ const campaignSelect = `
     (SELECT count(*) FROM campaign_targets ct WHERE ct.campaign_id = c.id AND ct.enabled) AS target_count
   FROM campaigns c`;
 
-const mapCampaign = (row: CampaignRow): CampaignDto => ({
-  id: row.id,
-  sessionId: row.session_id,
-  name: row.name,
-  text: row.payload.text,
-  scheduleType: row.schedule_type,
-  scheduledAt: row.scheduled_at,
-  status: row.status,
-  targetCount: Number(row.target_count),
-  revision: Number(row.revision),
-  targetsRevision: Number(row.targets_revision),
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
+const mapCampaign = (row: CampaignRow): CampaignDto => {
+  const content = campaignContentFromPayload(row.payload);
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    name: row.name,
+    text: campaignContentText(content),
+    content,
+    scheduleType: row.schedule_type,
+    scheduledAt: row.scheduled_at,
+    status: row.status,
+    targetCount: Number(row.target_count),
+    revision: Number(row.revision),
+    targetsRevision: Number(row.targets_revision),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};
 
 const mapTarget = (row: TargetRow): CampaignTargetDto => ({
   groupId: row.group_id,
@@ -114,7 +127,7 @@ export class CampaignRepository {
   async create(input: {
     sessionId: string;
     name: string;
-    text: string;
+    content: CampaignContentDto;
     scheduleType: CampaignScheduleType;
     scheduledAt: Date | null;
     idempotencyKey: string;
@@ -135,12 +148,14 @@ export class CampaignRepository {
 
       const inserted = await client.query<CampaignRow>(
         `INSERT INTO campaigns
-           (session_id, name, payload, schedule_type, scheduled_at, create_idempotency_key, create_request_hash)
-         VALUES ($1,$2,$3::jsonb,$4,$5,$6::uuid,$7)
+           (session_id, name, message_type, media_asset_id, payload, schedule_type, scheduled_at,
+            create_idempotency_key, create_request_hash)
+         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8::uuid,$9)
          ON CONFLICT (create_idempotency_key) WHERE create_idempotency_key IS NOT NULL DO NOTHING
          RETURNING *, 0 AS target_count`,
-        [input.sessionId, input.name, JSON.stringify({ text: input.text }), input.scheduleType, input.scheduledAt,
-          input.idempotencyKey, input.requestHash],
+        [input.sessionId, input.name, campaignContentMessageType(input.content),
+          campaignContentMediaAssetId(input.content), JSON.stringify(input.content), input.scheduleType,
+          input.scheduledAt, input.idempotencyKey, input.requestHash],
       );
       if (inserted.rows[0]) {
         return {
@@ -208,24 +223,27 @@ export class CampaignRepository {
 
   async update(id: string, input: {
     name: string;
-    text: string;
+    content: CampaignContentDto;
     scheduleType: CampaignScheduleType;
     scheduledAt: Date | null;
   }, expectedRevision: number): Promise<CampaignDto | null> {
     const result = await this.database.query<CampaignRow>(
       `WITH updated AS (
-         UPDATE campaigns SET name = $2, payload = $3::jsonb, schedule_type = $4,
-           scheduled_at = $5,
-           revision = revision + CASE WHEN (name, payload, schedule_type, scheduled_at)
-             IS DISTINCT FROM ($2, $3::jsonb, $4::campaign_schedule_type, $5::timestamptz) THEN 1 ELSE 0 END,
-           updated_at = CASE WHEN (name, payload, schedule_type, scheduled_at)
-             IS DISTINCT FROM ($2, $3::jsonb, $4::campaign_schedule_type, $5::timestamptz) THEN now() ELSE updated_at END
-         WHERE id = $1 AND deleted_at IS NULL AND status = 'DRAFT' AND revision = $6 RETURNING *
+         UPDATE campaigns SET name = $2, message_type = $3, media_asset_id = $4,
+           payload = $5::jsonb, schedule_type = $6, scheduled_at = $7,
+           revision = revision + CASE WHEN (name, message_type, media_asset_id, payload, schedule_type, scheduled_at)
+             IS DISTINCT FROM ($2, $3, $4::uuid, $5::jsonb, $6::campaign_schedule_type, $7::timestamptz)
+             THEN 1 ELSE 0 END,
+           updated_at = CASE WHEN (name, message_type, media_asset_id, payload, schedule_type, scheduled_at)
+             IS DISTINCT FROM ($2, $3, $4::uuid, $5::jsonb, $6::campaign_schedule_type, $7::timestamptz)
+             THEN now() ELSE updated_at END
+         WHERE id = $1 AND deleted_at IS NULL AND status = 'DRAFT' AND revision = $8 RETURNING *
        )
        SELECT updated.*,
          (SELECT count(*) FROM campaign_targets WHERE campaign_id = updated.id AND enabled) AS target_count
        FROM updated`,
-      [id, input.name, JSON.stringify({ text: input.text }), input.scheduleType, input.scheduledAt, expectedRevision],
+      [id, input.name, campaignContentMessageType(input.content), campaignContentMediaAssetId(input.content),
+        JSON.stringify(input.content), input.scheduleType, input.scheduledAt, expectedRevision],
     );
     return result.rows[0] ? mapCampaign(result.rows[0]) : null;
   }
@@ -542,7 +560,8 @@ export class CampaignRepository {
 
       await client.query(
         `UPDATE campaigns
-         SET deleted_at = now(), revision = revision + 1, updated_at = now()
+         SET deleted_at = now(), media_asset_id = NULL,
+           revision = revision + 1, updated_at = now()
          WHERE id = $1 AND deleted_at IS NULL`,
         [input.id],
       );

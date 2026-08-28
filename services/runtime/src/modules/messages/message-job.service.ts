@@ -4,6 +4,7 @@ import { SessionScopeService } from '../gateway/session-scope.service';
 import { messageRequestHash } from './message-idempotency';
 import { MessageJobRepository } from './message-job.repository';
 import { MessageSendPolicyService } from './message-send-policy.service';
+import { CampaignContentType } from '../../contracts/campaigns/campaign-content.dto';
 
 @Injectable()
 export class MessageJobService {
@@ -17,6 +18,7 @@ export class MessageJobService {
     if (idempotencyKey.length > 200) throw new BadRequestException('Idempotency-Key must not exceed 200 characters');
     await this.policy.assertCreatable(dto.sessionId, dto.recipientId, dto.dryRun);
     const scheduledAt = dto.scheduledAt ? new Date(dto.scheduledAt) : new Date();
+    const content = { type: CampaignContentType.TEXT, text: dto.text } as const;
     if (scheduledAt.getTime() < Date.now() - 60_000) {
       throw new ConflictException('scheduledAt is more than 60 seconds in the past');
     }
@@ -26,13 +28,13 @@ export class MessageJobService {
       requestHash: messageRequestHash({
         sessionId: dto.sessionId,
         recipientId: dto.recipientId,
-        text: dto.text,
+        content,
         scheduledAt: dto.scheduledAt ?? null,
         dryRun: dto.dryRun,
       }),
       sessionId: dto.sessionId,
       recipientId: dto.recipientId,
-      text: dto.text,
+      content,
       scheduledAt,
       dryRun: dto.dryRun,
     });

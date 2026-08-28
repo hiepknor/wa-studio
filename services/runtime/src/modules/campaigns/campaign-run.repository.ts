@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { CampaignContentDto } from '../../contracts/campaigns/campaign-content.dto';
 import type { CampaignExecutionMode, CampaignPreflightDto } from '../../contracts/campaigns/campaign-preflight.dto';
 import type { CampaignDeliveryStatus } from '../../contracts/campaigns/campaign-delivery.dto';
 import type { CampaignRunDto, CampaignRunStatus } from '../../contracts/campaigns/campaign-run.dto';
@@ -104,7 +105,9 @@ export class CampaignRunRepository {
         id: string;
         name: string;
         session_id: string;
-        payload: { text: string };
+        message_type: string;
+        media_asset_id: string | null;
+        payload: CampaignContentDto;
         schedule_type: CampaignScheduleType;
         scheduled_at: Date | null;
         status: string;
@@ -114,7 +117,7 @@ export class CampaignRunRepository {
         target_source_group_list_name_snapshot: string | null;
         target_source_membership_revision: string | number | null;
         target_source_applied_at: Date | null;
-      }>(`SELECT id, name, session_id, payload, schedule_type, scheduled_at, status, revision, targets_revision
+      }>(`SELECT id, name, session_id, message_type, media_asset_id, payload, schedule_type, scheduled_at, status, revision, targets_revision
              , target_source_group_list_id, target_source_group_list_name_snapshot,
                target_source_membership_revision, target_source_applied_at
            FROM campaigns WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [input.campaignId]);
@@ -173,14 +176,16 @@ export class CampaignRunRepository {
         : new Date();
       const inserted = await client.query<{ id: string }>(
          `INSERT INTO campaign_runs
-           (campaign_id, campaign_name_snapshot, session_id, idempotency_key, execution_mode, payload_snapshot, scheduled_at,
+           (campaign_id, campaign_name_snapshot, session_id, idempotency_key, execution_mode,
+            message_type, media_asset_id, payload_snapshot, scheduled_at,
             campaign_revision, targets_revision, target_source_group_list_id,
             target_source_group_list_name_snapshot, target_source_membership_revision,
             target_source_applied_at)
-         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15)
          ON CONFLICT DO NOTHING RETURNING id`,
         [campaign.id, campaign.name, campaign.session_id, input.idempotencyKey, input.executionMode,
-          JSON.stringify(campaign.payload), scheduledAt, campaign.revision, campaign.targets_revision,
+          campaign.message_type, campaign.media_asset_id, JSON.stringify(campaign.payload), scheduledAt,
+          campaign.revision, campaign.targets_revision,
           campaign.target_source_group_list_id, campaign.target_source_group_list_name_snapshot,
           campaign.target_source_membership_revision,
           campaign.target_source_applied_at],

@@ -527,8 +527,30 @@ function RunOverview({ run }: { run: RuntimeCampaignRun }) {
       <div><dt>Target revision</dt><dd>r{run.targetsRevision}</dd></div>
       <div><dt>Audience source</dt><dd>{run.targetSource ? `${run.targetSource.groupListNameSnapshot} · membership r${run.targetSource.membershipRevision}` : "Custom selection"}</dd></div>
     </dl></section>
-    <details className="runs-message-snapshot"><summary>Message snapshot</summary><p>{run.text}</p></details>
+    <RunMessageSnapshot run={run} />
   </div>;
+}
+
+function RunMessageSnapshot({ run }: { run: RuntimeCampaignRun }) {
+  const content = run.content ?? { type: "TEXT" as const, text: run.text };
+  return <details className="runs-message-snapshot">
+    <summary>Message snapshot</summary>
+    {content.type === "TEXT" ? <p>{content.text}</p> : <>
+      <dl className="runs-detail-list runs-message-metadata">
+        <div><dt>Type</dt><dd>Image</dd></div>
+        <div><dt>File</dt><dd>{content.filename}</dd></div>
+        <div><dt>Format</dt><dd>{content.mimeType} · {formatRunBytes(content.byteSize)}</dd></div>
+        <div><dt>Integrity</dt><dd className="data-identifier">SHA-256 {content.sha256.slice(0, 12)}…</dd></div>
+      </dl>
+      <p>{content.caption || "No caption"}</p>
+    </>}
+  </details>;
+}
+
+function formatRunBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/u, "")} MB`;
 }
 
 function RunActions({ mutation, onAction, run }: {

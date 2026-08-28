@@ -33,6 +33,7 @@ const session: RuntimeSession = {
 
 const campaign: RuntimeCampaign = {
   id: "campaign-id", sessionId: session.id, name: "Release", text: "Ship it",
+  content: { type: "TEXT", text: "Ship it" },
   scheduleType: "IMMEDIATE", scheduledAt: null, status: "DRAFT", targetCount: 1,
   revision: 3, targetsRevision: 4, createdAt: "2026-08-14T00:00:00.000Z",
   updatedAt: "2026-08-14T00:00:00.000Z",
@@ -145,6 +146,7 @@ function campaignRun(
     status,
     statusReason: null,
     text: campaign.text,
+    content: campaign.content,
     targetSource: null,
     preflight: report(executionMode, "PASS"),
     campaignRevision: campaign.revision,
@@ -297,10 +299,99 @@ describe("CampaignsScreen", () => {
     expect(createCampaign).toHaveBeenCalledTimes(2);
     expect(createCampaign.mock.calls[0][1]).toBe(createCampaign.mock.calls[1][1]);
     expect(createCampaign.mock.calls[0][0]).toEqual({
-      sessionId: session.id, name: "New release", text: "Ship it", scheduleType: "IMMEDIATE",
+      sessionId: session.id, name: "New release",
+      content: { type: "TEXT", text: "Ship it" }, scheduleType: "IMMEDIATE",
     });
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
     expect(await screen.findAllByText("New release")).toHaveLength(1);
+  });
+
+  it("uploads one image asset before creating a media campaign snapshot", async () => {
+    const user = userEvent.setup();
+    const uploadId = "11111111-1111-4111-8111-111111111111";
+    const assetId = "22222222-2222-4222-8222-222222222222";
+    const mediaContent = {
+      type: "IMAGE" as const,
+      mediaAssetId: assetId,
+      caption: "Release notes",
+      filename: "release.png",
+      mimeType: "image/png",
+      byteSize: 8,
+      sha256: "b".repeat(64),
+    };
+    const createCampaign = vi.fn().mockResolvedValue({
+      ...campaign,
+      id: "media-campaign-id",
+      name: "Media release",
+      text: mediaContent.caption,
+      content: mediaContent,
+      revision: 1,
+    });
+    const api = renderCampaigns({
+      getCampaignMediaPolicy: vi.fn().mockResolvedValue({
+        chunkSize: 393_216,
+        imageMimeTypes: ["image/jpeg", "image/png", "image/webp"],
+        imageMaxBytes: 8 * 1024 * 1024,
+        storageMaxBytes: 512 * 1024 * 1024,
+      }),
+      createCampaignMediaUpload: vi.fn().mockResolvedValue({
+        id: uploadId,
+        sessionId: session.id,
+        kind: "IMAGE",
+        filename: mediaContent.filename,
+        mimeType: mediaContent.mimeType,
+        byteSize: mediaContent.byteSize,
+        sha256: mediaContent.sha256,
+        chunkSize: 393_216,
+        totalChunks: 1,
+        uploadedChunks: [],
+        status: "UPLOADING",
+        completedAssetId: null,
+        expiresAt: "2026-08-29T00:00:00.000Z",
+        createdAt: "2026-08-28T00:00:00.000Z",
+        updatedAt: "2026-08-28T00:00:00.000Z",
+      }),
+      putCampaignMediaChunk: vi.fn().mockResolvedValue(undefined),
+      completeCampaignMediaUpload: vi.fn().mockResolvedValue({
+        id: assetId,
+        sessionId: session.id,
+        kind: "IMAGE",
+        filename: mediaContent.filename,
+        mimeType: mediaContent.mimeType,
+        byteSize: mediaContent.byteSize,
+        sha256: mediaContent.sha256,
+        createdAt: "2026-08-28T00:00:01.000Z",
+      }),
+      cancelCampaignMediaUpload: vi.fn().mockResolvedValue(undefined),
+      createCampaign,
+    }, []);
+    await connect(user);
+    await user.click(screen.getByRole("button", { name: "New campaign" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus());
+    await user.type(screen.getByRole("textbox", { name: "Campaign name" }), "Media release");
+    await user.click(screen.getByRole("combobox", { name: "Message type" }));
+    await user.click(screen.getByRole("option", { name: /Image/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Choose file" })).toBeEnabled());
+    const file = new File([
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    ], mediaContent.filename, { type: mediaContent.mimeType });
+    await user.upload(screen.getByLabelText("Choose an image"), file);
+    expect(await screen.findAllByText(mediaContent.filename)).toHaveLength(2);
+    await user.type(screen.getByRole("textbox", { name: "Caption · Optional" }), mediaContent.caption);
+    await user.click(screen.getByRole("button", { name: "Create draft" }));
+    await screen.findByText("Campaign draft created");
+
+    expect(api.putCampaignMediaChunk).toHaveBeenCalledOnce();
+    expect(createCampaign).toHaveBeenCalledWith({
+      sessionId: session.id,
+      name: "Media release",
+      content: {
+        type: "IMAGE",
+        mediaAssetId: assetId,
+        caption: mediaContent.caption,
+      },
+      scheduleType: "IMMEDIATE",
+    }, expect.any(String));
   });
 
   it("admits only one create mutation before React can render its busy state", async () => {
@@ -343,8 +434,14 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("button", { name: "Save details" }));
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
-    await user.click(screen.getByRole("button", { name: "Release" }));
+    const release = screen.getByRole("button", { name: "Release" });
+    await waitFor(() => expect(release.closest("[inert]")).toBeNull());
+    await user.click(release);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Close drawer" })).toHaveFocus(),
+    );
     const name = await screen.findByRole("textbox", { name: "Campaign name" });
     await user.type(name, " next");
     expect(screen.getByRole("button", { name: "Save details" })).toBeEnabled();
@@ -376,7 +473,7 @@ describe("CampaignsScreen", () => {
     expect(await screen.findByRole("button", { name: "Restore unconfirmed request" })).toBeInTheDocument();
     expect(createCampaign.mock.calls[0][0]).toMatchObject({
       name: "New release",
-      text: "Ship it",
+      content: { type: "TEXT", text: "Ship it" },
     });
 
     await user.clear(name);
@@ -399,7 +496,9 @@ describe("CampaignsScreen", () => {
   it("does not alter scheduling on content PATCH and maps typed scheduling/edit conflicts", async () => {
     const user = userEvent.setup();
     const updateCampaign = vi.fn()
-      .mockResolvedValueOnce({ ...campaign, text: "Updated", revision: 4 })
+      .mockResolvedValueOnce({
+        ...campaign, text: "Updated", content: { type: "TEXT", text: "Updated" }, revision: 4,
+      })
       .mockRejectedValueOnce(new RuntimeRequestError("opaque", { code: "CAMPAIGN_NOT_EDITABLE", status: 409 }));
     renderCampaigns({ updateCampaign });
     await connect(user);
@@ -408,7 +507,9 @@ describe("CampaignsScreen", () => {
     await user.clear(text);
     await user.type(text, "Updated");
     await user.click(screen.getByRole("button", { name: "Save details" }));
-    await waitFor(() => expect(updateCampaign).toHaveBeenCalledWith(campaign.id, { text: "Updated" }));
+    await waitFor(() => expect(updateCampaign).toHaveBeenCalledWith(campaign.id, {
+      content: { type: "TEXT", text: "Updated" },
+    }));
 
     await user.clear(text);
     await user.type(text, "Again");

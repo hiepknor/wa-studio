@@ -2,6 +2,7 @@ import type {
   CampaignDeliveryDto,
   CampaignDeliveryStatus,
 } from '../../contracts/campaigns/campaign-delivery.dto';
+import type { CampaignContentDto } from '../../contracts/campaigns/campaign-content.dto';
 import type { CampaignExecutionMode } from '../../contracts/campaigns/campaign-preflight.dto';
 import { DatabaseService } from '../../core/database/database.service';
 import type { GroupSendCapabilityStatus } from '../gateway/group-capability';
@@ -71,7 +72,7 @@ export class CampaignDeliveryRepository {
         campaign_id: string;
         session_id: string;
         execution_mode: CampaignExecutionMode;
-        payload_snapshot: { text: string };
+        payload_snapshot: CampaignContentDto;
         status: string;
         session_status: string | null;
         engine_loaded: boolean | null;
@@ -149,13 +150,13 @@ export class CampaignDeliveryRepository {
           requestHash: messageRequestHash({
             sessionId: run.session_id,
             recipientId: delivery.group_id,
-            text: run.payload_snapshot.text,
+            content: run.payload_snapshot,
             scheduledAt: null,
             dryRun: run.execution_mode === 'DRY_RUN',
           }),
           sessionId: run.session_id,
           recipientId: delivery.group_id,
-          text: run.payload_snapshot.text,
+          content: run.payload_snapshot,
           scheduledAt: new Date(),
           dryRun: run.execution_mode === 'DRY_RUN',
         });

@@ -131,7 +131,7 @@ export class CampaignRunService {
       const report = await this.preflights.evaluate({
         executionMode: context.run.executionMode,
         sessionId: context.run.sessionId,
-        text: context.run.text,
+        content: context.run.content,
         targets: context.targets,
         campaignRevision: context.campaignRevision,
         targetsRevision: context.targetsRevision,
@@ -221,7 +221,7 @@ export class CampaignRunService {
     const report = await this.preflights.evaluate({
       executionMode: context.run.executionMode,
       sessionId: context.run.sessionId,
-      text: context.run.text,
+      content: context.run.content,
       targets: context.targets,
       campaignRevision: context.campaignRevision,
       targetsRevision: context.targetsRevision,

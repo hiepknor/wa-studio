@@ -25,7 +25,7 @@ describe('campaign lifecycle reconciliation', () => {
   it('reconciles exactly one legacy LIVE run without exposing or replacing it', async () => {
     const campaign = await pool.query<{ id: string }>(
       `INSERT INTO campaigns (session_id, name, payload)
-       VALUES ($1, 'Legacy lifecycle', '{"text":"hello"}') RETURNING id`,
+       VALUES ($1, 'Legacy lifecycle', '{"type":"TEXT","text":"hello"}') RETURNING id`,
       [INTEGRATION_SESSION_ID],
     );
     await pool.query(
@@ -33,7 +33,7 @@ describe('campaign lifecycle reconciliation', () => {
          (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
           payload_snapshot, scheduled_at, status)
        VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
-         'legacy-terminal', 'LIVE', '{"text":"hello"}', now(), 'COMPLETED')`,
+         'legacy-terminal', 'LIVE', '{"type":"TEXT","text":"hello"}', now(), 'COMPLETED')`,
       [campaign.rows[0]!.id, INTEGRATION_SESSION_ID],
     );
     const client = await pool.connect();
@@ -61,7 +61,7 @@ describe('campaign lifecycle reconciliation', () => {
   it('enforces one LIVE run per campaign at the database boundary', async () => {
     const campaign = await pool.query<{ id: string }>(
       `INSERT INTO campaigns (session_id, name, payload)
-       VALUES ($1, 'Duplicate lifecycle', '{"text":"hello"}') RETURNING id`,
+       VALUES ($1, 'Duplicate lifecycle', '{"type":"TEXT","text":"hello"}') RETURNING id`,
       [INTEGRATION_SESSION_ID],
     );
     const insert = (key: string) => pool.query(
@@ -69,7 +69,7 @@ describe('campaign lifecycle reconciliation', () => {
          (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
           payload_snapshot, scheduled_at)
        VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
-         $3, 'LIVE', '{"text":"hello"}', now())`,
+         $3, 'LIVE', '{"type":"TEXT","text":"hello"}', now())`,
       [campaign.rows[0]!.id, INTEGRATION_SESSION_ID, key],
     );
     await insert('first-live');
@@ -99,7 +99,7 @@ describe('campaign lifecycle reconciliation', () => {
     for (const status of ['ACTIVE', 'PAUSED']) {
       const campaign = await pool.query<{ id: string }>(
         `INSERT INTO campaigns (session_id, name, payload, status)
-         VALUES ($1, $2, '{"text":"hello"}', $3::campaign_status) RETURNING id`,
+         VALUES ($1, $2, '{"type":"TEXT","text":"hello"}', $3::campaign_status) RETURNING id`,
         [INTEGRATION_SESSION_ID, `Blocked ${status}`, status],
       );
       await pool.query(
@@ -107,7 +107,7 @@ describe('campaign lifecycle reconciliation', () => {
            (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
             payload_snapshot, scheduled_at, status)
          VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
-           $3, 'LIVE', '{"text":"hello"}', now(), 'BLOCKED')`,
+           $3, 'LIVE', '{"type":"TEXT","text":"hello"}', now(), 'BLOCKED')`,
         [campaign.rows[0]!.id, INTEGRATION_SESSION_ID, `blocked-${status.toLowerCase()}`],
       );
     }

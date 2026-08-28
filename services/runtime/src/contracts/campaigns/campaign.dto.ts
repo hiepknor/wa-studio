@@ -1,5 +1,10 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiExtraModels, ApiProperty, getSchemaPath } from '@nestjs/swagger';
 import { PageMetaDto } from '../common/pagination.dto';
+import {
+  ImageCampaignContentDto,
+  type CampaignContentDto,
+  TextCampaignContentDto,
+} from './campaign-content.dto';
 import { CampaignScheduleType } from './create-campaign.dto';
 
 export enum CampaignStatus {
@@ -9,6 +14,7 @@ export enum CampaignStatus {
   ARCHIVED = 'ARCHIVED',
 }
 
+@ApiExtraModels(TextCampaignContentDto, ImageCampaignContentDto)
 export class CampaignDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -19,8 +25,23 @@ export class CampaignDto {
   @ApiProperty()
   name!: string;
 
-  @ApiProperty()
+  @ApiProperty({ deprecated: true, description: 'Legacy alias for text content or a media caption.' })
   text!: string;
+
+  @ApiProperty({
+    oneOf: [
+      { $ref: getSchemaPath(TextCampaignContentDto) },
+      { $ref: getSchemaPath(ImageCampaignContentDto) },
+    ],
+    discriminator: {
+      propertyName: 'type',
+      mapping: {
+        TEXT: getSchemaPath(TextCampaignContentDto),
+        IMAGE: getSchemaPath(ImageCampaignContentDto),
+      },
+    },
+  })
+  content!: CampaignContentDto;
 
   @ApiProperty({ enum: CampaignScheduleType })
   scheduleType!: CampaignScheduleType;

@@ -2,6 +2,12 @@ import { Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { DatabaseService } from '../../core/database/database.service';
 import type { MessageJob, MessageJobStatus } from './message-job.types';
+import {
+  CampaignContentType,
+  campaignContentMediaAssetId,
+  campaignContentMessageType,
+  type CampaignContentDto,
+} from '../../contracts/campaigns/campaign-content.dto';
 
 const defaultProcessingLeaseTtlMs = 120_000;
 
@@ -10,7 +16,9 @@ interface MessageJobRow {
   idempotency_key: string;
   session_id: string;
   recipient_id: string;
-  payload: { text: string };
+  message_type: string;
+  media_asset_id: string | null;
+  payload: CampaignContentDto;
   scheduled_at: Date;
   status: MessageJobStatus;
   dry_run: boolean;
@@ -47,18 +55,22 @@ export class MessageJobRepository {
     requestHash: string;
     sessionId: string;
     recipientId: string;
-    text: string;
+    text?: string;
+    content?: CampaignContentDto;
     scheduledAt: Date;
     dryRun: boolean;
   }): Promise<{ job: MessageJob; created: boolean; idempotencyConflict: boolean }> {
+    const content = input.content ?? { type: CampaignContentType.TEXT, text: input.text ?? '' };
     const inserted = await this.database.query<MessageJobRow>(
       `INSERT INTO message_jobs
-         (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id, payload, scheduled_at, dry_run)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+         (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id,
+          message_type, media_asset_id, payload, scheduled_at, dry_run)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
        ON CONFLICT (idempotency_scope, idempotency_key) DO NOTHING
        RETURNING *`,
       [input.idempotencyScope, input.idempotencyKey, input.requestHash, input.sessionId, input.recipientId,
-        JSON.stringify({ text: input.text }), input.scheduledAt, input.dryRun],
+        campaignContentMessageType(content), campaignContentMediaAssetId(content), JSON.stringify(content),
+        input.scheduledAt, input.dryRun],
     );
     if (inserted.rows[0]) return { job: map(inserted.rows[0]), created: true, idempotencyConflict: false };
 
@@ -76,18 +88,22 @@ export class MessageJobRepository {
     requestHash: string;
     sessionId: string;
     recipientId: string;
-    text: string;
+    text?: string;
+    content?: CampaignContentDto;
     scheduledAt: Date;
     dryRun: boolean;
   }): Promise<{ job: MessageJob; created: boolean; idempotencyConflict: boolean }> {
+    const content = input.content ?? { type: CampaignContentType.TEXT, text: input.text ?? '' };
     const inserted = await client.query<MessageJobRow>(
       `INSERT INTO message_jobs
-         (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id, payload, scheduled_at, dry_run)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+         (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id,
+          message_type, media_asset_id, payload, scheduled_at, dry_run)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
        ON CONFLICT (idempotency_scope, idempotency_key) DO NOTHING
        RETURNING *`,
       [input.idempotencyScope, input.idempotencyKey, input.requestHash, input.sessionId, input.recipientId,
-        JSON.stringify({ text: input.text }), input.scheduledAt, input.dryRun],
+        campaignContentMessageType(content), campaignContentMediaAssetId(content), JSON.stringify(content),
+        input.scheduledAt, input.dryRun],
     );
     if (inserted.rows[0]) return { job: map(inserted.rows[0]), created: true, idempotencyConflict: false };
     const existing = await client.query<MessageJobRow & { request_hash: string }>(
@@ -155,6 +171,30 @@ export class MessageJobRepository {
        WHERE id = $1 AND status = 'QUEUED'`,
       [id, error],
     );
+  }
+
+  async rescheduleProcessing(
+    client: PoolClient,
+    id: string,
+    error: string,
+    delayMs: number,
+  ): Promise<boolean> {
+    const updated = await client.query<MessageJobRow>(
+      `UPDATE message_jobs SET status = 'SCHEDULED', scheduled_at = now() + $3 * interval '1 millisecond',
+         last_error = $2, lease_expires_at = NULL, updated_at = now()
+       WHERE id = $1 AND status = 'PROCESSING'
+       RETURNING attempt_count`,
+      [id, error, delayMs],
+    );
+    const attempt = updated.rows[0]?.attempt_count;
+    if (attempt === undefined) return false;
+    await client.query(
+      `INSERT INTO message_attempts (message_job_id, attempt_number, outcome, error)
+       VALUES ($1, $2, 'RETRY', $3)
+       ON CONFLICT (message_job_id, attempt_number) DO NOTHING`,
+      [id, attempt, error],
+    );
+    return true;
   }
 
   async recoverStaleQueued(): Promise<number> {

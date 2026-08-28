@@ -9,6 +9,13 @@ import type { CreateCampaignDto } from '../../contracts/campaigns/create-campaig
 import { CampaignScheduleType } from '../../contracts/campaigns/create-campaign.dto';
 import type { DeleteCampaignQueryDto } from '../../contracts/campaigns/delete-campaign.dto';
 import type { UpdateCampaignDto } from '../../contracts/campaigns/update-campaign.dto';
+import {
+  CampaignContentType,
+  type CampaignContentDto,
+  type CampaignContentInputDto,
+} from '../../contracts/campaigns/campaign-content.dto';
+import { MediaAssetKind } from '../../contracts/media-assets/media-asset.dto';
+import { MediaAssetService } from '../media-assets/media-asset.service';
 import { CampaignRepository } from './campaign.repository';
 import { CampaignPreflightService } from './campaign-preflight.service';
 import { CampaignError } from './campaign-error';
@@ -18,6 +25,7 @@ export class CampaignService {
   constructor(
     private readonly repository: CampaignRepository,
     private readonly preflights: CampaignPreflightService,
+    private readonly media: MediaAssetService,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
   ) {}
 
@@ -37,10 +45,11 @@ export class CampaignService {
         'Session is not synchronized');
     }
     const schedule = this.resolveSchedule(dto.scheduleType, dto.scheduledAt);
+    const content = await this.resolveContent(dto.sessionId, dto.content, dto.text, true);
     const input = {
       sessionId: dto.sessionId,
       name: this.nonBlank(dto.name, 'name'),
-      text: this.nonBlank(dto.text, 'text'),
+      content,
       ...schedule,
     };
     const requestHash = createHash('sha256').update(JSON.stringify({
@@ -102,9 +111,16 @@ export class CampaignService {
           dto.scheduledAt === undefined ? current.scheduledAt?.toISOString() : dto.scheduledAt,
         )
       : { scheduleType: current.scheduleType, scheduledAt: current.scheduledAt };
+    if (dto.content !== undefined && dto.text !== undefined) {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+        'content and the legacy text field cannot be supplied together');
+    }
+    const content = dto.content !== undefined || dto.text !== undefined
+      ? await this.resolveContent(current.sessionId, dto.content, dto.text, false)
+      : current.content;
     const updated = await this.repository.update(id, {
       name: dto.name === undefined ? current.name : this.nonBlank(dto.name, 'name'),
-      text: dto.text === undefined ? current.text : this.nonBlank(dto.text, 'text'),
+      content,
       ...schedule,
     }, current.revision);
     if (!updated) {
@@ -247,7 +263,7 @@ export class CampaignService {
     const report = await this.preflights.evaluate({
       executionMode: dto.executionMode,
       sessionId: campaign.sessionId,
-      text: campaign.text,
+      content: campaign.content,
       targets,
       campaignRevision: campaign.revision,
       targetsRevision: campaign.targetsRevision,
@@ -303,6 +319,78 @@ export class CampaignService {
     const trimmed = value.trim();
     if (!trimmed) throw new BadRequestException(`${field} must not be blank`);
     return trimmed;
+  }
+
+  private async resolveContent(
+    sessionId: string,
+    content: CampaignContentInputDto | undefined,
+    legacyText: string | undefined,
+    required: boolean,
+  ): Promise<CampaignContentDto> {
+    if (content !== undefined && legacyText !== undefined) {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+        'Exactly one of content or the legacy text field may be supplied');
+    }
+    if (content === undefined) {
+      if (legacyText === undefined) {
+        throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+          required ? 'Campaign content is required' : 'Campaign content update is required');
+      }
+      return { type: CampaignContentType.TEXT, text: this.nonBlank(legacyText, 'text') };
+    }
+    if (!content || typeof content !== 'object' || Array.isArray(content)) {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+        'Campaign content must be an object');
+    }
+    if (content.type === CampaignContentType.TEXT) {
+      this.assertContentKeys(content, ['type', 'text']);
+      if (typeof content.text !== 'string') {
+        throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+          'Text campaign content requires text');
+      }
+      const text = this.nonBlank(content.text, 'content.text');
+      if (text.length > 4096) {
+        throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+          'Text campaign content must not exceed 4096 characters');
+      }
+      return { type: CampaignContentType.TEXT, text };
+    }
+    if (content.type !== CampaignContentType.IMAGE) {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+        'Campaign content type must be TEXT or IMAGE');
+    }
+    this.assertContentKeys(content, ['type', 'mediaAssetId', 'caption']);
+    if (typeof content.mediaAssetId !== 'string' || !isUUID(content.mediaAssetId)) {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+        'Media campaign content requires a valid mediaAssetId');
+    }
+    if (content.caption !== undefined && typeof content.caption !== 'string') {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+        'Media campaign caption must be a string');
+    }
+    const caption = content.caption?.trim() ?? '';
+    if (caption.length > 1024) {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+        'Media campaign caption must not exceed 1024 characters');
+    }
+    const asset = await this.media.resolveForCampaign(content.mediaAssetId, sessionId, MediaAssetKind.IMAGE);
+    return {
+      type: content.type,
+      mediaAssetId: asset.id,
+      caption,
+      filename: asset.filename,
+      mimeType: asset.mimeType,
+      byteSize: asset.byteSize,
+      sha256: asset.sha256,
+    };
+  }
+
+  private assertContentKeys(content: object, allowed: string[]): void {
+    const unexpected = Object.keys(content).filter(key => !allowed.includes(key));
+    if (unexpected.length) {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_CONTENT_INVALID',
+        `Unexpected campaign content field: ${unexpected[0]}`);
+    }
   }
 
   private resolveSchedule(scheduleType: CampaignScheduleType, value?: string | null): {

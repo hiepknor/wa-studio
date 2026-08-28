@@ -6,19 +6,22 @@ import type { CampaignTargetDto } from '../../contracts/campaigns/campaign-targe
 import { evaluateCampaignPreflight } from './campaign-preflight';
 import { CampaignLivePreflightTokenService } from './campaign-live-preflight-token.service';
 import { GatewayRepository } from '../gateway/gateway.repository';
+import { CampaignContentType, type CampaignContentDto } from '../../contracts/campaigns/campaign-content.dto';
+import { MediaAssetService } from '../media-assets/media-asset.service';
 
 @Injectable()
 export class CampaignPreflightService {
   constructor(
     private readonly gateway: GatewayRepository,
     private readonly liveTokens: CampaignLivePreflightTokenService,
+    private readonly media: MediaAssetService,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
   ) {}
 
   async evaluate(input: {
     executionMode: CampaignExecutionMode;
     sessionId: string;
-    text: string;
+    content: CampaignContentDto;
     targets: CampaignTargetDto[];
     campaignRevision: number;
     targetsRevision: number;
@@ -31,9 +34,13 @@ export class CampaignPreflightService {
           restricted: persistedSession.restriction !== null,
         }
       : { status: 'missing', engineLoaded: false, restricted: true };
+    const mediaReady = input.content.type === CampaignContentType.TEXT
+      ? true
+      : await this.media.matchesSnapshot(input.content, input.sessionId);
     return evaluateCampaignPreflight({
       executionMode: input.executionMode,
-      text: input.text,
+      content: input.content,
+      mediaReady,
       targets: input.targets,
       session,
       liveSendsEnabled: this.config.ALLOW_LIVE_SENDS,

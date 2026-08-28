@@ -1250,7 +1250,7 @@
             "runtime-key": []
           }
         ],
-        "summary": "Create a text campaign draft",
+        "summary": "Create a text or image campaign draft",
         "tags": [
           "campaigns"
         ]
@@ -2718,6 +2718,705 @@
         ]
       }
     },
+    "/api/v1/media-assets/policy": {
+      "get": {
+        "operationId": "MediaAssetController_policy",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaAssetPolicyDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Image or chunk exceeds the V1 size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "Campaign image storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read Campaign image upload policy",
+        "tags": [
+          "media-assets"
+        ]
+      }
+    },
+    "/api/v1/media-assets/uploads": {
+      "post": {
+        "operationId": "MediaAssetController_createUpload",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMediaUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaUploadDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaUploadDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Image or chunk exceeds the V1 size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "Campaign image storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Create an idempotent Campaign image upload",
+        "tags": [
+          "media-assets"
+        ]
+      }
+    },
+    "/api/v1/media-assets/uploads/{id}": {
+      "get": {
+        "operationId": "MediaAssetController_getUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaUploadDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Image or chunk exceeds the V1 size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "Campaign image storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read resumable Campaign image upload state",
+        "tags": [
+          "media-assets"
+        ]
+      },
+      "delete": {
+        "operationId": "MediaAssetController_cancelUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Image or chunk exceeds the V1 size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "Campaign image storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Cancel an incomplete Campaign image upload",
+        "tags": [
+          "media-assets"
+        ]
+      }
+    },
+    "/api/v1/media-assets/uploads/{id}/chunks/{index}": {
+      "put": {
+        "operationId": "MediaAssetController_putChunk",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "index",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutMediaUploadChunkDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent chunk replay"
+          },
+          "201": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Image or chunk exceeds the V1 size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "Campaign image storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Store one idempotent Campaign image upload chunk",
+        "tags": [
+          "media-assets"
+        ]
+      }
+    },
+    "/api/v1/media-assets/uploads/{id}/complete": {
+      "post": {
+        "operationId": "MediaAssetController_completeUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Idempotent completion replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaAssetDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaAssetDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Image or chunk exceeds the V1 size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "Campaign image storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Verify and complete a Campaign image upload",
+        "tags": [
+          "media-assets"
+        ]
+      }
+    },
+    "/api/v1/media-assets/{id}": {
+      "get": {
+        "operationId": "MediaAssetController_getAsset",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaAssetDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Image or chunk exceeds the V1 size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "Campaign image storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read Campaign image asset metadata",
+        "tags": [
+          "media-assets"
+        ]
+      }
+    },
     "/api/v1/message-jobs": {
       "post": {
         "operationId": "MessageJobController_create",
@@ -3975,6 +4674,49 @@
           "groupIds"
         ]
       },
+      "TextCampaignContentInputDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "TEXT"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ]
+      },
+      "ImageCampaignContentInputDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "IMAGE"
+            ]
+          },
+          "mediaAssetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "caption": {
+            "type": "string",
+            "maxLength": 1024,
+            "default": ""
+          }
+        },
+        "required": [
+          "type",
+          "mediaAssetId"
+        ]
+      },
       "CreateCampaignDto": {
         "type": "object",
         "properties": {
@@ -3988,7 +4730,27 @@
           },
           "text": {
             "type": "string",
-            "maxLength": 4096
+            "maxLength": 4096,
+            "deprecated": true,
+            "description": "Legacy text input. Use content instead; exactly one of text or content is required."
+          },
+          "content": {
+            "description": "Typed campaign content. Exactly one of content or the legacy text field is required.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextCampaignContentInputDto"
+              },
+              {
+                "$ref": "#/components/schemas/ImageCampaignContentInputDto"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "TEXT": "#/components/schemas/TextCampaignContentInputDto",
+                "IMAGE": "#/components/schemas/ImageCampaignContentInputDto"
+              }
+            }
           },
           "scheduleType": {
             "type": "string",
@@ -4006,8 +4768,71 @@
         },
         "required": [
           "sessionId",
-          "name",
+          "name"
+        ]
+      },
+      "TextCampaignContentDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "TEXT"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "type",
           "text"
+        ]
+      },
+      "ImageCampaignContentDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "IMAGE"
+            ]
+          },
+          "mediaAssetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "caption": {
+            "type": "string",
+            "maxLength": 1024,
+            "default": ""
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "mimeType": {
+            "type": "string",
+            "maxLength": 127
+          },
+          "byteSize": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 8388608
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "type",
+          "mediaAssetId",
+          "filename",
+          "mimeType",
+          "byteSize",
+          "sha256"
         ]
       },
       "CampaignDto": {
@@ -4025,7 +4850,26 @@
             "type": "string"
           },
           "text": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Legacy alias for text content or a media caption."
+          },
+          "content": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextCampaignContentDto"
+              },
+              {
+                "$ref": "#/components/schemas/ImageCampaignContentDto"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "TEXT": "#/components/schemas/TextCampaignContentDto",
+                "IMAGE": "#/components/schemas/ImageCampaignContentDto"
+              }
+            }
           },
           "scheduleType": {
             "type": "string",
@@ -4075,6 +4919,7 @@
           "sessionId",
           "name",
           "text",
+          "content",
           "scheduleType",
           "scheduledAt",
           "status",
@@ -4137,7 +4982,26 @@
           },
           "text": {
             "type": "string",
-            "maxLength": 4096
+            "maxLength": 4096,
+            "deprecated": true,
+            "description": "Legacy text update. Use content instead; text and content cannot be supplied together."
+          },
+          "content": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextCampaignContentInputDto"
+              },
+              {
+                "$ref": "#/components/schemas/ImageCampaignContentInputDto"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "TEXT": "#/components/schemas/TextCampaignContentInputDto",
+                "IMAGE": "#/components/schemas/ImageCampaignContentInputDto"
+              }
+            }
           },
           "scheduleType": {
             "type": "string",
@@ -4312,6 +5176,7 @@
             "type": "string",
             "enum": [
               "CONTENT_VALID",
+              "MEDIA_READY",
               "TARGETS_VALID",
               "SESSION_SENDABLE",
               "GROUP_CAPABILITY",
@@ -4588,7 +5453,26 @@
             "nullable": true
           },
           "text": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Legacy alias for text content or a media caption."
+          },
+          "content": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextCampaignContentDto"
+              },
+              {
+                "$ref": "#/components/schemas/ImageCampaignContentDto"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "TEXT": "#/components/schemas/TextCampaignContentDto",
+                "IMAGE": "#/components/schemas/ImageCampaignContentDto"
+              }
+            }
           },
           "targetSource": {
             "nullable": true,
@@ -4654,6 +5538,7 @@
           "status",
           "statusReason",
           "text",
+          "content",
           "targetSource",
           "preflight",
           "campaignRevision",
@@ -4891,6 +5776,216 @@
         "required": [
           "data",
           "meta"
+        ]
+      },
+      "MediaAssetPolicyDto": {
+        "type": "object",
+        "properties": {
+          "chunkSize": {
+            "type": "number",
+            "enum": [
+              393216
+            ]
+          },
+          "imageMimeTypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "imageMaxBytes": {
+            "type": "number"
+          },
+          "storageMaxBytes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "chunkSize",
+          "imageMimeTypes",
+          "imageMaxBytes",
+          "storageMaxBytes"
+        ]
+      },
+      "CreateMediaUploadDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "IMAGE"
+            ]
+          },
+          "filename": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "mimeType": {
+            "type": "string",
+            "maxLength": 127
+          },
+          "byteSize": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 8388608
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "sessionId",
+          "kind",
+          "filename",
+          "mimeType",
+          "byteSize",
+          "sha256"
+        ]
+      },
+      "MediaUploadDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "IMAGE"
+            ]
+          },
+          "filename": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "byteSize": {
+            "type": "number"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "chunkSize": {
+            "type": "number"
+          },
+          "totalChunks": {
+            "type": "number"
+          },
+          "uploadedChunks": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "UPLOADING",
+              "COMPLETED",
+              "CANCELLED"
+            ]
+          },
+          "completedAssetId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "kind",
+          "filename",
+          "mimeType",
+          "byteSize",
+          "sha256",
+          "chunkSize",
+          "totalChunks",
+          "uploadedChunks",
+          "status",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "PutMediaUploadChunkDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "string",
+            "description": "Base64-encoded raw chunk bytes."
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "MediaAssetDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "IMAGE"
+            ]
+          },
+          "filename": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "byteSize": {
+            "type": "number"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "kind",
+          "filename",
+          "mimeType",
+          "byteSize",
+          "sha256",
+          "createdAt"
         ]
       },
       "CreateMessageJobDto": {

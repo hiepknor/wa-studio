@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -26,6 +26,7 @@ interface CampaignBody {
   targetCount: number;
   revision: number;
   targetsRevision: number;
+  content: Record<string, unknown>;
 }
 
 describe('campaign draft contract HTTP API', () => {
@@ -33,6 +34,7 @@ describe('campaign draft contract HTTP API', () => {
   let app: INestApplication;
   let baseUrl: string;
   let runPreparer: { prepare(runId: string): Promise<void> };
+  let messageProcessor: { process(payload: { messageJobId: string }): Promise<unknown> };
   let runRepository: {
     getPreflightContext(runId: string): Promise<Record<string, any> | null>;
     resume(runId: string, report: Record<string, any>, targets: Record<string, any>[]): Promise<unknown>;
@@ -44,6 +46,7 @@ describe('campaign draft contract HTTP API', () => {
       targets: Record<string, any>[],
     ): Promise<unknown>;
     auditLifecycle(): Promise<Record<string, number>>;
+    materializePending(runId: string, maxBuffered: number): Promise<number>;
   };
   const auth = { 'x-runtime-key': process.env.RUNTIME_API_KEY! };
 
@@ -58,12 +61,18 @@ describe('campaign draft contract HTTP API', () => {
     const { CampaignRunRepository } = require(
       resolve(process.cwd(), 'dist/src/modules/campaigns/campaign-run.repository.js'),
     ) as { CampaignRunRepository: new (...args: never[]) => typeof runRepository };
+    const { MessageJobProcessorService } = require(
+      resolve(process.cwd(), 'dist/src/modules/messages/message-job-processor.service.js'),
+    ) as {
+      MessageJobProcessorService: new (...args: never[]) => typeof messageProcessor;
+    };
     app = await NestFactory.create(ApiAppModule, { rawBody: true, logger: false });
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
     await app.listen(0, '127.0.0.1');
     runPreparer = app.get(CampaignRunService);
     runRepository = app.get(CampaignRunRepository);
+    messageProcessor = app.get(MessageJobProcessorService);
     const address = app.getHttpServer().address() as { port: number };
     baseUrl = `http://127.0.0.1:${address.port}/api/v1`;
   });
@@ -136,6 +145,235 @@ describe('campaign draft contract HTTP API', () => {
     const conflict = await createCampaign({ text: 'Different payload' }, key);
     expect(conflict.response.status).toBe(409);
     expect(conflict.body.code).toBe('CAMPAIGN_IDEMPOTENCY_CONFLICT');
+  });
+
+  it('uploads immutable media once and snapshots it through campaign preflight and runs', async () => {
+    const media = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from('integration-media'),
+    ]);
+    const sha256 = createHash('sha256').update(media).digest('hex');
+    const uploadKey = randomUUID();
+    const upload = await jsonRequest('/media-assets/uploads', {
+      method: 'POST',
+      headers: { 'idempotency-key': uploadKey },
+      body: JSON.stringify({
+        sessionId: INTEGRATION_SESSION_ID,
+        kind: 'IMAGE',
+        filename: 'campaign.png',
+        mimeType: 'image/png',
+        byteSize: media.byteLength,
+        sha256,
+      }),
+    });
+    expect(upload.response.status).toBe(201);
+    expect(upload.body).toMatchObject({
+      status: 'UPLOADING', chunkSize: 393_216, totalChunks: 1, uploadedChunks: [],
+    });
+
+    const uploadReplay = await jsonRequest('/media-assets/uploads', {
+      method: 'POST',
+      headers: { 'idempotency-key': uploadKey },
+      body: JSON.stringify({
+        sessionId: INTEGRATION_SESSION_ID,
+        kind: 'IMAGE',
+        filename: 'campaign.png',
+        mimeType: 'image/png',
+        byteSize: media.byteLength,
+        sha256,
+      }),
+    });
+    expect(uploadReplay.response.status).toBe(200);
+    expect(uploadReplay.body.id).toBe(upload.body.id);
+
+    const chunk = await jsonRequest(`/media-assets/uploads/${upload.body.id as string}/chunks/0`, {
+      method: 'PUT', body: JSON.stringify({ data: media.toString('base64') }),
+    });
+    expect(chunk.response.status).toBe(201);
+    expect((await jsonRequest(`/media-assets/uploads/${upload.body.id as string}/chunks/0`, {
+      method: 'PUT', body: JSON.stringify({ data: media.toString('base64') }),
+    })).response.status).toBe(200);
+
+    const completed = await jsonRequest(`/media-assets/uploads/${upload.body.id as string}/complete`, {
+      method: 'POST',
+    });
+    expect(completed.response.status).toBe(201);
+    expect(completed.body).toMatchObject({
+      sessionId: INTEGRATION_SESSION_ID,
+      kind: 'IMAGE',
+      filename: 'campaign.png',
+      mimeType: 'image/png',
+      byteSize: media.byteLength,
+      sha256,
+    });
+    expect((await jsonRequest(`/media-assets/uploads/${upload.body.id as string}/complete`, {
+      method: 'POST',
+    })).response.status).toBe(200);
+
+    const created = await createCampaign({
+      text: undefined,
+      content: {
+        type: 'IMAGE', mediaAssetId: completed.body.id, caption: 'Release photo',
+      },
+    });
+    expect(created.response.status).toBe(201);
+    expect(created.body).toMatchObject({
+      text: 'Release photo',
+      content: {
+        type: 'IMAGE', mediaAssetId: completed.body.id, caption: 'Release photo',
+        filename: 'campaign.png', mimeType: 'image/png', byteSize: media.byteLength, sha256,
+      },
+    });
+    const disposable = await createCampaign({
+      name: 'Disposable image draft',
+      text: undefined,
+      content: { type: 'IMAGE', mediaAssetId: completed.body.id, caption: '' },
+    });
+    expect((await jsonRequest(
+      `/campaigns/${disposable.body.id as string}?expectedRevision=1&expectedTargetsRevision=0`,
+      { method: 'DELETE' },
+    )).response.status).toBe(204);
+    expect((await pool.query<{ media_asset_id: string | null; content_type: string }>(
+      `SELECT media_asset_id::text, payload->>'type' AS content_type FROM campaigns WHERE id = $1`,
+      [disposable.body.id],
+    )).rows[0]).toEqual({ media_asset_id: null, content_type: 'IMAGE' });
+    await jsonRequest(`/campaigns/${created.body.id as string}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const preflight = await jsonRequest(`/campaigns/${created.body.id as string}/preflight`, {
+      method: 'POST', body: JSON.stringify({ executionMode: 'DRY_RUN' }),
+    });
+    expect(preflight.response.status).toBe(200);
+    expect(preflight.body.checks).toContainEqual(expect.objectContaining({
+      code: 'MEDIA_READY', status: 'PASS',
+    }));
+
+    const run = await jsonRequest(`/campaigns/${created.body.id as string}/runs`, {
+      method: 'POST', headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify({ executionMode: 'DRY_RUN' }),
+    });
+    expect(run.response.status).toBe(201);
+    expect(run.body.content).toEqual(created.body.content);
+    await runPreparer.prepare(run.body.id as string);
+    expect(await runRepository.materializePending(run.body.id as string, 10)).toBe(1);
+    const job = await pool.query<{
+      id: string; media_asset_id: string; message_type: string; payload: Record<string, unknown>;
+    }>(
+      `UPDATE message_jobs SET status = 'QUEUED'
+       WHERE id = (
+         SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1
+       ) RETURNING id, media_asset_id::text, message_type, payload`,
+      [run.body.id],
+    );
+    expect(job.rows[0]).toMatchObject({
+      media_asset_id: completed.body.id,
+      message_type: 'image',
+      payload: created.body.content,
+    });
+    await expect(messageProcessor.process({ messageJobId: job.rows[0]!.id }))
+      .resolves.toMatchObject({ dryRun: true });
+    expect((await pool.query('SELECT status FROM message_jobs WHERE id = $1', [job.rows[0]!.id])).rows[0])
+      .toEqual({ status: 'DRY_RUN_COMPLETED' });
+    const normalized = await pool.query<{
+      campaign_media: string; run_media: string; asset_count: string;
+    }>(
+      `SELECT c.media_asset_id::text AS campaign_media,
+         r.media_asset_id::text AS run_media,
+         (SELECT count(*)::text FROM media_assets) AS asset_count
+       FROM campaigns c JOIN campaign_runs r ON r.campaign_id = c.id
+       WHERE c.id = $1`,
+      [created.body.id],
+    );
+    expect(normalized.rows[0]).toEqual({
+      campaign_media: completed.body.id, run_media: completed.body.id, asset_count: '1',
+    });
+  });
+
+  it('keeps Campaign media V1 image-only at the HTTP boundary', async () => {
+    const document = await jsonRequest('/media-assets/uploads', {
+      method: 'POST',
+      headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify({
+        sessionId: INTEGRATION_SESSION_ID,
+        kind: 'DOCUMENT',
+        filename: 'release.pdf',
+        mimeType: 'application/pdf',
+        byteSize: 8,
+        sha256: 'a'.repeat(64),
+      }),
+    });
+    expect(document.response.status).toBe(400);
+
+    const unsupportedImage = await jsonRequest('/media-assets/uploads', {
+      method: 'POST',
+      headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify({
+        sessionId: INTEGRATION_SESSION_ID,
+        kind: 'IMAGE',
+        filename: 'animated.gif',
+        mimeType: 'image/gif',
+        byteSize: 8,
+        sha256: 'b'.repeat(64),
+      }),
+    });
+    expect(unsupportedImage.response.status).toBe(422);
+    expect(unsupportedImage.body.code).toBe('MEDIA_TYPE_NOT_ALLOWED');
+
+    const invalidBytes = Buffer.from('notimage');
+    const invalidUpload = await jsonRequest('/media-assets/uploads', {
+      method: 'POST',
+      headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify({
+        sessionId: INTEGRATION_SESSION_ID,
+        kind: 'IMAGE',
+        filename: 'spoofed.png',
+        mimeType: 'image/png',
+        byteSize: invalidBytes.byteLength,
+        sha256: createHash('sha256').update(invalidBytes).digest('hex'),
+      }),
+    });
+    expect(invalidUpload.response.status).toBe(201);
+    expect((await jsonRequest(`/media-assets/uploads/${invalidUpload.body.id as string}/chunks/0`, {
+      method: 'PUT', body: JSON.stringify({ data: invalidBytes.toString('base64') }),
+    })).response.status).toBe(201);
+    const invalidComplete = await jsonRequest(
+      `/media-assets/uploads/${invalidUpload.body.id as string}/complete`,
+      { method: 'POST' },
+    );
+    expect(invalidComplete.response.status).toBe(422);
+    expect(invalidComplete.body.code).toBe('MEDIA_SIGNATURE_MISMATCH');
+
+    await pool.query(
+      `INSERT INTO gateway_sessions
+         (id, name, status, engine_loaded, gateway_created_at, gateway_updated_at)
+       VALUES ($1, 'Other media session', 'ready', true, now(), now())`,
+      [DISALLOWED_SESSION_ID],
+    );
+    const foreignAsset = await pool.query<{ id: string }>(
+      `INSERT INTO media_assets
+         (session_id, kind, filename, mime_type, byte_size, sha256, content)
+       VALUES ($1, 'IMAGE', 'foreign.png', 'image/png', 8, $2, $3)
+       RETURNING id`,
+      [
+        DISALLOWED_SESSION_ID,
+        'c'.repeat(64),
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      ],
+    );
+    const crossSession = await createCampaign({
+      text: undefined,
+      content: { type: 'IMAGE', mediaAssetId: foreignAsset.rows[0]!.id, caption: '' },
+    });
+    expect(crossSession.response.status).toBe(422);
+    expect(crossSession.body.code).toBe('MEDIA_ASSET_SESSION_MISMATCH');
+    await expect(pool.query(
+      `INSERT INTO campaigns (session_id, name, message_type, media_asset_id, payload)
+       VALUES ($1, 'Invalid cross-session media', 'image', $2, $3::jsonb)`,
+      [INTEGRATION_SESSION_ID, foreignAsset.rows[0]!.id, JSON.stringify({
+        type: 'IMAGE', mediaAssetId: foreignAsset.rows[0]!.id, caption: '',
+        filename: 'foreign.png', mimeType: 'image/png', byteSize: 8, sha256: 'c'.repeat(64),
+      })],
+    )).rejects.toMatchObject({ code: '23503' });
   });
 
   it('serializes concurrent campaign creation retries', async () => {
@@ -362,7 +600,7 @@ describe('campaign draft contract HTTP API', () => {
     );
     const hidden = await pool.query<{ id: string }>(
       `INSERT INTO campaigns (session_id, name, payload)
-       VALUES ($1, 'Hidden campaign', '{"text":"hidden"}'::jsonb) RETURNING id`,
+       VALUES ($1, 'Hidden campaign', '{"type":"TEXT","text":"hidden"}'::jsonb) RETURNING id`,
       [DISALLOWED_SESSION_ID],
     );
     const denied = await jsonRequest(
@@ -644,7 +882,7 @@ describe('campaign draft contract HTTP API', () => {
          (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
           payload_snapshot, scheduled_at)
        VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
-         'legacy-live', 'LIVE', '{"text":"hello"}', now())`,
+         'legacy-live', 'LIVE', '{"type":"TEXT","text":"hello"}', now())`,
       [campaignId, INTEGRATION_SESSION_ID],
     );
 
@@ -786,7 +1024,7 @@ describe('campaign draft contract HTTP API', () => {
     expect(dryRun.response.status).toBe(200);
     expect(live.response.status).toBe(200);
     expect(dryRun.body).toMatchObject({
-      status: 'WARN', policyVersion: 2, executionMode: 'DRY_RUN', campaignRevision: 1,
+      status: 'WARN', policyVersion: 3, executionMode: 'DRY_RUN', campaignRevision: 1,
       targetsRevision: 1, totalTargets: 3, allowedTargets: 1, deniedTargets: 1, unknownTargets: 1,
     });
     expect(live.body.status).toBe('BLOCK');
@@ -830,7 +1068,7 @@ describe('campaign draft contract HTTP API', () => {
          (id, campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
           payload_snapshot, scheduled_at, created_at, updated_at)
        SELECT id, $1, $2, (SELECT name FROM campaigns WHERE id = $1),
-         'run-' || ordinal, 'DRY_RUN', '{"text":"hello"}'::jsonb, now(),
+         'run-' || ordinal, 'DRY_RUN', '{"type":"TEXT","text":"hello"}'::jsonb, now(),
          '2030-01-01T00:00:00Z'::timestamptz, '2030-01-01T00:00:00Z'::timestamptz
        FROM unnest($3::uuid[]) WITH ORDINALITY AS input(id, ordinal)`,
       [campaignId, INTEGRATION_SESSION_ID, runIds],
@@ -1052,7 +1290,7 @@ describe('campaign draft contract HTTP API', () => {
     const insertCampaign = async (name: string, status: string) => {
       const result = await pool.query<{ id: string }>(
         `INSERT INTO campaigns (session_id, name, payload, status)
-         VALUES ($1, $2, '{"text":"hello"}', $3::campaign_status) RETURNING id`,
+         VALUES ($1, $2, '{"type":"TEXT","text":"hello"}', $3::campaign_status) RETURNING id`,
         [INTEGRATION_SESSION_ID, name, status],
       );
       return result.rows[0]!.id;
@@ -1062,7 +1300,7 @@ describe('campaign draft contract HTTP API', () => {
          (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
           payload_snapshot, scheduled_at, status)
        VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
-         $3, 'LIVE', '{"text":"hello"}', now(), $4::campaign_run_status)`,
+         $3, 'LIVE', '{"type":"TEXT","text":"hello"}', now(), $4::campaign_run_status)`,
       [campaignId, INTEGRATION_SESSION_ID, key, status],
     );
     await insertLive(await insertCampaign('Draft drift', 'DRAFT'), 'drift-draft', 'PREPARING');

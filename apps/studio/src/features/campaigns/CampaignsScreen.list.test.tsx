@@ -29,7 +29,8 @@ const secondarySession: RuntimeSession = { ...primarySession, id: "secondary-ses
 
 function campaign(id: string, name: string): RuntimeCampaign {
   return {
-    id, sessionId: primarySession.id, name, text: "Message", scheduleType: "IMMEDIATE",
+    id, sessionId: primarySession.id, name, text: "Message",
+    content: { type: "TEXT", text: "Message" }, scheduleType: "IMMEDIATE",
     scheduledAt: null, status: "DRAFT", targetCount: 0, revision: 1, targetsRevision: 0,
     createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z",
   };

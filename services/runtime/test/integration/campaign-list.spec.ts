@@ -79,7 +79,7 @@ describe('campaign list search and filters', () => {
     }
     await pool.query(
       `INSERT INTO campaigns (session_id, name, payload, status)
-       VALUES ($1, 'Release Secret', '{"text":"hidden"}'::jsonb, 'DRAFT')`,
+       VALUES ($1, 'Release Secret', '{"type":"TEXT","text":"hidden"}'::jsonb, 'DRAFT')`,
       [DISALLOWED_SESSION_ID],
     );
   });

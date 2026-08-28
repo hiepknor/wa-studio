@@ -38,8 +38,8 @@ describe('data retention', () => {
          (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id, payload,
           scheduled_at, status, dry_run, updated_at)
        VALUES
-         ('runtime-api','old-terminal',$1,$2,$3,'{"text":"old"}',now(),'FAILED',false,$4),
-         ('runtime-api','old-active',$1,$2,$3,'{"text":"active"}',now(),'PROCESSING',false,$4)`,
+         ('runtime-api','old-terminal',$1,$2,$3,'{"type":"TEXT","text":"old"}',now(),'FAILED',false,$4),
+         ('runtime-api','old-active',$1,$2,$3,'{"type":"TEXT","text":"active"}',now(),'PROCESSING',false,$4)`,
       ['a'.repeat(64), INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, old],
     );
     await pool.query(
@@ -74,15 +74,15 @@ describe('data retention', () => {
       [INTEGRATION_SESSION_ID, old],
     );
     const campaign = await pool.query<{ id: string }>(
-      `INSERT INTO campaigns (session_id, name, payload) VALUES ($1,'retention','{"text":"hello"}') RETURNING id`,
+      `INSERT INTO campaigns (session_id, name, payload) VALUES ($1,'retention','{"type":"TEXT","text":"hello"}') RETURNING id`,
       [INTEGRATION_SESSION_ID],
     );
     await pool.query(
       `INSERT INTO campaign_runs
          (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
           status, payload_snapshot, scheduled_at, updated_at)
-       VALUES ($1,$2,'retention',$3,'DRY_RUN','COMPLETED','{"text":"hello"}',now(),$4),
-              ($1,$2,'retention',$5,'DRY_RUN','RUNNING','{"text":"hello"}',now(),$4)`,
+       VALUES ($1,$2,'retention',$3,'DRY_RUN','COMPLETED','{"type":"TEXT","text":"hello"}',now(),$4),
+              ($1,$2,'retention',$5,'DRY_RUN','RUNNING','{"type":"TEXT","text":"hello"}',now(),$4)`,
       [campaign.rows[0]!.id, INTEGRATION_SESSION_ID, randomUUID(), old, randomUUID()],
     );
     await pool.query(
@@ -100,6 +100,7 @@ describe('data retention', () => {
       activityEvents: 1, campaignRuns: 1, messageJobs: 1, inboundMessages: 0,
       runtimeEvents: 1, webhookEvents: 1, syncRuns: 1,
       contactObservations: 0,
+      mediaUploads: 0, mediaAssets: 0,
       batches: 1, capacityExhausted: false,
     });
     await expectCount('message_jobs', 1);
@@ -127,6 +128,58 @@ describe('data retention', () => {
     await expectCount('runtime_events', 0);
   });
 
+  it('removes expired uploads and orphan assets without deleting referenced Campaign media', async () => {
+    const old = new Date(Date.now() - 48 * 3_600_000);
+    const orphan = await pool.query<{ id: string }>(
+      `INSERT INTO media_assets
+         (session_id, kind, filename, mime_type, byte_size, sha256, content, created_at)
+       VALUES ($1, 'IMAGE', 'orphan.png', 'image/png', 8, $2, $3, $4)
+       RETURNING id`,
+      [INTEGRATION_SESSION_ID, 'a'.repeat(64), Buffer.from('oldimage'), old],
+    );
+    const retained = await pool.query<{ id: string }>(
+      `INSERT INTO media_assets
+         (session_id, kind, filename, mime_type, byte_size, sha256, content, created_at)
+       VALUES ($1, 'IMAGE', 'keep.png', 'image/png', 8, $2, $3, $4)
+       RETURNING id`,
+      [INTEGRATION_SESSION_ID, 'b'.repeat(64), Buffer.from('newimage'), old],
+    );
+    await pool.query(
+      `INSERT INTO campaigns (session_id, name, message_type, media_asset_id, payload)
+       VALUES ($1, 'media retention', 'image', $2::uuid,
+         jsonb_build_object(
+           'type', 'IMAGE', 'mediaAssetId', $2::uuid::text, 'caption', '',
+           'filename', 'keep.png', 'mimeType', 'image/png',
+           'byteSize', 8, 'sha256', $3::text
+         ))`,
+      [INTEGRATION_SESSION_ID, retained.rows[0]!.id, 'b'.repeat(64)],
+    );
+    const upload = await pool.query<{ id: string }>(
+      `INSERT INTO media_uploads
+         (session_id, kind, filename, declared_mime_type, byte_size, sha256, chunk_size,
+          create_idempotency_key, create_request_hash, status, expires_at, created_at, updated_at)
+       VALUES ($1, 'IMAGE', 'expired.png', 'image/png', 8, $2, 393216,
+         gen_random_uuid(), $3, 'UPLOADING', $4, $4, $4)
+       RETURNING id`,
+      [INTEGRATION_SESSION_ID, 'c'.repeat(64), 'd'.repeat(64), old],
+    );
+    await pool.query(
+      `INSERT INTO media_upload_chunks (upload_id, chunk_index, byte_size, sha256, content)
+       VALUES ($1, 0, 8, $2, $3)`,
+      [upload.rows[0]!.id, 'e'.repeat(64), Buffer.from('expimage')],
+    );
+
+    const result = await new DataRetentionTick(database).cleanup();
+
+    expect(result).toMatchObject({ mediaUploads: 1, mediaAssets: 1 });
+    expect((await pool.query('SELECT id FROM media_assets ORDER BY id')).rows).toEqual([
+      { id: retained.rows[0]!.id },
+    ]);
+    await expectCount('media_uploads', 0);
+    await expectCount('media_upload_chunks', 0);
+    expect(orphan.rows[0]!.id).not.toBe(retained.rows[0]!.id);
+  });
+
   it('uses shorter raw-webhook and normalized-event lifetimes than operational history', async () => {
     const tenDaysOld = new Date(Date.now() - 10 * 86_400_000);
     const fortyDaysOld = new Date(Date.now() - 40 * 86_400_000);
@@ -147,7 +200,7 @@ describe('data retention', () => {
       `INSERT INTO message_jobs
          (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id, payload,
           scheduled_at, status, dry_run, updated_at)
-       VALUES ('runtime-api','forty-day-job',$1,$2,$3,'{"text":"old"}',now(),'FAILED',false,$4)`,
+       VALUES ('runtime-api','forty-day-job',$1,$2,$3,'{"type":"TEXT","text":"old"}',now(),'FAILED',false,$4)`,
       ['a'.repeat(64), INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, fortyDaysOld],
     );
 

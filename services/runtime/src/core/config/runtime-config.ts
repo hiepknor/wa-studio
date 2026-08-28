@@ -74,9 +74,20 @@ const schema = z
       .pipe(z.array(z.uuid()).min(1)),
     ALLOW_LIVE_SENDS: booleanFromEnv(false),
     CAMPAIGN_LIVE_PREFLIGHT_TTL_SECONDS: z.coerce.number().int().min(30).max(900).default(120),
+    CAMPAIGN_MEDIA_IMAGE_MAX_BYTES: z.coerce.number().int()
+      .min(65_536).max(8_388_608).default(8_388_608),
+    CAMPAIGN_MEDIA_STORAGE_MAX_BYTES: z.coerce.number().int()
+      .min(16_777_216).max(10_737_418_240).default(536_870_912),
+    CAMPAIGN_MEDIA_UPLOAD_TTL_SECONDS: z.coerce.number().int()
+      .min(900).max(604_800).default(86_400),
+    CAMPAIGN_MEDIA_ORPHAN_RETENTION_HOURS: z.coerce.number().int()
+      .min(1).max(720).default(24),
+    CAMPAIGN_MEDIA_SEND_MEMORY_BUDGET_BYTES: z.coerce.number().int()
+      .min(33_554_432).max(1_073_741_824).default(33_554_432),
     OUTBOUND_MIN_DELAY_MS: z.coerce.number().int().min(0).max(60_000).default(3000),
     OUTBOUND_MAX_DELAY_MS: z.coerce.number().int().min(0).max(60_000).default(7000),
     MESSAGE_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(1),
+    MESSAGE_SAFE_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
     WEBHOOK_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
     GATEWAY_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(1),
     CAMPAIGN_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(2),

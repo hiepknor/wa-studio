@@ -41,7 +41,7 @@ export class CampaignController {
   ) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create a text campaign draft' })
+  @ApiOperation({ summary: 'Create a text or image campaign draft' })
   @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
   @ApiCreatedResponse({ type: CampaignDto })
   @ApiResponse({ status: 200, type: CampaignDto, description: 'Idempotent replay' })

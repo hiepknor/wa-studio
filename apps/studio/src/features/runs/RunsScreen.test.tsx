@@ -69,6 +69,7 @@ const summary: RuntimeCampaignRunSummary = {
 const run: RuntimeCampaignRun = {
   ...summary,
   text: "Release message snapshot",
+  content: { type: "TEXT", text: "Release message snapshot" },
   targetSource: null,
   preflight: null,
   campaignRevision: 3,
@@ -86,6 +87,7 @@ const secondRun: RuntimeCampaignRun = {
   ...run,
   ...secondSummary,
   text: "Retention message snapshot",
+  content: { type: "TEXT", text: "Retention message snapshot" },
 };
 
 function deferred<T>() {
@@ -209,6 +211,32 @@ describe("RunsScreen", () => {
     await user.click(within(inspector).getByRole("button", { name: "Pause" }));
     await waitFor(() => expect(api.pauseCampaignRun).toHaveBeenCalledWith(run.id));
     expect(await within(inspector).findByText(/Paused · Runtime authoritative/)).toBeInTheDocument();
+  });
+
+  it("shows the immutable image metadata and caption in the run snapshot", async () => {
+    const user = userEvent.setup();
+    const imageRun: RuntimeCampaignRun = {
+      ...run,
+      text: "Release image",
+      content: {
+        type: "IMAGE",
+        mediaAssetId: "44444444-4444-4444-8444-444444444444",
+        caption: "Release image",
+        filename: "launch.png",
+        mimeType: "image/png",
+        byteSize: 8,
+        sha256: "a".repeat(64),
+      },
+    };
+    renderRuns({ getCampaignRun: vi.fn().mockResolvedValue(imageRun) });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+
+    await user.click(within(inspector).getByText("Message snapshot"));
+    expect(within(inspector).getByText("launch.png")).toBeInTheDocument();
+    expect(within(inspector).getByText("image/png · 8 B")).toBeInTheDocument();
+    expect(within(inspector).getByText("Release image")).toBeInTheDocument();
   });
 
   it("reports a cancellation failure inside the active confirmation", async () => {

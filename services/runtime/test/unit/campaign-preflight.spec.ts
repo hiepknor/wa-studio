@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CampaignExecutionMode } from '../../src/contracts/campaigns/campaign-preflight.dto';
+import { CampaignContentType } from '../../src/contracts/campaigns/campaign-content.dto';
 import type { CampaignTargetDto } from '../../src/contracts/campaigns/campaign-target.dto';
 import { evaluateCampaignPreflight } from '../../src/modules/campaigns/campaign-preflight';
 
@@ -20,11 +21,35 @@ const ready = { status: 'ready', engineLoaded: true, restricted: false };
 const revisions = { campaignRevision: 7, targetsRevision: 4 };
 
 describe('evaluateCampaignPreflight', () => {
-  it('publishes policy version 2 for invalidation-aware capability semantics', () => {
+  it('publishes policy version 3 for media-aware capability semantics', () => {
     expect(evaluateCampaignPreflight({
       executionMode: CampaignExecutionMode.DRY_RUN,
       text: 'hello', targets: [target('ALLOWED')], session: ready, liveSendsEnabled: false, ...revisions,
-    }).policyVersion).toBe(2);
+    }).policyVersion).toBe(3);
+  });
+
+  it('blocks media content when its immutable asset is unavailable', () => {
+    const report = evaluateCampaignPreflight({
+      executionMode: CampaignExecutionMode.DRY_RUN,
+      content: {
+        type: CampaignContentType.IMAGE,
+        mediaAssetId: '2bbf8ca6-c405-4c96-bb6c-4e0df7b8f1a8',
+        caption: 'hello',
+        filename: 'photo.png',
+        mimeType: 'image/png',
+        byteSize: 8,
+        sha256: 'a'.repeat(64),
+      },
+      mediaReady: false,
+      targets: [target('ALLOWED')],
+      session: ready,
+      liveSendsEnabled: false,
+      ...revisions,
+    });
+    expect(report.status).toBe('BLOCK');
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      code: 'MEDIA_READY', status: 'BLOCK',
+    }));
   });
 
   it('passes a live campaign only when all capabilities and the kill switch allow it', () => {

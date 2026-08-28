@@ -223,7 +223,7 @@ export interface paths {
          */
         get: operations["CampaignController_list"];
         put?: never;
-        /** Create a text campaign draft */
+        /** Create a text or image campaign draft */
         post: operations["CampaignController_create"];
         delete?: never;
         options?: never;
@@ -419,6 +419,109 @@ export interface paths {
         put?: never;
         /** Cancel pending work for a campaign run */
         post: operations["CampaignRunController_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media-assets/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Campaign image upload policy */
+        get: operations["MediaAssetController_policy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media-assets/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create an idempotent Campaign image upload */
+        post: operations["MediaAssetController_createUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media-assets/uploads/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read resumable Campaign image upload state */
+        get: operations["MediaAssetController_getUpload"];
+        put?: never;
+        post?: never;
+        /** Cancel an incomplete Campaign image upload */
+        delete: operations["MediaAssetController_cancelUpload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media-assets/uploads/{id}/chunks/{index}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Store one idempotent Campaign image upload chunk */
+        put: operations["MediaAssetController_putChunk"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media-assets/uploads/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify and complete a Campaign image upload */
+        post: operations["MediaAssetController_completeUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media-assets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Campaign image asset metadata */
+        get: operations["MediaAssetController_getAsset"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -818,11 +921,36 @@ export interface components {
              */
             groupIds: string[];
         };
+        TextCampaignContentInputDto: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "TEXT";
+            text: string;
+        };
+        ImageCampaignContentInputDto: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "IMAGE";
+            /** Format: uuid */
+            mediaAssetId: string;
+            /** @default  */
+            caption: string;
+        };
         CreateCampaignDto: {
             /** Format: uuid */
             sessionId: string;
             name: string;
-            text: string;
+            /**
+             * @deprecated
+             * @description Legacy text input. Use content instead; exactly one of text or content is required.
+             */
+            text?: string;
+            /** @description Typed campaign content. Exactly one of content or the legacy text field is required. */
+            content?: components["schemas"]["TextCampaignContentInputDto"] | components["schemas"]["ImageCampaignContentInputDto"];
             /**
              * @default IMMEDIATE
              * @enum {string}
@@ -834,13 +962,41 @@ export interface components {
              */
             scheduledAt?: string;
         };
+        TextCampaignContentDto: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "TEXT";
+            text: string;
+        };
+        ImageCampaignContentDto: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "IMAGE";
+            /** Format: uuid */
+            mediaAssetId: string;
+            /** @default  */
+            caption: string;
+            filename: string;
+            mimeType: string;
+            byteSize: number;
+            sha256: string;
+        };
         CampaignDto: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             sessionId: string;
             name: string;
+            /**
+             * @deprecated
+             * @description Legacy alias for text content or a media caption.
+             */
             text: string;
+            content: components["schemas"]["TextCampaignContentDto"] | components["schemas"]["ImageCampaignContentDto"];
             /** @enum {string} */
             scheduleType: "IMMEDIATE" | "ONCE";
             /** Format: date-time */
@@ -871,7 +1027,12 @@ export interface components {
             /** @description Campaign revision observed by the editor. A stale value returns HTTP 409. */
             expectedRevision?: number;
             name?: string;
+            /**
+             * @deprecated
+             * @description Legacy text update. Use content instead; text and content cannot be supplied together.
+             */
             text?: string;
+            content?: components["schemas"]["TextCampaignContentInputDto"] | components["schemas"]["ImageCampaignContentInputDto"];
             /** @enum {string} */
             scheduleType?: "IMMEDIATE" | "ONCE";
             /**
@@ -932,7 +1093,7 @@ export interface components {
         };
         CampaignPreflightCheckDto: {
             /** @enum {string} */
-            code: "CONTENT_VALID" | "TARGETS_VALID" | "SESSION_SENDABLE" | "GROUP_CAPABILITY" | "LIVE_SEND_ALLOWED";
+            code: "CONTENT_VALID" | "MEDIA_READY" | "TARGETS_VALID" | "SESSION_SENDABLE" | "GROUP_CAPABILITY" | "LIVE_SEND_ALLOWED";
             /** @enum {string} */
             status: "PASS" | "WARN" | "BLOCK";
             message: string;
@@ -1010,7 +1171,12 @@ export interface components {
             /** @enum {string} */
             status: "PREPARING" | "BLOCKED" | "SCHEDULED" | "RUNNING" | "PAUSED" | "COMPLETED" | "PARTIAL_FAILED" | "CANCELLED" | "FAILED";
             statusReason: string | null;
+            /**
+             * @deprecated
+             * @description Legacy alias for text content or a media caption.
+             */
             text: string;
+            content: components["schemas"]["TextCampaignContentDto"] | components["schemas"]["ImageCampaignContentDto"];
             targetSource: components["schemas"]["CampaignTargetSourceDto"] | null;
             preflight: components["schemas"]["CampaignPreflightDto"] | null;
             campaignRevision: number;
@@ -1087,6 +1253,66 @@ export interface components {
         CampaignDeliveryListDto: {
             data: components["schemas"]["CampaignDeliveryDto"][];
             meta: components["schemas"]["PageMetaDto"];
+        };
+        MediaAssetPolicyDto: {
+            /** @enum {number} */
+            chunkSize: 393216;
+            imageMimeTypes: string[];
+            imageMaxBytes: number;
+            storageMaxBytes: number;
+        };
+        CreateMediaUploadDto: {
+            /** Format: uuid */
+            sessionId: string;
+            /** @enum {string} */
+            kind: "IMAGE";
+            filename: string;
+            mimeType: string;
+            byteSize: number;
+            sha256: string;
+        };
+        MediaUploadDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            sessionId: string;
+            /** @enum {string} */
+            kind: "IMAGE";
+            filename: string;
+            mimeType: string;
+            byteSize: number;
+            sha256: string;
+            chunkSize: number;
+            totalChunks: number;
+            uploadedChunks: number[];
+            /** @enum {string} */
+            status: "UPLOADING" | "COMPLETED" | "CANCELLED";
+            /** Format: uuid */
+            completedAssetId?: string | null;
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        PutMediaUploadChunkDto: {
+            /** @description Base64-encoded raw chunk bytes. */
+            data: string;
+        };
+        MediaAssetDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            sessionId: string;
+            /** @enum {string} */
+            kind: "IMAGE";
+            filename: string;
+            mimeType: string;
+            byteSize: number;
+            sha256: string;
+            /** Format: date-time */
+            createdAt: string;
         };
         CreateMessageJobDto: {
             /**
@@ -2819,6 +3045,531 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    MediaAssetController_policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaAssetPolicyDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Image or chunk exceeds the V1 size limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Campaign image storage quota exceeded */
+            507: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    MediaAssetController_createUpload: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMediaUploadDto"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaUploadDto"];
+                };
+            };
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaUploadDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Image or chunk exceeds the V1 size limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Campaign image storage quota exceeded */
+            507: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    MediaAssetController_getUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaUploadDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Image or chunk exceeds the V1 size limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Campaign image storage quota exceeded */
+            507: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    MediaAssetController_cancelUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Image or chunk exceeds the V1 size limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Campaign image storage quota exceeded */
+            507: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    MediaAssetController_putChunk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                index: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutMediaUploadChunkDto"];
+            };
+        };
+        responses: {
+            /** @description Idempotent chunk replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Image or chunk exceeds the V1 size limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Campaign image storage quota exceeded */
+            507: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    MediaAssetController_completeUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Idempotent completion replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaAssetDto"];
+                };
+            };
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaAssetDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Image or chunk exceeds the V1 size limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Campaign image storage quota exceeded */
+            507: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    MediaAssetController_getAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaAssetDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Image or chunk exceeds the V1 size limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            /** @description Campaign image storage quota exceeded */
+            507: {
                 headers: {
                     [name: string]: unknown;
                 };

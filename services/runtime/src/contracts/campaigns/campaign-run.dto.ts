@@ -1,8 +1,13 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiExtraModels, ApiProperty, getSchemaPath } from '@nestjs/swagger';
 import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
 import { PageMetaDto } from '../common/pagination.dto';
 import { CampaignExecutionMode, CampaignPreflightDto } from './campaign-preflight.dto';
 import { CampaignTargetSourceDto } from './campaign-target.dto';
+import {
+  ImageCampaignContentDto,
+  type CampaignContentDto,
+  TextCampaignContentDto,
+} from './campaign-content.dto';
 
 export enum CampaignRunStatus {
   PREPARING = 'PREPARING',
@@ -68,6 +73,7 @@ export class CampaignRunProgressDto {
   @ApiProperty() cancelled!: number;
 }
 
+@ApiExtraModels(TextCampaignContentDto, ImageCampaignContentDto)
 export class CampaignRunDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -90,8 +96,23 @@ export class CampaignRunDto {
   @ApiProperty({ type: String, nullable: true })
   statusReason!: string | null;
 
-  @ApiProperty()
+  @ApiProperty({ deprecated: true, description: 'Legacy alias for text content or a media caption.' })
   text!: string;
+
+  @ApiProperty({
+    oneOf: [
+      { $ref: getSchemaPath(TextCampaignContentDto) },
+      { $ref: getSchemaPath(ImageCampaignContentDto) },
+    ],
+    discriminator: {
+      propertyName: 'type',
+      mapping: {
+        TEXT: getSchemaPath(TextCampaignContentDto),
+        IMAGE: getSchemaPath(ImageCampaignContentDto),
+      },
+    },
+  })
+  content!: CampaignContentDto;
 
   @ApiProperty({ type: CampaignTargetSourceDto, nullable: true })
   targetSource!: CampaignTargetSourceDto | null;

@@ -172,6 +172,22 @@ session's send rate. Increase one step at a time from the defaults while observi
 pressure, queue age and OpenWA 429/5xx responses. Keep the outbound maximum delay at or below 60
 seconds so the session and message processing leases remain bounded.
 
+Campaign media V1 accepts one JPEG, PNG, or WebP image up to
+`CAMPAIGN_MEDIA_IMAGE_MAX_BYTES` (8 MiB by default). Image bytes live in PostgreSQL, are included in
+database backups, and must be covered by the same encryption-at-rest and restore controls as other
+Runtime data. `CAMPAIGN_MEDIA_STORAGE_MAX_BYTES` is a workspace-wide database quota that counts
+completed assets plus the declared size of active, unexpired uploads. Monitor database and backup
+growth before increasing its 512 MiB default.
+
+Incomplete uploads expire after `CAMPAIGN_MEDIA_UPLOAD_TTL_SECONDS`; completed/cancelled upload
+records and unreferenced assets are removed after `CAMPAIGN_MEDIA_ORPHAN_RETENTION_HOURS` by the
+regular retention tick. The live worker loads an image only immediately before the OpenWA call.
+`CAMPAIGN_MEDIA_SEND_MEMORY_BUDGET_BYTES` uses a conservative 4x raw-byte weight to cover the
+database buffer, base64 value, and serialized request; its 32 MiB default admits one maximum-size
+image per Runtime process. OpenWA 409 and 429 responses are the only image-send failures retried
+automatically, up to `MESSAGE_SAFE_RETRY_MAX_ATTEMPTS`. Timeouts, malformed success responses, and
+5xx responses remain `UNKNOWN` after the request starts because retrying could duplicate a send.
+
 Terminal operational rows are retained for `RUNTIME_RETENTION_DAYS` (90 days by default), the
 sanitized Activity ledger for `RUNTIME_ACTIVITY_RETENTION_DAYS` (90 days), normalized events for
 `RUNTIME_EVENT_RETENTION_DAYS` (30 days), inbox message bodies for

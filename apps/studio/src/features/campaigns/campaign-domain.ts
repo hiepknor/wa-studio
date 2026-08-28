@@ -2,13 +2,21 @@ import type {
   RuntimeCampaign,
   RuntimeCampaignPreflight,
   RuntimeCreateCampaign,
+  RuntimeMediaAsset,
   RuntimeRequestError,
   RuntimeUpdateCampaign,
 } from "@/shared/api/runtime-client";
 
 export type CampaignScheduleType = RuntimeCampaign["scheduleType"];
+export type CampaignContentType = RuntimeCampaign["content"]["type"];
+export type CampaignMediaSelection = Pick<
+  RuntimeMediaAsset,
+  "byteSize" | "filename" | "id" | "kind" | "mimeType" | "sha256"
+>;
 
 export interface CampaignFormValues {
+  contentType: CampaignContentType;
+  mediaAsset: CampaignMediaSelection | null;
   name: string;
   scheduleType: CampaignScheduleType;
   scheduledAt: string;
@@ -18,22 +26,44 @@ export interface CampaignFormValues {
 export interface CampaignFormErrors {
   name?: string;
   scheduledAt?: string;
+  mediaAsset?: string;
   text?: string;
 }
 
+function campaignDtoContent(campaign: RuntimeCampaign): RuntimeCampaign["content"] {
+  return campaign.content ?? { type: "TEXT", text: campaign.text };
+}
+
 export function campaignFormFromDto(campaign: RuntimeCampaign): CampaignFormValues {
+  const content = campaignDtoContent(campaign);
   return {
+    contentType: content.type,
+    mediaAsset: content.type === "TEXT" ? null : {
+      id: content.mediaAssetId,
+      kind: content.type,
+      filename: content.filename,
+      mimeType: content.mimeType,
+      byteSize: content.byteSize,
+      sha256: content.sha256,
+    },
     name: campaign.name,
     scheduleType: campaign.scheduleType,
     scheduledAt: campaign.scheduledAt
       ? toDateTimeLocal(campaign.scheduledAt)
       : "",
-    text: campaign.text,
+    text: content.type === "TEXT" ? content.text : content.caption,
   };
 }
 
 export function emptyCampaignForm(): CampaignFormValues {
-  return { name: "", scheduleType: "IMMEDIATE", scheduledAt: "", text: "" };
+  return {
+    contentType: "TEXT",
+    mediaAsset: null,
+    name: "",
+    scheduleType: "IMMEDIATE",
+    scheduledAt: "",
+    text: "",
+  };
 }
 
 export function toDateTimeLocal(value: string): string {
@@ -54,7 +84,15 @@ export function validateCampaignForm(
 ): CampaignFormErrors {
   const errors: CampaignFormErrors = {};
   if (!values.name.trim()) errors.name = "Campaign name is required.";
-  if (!values.text.trim()) errors.text = "Message text is required.";
+  if (values.contentType === "TEXT") {
+    if (!values.text.trim()) errors.text = "Message text is required.";
+    else if (values.text.trim().length > 4_096) errors.text = "Message text cannot exceed 4,096 characters.";
+  } else {
+    if (!values.mediaAsset || values.mediaAsset.kind !== values.contentType) {
+      errors.mediaAsset = "Choose and upload an image.";
+    }
+    if (values.text.trim().length > 1_024) errors.text = "Caption cannot exceed 1,024 characters.";
+  }
   if (values.scheduleType === "ONCE") {
     const timestamp = toUtcTimestamp(values.scheduledAt);
     if (!values.scheduledAt) errors.scheduledAt = "Choose when this campaign should run.";
@@ -76,7 +114,7 @@ export function createCampaignPayload(
   return {
     sessionId,
     name: values.name.trim(),
-    text: values.text.trim(),
+    content: campaignContentInput(values),
     scheduleType: values.scheduleType,
     ...(scheduledAt ? { scheduledAt } : {}),
   };
@@ -88,9 +126,16 @@ export function updateCampaignPayload(
 ): RuntimeUpdateCampaign {
   const input: RuntimeUpdateCampaign = {};
   const name = values.name.trim();
-  const text = values.text.trim();
   if (name !== campaign.name) input.name = name;
-  if (text !== campaign.text) input.text = text;
+  const content = campaignContentInput(values);
+  const persistedContent = campaignDtoContent(campaign);
+  const contentChanged = persistedContent.type !== content.type
+    || (content.type === "TEXT"
+      ? persistedContent.type !== "TEXT" || persistedContent.text !== content.text
+      : persistedContent.type === "TEXT"
+        || persistedContent.mediaAssetId !== content.mediaAssetId
+        || persistedContent.caption !== content.caption);
+  if (contentChanged) input.content = content;
 
   if (values.scheduleType !== campaign.scheduleType) {
     input.scheduleType = values.scheduleType;
@@ -102,6 +147,19 @@ export function updateCampaignPayload(
     if (scheduledAt !== campaign.scheduledAt) input.scheduledAt = scheduledAt;
   }
   return input;
+}
+
+function campaignContentInput(
+  values: CampaignFormValues,
+): NonNullable<RuntimeCreateCampaign["content"]> {
+  if (values.contentType === "TEXT") {
+    return { type: "TEXT", text: values.text.trim() };
+  }
+  return {
+    type: values.contentType,
+    mediaAssetId: values.mediaAsset?.id ?? "",
+    caption: values.text.trim(),
+  };
 }
 
 export function hasCampaignChanges(
@@ -157,6 +215,7 @@ export function isPreflightStale(
 const ERROR_COPY: Record<string, string> = {
   CAMPAIGN_IDEMPOTENCY_CONFLICT:
     "This create key was already used with different campaign details. Start a new campaign intent.",
+  CAMPAIGN_CONTENT_INVALID: "Review the selected message type, attachment, and caption.",
   CAMPAIGN_FILTER_STATUS_INVALID: "One or more campaign status filters are invalid.",
   CAMPAIGN_FILTER_SCHEDULE_TYPE_INVALID: "One or more campaign schedule filters are invalid.",
   CAMPAIGN_QUERY_INVALID: "Campaign search must be 200 characters or fewer.",
@@ -195,6 +254,15 @@ const ERROR_COPY: Record<string, string> = {
     "This group list changed in Runtime. Reload and review its latest revision.",
   GROUP_LIST_ARCHIVED:
     "This group list is archived and can no longer be applied.",
+  MEDIA_STORAGE_QUOTA_EXCEEDED:
+    "Campaign media storage is full. Remove unused campaign media or increase the Runtime storage limit.",
+  MEDIA_UPLOAD_CHUNK_CONFLICT:
+    "An upload chunk no longer matches this file. Choose the file again to start a clean upload.",
+  MEDIA_DIGEST_MISMATCH:
+    "The uploaded file did not pass its integrity check. Choose the file again.",
+  MEDIA_UPLOAD_EXPIRED: "This upload expired. Choose the file again to restart it.",
+  MEDIA_SIGNATURE_MISMATCH:
+    "The file contents do not match the selected image format.",
 };
 
 export function campaignErrorMessage(error: unknown, fallback: string): string {

@@ -14,6 +14,7 @@ export enum CampaignPreflightStatus {
 
 export enum CampaignPreflightCheckCode {
   CONTENT_VALID = 'CONTENT_VALID',
+  MEDIA_READY = 'MEDIA_READY',
   TARGETS_VALID = 'TARGETS_VALID',
   SESSION_SENDABLE = 'SESSION_SENDABLE',
   GROUP_CAPABILITY = 'GROUP_CAPABILITY',

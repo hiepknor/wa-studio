@@ -13,6 +13,12 @@ export default defineConfig(async () => ({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  optimizeDeps: {
+    exclude: ["@jsquash/webp"],
+  },
+  worker: {
+    format: "es",
+  },
 
   test: {
     environment: "jsdom",

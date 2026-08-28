@@ -44,6 +44,7 @@
 .runs-message-snapshot { border-top: 1px solid var(--border-subtle); padding-top: var(--space-3); }
 .runs-message-snapshot summary { cursor: pointer; font-weight: var(--weight-medium); }
 .runs-message-snapshot p { margin: var(--space-3) 0 0; color: var(--text-secondary); white-space: pre-wrap; }
+.runs-message-metadata { margin-top: var(--space-3); }
 .runs-inspector-actions { display: flex; width: 100%; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
 .runs-inspector-actions > span { min-width: 0; color: var(--text-tertiary); font-size: var(--type-caption); }
 .runs-inspector-actions > div { display: flex; gap: var(--space-2); margin-left: auto; }

@@ -1,11 +1,20 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ApiExtraModels, ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
+import { IsEnum, IsNotEmpty, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  ImageCampaignContentInputDto,
+  type CampaignContentInputDto,
+  TextCampaignContentInputDto,
+} from './campaign-content.dto';
 
 export enum CampaignScheduleType {
   IMMEDIATE = 'IMMEDIATE',
   ONCE = 'ONCE',
 }
 
+@ApiExtraModels(
+  TextCampaignContentInputDto,
+  ImageCampaignContentInputDto,
+)
 export class CreateCampaignDto {
   @ApiProperty({ format: 'uuid' })
   @IsUUID()
@@ -17,11 +26,34 @@ export class CreateCampaignDto {
   @MaxLength(120)
   name!: string;
 
-  @ApiProperty({ maxLength: 4096 })
+  @ApiPropertyOptional({
+    maxLength: 4096,
+    deprecated: true,
+    description: 'Legacy text input. Use content instead; exactly one of text or content is required.',
+  })
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(4096)
-  text!: string;
+  text?: string;
+
+  @ApiPropertyOptional({
+    description: 'Typed campaign content. Exactly one of content or the legacy text field is required.',
+    oneOf: [
+      { $ref: getSchemaPath(TextCampaignContentInputDto) },
+      { $ref: getSchemaPath(ImageCampaignContentInputDto) },
+    ],
+    discriminator: {
+      propertyName: 'type',
+      mapping: {
+        TEXT: getSchemaPath(TextCampaignContentInputDto),
+        IMAGE: getSchemaPath(ImageCampaignContentInputDto),
+      },
+    },
+  })
+  @IsOptional()
+  @IsObject()
+  content?: CampaignContentInputDto;
 
   @ApiPropertyOptional({ enum: CampaignScheduleType, default: CampaignScheduleType.IMMEDIATE })
   @IsOptional()

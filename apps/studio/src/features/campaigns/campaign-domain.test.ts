@@ -18,6 +18,7 @@ const campaign: RuntimeCampaign = {
   sessionId: "session-id",
   name: "Release",
   text: "Ship it",
+  content: { type: "TEXT", text: "Ship it" },
   scheduleType: "ONCE",
   scheduledAt: "2026-09-01T02:00:00.000Z",
   status: "DRAFT",
@@ -29,6 +30,8 @@ const campaign: RuntimeCampaign = {
 };
 
 const validOnce: CampaignFormValues = {
+  contentType: "TEXT",
+  mediaAsset: null,
   name: "Release",
   text: "Ship it",
   scheduleType: "ONCE",
@@ -45,7 +48,7 @@ describe("campaign scheduling", () => {
     expect(payload).toEqual({
       sessionId: "session-id",
       name: "Release",
-      text: "Ship it",
+      content: { type: "TEXT", text: "Ship it" },
       scheduleType: "IMMEDIATE",
     });
     expect({ ...campaign, scheduleType: "IMMEDIATE", scheduledAt: null }.scheduledAt).toBeNull();
@@ -68,7 +71,7 @@ describe("campaign scheduling", () => {
 
   it("keeps scheduling fields out of a content-only PATCH", () => {
     expect(updateCampaignPayload(campaign, { ...validOnce, text: "Updated" })).toEqual({
-      text: "Updated",
+      content: { type: "TEXT", text: "Updated" },
     });
   });
 
@@ -78,6 +81,37 @@ describe("campaign scheduling", () => {
       scheduleType: "IMMEDIATE",
       scheduledAt: "",
     })).toEqual({ scheduleType: "IMMEDIATE", scheduledAt: null });
+  });
+});
+
+describe("campaign image content", () => {
+  const imageForm: CampaignFormValues = {
+    ...validOnce,
+    contentType: "IMAGE",
+    mediaAsset: {
+      id: "22222222-2222-4222-8222-222222222222",
+      kind: "IMAGE",
+      filename: "launch.png",
+      mimeType: "image/png",
+      byteSize: 8,
+      sha256: "a".repeat(64),
+    },
+    text: " Release image ",
+  };
+
+  it("creates an image snapshot reference with a trimmed optional caption", () => {
+    expect(validateCampaignForm(imageForm, new Date("2026-08-14T00:00:00.000Z")))
+      .not.toHaveProperty("mediaAsset");
+    expect(createCampaignPayload("session-id", imageForm).content).toEqual({
+      type: "IMAGE",
+      mediaAssetId: imageForm.mediaAsset?.id,
+      caption: "Release image",
+    });
+  });
+
+  it("requires a verified image before saving", () => {
+    expect(validateCampaignForm({ ...imageForm, mediaAsset: null }).mediaAsset)
+      .toBe("Choose and upload an image.");
   });
 });
 

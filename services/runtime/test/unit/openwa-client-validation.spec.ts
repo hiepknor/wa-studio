@@ -216,6 +216,31 @@ describe('OpenWAClient response validation', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('sends image payloads through the pinned OpenWA route without POST retries', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ messageId: 'image-id', timestamp: 1 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const openwa = new OpenWAClient();
+    const common = {
+      sessionId: 'session-1', chatId: 'group@g.us', base64: 'iVBORw0KGgo=',
+      mimetype: 'image/png', caption: 'Release',
+    };
+
+    await expect(openwa.sendImage(common))
+      .resolves.toEqual({ messageId: 'image-id', timestamp: 1 });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, new URL(
+      '/api/sessions/session-1/messages/send-image', 'http://openwa.test',
+    ), expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        chatId: common.chatId, base64: common.base64, mimetype: common.mimetype,
+        caption: common.caption,
+      }),
+    }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('validates and mutates webhook registrations through the pinned OpenWA contract', async () => {
     const webhook = {
       id: 'webhook-1', sessionId: 'session-1', url: 'https://runtime.test/api/v1/webhooks/openwa',

@@ -17,6 +17,7 @@ import { MessagesModule } from '../modules/messages/messages.module';
 import { WebhooksModule } from '../modules/webhooks/webhooks.module';
 import { EventInboxConsumerModule } from '../modules/webhooks/event-inbox-consumer.module';
 import { ActivityModule } from '../modules/activity/activity.module';
+import { MediaAssetsModule } from '../modules/media-assets/media-assets.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ActivityModule } from '../modules/activity/activity.module';
     WebhooksModule,
     EventInboxConsumerModule,
     ActivityModule,
+    MediaAssetsModule,
   ],
   providers: [
     RequestContextMiddleware,

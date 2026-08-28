@@ -1,4 +1,8 @@
 import type { PoolClient } from 'pg';
+import {
+  campaignContentFromPayload,
+  campaignContentText,
+} from '../../contracts/campaigns/campaign-content.dto';
 import type { CampaignExecutionMode, CampaignPreflightDto } from '../../contracts/campaigns/campaign-preflight.dto';
 import type {
   CampaignRunDto,
@@ -18,7 +22,9 @@ export interface CampaignRunRow {
   execution_mode: CampaignExecutionMode;
   status: CampaignRunStatus;
   status_reason: string | null;
-  payload_snapshot: { text: string };
+  message_type: string;
+  media_asset_id: string | null;
+  payload_snapshot: unknown;
   campaign_revision: string | number;
   targets_revision: string | number;
   target_source_group_list_id: string | null;
@@ -81,7 +87,9 @@ export const campaignRunSelect = `
     ) delivery_statuses
   ) progress ON true`;
 
-export const mapCampaignRun = (row: CampaignRunRow): CampaignRunDto => ({
+export const mapCampaignRun = (row: CampaignRunRow): CampaignRunDto => {
+  const content = campaignContentFromPayload(row.payload_snapshot);
+  return {
   id: row.id,
   campaignId: row.campaign_id,
   campaignNameSnapshot: row.campaign_name_snapshot,
@@ -89,7 +97,8 @@ export const mapCampaignRun = (row: CampaignRunRow): CampaignRunDto => ({
   executionMode: row.execution_mode,
   status: row.status,
   statusReason: row.status_reason,
-  text: row.payload_snapshot.text,
+  text: campaignContentText(content),
+  content,
   targetSource: row.target_source_group_list_id
     && row.target_source_group_list_name_snapshot
     && row.target_source_membership_revision
@@ -112,7 +121,8 @@ export const mapCampaignRun = (row: CampaignRunRow): CampaignRunDto => ({
   completedAt: row.completed_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
-});
+  };
+};
 
 export const mapCampaignRunSummary = (row: CampaignRunRow): CampaignRunSummaryDto => ({
   id: row.id,

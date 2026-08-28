@@ -105,12 +105,13 @@ const webhookSchema = z.object({
   retryCount: z.number().int().min(0).max(5),
 });
 const healthSchema = z.object({ status: nonEmptyString, timestamp: dateTimeString, version: nonEmptyString });
-const sendTextResultSchema = z.object({ messageId: nonEmptyString, timestamp: z.number().int().nonnegative() });
+const sendMessageResultSchema = z.object({ messageId: nonEmptyString, timestamp: z.number().int().nonnegative() });
 const maxRateLimitRetries = 12;
 const maxTransientReadRetries = 4;
 const maximumErrorResponseBytes = 64 * 1024;
 
-export type OpenWASendTextResult = z.infer<typeof sendTextResultSchema>;
+export type OpenWASendTextResult = z.infer<typeof sendMessageResultSchema>;
+export type OpenWASendImageResult = z.infer<typeof sendMessageResultSchema>;
 export type OpenWASession = z.infer<typeof sessionSchema>;
 export type OpenWAGroupSummary = z.infer<typeof groupSummarySchema>;
 export type OpenWAGroupParticipant = z.infer<typeof participantSchema>;
@@ -349,13 +350,37 @@ export class OpenWAClient implements OnModuleDestroy {
   }
 
   async sendText(sessionId: string, chatId: string, text: string): Promise<OpenWASendTextResult> {
-    return this.request('send_text', `/api/sessions/${encodeURIComponent(sessionId)}/messages/send-text`, sendTextResultSchema, {
+    return this.request('send_text', `/api/sessions/${encodeURIComponent(sessionId)}/messages/send-text`, sendMessageResultSchema, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
       },
       body: JSON.stringify({ chatId, text }),
     });
+  }
+
+  async sendImage(input: {
+    sessionId: string;
+    chatId: string;
+    base64: string;
+    mimetype: string;
+    caption: string;
+  }): Promise<OpenWASendImageResult> {
+    return this.request(
+      'send_image',
+      `/api/sessions/${encodeURIComponent(input.sessionId)}/messages/send-image`,
+      sendMessageResultSchema,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chatId: input.chatId,
+          base64: input.base64,
+          mimetype: input.mimetype,
+          ...(input.caption ? { caption: input.caption } : {}),
+        }),
+      },
+    );
   }
 }
 

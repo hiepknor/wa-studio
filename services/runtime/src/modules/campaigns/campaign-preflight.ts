@@ -6,6 +6,10 @@ import {
   type CampaignPreflightDto,
 } from '../../contracts/campaigns/campaign-preflight.dto';
 import type { CampaignTargetDto } from '../../contracts/campaigns/campaign-target.dto';
+import {
+  CampaignContentType,
+  type CampaignContentDto,
+} from '../../contracts/campaigns/campaign-content.dto';
 
 export interface CampaignPreflightSessionState {
   status: string;
@@ -15,7 +19,9 @@ export interface CampaignPreflightSessionState {
 
 export function evaluateCampaignPreflight(input: {
   executionMode: CampaignExecutionMode;
-  text: string;
+  content?: CampaignContentDto;
+  text?: string;
+  mediaReady?: boolean;
   targets: CampaignTargetDto[];
   session: CampaignPreflightSessionState;
   liveSendsEnabled: boolean;
@@ -23,6 +29,7 @@ export function evaluateCampaignPreflight(input: {
   targetsRevision: number;
   checkedAt?: Date;
 }): CampaignPreflightDto {
+  const content = input.content ?? { type: CampaignContentType.TEXT, text: input.text ?? '' };
   const checks: CampaignPreflightDto['checks'] = [];
   const targetIssues = input.targets
     .map(target => ({
@@ -48,10 +55,22 @@ export function evaluateCampaignPreflight(input: {
 
   checks.push({
     code: CampaignPreflightCheckCode.CONTENT_VALID,
-    status: input.text.trim() && input.text.length <= 4096
+    status: content.type === CampaignContentType.TEXT
+      ? content.text.trim() && content.text.length <= 4096
+        ? CampaignPreflightStatus.PASS : CampaignPreflightStatus.BLOCK
+      : (content.caption ?? '').length <= 1024
       ? CampaignPreflightStatus.PASS : CampaignPreflightStatus.BLOCK,
-    message: input.text.trim() && input.text.length <= 4096 ? 'Text content is valid' : 'Text content is invalid',
+    message: content.type === CampaignContentType.TEXT
+      ? content.text.trim() && content.text.length <= 4096 ? 'Text content is valid' : 'Text content is invalid'
+      : (content.caption ?? '').length <= 1024 ? 'Image content is valid' : 'Image caption is invalid',
   });
+  if (content.type !== CampaignContentType.TEXT) {
+    checks.push({
+      code: CampaignPreflightCheckCode.MEDIA_READY,
+      status: input.mediaReady ? CampaignPreflightStatus.PASS : CampaignPreflightStatus.BLOCK,
+      message: input.mediaReady ? 'Image asset is ready and immutable' : 'Image asset is missing or changed',
+    });
+  }
   checks.push({
     code: CampaignPreflightCheckCode.TARGETS_VALID,
     status: input.targets.length ? CampaignPreflightStatus.PASS : CampaignPreflightStatus.BLOCK,
@@ -88,7 +107,7 @@ export function evaluateCampaignPreflight(input: {
       ? CampaignPreflightStatus.WARN : CampaignPreflightStatus.PASS;
   return {
     status,
-    policyVersion: 2,
+    policyVersion: 3,
     campaignRevision: input.campaignRevision,
     targetsRevision: input.targetsRevision,
     executionMode: input.executionMode,

@@ -1,7 +1,16 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { ApiExtraModels, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
+import { IsEnum, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { CampaignScheduleType } from './create-campaign.dto';
+import {
+  ImageCampaignContentInputDto,
+  type CampaignContentInputDto,
+  TextCampaignContentInputDto,
+} from './campaign-content.dto';
 
+@ApiExtraModels(
+  TextCampaignContentInputDto,
+  ImageCampaignContentInputDto,
+)
 export class UpdateCampaignDto {
   @ApiPropertyOptional({
     type: 'integer', minimum: 1,
@@ -19,12 +28,33 @@ export class UpdateCampaignDto {
   @MaxLength(120)
   name?: string;
 
-  @ApiPropertyOptional({ maxLength: 4096 })
+  @ApiPropertyOptional({
+    maxLength: 4096,
+    deprecated: true,
+    description: 'Legacy text update. Use content instead; text and content cannot be supplied together.',
+  })
   @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(4096)
   text?: string;
+
+  @ApiPropertyOptional({
+    oneOf: [
+      { $ref: getSchemaPath(TextCampaignContentInputDto) },
+      { $ref: getSchemaPath(ImageCampaignContentInputDto) },
+    ],
+    discriminator: {
+      propertyName: 'type',
+      mapping: {
+        TEXT: getSchemaPath(TextCampaignContentInputDto),
+        IMAGE: getSchemaPath(ImageCampaignContentInputDto),
+      },
+    },
+  })
+  @IsOptional()
+  @IsObject()
+  content?: CampaignContentInputDto;
 
   @ApiPropertyOptional({ enum: CampaignScheduleType })
   @IsOptional()

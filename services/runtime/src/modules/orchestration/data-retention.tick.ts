@@ -13,6 +13,8 @@ export interface RetentionResult {
   webhookEvents: number;
   syncRuns: number;
   contactObservations: number;
+  mediaUploads: number;
+  mediaAssets: number;
   batches: number;
   capacityExhausted: boolean;
 }
@@ -36,7 +38,7 @@ export class DataRetentionTick {
     const started = performance.now();
     const result = await this.cleanup();
     const deleted = result.activityEvents + result.campaignRuns + result.messageJobs + result.inboundMessages + result.runtimeEvents
-      + result.webhookEvents + result.syncRuns + result.contactObservations;
+      + result.webhookEvents + result.syncRuns + result.contactObservations + result.mediaUploads + result.mediaAssets;
     this.logger.log({
       event: 'data.retention.completed', deleted, durationMs: Math.round(performance.now() - started), ...result,
     });
@@ -52,6 +54,9 @@ export class DataRetentionTick {
     const contactObservationCutoff = new Date(
       now.valueOf() - this.config.CONTACT_MESSAGE_OBSERVATION_RETENTION_DAYS * 86_400_000,
     );
+    const mediaOrphanCutoff = new Date(
+      now.valueOf() - this.config.CAMPAIGN_MEDIA_ORPHAN_RETENTION_HOURS * 3_600_000,
+    );
     const limit = options.batchSize ?? this.config.RUNTIME_RETENTION_BATCH_SIZE;
     const maxBatches = options.maxBatches ?? this.config.RUNTIME_RETENTION_MAX_BATCHES_PER_RUN;
     const deadline = performance.now() + (options.timeBudgetMs ?? this.config.RUNTIME_RETENTION_TIME_BUDGET_MS);
@@ -59,6 +64,7 @@ export class DataRetentionTick {
       activityEvents: 0,
       campaignRuns: 0, messageJobs: 0, inboundMessages: 0, runtimeEvents: 0, webhookEvents: 0, syncRuns: 0,
       contactObservations: 0,
+      mediaUploads: 0, mediaAssets: 0,
       batches: 0, capacityExhausted: false,
     };
     let drained = false;
@@ -81,6 +87,8 @@ export class DataRetentionTick {
           contactObservationCutoff,
           limit,
         ),
+        mediaUploads: await this.deleteExpiredMediaUploads(client, now, mediaOrphanCutoff, limit),
+        mediaAssets: await this.deleteOrphanMediaAssets(client, mediaOrphanCutoff, limit),
       }));
       total.batches += 1;
       total.activityEvents += current.activityEvents;
@@ -91,6 +99,8 @@ export class DataRetentionTick {
       total.webhookEvents += current.webhookEvents;
       total.syncRuns += current.syncRuns;
       total.contactObservations += current.contactObservations;
+      total.mediaUploads += current.mediaUploads;
+      total.mediaAssets += current.mediaAssets;
       if (Object.values(current).every(count => count < limit)) {
         drained = true;
         break;
@@ -230,6 +240,46 @@ export class DataRetentionTick {
        )
        DELETE FROM contact_observations observation USING candidates
        WHERE observation.session_id = candidates.session_id AND observation.id = candidates.id`,
+      [cutoff, limit],
+    ));
+  }
+
+  private async deleteExpiredMediaUploads(
+    client: PoolClient,
+    now: Date,
+    settledCutoff: Date,
+    limit: number,
+  ): Promise<number> {
+    return this.count(await client.query(
+      `WITH candidates AS (
+         SELECT id FROM media_uploads
+         WHERE (status = 'UPLOADING' AND expires_at < $1)
+           OR (status IN ('COMPLETED','CANCELLED') AND updated_at < $2)
+         ORDER BY updated_at, id LIMIT $3 FOR UPDATE SKIP LOCKED
+       )
+       DELETE FROM media_uploads upload USING candidates
+       WHERE upload.id = candidates.id`,
+      [now, settledCutoff, limit],
+    ));
+  }
+
+  private async deleteOrphanMediaAssets(
+    client: PoolClient,
+    cutoff: Date,
+    limit: number,
+  ): Promise<number> {
+    return this.count(await client.query(
+      `WITH candidates AS (
+         SELECT asset.id FROM media_assets asset
+         WHERE asset.created_at < $1
+           AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.media_asset_id = asset.id)
+           AND NOT EXISTS (SELECT 1 FROM campaign_runs cr WHERE cr.media_asset_id = asset.id)
+           AND NOT EXISTS (SELECT 1 FROM message_jobs mj WHERE mj.media_asset_id = asset.id)
+           AND NOT EXISTS (SELECT 1 FROM media_uploads mu WHERE mu.completed_asset_id = asset.id)
+         ORDER BY asset.created_at, asset.id LIMIT $2 FOR UPDATE OF asset SKIP LOCKED
+       )
+       DELETE FROM media_assets asset USING candidates
+       WHERE asset.id = candidates.id`,
       [cutoff, limit],
     ));
   }

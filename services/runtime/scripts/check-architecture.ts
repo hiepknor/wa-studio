@@ -13,13 +13,14 @@ export interface ArchitectureViolation {
 }
 
 const allowedFeatureDependencies: Readonly<Record<string, readonly string[]>> = {
-  campaigns: ['gateway', 'group-lists', 'messages'],
+  campaigns: ['gateway', 'group-lists', 'media-assets', 'messages'],
   contacts: [],
   gateway: ['contacts'],
   'group-lists': ['gateway'],
   health: [],
   inbox: ['gateway'],
-  messages: ['gateway'],
+  'media-assets': ['gateway'],
+  messages: ['gateway', 'media-assets'],
   orchestration: ['campaigns', 'contacts', 'gateway', 'messages', 'webhooks'],
   webhooks: ['contacts', 'gateway', 'messages'],
 };

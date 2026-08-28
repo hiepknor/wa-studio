@@ -20,6 +20,7 @@ export type RuntimeUpdateGroupList = components["schemas"]["UpdateGroupListDto"]
 export type RuntimeGroupListGroup = components["schemas"]["GroupListGroupDto"];
 export type RuntimeGroupListMembership = components["schemas"]["GroupListMembershipDto"];
 export type RuntimeCampaign = components["schemas"]["CampaignDto"];
+export type RuntimeCampaignContent = RuntimeCampaign["content"];
 export type RuntimeCampaignPage = components["schemas"]["CampaignListDto"];
 export type RuntimeCreateCampaign = components["schemas"]["CreateCampaignDto"];
 export type RuntimeUpdateCampaign = components["schemas"]["UpdateCampaignDto"];
@@ -34,6 +35,10 @@ export type RuntimeCampaignRunSummaryPage = components["schemas"]["CampaignRunSu
 export type RuntimeCampaignDelivery = components["schemas"]["CampaignDeliveryDto"];
 export type RuntimeCampaignDeliveryPage = components["schemas"]["CampaignDeliveryListDto"];
 export type RuntimeCreateCampaignRun = components["schemas"]["CreateCampaignRunDto"];
+export type RuntimeMediaAsset = components["schemas"]["MediaAssetDto"];
+export type RuntimeMediaAssetPolicy = components["schemas"]["MediaAssetPolicyDto"];
+export type RuntimeMediaUpload = components["schemas"]["MediaUploadDto"];
+export type RuntimeCreateMediaUpload = components["schemas"]["CreateMediaUploadDto"];
 export type RuntimeCampaignExecutionMode =
   components["schemas"]["CampaignPreflightRequestDto"]["executionMode"];
 export type RuntimeError = components["schemas"]["RuntimeErrorDto"];
@@ -579,6 +584,113 @@ export class RuntimeApi {
     if (!result.response.ok) {
       throw runtimeRequestError(
         "Could not archive group list",
+        result.response.status,
+        result.error,
+      );
+    }
+  }
+
+  async getCampaignMediaPolicy(
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeMediaAssetPolicy> {
+    const result = await this.client.GET("/api/v1/media-assets/policy", { ...options });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load campaign media policy",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async createCampaignMediaUpload(
+    input: RuntimeCreateMediaUpload,
+    idempotencyKey: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeMediaUpload> {
+    const result = await this.client.POST("/api/v1/media-assets/uploads", {
+      ...options,
+      body: input,
+      params: { header: { "Idempotency-Key": idempotencyKey } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not create campaign media upload",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async getCampaignMediaUpload(
+    uploadId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeMediaUpload> {
+    const result = await this.client.GET("/api/v1/media-assets/uploads/{id}", {
+      ...options,
+      params: { path: { id: uploadId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load campaign media upload",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async putCampaignMediaChunk(
+    uploadId: string,
+    index: number,
+    data: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<void> {
+    const result = await this.client.PUT("/api/v1/media-assets/uploads/{id}/chunks/{index}", {
+      ...options,
+      body: { data },
+      params: { path: { id: uploadId, index } },
+    });
+    if (!result.response.ok) {
+      throw runtimeRequestError(
+        `Could not upload campaign media chunk ${index + 1}`,
+        result.response.status,
+        result.error,
+      );
+    }
+  }
+
+  async completeCampaignMediaUpload(
+    uploadId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeMediaAsset> {
+    const result = await this.client.POST("/api/v1/media-assets/uploads/{id}/complete", {
+      ...options,
+      params: { path: { id: uploadId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not complete campaign media upload",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async cancelCampaignMediaUpload(
+    uploadId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<void> {
+    const result = await this.client.DELETE("/api/v1/media-assets/uploads/{id}", {
+      ...options,
+      params: { path: { id: uploadId } },
+    });
+    if (!result.response.ok) {
+      throw runtimeRequestError(
+        "Could not cancel campaign media upload",
         result.response.status,
         result.error,
       );
