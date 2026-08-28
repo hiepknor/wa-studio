@@ -1042,6 +1042,8 @@ mod tests {
 
     use age::{secrecy::SecretString, x25519};
 
+    use super::super::secret_store::random_secret;
+
     use super::{
         acquire_root_lock, commit_integrity_marker, latest_integrity_check, list_backups,
         postgres_binary, remove_incomplete_backups, resolve_managed_backup,
@@ -1245,11 +1247,7 @@ mod tests {
     fn restores_an_encrypted_dump_transactionally_and_keeps_a_safety_backup() {
         let cluster = tempfile::tempdir().unwrap();
         let backups = tempfile::tempdir().unwrap();
-        let mut postgres = ManagedPostgres::start(
-            cluster.path(),
-            "restore-test-password-with-at-least-32-characters".to_string(),
-        )
-        .unwrap();
+        let mut postgres = ManagedPostgres::start(cluster.path(), random_secret(48)).unwrap();
         execute_sql(
             &postgres,
             "CREATE TABLE restore_probe(value text NOT NULL); INSERT INTO restore_probe VALUES ('before');",
