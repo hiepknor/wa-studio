@@ -32,6 +32,19 @@ describe('gateway sync recovery', () => {
     return result.rows;
   };
 
+  const listSyncActivity = async (syncRunId: string) => {
+    const result = await pool.query<{
+      event_type: string;
+      severity: string;
+      metadata: Record<string, unknown>;
+    }>(
+      `SELECT event_type, severity, metadata FROM activity_events
+       WHERE sync_run_id = $1 ORDER BY occurred_at`,
+      [syncRunId],
+    );
+    return result.rows;
+  };
+
   beforeAll(() => {
     pool = integrationPool();
     database = new DatabaseService();
@@ -67,6 +80,18 @@ describe('gateway sync recovery', () => {
     expect(await gateway.findSyncRun(run.id)).toMatchObject({ status: 'COMPLETED', groupsSynced: 1, membersSynced: 1 });
     expect(await gateway.findGroup(INTEGRATION_SESSION_ID, '120363000000000000@g.us')).toMatchObject({
       sendCapability: { status: 'ALLOWED', reason: 'SEND_ALLOWED' },
+    });
+    expect(await listSyncActivity(run.id)).toContainEqual({
+      event_type: 'sync.completed',
+      severity: 'SUCCESS',
+      metadata: {
+        groupsFailed: 0,
+        groupsSkipped: 0,
+        groupsSynced: 1,
+        membersSynced: 1,
+        status: 'COMPLETED',
+        syncType: 'FULL',
+      },
     });
   });
 
@@ -337,6 +362,9 @@ describe('gateway sync recovery', () => {
     }, INTEGRATION_SESSION_ID, GatewaySyncMode.FULL, []);
     expect(result).toMatchObject({ discovered: 0, scheduled: 0, completed: true, deferred: false });
     expect(await gateway.findSyncRun(run.id)).toMatchObject({ status: 'COMPLETED' });
+    expect(await listSyncActivity(run.id)).toContainEqual(expect.objectContaining({
+      event_type: 'sync.completed', severity: 'SUCCESS',
+    }));
   });
 
   it('incremental discovery skips fresh unchanged groups and selects invalidated groups', async () => {
@@ -410,6 +438,9 @@ describe('gateway sync recovery', () => {
     await items.fail(claimedFailed!.id, claimedFailed!.leaseToken, 'terminal failure', {
       retryable: false, ratePressure: false, code: 'TEST_FAILURE',
     });
+    expect(await listSyncActivity(failedRun.id)).toContainEqual(expect.objectContaining({
+      event_type: 'sync.failed', severity: 'ERROR',
+    }));
 
     const retryRun = await gateway.createSyncRun(INTEGRATION_SESSION_ID, GatewaySyncMode.INCREMENTAL);
     const retryClaim = await gateway.claimSyncRun(retryRun.id);

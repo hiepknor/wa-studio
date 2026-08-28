@@ -12,6 +12,7 @@ import type {
   GatewaySyncFailurePolicy,
   GatewaySyncItemDispatch,
 } from './gateway-sync-item.types';
+import { appendGatewaySyncActivity } from './gateway-sync-activity';
 import { GatewaySyncRateLimitRepository } from './gateway-sync-rate-limit.repository';
 
 const summaryFingerprint = (group: OpenWAGroupSummary): string => createHash('sha256').update(JSON.stringify({
@@ -146,6 +147,16 @@ export class GatewaySyncItemRepository {
         [fence.syncRunId, fence.leaseToken, completed ? 'COMPLETED' : 'RECONCILING',
           groups.length, selected.length, completed],
       );
+      if (completed) {
+        await appendGatewaySyncActivity(client, {
+          syncRunId: fence.syncRunId,
+          eventType: 'sync.completed',
+          severity: 'SUCCESS',
+          origin: 'GATEWAY',
+          metadata: { groupsSynced: 0, groupsFailed: 0, groupsSkipped: 0, membersSynced: 0 },
+          dedupeKey: `sync-run:${fence.syncRunId}:completed`,
+        });
+      }
       return { discovered: groups.length, scheduled: selected.length, completed, deferred: false };
     });
   }
@@ -359,7 +370,13 @@ export class GatewaySyncItemRepository {
   }
 
   private async refreshParent(client: PoolClient, syncRunId: string): Promise<void> {
-    await client.query(
+    const result = await client.query<{
+      status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+      groups_synced: number;
+      groups_failed: number;
+      groups_skipped: number;
+      members_synced: number;
+    }>(
       `WITH aggregate AS (
          SELECT count(*) FILTER (WHERE status = 'COMPLETED')::integer AS completed,
                 count(*) FILTER (WHERE status = 'FAILED')::integer AS failed,
@@ -376,9 +393,27 @@ export class GatewaySyncItemRepository {
          error = CASE WHEN aggregate.remaining = 0 AND aggregate.failed > 0
            THEN aggregate.failed || ' group reconciliations failed' ELSE runs.error END,
          completed_at = CASE WHEN aggregate.remaining = 0 THEN now() ELSE NULL END, updated_at = now()
-       FROM aggregate WHERE runs.id = $1`,
+       FROM aggregate WHERE runs.id = $1 AND runs.status IN ('PENDING','RUNNING')
+       RETURNING runs.status, runs.groups_synced, runs.groups_failed,
+         runs.groups_skipped, runs.members_synced`,
       [syncRunId],
     );
+    const run = result.rows[0];
+    if (!run || run.status === 'RUNNING') return;
+    const failed = run.status === 'FAILED';
+    await appendGatewaySyncActivity(client, {
+      syncRunId,
+      eventType: failed ? 'sync.failed' : 'sync.completed',
+      severity: failed ? 'ERROR' : 'SUCCESS',
+      origin: 'GATEWAY',
+      metadata: {
+        groupsSynced: run.groups_synced,
+        groupsFailed: run.groups_failed,
+        groupsSkipped: run.groups_skipped,
+        membersSynced: run.members_synced,
+      },
+      dedupeKey: `sync-run:${syncRunId}:${failed ? 'failed' : 'completed'}`,
+    });
   }
 
   private async assertDiscoveryOwnership(client: PoolClient, fence: SyncWriteFence, sessionId: string): Promise<void> {
