@@ -5,12 +5,12 @@ The GitHub Actions workflow is authoritative; do not upload or replace updater a
 
 `release/components.json` declares the release channel. A `canary` release is published as a GitHub
 prerelease and is intentionally excluded from the `releases/latest` updater endpoint. A `stable`
-release is published as the latest release. Change the channel only in a reviewed version-bump
-commit; never mutate the channel of an existing tag or published release.
+release is published as the latest release. Change the channel only in a version-bump commit that
+passes every required check; never mutate the channel of an existing tag or published release.
 
 ## Preconditions
 
-- Release from a reviewed commit on `main` with a clean CI result.
+- Release from a pull-request commit on `main` with every required check current and successful.
 - Keep `apps/studio/package.json`, Tauri, Runtime, contract and `release/components.json` versions
   aligned. `npm run release:manifest:check` must pass.
 - Configure `WA_STUDIO_UPDATER_ENDPOINT` as exactly
@@ -19,8 +19,9 @@ commit; never mutate the channel of an existing tag or published release.
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub Actions secrets.
 - Configure the Developer ID certificate and App Store Connect notarization secrets used by
   `.github/workflows/release.yml`.
-- Configure those credentials as secrets of the protected `release` GitHub environment and require
-  the independent release reviewer before the signed desktop job starts.
+- Configure those credentials as secrets of the protected `release` GitHub environment. In this
+  single-maintainer repository, the protected tag, required checks, signed workflow and artifact
+  verification replace a manual environment approval.
 
 Never print, copy into a workflow artifact, or add a fallback for any signing or notarization secret.
 Keep signing, updater, and notarization secrets scoped to the single signed-build step; dependency
@@ -96,9 +97,9 @@ perform this check because they intentionally contain no update channel or publi
 
 ### Canary 0.2.0
 
-1. Keep `releaseChannel` set to `canary`, obtain the independent reviewer approval, and tag the
-   reviewed commit as `v0.2.0`. Install the published notarized DMG manually on only the canary Mac;
-   prereleases are intentionally invisible to the stable updater endpoint.
+1. Keep `releaseChannel` set to `canary` and tag the verified `main` commit as `v0.2.0`. Install the
+   published notarized DMG manually on only the canary Mac; prereleases are intentionally invisible
+   to the stable updater endpoint.
 2. Verify all eight release assets, attestations, checksums, the updater signature, and the Event
    Inbox image digest. Stage that digest with the Event Inbox `canary` Compose profile on port 34201.
 3. Confirm private readiness, switch only `wa-events.onio.cc` to the candidate with
@@ -106,11 +107,11 @@ perform this check because they intentionally contain no update channel or publi
    the observation window.
 4. Run the production-readiness checklist in `docs/production-readiness.md`, including one real
    outbound run scoped to the dedicated test group. Do not reuse a customer group or broaden the
-   target after approval.
+   target after it has been recorded for UAT.
 5. Observe for 24 continuous hours. Restart the clock after any candidate redeploy, unexplained
    endpoint switch, critical alert, failed backup, or unresolved UAT discrepancy.
 6. Accept only with zero unexplained callback loss, zero duplicate outbound effects, zero critical
-   alerts, a successful encrypted off-host backup plus restore drill, and explicit operator/reviewer
+   alerts, a successful encrypted off-host backup plus restore drill, and explicit operator
    sign-off. Preserve the evidence by release digest and UTC interval.
 
 Rollback server traffic immediately to 34200 when liveness/readiness fails, a callback cannot be
@@ -120,9 +121,10 @@ further outbound UAT, retain both slots and logs for diagnosis, and ship a highe
 
 ### Stable 0.2.1
 
-After canary acceptance, create a reviewed version-bump commit that moves Studio and Tauri to 0.2.1,
+After canary acceptance, create a version-bump commit that moves Studio and Tauri to 0.2.1,
 updates Runtime metadata only when Runtime changed, regenerates the release manifest, and changes
-`releaseChannel` to `stable`. Re-run the full release gates and tag only that commit as `v0.2.1`.
+`releaseChannel` to `stable`. Merge it through a pull request with every required check successful,
+then tag only that commit as `v0.2.1`.
 Converge the primary Event Inbox slot to the accepted immutable image,
 switch Caddy back to the fail-safe 34200 target, then publish 0.2.1 as latest. Verify an installed
 0.2.0 canary and the preceding stable build both discover 0.2.1 through the signed updater manifest.

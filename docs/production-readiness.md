@@ -1,15 +1,17 @@
 # WA Studio production readiness
 
 This is the acceptance record for the first durable WA Studio deployment. A checked box requires a
-command result, screenshot, alert event, immutable digest, or reviewer acknowledgement retained in
+command result, screenshot, alert event, immutable digest, or operator acknowledgement retained in
 the private release record. Repository CI alone is not production acceptance.
 
 ## External prerequisites
 
-- [ ] GitHub `main` requires CI and CodeQL, blocks force-push/deletion, dismisses stale approvals,
-      and requires one independent reviewer.
-- [ ] The protected `release` environment has the same independent reviewer and contains only the
-      Apple signing, notarization, and updater secrets required by the signed desktop job.
+- [ ] GitHub `main` requires a pull request with current CI and CodeQL results and blocks
+      force-push/deletion. The single-maintainer repository does not require a manual approval;
+      branch protection and required checks still apply to administrators.
+- [ ] The protected `release` environment contains only the Apple signing, notarization, and updater
+      secrets required by the signed desktop job. Tag, workflow and artifact verification gates are
+      the release authorization boundary for the single-maintainer repository.
 - [ ] The Cloudflare R2 bucket exists with a bucket-scoped Object Read & Write token, 35-day lock on
       `production/`, 90-day production expiry, and one-day staging expiry.
 - [ ] The dedicated Telegram bot and private operator chat exist; token and chat ID are installed as
@@ -37,8 +39,8 @@ from any failures recorded before or after it. Before the canary clock starts:
       participant, and retained Activity totals against the authoritative server.
 - [ ] Confirm the Event Inbox has no unowned session, unexpected dead event, aged pending event, or
       unexplained delivery gap after the sync.
-- [ ] Close the incident with operator and independent reviewer acknowledgement; retain the original
-      count and evidence rather than deleting it.
+- [ ] Close the incident with explicit operator acknowledgement; retain the original count and
+      evidence rather than deleting it.
 
 ## Canary UAT and 24-hour gate
 
@@ -61,8 +63,8 @@ from any failures recorded before or after it. Before the canary clock starts:
 
 Record candidate commit, desktop checksums, Event Inbox digest, OpenWA reviewed tag, canary start/end
 UTC, R2 backup key/checksum, restore-drill result, UAT run ID, test-group ID, alert test timestamps,
-operator, independent reviewer, and the final go/no-go decision. Store identifiers only in the
-private release record; never add customer or credential data to Git.
+operator acknowledgement, and the final go/no-go decision. Store identifiers only in the private
+release record; never add customer or credential data to Git.
 
 A no-go means: route Event Inbox back to 34200, stop outbound activity, preserve evidence, and
 fix-forward. A go means: prepare the reviewed 0.2.1 stable bump, converge the primary slot, verify the
