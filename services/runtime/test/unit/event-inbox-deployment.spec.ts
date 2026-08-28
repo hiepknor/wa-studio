@@ -68,8 +68,10 @@ describe('Event Inbox deployment contract', () => {
     expect(compose).not.toMatch(/ports:\s*\n/u);
   });
 
-  it('wires bounded pairing limits into the production Compose profile', () => {
+  it('wires bounded storage and pairing limits into the production Compose profile', () => {
     const compose = readFileSync(resolve(deployRoot, 'compose.yaml'), 'utf8');
+    expect(compose).toContain('EVENT_INBOX_MAX_STORED_EVENTS:-500000');
+    expect(compose).toContain('EVENT_INBOX_MAX_STORED_BYTES:-2147483648');
     expect(compose).toContain('EVENT_INBOX_PAIR_RATE_LIMIT_MAX_ATTEMPTS');
     expect(compose).toContain('EVENT_INBOX_PAIR_GLOBAL_RATE_LIMIT_MAX_ATTEMPTS');
     expect(compose).toContain('EVENT_INBOX_PAIR_RATE_LIMIT_WINDOW_SECONDS');

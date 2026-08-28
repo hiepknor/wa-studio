@@ -36,9 +36,9 @@ const schema = z.object({
     .transform(value => value.split(',').map(item => item.trim()).filter(Boolean))
     .pipe(z.array(z.uuid()).min(1).max(1000)),
   EVENT_INBOX_RETENTION_DAYS: z.coerce.number().int().min(1).max(90).default(7),
-  EVENT_INBOX_MAX_STORED_EVENTS: z.coerce.number().int().min(100).max(100_000).default(100_000),
+  EVENT_INBOX_MAX_STORED_EVENTS: z.coerce.number().int().min(100).max(5_000_000).default(500_000),
   EVENT_INBOX_MAX_STORED_BYTES: z.coerce.number().int()
-    .min(1_048_576).max(8_589_934_592).default(268_435_456),
+    .min(1_048_576).max(8_589_934_592).default(2_147_483_648),
   EVENT_INBOX_MAX_PAYLOAD_BYTES: z.coerce.number().int().min(1024).max(1_048_576).default(262_144),
   EVENT_INBOX_PAIR_RATE_LIMIT_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(5),
   EVENT_INBOX_PAIR_GLOBAL_RATE_LIMIT_MAX_ATTEMPTS: z.coerce.number().int()

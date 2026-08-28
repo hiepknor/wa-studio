@@ -31,7 +31,8 @@ describe('Event Inbox boundary', () => {
   it('validates PostgreSQL and bounded durable-delivery defaults', () => {
     expect(config()).toMatchObject({
       EVENT_INBOX_BIND_HOST: '127.0.0.1',
-      EVENT_INBOX_MAX_STORED_EVENTS: 100_000,
+      EVENT_INBOX_MAX_STORED_EVENTS: 500_000,
+      EVENT_INBOX_MAX_STORED_BYTES: 2_147_483_648,
       EVENT_INBOX_MAX_PAYLOAD_BYTES: 262_144,
       EVENT_INBOX_LEASE_SECONDS: 60,
       EVENT_INBOX_RETENTION_DAYS: 7,
@@ -53,6 +54,14 @@ describe('Event Inbox boundary', () => {
       EVENT_INBOX_HTTP_REQUEST_TIMEOUT_MS: '5000',
       EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS: '5001',
     })).toThrow('cannot exceed');
+    expect(parseEventInboxConfig({
+      ...configEnvironment(),
+      EVENT_INBOX_MAX_STORED_EVENTS: '5000000',
+    }).EVENT_INBOX_MAX_STORED_EVENTS).toBe(5_000_000);
+    expect(() => parseEventInboxConfig({
+      ...configEnvironment(),
+      EVENT_INBOX_MAX_STORED_EVENTS: '5000001',
+    })).toThrow();
   });
 
   it('requires an independent metrics credential for production', () => {

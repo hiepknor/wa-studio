@@ -36,6 +36,8 @@ EVENT_INBOX_MASTER_SECRET=<random-48+-character-secret>
 EVENT_INBOX_METRICS_TOKEN=<different-random-48+-character-secret>
 EVENT_INBOX_HTTP_REQUEST_TIMEOUT_MS=30000
 EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS=10000
+EVENT_INBOX_MAX_STORED_EVENTS=500000
+EVENT_INBOX_MAX_STORED_BYTES=2147483648
 EVENT_INBOX_MAX_PAYLOAD_BYTES=262144
 EVENT_INBOX_DEVICE_TOKEN_TTL_DAYS=365
 # Set once during the v1 -> v2 rollout, then remove after this fixed UTC instant passes.
@@ -113,9 +115,15 @@ restores the fail-safe default without an exposed service gap.
 
 ## Bounded storage
 
-The default profile enforces seven-day expiry, 100,000 stored events, 256 MiB aggregate payloads,
+The default profile enforces seven-day expiry, 500,000 stored events, 2 GiB aggregate payloads,
 256 KiB per callback, 60-second claims, 20 delivery attempts, poison-event isolation, and bounded
-container logs. Readiness reports stored, pending, leased, dead, oldest-pending, active-device,
+container logs. The event-count ceiling can be configured up to 5,000,000 and the byte ceiling up to
+8 GiB, but increasing either value is a capacity-planned release change, not an incident-time knob.
+
+Before rollout, calculate the offline buffer from the highest observed callback rate and average
+stored bytes per event. The lower of the event and byte ceilings must cover at least 24 hours at the
+observed peak, while leaving enough disk for PostgreSQL, WAL, one local encrypted backup, and the
+restore drill. Readiness reports stored, pending, leased, dead, oldest-pending, active-device,
 legacy-device, and owned-session metrics. After the fixed v1 grace expires, maintenance removes
 inactive ownership fences and expired device records without allowing token-generation reuse.
 

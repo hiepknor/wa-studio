@@ -19,13 +19,20 @@ the private release record. Repository CI alone is not production acceptance.
 
 ## Pre-production callback incident
 
-The 58 failed callbacks observed before go-live are a pre-production incident baseline, not accepted
-production loss and not a counter to erase. Before the canary clock starts:
+The 58 failed callbacks observed on 2026-08-21 are an immutable pre-production incident slice, not
+accepted production loss and not the total OpenWA failure ledger. Preserve that slice separately
+from any failures recorded before or after it. Before the canary clock starts:
 
 - [ ] Record the exact UTC interval, OpenWA session scope, aggregate failure classes, and source
       counters without copying message payloads or API keys into the release record.
 - [ ] Explain all 58 outcomes as rejected test traffic, recovered/idempotent delivery, or a fixed
       defect. Any unclassified callback blocks go-live.
+- [ ] Record the current cumulative OpenWA failure-ledger count and classify every delta outside the
+      58-event slice. A stable historical slice must never be mistaken for the current source total.
+- [ ] Prove the reviewed OpenWA tag can retain and idempotently redrive terminal webhook failures.
+      The currently pinned 0.23.3 release closes queued outbox rows before delivery and does not
+      redrive its terminal failure ledger; any release with that behavior is a no-go for unattended
+      production operation.
 - [ ] Run a full authoritative OpenWA sync, allow Runtime projections to settle, and compare group,
       participant, and retained Activity totals against the authoritative server.
 - [ ] Confirm the Event Inbox has no unowned session, unexpected dead event, aged pending event, or
@@ -47,7 +54,8 @@ production loss and not a counter to erase. Before the canary clock starts:
 - [ ] Verify public liveness and discovery, private readiness/metrics, TLS expiry, disk alerts, backup
       freshness, restore freshness, and Telegram firing/resolved delivery.
 - [ ] Observe the unchanged candidate digest for 24 continuous hours with no critical alert,
-      unexplained callback loss, duplicate outbound effect, `UNKNOWN` delivery, or storage pressure.
+      new OpenWA terminal webhook failure, unexplained callback loss, duplicate outbound effect,
+      `UNKNOWN` delivery, or storage pressure.
 
 ## Go/no-go record
 
