@@ -30,6 +30,12 @@ const diagnostics: ManagedRuntimeDiagnostics = {
   recoveryFreshness: "fresh",
   lastIntegrityCheckAtMs: 1_787_312_260_000,
   integrityFreshness: "fresh",
+  storage: {
+    filesystemTotalBytes: 228 * 1_073_741_824,
+    filesystemAvailableBytes: 64 * 1_073_741_824,
+    filesystemAvailablePercent: 28,
+    pressure: "normal",
+  },
 };
 
 function deferred<T>() {

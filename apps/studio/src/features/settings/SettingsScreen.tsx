@@ -276,15 +276,19 @@ export function SettingsScreen({
   const overviewError = [runtimeError, updateError]
     .filter((message): message is string => Boolean(message))
     .join(" ") || null;
+  const storageNeedsAttention = diagnostics?.storage.pressure !== undefined
+    && diagnostics.storage.pressure !== "normal";
   const tabs = SETTINGS_TABS.map(tab => ({
     ...tab,
     warning: tab.id === "connection"
       ? managedRuntime.phase === "degraded" || managedRuntime.phase === "unavailable"
       : tab.id === "recovery"
-        ? Boolean(runtimeError || (diagnostics && diagnostics.recoveryFreshness !== "fresh"))
+        ? Boolean(runtimeError
+          || (diagnostics && diagnostics.recoveryFreshness !== "fresh")
+          || storageNeedsAttention)
         : tab.id === "updates"
           ? Boolean(updateError || updateState?.pending)
-          : Boolean(runtimeError || updateError),
+          : Boolean(runtimeError || updateError || storageNeedsAttention),
   }));
 
   return (

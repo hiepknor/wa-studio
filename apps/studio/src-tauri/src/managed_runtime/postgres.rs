@@ -843,6 +843,45 @@ pub fn list_backups(directory: &Path) -> Result<Vec<ManagedRuntimeBackup>, Strin
     Ok(backups)
 }
 
+pub fn remove_incomplete_backups(directory: &Path) -> Result<usize, String> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect incomplete PostgreSQL backups: {error}"
+            ))
+        }
+    };
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry
+            .map_err(|error| format!("Could not inspect incomplete PostgreSQL backup: {error}"))?;
+        let file_type = entry.file_type().map_err(|error| {
+            format!("Could not inspect incomplete PostgreSQL backup type: {error}")
+        })?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let is_managed_partial = name.ends_with(".dump.age.partial")
+            && (name.starts_with("automatic-")
+                || name.starts_with("manual-")
+                || name.starts_with("pre-migration-v")
+                || name.starts_with("pre-restore-v")
+                || name.starts_with("pre-update-v"));
+        if !file_type.is_file() || file_type.is_symlink() || !is_managed_partial {
+            continue;
+        }
+        fs::remove_file(entry.path()).map_err(|error| {
+            format!(
+                "Could not remove incomplete PostgreSQL backup {}: {error}",
+                entry.path().display()
+            )
+        })?;
+        removed += 1;
+    }
+    Ok(removed)
+}
+
 pub fn stage_managed_backup(
     directory: &Path,
     backup_id: &str,
@@ -1005,10 +1044,10 @@ mod tests {
 
     use super::{
         acquire_root_lock, commit_integrity_marker, latest_integrity_check, list_backups,
-        postgres_binary, resolve_managed_backup, retain_staged_managed_backup, rotate_backups,
-        safe_filename_component, stage_managed_backup, stream_archive_to, ManagedPostgres,
-        AUTOMATIC_BACKUP_RETENTION_COUNT, DATABASE_NAME, MANUAL_BACKUP_RETENTION_COUNT,
-        SAFETY_BACKUP_RETENTION_COUNT,
+        postgres_binary, remove_incomplete_backups, resolve_managed_backup,
+        retain_staged_managed_backup, rotate_backups, safe_filename_component,
+        stage_managed_backup, stream_archive_to, ManagedPostgres, AUTOMATIC_BACKUP_RETENTION_COUNT,
+        DATABASE_NAME, MANUAL_BACKUP_RETENTION_COUNT, SAFETY_BACKUP_RETENTION_COUNT,
     };
 
     struct EarlyClosingWriter {
@@ -1178,6 +1217,27 @@ mod tests {
         assert_eq!(backups[0].created_at_ms, 30);
         assert_eq!(backups[0].size_bytes, 4);
         assert!(resolve_managed_backup(directory.path(), "../secret.dump.age").is_err());
+    }
+
+    #[test]
+    fn removes_only_managed_incomplete_backups() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(
+            directory.path().join("automatic-1.dump.age.partial"),
+            b"partial",
+        )
+        .unwrap();
+        fs::write(
+            directory.path().join("manual-2.dump.age.partial"),
+            b"partial",
+        )
+        .unwrap();
+        fs::write(directory.path().join("automatic-3.dump.age"), b"complete").unwrap();
+        fs::write(directory.path().join("unrelated.partial"), b"keep").unwrap();
+
+        assert_eq!(remove_incomplete_backups(directory.path()).unwrap(), 2);
+        assert!(directory.path().join("automatic-3.dump.age").exists());
+        assert!(directory.path().join("unrelated.partial").exists());
     }
 
     #[test]

@@ -20,7 +20,10 @@ use std::{
 
 use age::secrecy::SecretString;
 use config::{DesktopDatabaseConfig, DesktopRuntimeConfig};
-use model::{ManagedRuntimeConnection, ManagedRuntimePhase, ProtectionFreshness};
+use model::{
+    ManagedRuntimeConnection, ManagedRuntimePhase, ManagedRuntimeStorageDiagnostics,
+    ProtectionFreshness, StoragePressure,
+};
 use provisioning::{ManagedRuntimeProvisioningInput, ManagedRuntimeProvisioningProfile};
 use release::{OPENWA_CONTRACT_SHA256, OPENWA_RELEASE_TAG};
 use serde_json::json;
@@ -37,6 +40,11 @@ pub use state::ManagedRuntimeState;
 
 pub const STATE_CHANGED_EVENT: &str = "managed-runtime://state-changed";
 const RECOVERY_FRESHNESS_INTERVAL_MS: u64 = 24 * 60 * 60 * 1_000;
+const GIBIBYTE: u64 = 1_024 * 1_024 * 1_024;
+const STORAGE_WARNING_AVAILABLE_BYTES: u64 = 20 * GIBIBYTE;
+const STORAGE_CRITICAL_AVAILABLE_BYTES: u64 = 10 * GIBIBYTE;
+const STORAGE_WARNING_AVAILABLE_PERCENT: u8 = 15;
+const STORAGE_CRITICAL_AVAILABLE_PERCENT: u8 = 8;
 
 fn current_timestamp_millis() -> Result<u64, String> {
     SystemTime::now()
@@ -57,6 +65,39 @@ fn protection_freshness(
         }
         Some(_) => ProtectionFreshness::Due,
     }
+}
+
+fn storage_diagnostics(path: &std::path::Path) -> Result<ManagedRuntimeStorageDiagnostics, String> {
+    let filesystem_path = path
+        .ancestors()
+        .find(|candidate| candidate.exists())
+        .ok_or_else(|| "Could not resolve a filesystem for WA Studio storage.".to_string())?;
+    let filesystem_total_bytes = fs2::total_space(filesystem_path)
+        .map_err(|error| format!("Could not inspect WA Studio storage capacity: {error}"))?;
+    let filesystem_available_bytes = fs2::available_space(filesystem_path)
+        .map_err(|error| format!("Could not inspect WA Studio available storage: {error}"))?;
+    let filesystem_available_percent = filesystem_available_bytes
+        .saturating_mul(100)
+        .checked_div(filesystem_total_bytes)
+        .unwrap_or(0)
+        .min(100) as u8;
+    let pressure = if filesystem_available_bytes <= STORAGE_CRITICAL_AVAILABLE_BYTES
+        || filesystem_available_percent <= STORAGE_CRITICAL_AVAILABLE_PERCENT
+    {
+        StoragePressure::Critical
+    } else if filesystem_available_bytes <= STORAGE_WARNING_AVAILABLE_BYTES
+        || filesystem_available_percent <= STORAGE_WARNING_AVAILABLE_PERCENT
+    {
+        StoragePressure::Warning
+    } else {
+        StoragePressure::Normal
+    };
+    Ok(ManagedRuntimeStorageDiagnostics {
+        filesystem_total_bytes,
+        filesystem_available_bytes,
+        filesystem_available_percent,
+        pressure,
+    })
 }
 
 #[tauri::command]
@@ -82,6 +123,7 @@ pub async fn get_managed_runtime_diagnostics(
         .path()
         .app_data_dir()
         .map_err(|error| format!("Could not resolve WA Desktop data directory: {error}"))?;
+    let storage = storage_diagnostics(&app_data_directory)?;
     let backup_directory = config
         .as_ref()
         .and_then(|config| config.managed_backup_directory(&app_data_directory));
@@ -118,6 +160,7 @@ pub async fn get_managed_runtime_diagnostics(
             last_integrity_check_at_ms,
             postgres::integrity_check_interval_millis(),
         ),
+        storage,
     })
 }
 
@@ -225,6 +268,7 @@ pub async fn create_managed_runtime_backup(app: AppHandle) -> Result<(), String>
     let backup_directory = managed_backup_directory_for_config(&app, &config)?;
     let backup_app = app.clone();
     let path = tauri::async_runtime::spawn_blocking(move || {
+        postgres::remove_incomplete_backups(&backup_directory)?;
         backup_app
             .state::<ManagedRuntimeState>()
             .create_manual_postgres_backup(&backup_directory, &identity)
@@ -919,6 +963,7 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
                 let (release_backup, automatic_backup) =
                     tauri::async_runtime::spawn_blocking(move || {
                         let state = backup_app.state::<ManagedRuntimeState>();
+                        postgres::remove_incomplete_backups(&backup_directory)?;
                         let release_backup = state.create_postgres_backup(
                             &backup_directory,
                             &release_version,
@@ -1563,9 +1608,10 @@ mod tests {
 
     use super::{
         operational_response_matches, parse_and_validate_manifest, protection_freshness,
-        quarantine_path, recovery_passphrase, OPENWA_CONTRACT_SHA256, OPENWA_RELEASE_TAG,
+        quarantine_path, recovery_passphrase, storage_diagnostics, OPENWA_CONTRACT_SHA256,
+        OPENWA_RELEASE_TAG,
     };
-    use crate::managed_runtime::model::ProtectionFreshness;
+    use crate::managed_runtime::model::{ProtectionFreshness, StoragePressure};
     use serde_json::json;
 
     fn valid_manifest() -> String {
@@ -1621,6 +1667,19 @@ mod tests {
             protection_freshness(1_000, Some(1_001), 100),
             ProtectionFreshness::Fresh
         );
+    }
+
+    #[test]
+    fn reports_storage_pressure_for_the_current_filesystem() {
+        let directory = tempfile::tempdir().unwrap();
+        let diagnostics = storage_diagnostics(&directory.path().join("missing/app-data")).unwrap();
+        assert!(diagnostics.filesystem_total_bytes > 0);
+        assert!(diagnostics.filesystem_available_bytes <= diagnostics.filesystem_total_bytes);
+        assert!(diagnostics.filesystem_available_percent <= 100);
+        assert!(matches!(
+            diagnostics.pressure,
+            StoragePressure::Normal | StoragePressure::Warning | StoragePressure::Critical
+        ));
     }
 
     #[test]

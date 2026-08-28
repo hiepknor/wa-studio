@@ -29,6 +29,12 @@ function getDiagnostics(): Promise<ManagedRuntimeDiagnostics> {
     recoveryFreshness: "fresh" as const,
     lastIntegrityCheckAtMs: 1_787_312_260_000,
     integrityFreshness: "fresh" as const,
+    storage: {
+      filesystemTotalBytes: 228 * 1_073_741_824,
+      filesystemAvailableBytes: 64 * 1_073_741_824,
+      filesystemAvailablePercent: 28,
+      pressure: "normal" as const,
+    },
   });
 }
 
@@ -64,6 +70,38 @@ function context(): RuntimeConnectionContextValue {
 }
 
 describe("SettingsScreen", () => {
+  it("surfaces managed storage pressure in the overview", async () => {
+    render(
+      <ToastProvider>
+        <RuntimeConnectionContext.Provider value={context()}>
+          <SettingsScreen
+            getDiagnostics={vi.fn().mockResolvedValue({
+              ...await getDiagnostics(),
+              storage: {
+                filesystemTotalBytes: 228 * 1_073_741_824,
+                filesystemAvailableBytes: 18 * 1_073_741_824,
+                filesystemAvailablePercent: 7,
+                pressure: "critical",
+              },
+            })}
+            getProvisioningProfile={vi.fn().mockResolvedValue(null)}
+            getUpdateState={vi.fn().mockResolvedValue({
+              currentVersion: "0.2.0",
+              disabledReason: "Test build",
+              enabled: false,
+              pending: null,
+            })}
+            listBackups={vi.fn().mockResolvedValue([])}
+            subscribeUpdateProgress={vi.fn().mockResolvedValue(vi.fn())}
+          />
+        </RuntimeConnectionContext.Provider>
+      </ToastProvider>,
+    );
+
+    expect(await screen.findByText("Critical")).toBeInTheDocument();
+    expect(screen.getByText("18.0 GiB available (7%).")).toBeInTheDocument();
+  });
+
   it("requires confirmation and restores a selected encrypted backup", async () => {
     const user = userEvent.setup();
     const listBackups = vi.fn().mockResolvedValue([

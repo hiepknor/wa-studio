@@ -71,6 +71,14 @@ export interface ManagedRuntimeBackup {
 }
 
 export type ProtectionFreshness = "fresh" | "due" | "missing";
+export type StoragePressure = "normal" | "warning" | "critical";
+
+export interface ManagedRuntimeStorageDiagnostics {
+  filesystemTotalBytes: number;
+  filesystemAvailableBytes: number;
+  filesystemAvailablePercent: number;
+  pressure: StoragePressure;
+}
 
 export interface ManagedRuntimeDiagnostics {
   generatedAtMs: number;
@@ -85,6 +93,7 @@ export interface ManagedRuntimeDiagnostics {
   recoveryFreshness: ProtectionFreshness;
   lastIntegrityCheckAtMs: number | null;
   integrityFreshness: ProtectionFreshness;
+  storage: ManagedRuntimeStorageDiagnostics;
 }
 
 export const MANAGED_RUNTIME_STATE_CHANGED_EVENT = "managed-runtime://state-changed";

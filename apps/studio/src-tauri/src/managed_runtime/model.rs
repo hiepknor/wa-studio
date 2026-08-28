@@ -62,6 +62,23 @@ pub enum ProtectionFreshness {
     Missing,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StoragePressure {
+    Normal,
+    Warning,
+    Critical,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedRuntimeStorageDiagnostics {
+    pub filesystem_total_bytes: u64,
+    pub filesystem_available_bytes: u64,
+    pub filesystem_available_percent: u8,
+    pub pressure: StoragePressure,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ManagedRuntimeDiagnostics {
@@ -77,6 +94,7 @@ pub struct ManagedRuntimeDiagnostics {
     pub recovery_freshness: ProtectionFreshness,
     pub last_integrity_check_at_ms: Option<u64>,
     pub integrity_freshness: ProtectionFreshness,
+    pub storage: ManagedRuntimeStorageDiagnostics,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]

@@ -27,6 +27,23 @@ interface SettingsOverviewPanelProps {
 
 type OverviewTone = "danger" | "neutral" | "success" | "warning";
 
+function storagePresentation(diagnostics: ManagedRuntimeDiagnostics | null): {
+  description: string;
+  label: string;
+  tone: OverviewTone;
+} {
+  if (!diagnostics) return { description: "Storage capacity is being inspected.", label: "Inspecting", tone: "neutral" };
+  const availableGiB = diagnostics.storage.filesystemAvailableBytes / 1_073_741_824;
+  const description = `${availableGiB.toFixed(1)} GiB available (${diagnostics.storage.filesystemAvailablePercent}%).`;
+  if (diagnostics.storage.pressure === "critical") {
+    return { description, label: "Critical", tone: "danger" };
+  }
+  if (diagnostics.storage.pressure === "warning") {
+    return { description, label: "Low space", tone: "warning" };
+  }
+  return { description, label: "Available", tone: "success" };
+}
+
 function runtimePresentation(phase: ManagedRuntimeSnapshot["phase"]): {
   badgeLabel: string;
   description: ReactNode;
@@ -87,6 +104,7 @@ export function SettingsOverviewPanel({
 }: SettingsOverviewPanelProps) {
   const runtime = runtimePresentation(managedRuntime.phase);
   const protection = freshnessPresentation(diagnostics?.recoveryFreshness);
+  const storage = storagePresentation(diagnostics);
   const updatePending = updateState?.pending;
   const updateLabel = updatePending
     ? `v${updatePending.version}`
@@ -165,6 +183,11 @@ export function SettingsOverviewPanel({
             ? <>Latest recovery point: <DateTime value={new Date(diagnostics.latestRecoveryPointAtMs).toISOString()} /></>
             : "No local recovery point is available yet."}
           label="Data protection"
+        />
+        <SettingsRow
+          action={<Badge tone={storage.tone} variant="status">{storage.label}</Badge>}
+          description={storage.description}
+          label="Local storage"
         />
       </SettingsSection>
 
