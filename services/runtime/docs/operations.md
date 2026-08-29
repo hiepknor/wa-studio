@@ -196,6 +196,12 @@ template), and raw webhook envelopes for `RUNTIME_RAW_WEBHOOK_RETENTION_DAYS` (7
 retention is the effective webhook idempotency window. Backups remain governed by their own
 retention policy.
 
+Mutation receipts use the operational retention window and are deleted before the terminal object
+they can replay. Historical group-reconciliation operation rows use the same cutoff: the current
+revision is retained, active revisions are never candidates, and a terminal historical revision is
+preserved while any non-expired capability-refresh receipt still references it. Retention logs expose
+their deletion counts as `mutationReceipts` and `groupReconciliationOperations`.
+
 The scheduler runs cleanup every `RUNTIME_RETENTION_INTERVAL_MS`. Each transaction deletes at most
 `RUNTIME_RETENTION_BATCH_SIZE` rows per family, then the tick repeats until all families drain below
 one batch, `RUNTIME_RETENTION_MAX_BATCHES_PER_RUN` is reached, or

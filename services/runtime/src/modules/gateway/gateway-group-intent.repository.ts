@@ -4,6 +4,10 @@ import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-con
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { appendActivityEvent } from '../../core/activity/activity-writer';
 import { DatabaseService } from '../../core/database/database.service';
+import {
+  RuntimeMutationReceiptRepository,
+  type RuntimeMutationReceipt,
+} from '../../core/database/runtime-mutation-receipt.repository';
 import type {
   GroupCapabilityRefreshDto,
   GroupCapabilityRefreshStatus,
@@ -15,6 +19,7 @@ import type {
   GatewayGroupIntentFailurePolicy,
 } from './gateway-group-intent.types';
 import { GatewaySyncRateLimitRepository } from './gateway-sync-rate-limit.repository';
+import { GroupCapabilityRefreshIdempotencyConflictError } from './gateway-mutation-idempotency';
 
 const MANUAL_CAPABILITY_REASON = 'manual.capability_refresh';
 const MANUAL_PRIORITY = 1;
@@ -36,33 +41,45 @@ interface GatewayGroupIntentRow {
   completed_at: Date | null;
 }
 
+interface GatewayGroupOperationRow {
+  session_id: string;
+  group_id: string;
+  request_revision: string;
+  source: 'MANUAL' | 'SYSTEM';
+  status: 'PENDING' | 'RUNNING' | 'RETRY' | 'COMPLETED' | 'FAILED';
+  attempt_count: number;
+  requested_at: Date;
+  started_at: Date | null;
+  next_attempt_at: Date;
+  completed_at: Date | null;
+  error_code: string | null;
+  operation_accepted_at?: Date | null;
+}
+
 function mapCapabilityRefresh(
-  row: GatewayGroupIntentRow,
-  requestRevision = Number(row.requested_revision),
+  row: GatewayGroupOperationRow,
+  receipt?: RuntimeMutationReceipt | null,
 ): GroupCapabilityRefreshDto {
-  const completed = Number(row.completed_revision) >= requestRevision;
-  const status: GroupCapabilityRefreshStatus = completed
-    ? 'COMPLETED'
-    : row.status === 'RETRY'
-      ? 'RETRYING'
-      : row.status;
+  const status: GroupCapabilityRefreshStatus = row.status === 'RETRY' ? 'RETRYING' : row.status;
   return {
     sessionId: row.session_id,
     groupId: row.group_id,
-    requestRevision,
+    requestRevision: Number(row.request_revision),
     status,
-    source: row.reasons.includes(MANUAL_CAPABILITY_REASON) ? 'MANUAL' : 'SYSTEM',
+    source: receipt || row.operation_accepted_at ? 'MANUAL' : row.source,
     attemptCount: row.attempt_count,
-    requestedAt: row.last_requested_at,
+    requestedAt: receipt?.acceptedAt ?? row.operation_accepted_at ?? row.requested_at,
     startedAt: row.started_at,
     nextAttemptAt: ['PENDING', 'RETRYING'].includes(status) ? row.next_attempt_at : null,
-    completedAt: completed || status === 'FAILED' ? row.completed_at : null,
-    errorCode: status === 'FAILED' ? row.last_error_code : null,
+    completedAt: ['COMPLETED', 'FAILED'].includes(status) ? row.completed_at : null,
+    errorCode: status === 'FAILED' ? row.error_code : null,
   };
 }
 
 @Injectable()
 export class GatewayGroupIntentRepository {
+  private readonly mutationReceipts = new RuntimeMutationReceiptRepository();
+
   constructor(
     private readonly database: DatabaseService,
     private readonly rateLimits: GatewaySyncRateLimitRepository = new GatewaySyncRateLimitRepository(database),
@@ -145,7 +162,71 @@ export class GatewayGroupIntentRepository {
     requestReason = MANUAL_CAPABILITY_REASON,
     priority = MANUAL_PRIORITY,
   ): Promise<GroupCapabilityRefreshDto | null> {
+    const result = await this.requestCapabilityRefreshOperation(
+      sessionId,
+      groupId,
+      capabilityReason,
+      requestReason,
+      priority,
+    );
+    return result?.operation ?? null;
+  }
+
+  async requestCapabilityRefreshIdempotent(
+    sessionId: string,
+    groupId: string,
+    idempotency: { key: string; requestHash: string },
+    capabilityReason: GroupSendCapabilityReason = 'MANUAL_REFRESH',
+    requestReason = MANUAL_CAPABILITY_REASON,
+    priority = MANUAL_PRIORITY,
+  ): Promise<{ operation: GroupCapabilityRefreshDto; replayed: boolean } | null> {
+    return this.requestCapabilityRefreshOperation(
+      sessionId,
+      groupId,
+      capabilityReason,
+      requestReason,
+      priority,
+      idempotency,
+    );
+  }
+
+  private async requestCapabilityRefreshOperation(
+    sessionId: string,
+    groupId: string,
+    capabilityReason: GroupSendCapabilityReason,
+    requestReason: string,
+    priority: number,
+    idempotency?: { key: string; requestHash: string },
+  ): Promise<{ operation: GroupCapabilityRefreshDto; replayed: boolean } | null> {
     return this.database.transaction(async client => {
+      if (idempotency) {
+        const receipt = await this.mutationReceipts.lockAndFind(
+          client,
+          'GROUP_CAPABILITY_REFRESH',
+          idempotency.key,
+        );
+        if (receipt) {
+          if (receipt.requestHash !== idempotency.requestHash) {
+            throw new GroupCapabilityRefreshIdempotencyConflictError();
+          }
+          if (receipt.resultRevision === null) {
+            throw new Error('Capability refresh receipt is missing its request revision');
+          }
+          const operation = await client.query<GatewayGroupOperationRow>(
+            `SELECT * FROM gateway_group_reconciliation_operations
+             WHERE session_id = $1 AND group_id = $2 AND request_revision = $3`,
+            [sessionId, groupId, receipt.resultRevision],
+          );
+          if (!operation.rows[0]) {
+            throw new Error('Capability refresh receipt references a missing reconciliation operation');
+          }
+          return {
+            operation: mapCapabilityRefresh(operation.rows[0], receipt),
+            replayed: true,
+          };
+        }
+      }
+
       await this.acquireMutationLock(client, sessionId, groupId);
       const existingIntent = await client.query<GatewayGroupIntentRow>(
         `SELECT * FROM gateway_group_reconciliation_intents
@@ -168,9 +249,9 @@ export class GatewayGroupIntentRepository {
         || existingIntent.rows[0]?.status === 'RETRY'
         ? existingIntent.rows[0]
         : null;
-      let operation: GroupCapabilityRefreshDto;
+      let requestRevision: number;
       if (active) {
-        const updated = await client.query<GatewayGroupIntentRow>(
+        const updated = await client.query<{ requested_revision: string }>(
           `UPDATE gateway_group_reconciliation_intents SET
              reasons = CASE WHEN $3 = ANY(reasons) THEN reasons ELSE array_append(reasons, $3) END,
              priority = LEAST(priority, $4),
@@ -181,7 +262,7 @@ export class GatewayGroupIntentRepository {
            WHERE session_id = $1 AND group_id = $2 RETURNING *`,
           [sessionId, groupId, requestReason, priority],
         );
-        operation = mapCapabilityRefresh(updated.rows[0]!);
+        requestRevision = Number(updated.rows[0]!.requested_revision);
       } else {
         const scheduled = await this.scheduleInTransaction(
           client,
@@ -190,12 +271,7 @@ export class GatewayGroupIntentRepository {
           requestReason,
           { immediate: true, priority },
         );
-        const created = await client.query<GatewayGroupIntentRow>(
-          `SELECT * FROM gateway_group_reconciliation_intents
-           WHERE session_id = $1 AND group_id = $2`,
-          [sessionId, groupId],
-        );
-        operation = mapCapabilityRefresh(created.rows[0]!, scheduled.requestedRevision);
+        requestRevision = scheduled.requestedRevision;
       }
 
       if (groupRow.capability_invalidated_at === null) {
@@ -214,6 +290,25 @@ export class GatewayGroupIntentRepository {
         );
       }
       await client.query(`SELECT pg_notify('wa_runtime_gateway_work', 'group-reconciliation')`);
+      const receipt = idempotency
+        ? await this.mutationReceipts.record(client, {
+            operationType: 'GROUP_CAPABILITY_REFRESH',
+            idempotencyKey: idempotency.key,
+            requestHash: idempotency.requestHash,
+            sessionId,
+            subjectId: groupId,
+            resultId: groupId,
+            resultRevision: requestRevision,
+          })
+        : null;
+      const operationResult = await client.query<GatewayGroupOperationRow>(
+        `SELECT * FROM gateway_group_reconciliation_operations
+         WHERE session_id = $1 AND group_id = $2 AND request_revision = $3`,
+        [sessionId, groupId, requestRevision],
+      );
+      const operationRow = operationResult.rows[0];
+      if (!operationRow) throw new Error('Capability refresh operation projection was not created');
+      const operation = mapCapabilityRefresh(operationRow, receipt);
       await appendActivityEvent(client, {
         sessionId,
         eventType: 'group.capability_refresh.requested',
@@ -227,7 +322,7 @@ export class GatewayGroupIntentRepository {
         metadata: { requestRevision: operation.requestRevision, reason: requestReason },
         dedupeKey: `group-capability-refresh:${sessionId}:${groupId}:${operation.requestRevision}:requested`,
       });
-      return operation;
+      return { operation, replayed: false };
     });
   }
 
@@ -236,16 +331,28 @@ export class GatewayGroupIntentRepository {
     groupId: string,
     requestRevision?: number,
   ): Promise<GroupCapabilityRefreshDto | null> {
-    const result = await this.database.query<GatewayGroupIntentRow>(
-      `SELECT * FROM gateway_group_reconciliation_intents
-       WHERE session_id = $1 AND group_id = $2`,
-      [sessionId, groupId],
+    const result = await this.database.query<GatewayGroupOperationRow>(
+      `SELECT operations.*, receipt.accepted_at AS operation_accepted_at
+       FROM gateway_group_reconciliation_operations operations
+       LEFT JOIN LATERAL (
+         SELECT accepted_at
+         FROM runtime_mutation_receipts
+         WHERE operation_type = 'GROUP_CAPABILITY_REFRESH'
+           AND session_id = operations.session_id
+           AND subject_id = operations.group_id
+           AND result_revision = operations.request_revision
+         ORDER BY accepted_at, idempotency_key
+         LIMIT 1
+       ) receipt ON true
+       WHERE operations.session_id = $1 AND operations.group_id = $2
+         AND ($3::bigint IS NULL OR operations.request_revision = $3)
+       ORDER BY operations.request_revision DESC
+       LIMIT 1`,
+      [sessionId, groupId, requestRevision ?? null],
     );
     const row = result.rows[0];
     if (!row) return null;
-    const revision = requestRevision ?? Number(row.requested_revision);
-    if (revision < 1 || revision > Number(row.requested_revision)) return null;
-    return mapCapabilityRefresh(row, revision);
+    return mapCapabilityRefresh(row);
   }
 
   async completeFromAuthoritativeSync(
@@ -518,7 +625,10 @@ export class GatewayGroupIntentRepository {
            next_attempt_at = CASE
              WHEN requested_revision > COALESCE(claimed_revision, completed_revision) THEN GREATEST(not_before, now())
              WHEN attempt_count >= $1 THEN next_attempt_at ELSE now() END,
-           last_error_code = 'LEASE_EXPIRED', updated_at = now()
+           last_error_code = 'LEASE_EXPIRED',
+           completed_at = CASE WHEN requested_revision <= COALESCE(claimed_revision, completed_revision)
+             AND attempt_count >= $1 THEN now() ELSE NULL END,
+           updated_at = now()
          WHERE status = 'RUNNING' AND lease_expires_at < now()
          RETURNING session_id, status
        ), released AS (

@@ -27,3 +27,10 @@ export class GatewaySyncModeConflictError extends Error {
     this.name = 'GatewaySyncModeConflictError';
   }
 }
+
+export class GatewaySyncIdempotencyConflictError extends Error {
+  constructor() {
+    super('Idempotency-Key was already used with a different session sync request');
+    this.name = 'GatewaySyncIdempotencyConflictError';
+  }
+}

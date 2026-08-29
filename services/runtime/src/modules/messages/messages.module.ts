@@ -9,6 +9,7 @@ import { MessageJobService } from './message-job.service';
 import { MessageSendPolicyService } from './message-send-policy.service';
 import { OutboundSessionLeaseRepository } from './outbound-session-lease.repository';
 import { OutboundSessionLeaseService } from './outbound-session-lease.service';
+import { MessageStatusProjectionService } from './message-status-projection.service';
 
 @Module({
   imports: [GatewayModule, MediaAssetsModule, OpenWAModule],
@@ -20,7 +21,13 @@ import { OutboundSessionLeaseService } from './outbound-session-lease.service';
     MessageJobProcessorService,
     OutboundSessionLeaseRepository,
     OutboundSessionLeaseService,
+    MessageStatusProjectionService,
   ],
-  exports: [MessageJobRepository, MessageSendPolicyService, MessageJobProcessorService],
+  exports: [
+    MessageJobRepository,
+    MessageSendPolicyService,
+    MessageJobProcessorService,
+    MessageStatusProjectionService,
+  ],
 })
 export class MessagesModule {}

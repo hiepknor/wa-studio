@@ -21,10 +21,21 @@ preparation is processed at least once. In the accepted target model, repositori
 constraints, revision checks and token-owned database leases so replay is safe. A stale attempt is
 not allowed to renew, complete, fail or mutate guarded domain data.
 
+Session Sync Runs, their group Items, and targeted group Intents also have database-enforced legal
+transition graphs and lifecycle-field invariants. Capability-refresh observation reads a separate
+per-revision projection instead of the mutable scheduling Intent. A newer event may coalesce into the
+same worker aggregate, but it cannot rewrite an older completed or failed operation returned by poll
+or idempotent replay.
+
 Message delivery cannot be exactly once because the pinned OpenWA send endpoint does not accept a
 Runtime request identifier. A live job is therefore attempted once. If the worker loses its lease
 after entering `PROCESSING`, the Runtime records `UNKNOWN` and never schedules an automatic resend.
 An operator must resolve that ambiguity or create a new intent.
+
+`ACCEPTED` is dispatch-complete but can still receive a definitive failed webhook, while `UNKNOWN`
+can later receive definitive sent or failed evidence. Delivery reconciliation therefore keeps the
+Campaign Run `COMPLETED`/`PARTIAL_FAILED` aggregate convergent with current durable delivery evidence.
+Every correction is audited and side-effect free: it does not reopen the run or issue another send.
 
 The implementation serializes outbound work with a token-owned PostgreSQL lease per session. A
 waiting worker refreshes its message processing lease, and only the current session-lease owner may
@@ -128,6 +139,17 @@ check immediately before calling OpenWA.
 
 ## Idempotency
 
+Operator-triggered session sync, group capability refresh, and Campaign Run pause/resume/cancel use
+immutable PostgreSQL mutation receipts. The receipt key is scoped by operation type and bound to a
+canonical request hash. The receipt is inserted in the same transaction as the durable state change,
+so neither the domain mutation nor its replay evidence can commit alone. A concurrent request with
+the same operation/key waits on a transaction advisory lock and then replays the committed receipt;
+reuse for a different target or payload is rejected. Successful run-action replay returns the current
+canonical run without reapplying the historical transition. A resume rejected by preflight records
+the rejection and report too, so the same key cannot become successful merely because capability
+state changes later. Conflicts caused before a durable decision—such as a stale preflight input—do not
+create a receipt and require a fresh operator intent.
+
 Message idempotency is scoped. The Runtime stores a canonical request hash with each key. Repeating
 the same scope, key and request returns the existing job; reusing the key for a different request is
 a conflict. Campaign message jobs use a run-specific scope so client keys cannot collide with
@@ -135,6 +157,12 @@ campaign delivery keys. Terminal records are removed by configured operational r
 idempotency is guaranteed only while the original record remains within that retention window. Raw
 webhook envelopes and normalized events use shorter, independent lifetimes and multi-batch bounded
 draining as defined by [ADR 012](adr/012-event-ownership-and-bounded-storage.md).
+
+Runtime mutation receipts have the same operational retention window. Cleanup removes expired
+receipts before their old Session Sync or Campaign Run results and before unreferenced historical
+capability-operation projections. The latest group reconciliation revision and every active revision
+remain readable; a historical terminal revision remains readable for as long as a retained receipt
+can replay it.
 
 Campaign-run idempotency binds the key to execution mode and every supplied campaign/target
 revision. LIVE additionally requires a signed, expiring preflight proof for new work. An exact replay

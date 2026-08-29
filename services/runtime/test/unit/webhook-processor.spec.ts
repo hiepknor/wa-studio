@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { MessageJobRepository } from '../../src/modules/messages/message-job.repository';
+import type { MessageStatusProjectionService } from '../../src/modules/messages/message-status-projection.service';
 import type { RuntimeEventRepository } from '../../src/modules/webhooks/runtime-event.repository';
 import { WebhookProcessorService } from '../../src/modules/webhooks/webhook-processor.service';
 import type { OpenWAWebhookEnvelope, WebhookRepository } from '../../src/modules/webhooks/webhook.repository';
@@ -27,20 +27,22 @@ describe('WebhookProcessorService', () => {
       markProcessedInTransaction: vi.fn().mockResolvedValue(true), markFailed: vi.fn(),
     };
     const runtimeEvents = { storeInTransaction: vi.fn().mockResolvedValue(true) };
-    const messages = { updateStatusByOpenWAMessageIdWithClient: vi.fn().mockResolvedValue(undefined) };
+    const messageStatuses = {
+      projectEventInTransaction: vi.fn().mockResolvedValue({ state: 'APPLIED', statusAdvanced: true }),
+    };
     const processor = new WebhookProcessorService(
       database as unknown as DatabaseService,
       webhooks as unknown as WebhookRepository,
       runtimeEvents as unknown as RuntimeEventRepository,
-      messages as unknown as MessageJobRepository,
+      messageStatuses as unknown as MessageStatusProjectionService,
       {} as ContactMessageObserverService,
     );
 
     await processor.process(envelope.idempotencyKey);
 
     expect(runtimeEvents.storeInTransaction).toHaveBeenCalledOnce();
-    expect(messages.updateStatusByOpenWAMessageIdWithClient).toHaveBeenCalledWith(
-      client, 'message-1', 'DELIVERED',
+    expect(messageStatuses.projectEventInTransaction).toHaveBeenCalledWith(
+      client, envelope.idempotencyKey,
     );
     expect(webhooks.markProcessedInTransaction).toHaveBeenCalledWith(
       client, envelope.idempotencyKey, claim.leaseToken,
@@ -60,7 +62,7 @@ describe('WebhookProcessorService', () => {
       database as unknown as DatabaseService,
       webhooks as unknown as WebhookRepository,
       runtimeEvents as unknown as RuntimeEventRepository,
-      {} as MessageJobRepository,
+      {} as MessageStatusProjectionService,
       {} as ContactMessageObserverService,
     );
 
@@ -93,7 +95,9 @@ describe('WebhookProcessorService', () => {
       database as unknown as DatabaseService,
       webhooks as unknown as WebhookRepository,
       { storeInTransaction: vi.fn() } as unknown as RuntimeEventRepository,
-      {} as MessageJobRepository,
+      {
+        projectEventInTransaction: vi.fn().mockResolvedValue({ state: 'MISSING', statusAdvanced: false }),
+      } as unknown as MessageStatusProjectionService,
       contacts as unknown as ContactMessageObserverService,
     );
 
@@ -124,7 +128,7 @@ describe('WebhookProcessorService', () => {
       database as unknown as DatabaseService,
       webhooks as unknown as WebhookRepository,
       { storeInTransaction: vi.fn().mockResolvedValue(true) } as unknown as RuntimeEventRepository,
-      {} as MessageJobRepository,
+      {} as MessageStatusProjectionService,
       { enqueue: vi.fn().mockRejectedValue(new Error('contacts unavailable')) } as unknown as ContactMessageObserverService,
     );
 

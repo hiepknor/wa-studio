@@ -121,6 +121,38 @@ describe("probeRuntimeConnection", () => {
 });
 
 describe("RuntimeApi", () => {
+  it("returns typed component health for an upstream-only degraded response", async () => {
+    const degraded = {
+      status: "degraded",
+      service: "wa-runtime",
+      version: "0.1.0",
+      instanceId: "desktop-1",
+      dependencies: { postgres: true, queue: { backend: "postgres", ready: true } },
+      processes: { worker: "healthy", scheduler: "healthy" },
+      components: {
+        openwa: {
+          status: "UNAVAILABLE",
+          expectedRelease: "0.23.3",
+          observedRelease: null,
+          checkedAt: "2026-08-29T00:00:00.000Z",
+          lastSuccessfulAt: null,
+          reason: "network_error",
+        },
+      },
+      reason: "upstream_unavailable",
+    } as const;
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json(degraded));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
+      runtimeFetch,
+    );
+
+    await expect(api.getOperationalHealth()).resolves.toEqual(degraded);
+    expect((runtimeFetch.mock.calls[0][0] as Request).url).toBe(
+      "http://127.0.0.1:3100/api/v1/health/operational",
+    );
+  });
+
   it("propagates caller cancellation through a typed read", async () => {
     let transportSignal: AbortSignal | undefined;
     const runtimeFetch = vi.fn<typeof fetch>().mockImplementation((input) => {
@@ -441,7 +473,7 @@ describe("RuntimeApi", () => {
       preflightToken: report.liveLaunchToken,
     }, "launch-key");
     await api.getCampaignRun(run.id);
-    await api.pauseCampaignRun(run.id);
+    await api.pauseCampaignRun(run.id, "123e4567-e89b-42d3-a456-426614174000");
 
     const requests = runtimeFetch.mock.calls.map((call) => call[0] as Request);
     expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
@@ -467,6 +499,7 @@ describe("RuntimeApi", () => {
       executionMode: "LIVE", expectedCampaignRevision: 1, expectedTargetsRevision: 4,
       preflightToken: report.liveLaunchToken,
     });
+    expect(requests[7].headers.get("Idempotency-Key")).toBe("123e4567-e89b-42d3-a456-426614174000");
     expect(requests.some((request) => request.url.includes("message"))).toBe(false);
   });
 
@@ -491,7 +524,10 @@ describe("RuntimeApi", () => {
       runtimeFetch,
     );
 
-    await expect(api.requestSessionSync("session id")).resolves.toEqual(syncRun);
+    await expect(api.requestSessionSync(
+      "session id",
+      "00000000-0000-4000-8000-000000000011",
+    )).resolves.toEqual(syncRun);
 
     const request = runtimeFetch.mock.calls[0][0] as Request;
     expect(request.method).toBe("POST");
@@ -499,6 +535,9 @@ describe("RuntimeApi", () => {
       "http://127.0.0.1:3100/api/v1/sessions/session%20id/sync",
     );
     expect(request.headers.get("X-Runtime-Key")).toBe("0123456789abcdef0123456789abcdef");
+    expect(request.headers.get("Idempotency-Key")).toBe(
+      "00000000-0000-4000-8000-000000000011",
+    );
   });
 
   it("reads paginated groups and group details for a session", async () => {
@@ -727,13 +766,20 @@ describe("RuntimeApi", () => {
       runtimeFetch,
     );
 
-    await expect(api.requestGroupCapabilityRefresh("session id", "120363@g.us"))
+    await expect(api.requestGroupCapabilityRefresh(
+      "session id",
+      "120363@g.us",
+      "00000000-0000-4000-8000-000000000021",
+    ))
       .resolves.toEqual(operation);
 
     const request = runtimeFetch.mock.calls[0][0] as Request;
     expect(request.method).toBe("POST");
     expect(request.url).toBe(
       "http://127.0.0.1:3100/api/v1/groups/120363%40g.us/capability-refreshes?sessionId=session%20id",
+    );
+    expect(request.headers.get("Idempotency-Key")).toBe(
+      "00000000-0000-4000-8000-000000000021",
     );
   });
 

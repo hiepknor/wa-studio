@@ -54,12 +54,17 @@ Clients must branch on `code` and HTTP status, not parse the human-readable `mes
 
 ## Idempotency
 
-These creation endpoints require an `Idempotency-Key` header:
+These intent endpoints require an `Idempotency-Key` header:
 
 - `POST /message-jobs`;
 - `POST /campaigns`;
 - `POST /group-lists`;
-- `POST /campaigns/{id}/runs`.
+- `POST /campaigns/{id}/runs`;
+- `POST /sessions/{id}/sync`;
+- `POST /groups/{id}/capability-refreshes`;
+- `POST /campaign-runs/{id}/pause`;
+- `POST /campaign-runs/{id}/resume`;
+- `POST /campaign-runs/{id}/cancel`.
 
 Keys describe one operator intent and should be stable across HTTP retry, timeout and client
 restart. Do not generate a new key merely because the response was lost. Reusing a campaign-run key
@@ -72,6 +77,14 @@ the original draft with HTTP 200 on an exact replay. Reusing a key for another p
 Group-list-create keys are UUIDs bound to the canonical session, trimmed metadata and sorted initial
 membership. Exact replay returns the original list with HTTP 200; another payload returns HTTP 409
 `GROUP_LIST_IDEMPOTENCY_CONFLICT`.
+Session sync, capability refresh and Campaign Run lifecycle keys are UUIDs. Their receipt is committed
+atomically with the durable mutation. Exact sync/capability replay returns HTTP 200 instead of the
+initial HTTP 202; lifecycle actions use HTTP 200 for both first application and replay. Reusing a key
+for a different canonical intent returns a typed HTTP 409. A blocked resume is a durable rejected
+outcome: replaying its key returns the same conflict even if later capability observations differ.
+Capability-refresh progress is revision-stable: reads and replays resolve the operation row for the
+requested revision, so a later coalesced group event cannot replace its timestamps, attempts, terminal
+status, or error.
 
 ## Endpoint groups
 
@@ -93,7 +106,7 @@ GET  /sessions/{id}/sync-runs/{runId}
 GET  /groups?sessionId={sessionId}&limit=50&offset=0&query={search}&capabilityStatus={statuses}&capabilityFreshness={freshness}&isActive={boolean}&minParticipants={integer}&maxParticipants={integer}
 GET  /groups/{id}?sessionId={sessionId}
 GET  /groups/{id}/members?sessionId={sessionId}&limit=50&offset=0&query={search}
-POST /groups/{id}/refresh-capability?sessionId={sessionId}
+POST /groups/{id}/capability-refreshes?sessionId={sessionId}
 GET  /messages?sessionId={sessionId}&groupId={groupId}
 ```
 

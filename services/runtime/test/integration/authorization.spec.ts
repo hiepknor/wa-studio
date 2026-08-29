@@ -35,6 +35,10 @@ describe('HTTP session authorization', () => {
   afterAll(async () => { await app.close(); await pool.end(); });
 
   const runtimeHeaders = { 'x-runtime-key': process.env.RUNTIME_API_KEY! };
+  const idempotencyHeaders = (key: string) => ({
+    ...runtimeHeaders,
+    'idempotency-key': key,
+  });
 
   it('preserves a valid request id and replaces an invalid one', async () => {
     const supplied = await fetch(`${baseUrl}/health/live`, { headers: { 'x-request-id': 'request-123' } });
@@ -53,7 +57,10 @@ describe('HTTP session authorization', () => {
 
     const oversized = await fetch(`${baseUrl}/sessions/${INTEGRATION_SESSION_ID}/sync`, {
       method: 'POST',
-      headers: { ...runtimeHeaders, 'content-type': 'application/json' },
+      headers: {
+        ...idempotencyHeaders('00000000-0000-4000-8000-000000000010'),
+        'content-type': 'application/json',
+      },
       body: JSON.stringify({ padding: 'x'.repeat(1_048_576) }),
     });
     expect(oversized.status).toBe(413);
@@ -122,16 +129,34 @@ describe('HTTP session authorization', () => {
   });
 
   it('validates additive sync modes and preserves the no-body FULL default', async () => {
+    const fullKey = '00000000-0000-4000-8000-000000000011';
     const noBody = await fetch(`${baseUrl}/sessions/${INTEGRATION_SESSION_ID}/sync`, {
-      method: 'POST', headers: runtimeHeaders,
+      method: 'POST', headers: idempotencyHeaders(fullKey),
     });
     expect(noBody.status).toBe(202);
-    expect(await noBody.json()).toMatchObject({ syncType: 'FULL', phase: 'DISCOVERING' });
+    const fullRun = await noBody.json() as { id: string; syncType: string; phase: string };
+    expect(fullRun).toMatchObject({ syncType: 'FULL', phase: 'DISCOVERING' });
 
-    await pool.query(`UPDATE sync_runs SET status = 'COMPLETED', completed_at = now()`);
+    await pool.query(
+      `UPDATE sync_runs SET status = 'RUNNING', sync_epoch = 1,
+         lease_token = gen_random_uuid(), lease_expires_at = now() + interval '2 minutes'
+       WHERE status = 'PENDING'`,
+    );
+    await pool.query(
+      `UPDATE sync_runs SET status = 'COMPLETED', phase = 'COMPLETED', completed_at = now(),
+         lease_token = NULL, lease_expires_at = NULL
+       WHERE status = 'RUNNING'`,
+    );
+    const replay = await fetch(`${baseUrl}/sessions/${INTEGRATION_SESSION_ID}/sync`, {
+      method: 'POST', headers: idempotencyHeaders(fullKey),
+    });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ id: fullRun.id, status: 'COMPLETED' });
+
+    const incrementalKey = '00000000-0000-4000-8000-000000000012';
     const incremental = await fetch(`${baseUrl}/sessions/${INTEGRATION_SESSION_ID}/sync`, {
       method: 'POST',
-      headers: { ...runtimeHeaders, 'content-type': 'application/json' },
+      headers: { ...idempotencyHeaders(incrementalKey), 'content-type': 'application/json' },
       body: JSON.stringify({ mode: 'INCREMENTAL' }),
     });
     expect(incremental.status).toBe(202);
@@ -139,7 +164,10 @@ describe('HTTP session authorization', () => {
 
     const conflicting = await fetch(`${baseUrl}/sessions/${INTEGRATION_SESSION_ID}/sync`, {
       method: 'POST',
-      headers: { ...runtimeHeaders, 'content-type': 'application/json' },
+      headers: {
+        ...idempotencyHeaders('00000000-0000-4000-8000-000000000013'),
+        'content-type': 'application/json',
+      },
       body: JSON.stringify({ mode: 'FULL' }),
     });
     expect(conflicting.status).toBe(409);
@@ -147,11 +175,41 @@ describe('HTTP session authorization', () => {
       code: 'SYNC_MODE_CONFLICT', activeMode: 'INCREMENTAL',
     });
 
+    const idempotencyConflict = await fetch(`${baseUrl}/sessions/${INTEGRATION_SESSION_ID}/sync`, {
+      method: 'POST',
+      headers: { ...idempotencyHeaders(incrementalKey), 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'FULL' }),
+    });
+    expect(idempotencyConflict.status).toBe(409);
+    expect(await idempotencyConflict.json()).toMatchObject({
+      code: 'SESSION_SYNC_IDEMPOTENCY_CONFLICT',
+    });
+
     const invalid = await fetch(`${baseUrl}/sessions/${INTEGRATION_SESSION_ID}/sync`, {
       method: 'POST',
-      headers: { ...runtimeHeaders, 'content-type': 'application/json' },
+      headers: {
+        ...idempotencyHeaders('00000000-0000-4000-8000-000000000014'),
+        'content-type': 'application/json',
+      },
       body: JSON.stringify({ mode: 'FAST' }),
     });
     expect(invalid.status).toBe(400);
+  });
+
+  it('collapses concurrent sync requests with the same durable operation key', async () => {
+    const endpoint = `${baseUrl}/sessions/${INTEGRATION_SESSION_ID}/sync`;
+    const request = () => fetch(endpoint, {
+      method: 'POST',
+      headers: idempotencyHeaders('00000000-0000-4000-8000-000000000015'),
+    });
+    const responses = await Promise.all([request(), request()]);
+    expect(responses.map(response => response.status).sort()).toEqual([200, 202]);
+    const runs = await Promise.all(responses.map(response => response.json() as Promise<{ id: string }>));
+    expect(new Set(runs.map(run => run.id)).size).toBe(1);
+    expect((await pool.query('SELECT count(*)::int AS count FROM sync_runs')).rows[0].count).toBe(1);
+    expect((await pool.query(
+      `SELECT count(*)::int AS count FROM runtime_mutation_receipts
+       WHERE operation_type = 'SESSION_SYNC'`,
+    )).rows[0].count).toBe(1);
   });
 });

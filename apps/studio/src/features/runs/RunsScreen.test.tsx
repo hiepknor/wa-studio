@@ -209,7 +209,10 @@ describe("RunsScreen", () => {
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     await user.click(within(inspector).getByRole("button", { name: "Pause" }));
-    await waitFor(() => expect(api.pauseCampaignRun).toHaveBeenCalledWith(run.id));
+    await waitFor(() => expect(api.pauseCampaignRun).toHaveBeenCalledWith(
+      run.id,
+      expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    ));
     expect(await within(inspector).findByText(/Paused · Runtime authoritative/)).toBeInTheDocument();
   });
 
@@ -335,6 +338,32 @@ describe("RunsScreen", () => {
     expect(getCampaignRun).toHaveBeenCalledTimes(2);
   });
 
+  it("reuses the same action key when an unconfirmed pause is retried", async () => {
+    const user = userEvent.setup();
+    const paused = { ...run, status: "PAUSED" as const };
+    const pauseCampaignRun = vi.fn()
+      .mockRejectedValueOnce(new RuntimeTransportError(
+        "response lost",
+        { requestDispatched: true },
+      ))
+      .mockResolvedValueOnce(paused);
+    renderRuns({
+      getCampaignRun: vi.fn().mockResolvedValue(run),
+      pauseCampaignRun,
+    });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+
+    await user.click(await within(inspector).findByRole("button", { name: "Pause" }));
+    expect(await within(inspector).findByText(/same request key/)).toBeInTheDocument();
+    await user.click(within(inspector).getByRole("button", { name: "Pause" }));
+
+    await waitFor(() => expect(pauseCampaignRun).toHaveBeenCalledTimes(2));
+    expect(pauseCampaignRun.mock.calls[0]?.[1]).toBe(pauseCampaignRun.mock.calls[1]?.[1]);
+    expect(await within(inspector).findByText(/Paused · Runtime authoritative/)).toBeInTheDocument();
+  });
+
   it("returns an out-of-range result to the aligned last page", async () => {
     const user = userEvent.setup();
     let contracted = false;
@@ -409,7 +438,10 @@ describe("RunsScreen", () => {
     const firstInspector = await screen.findByRole("dialog", { name: "Product release" });
     expect(await within(firstInspector).findByText("Release message snapshot")).toBeInTheDocument();
     await user.click(within(firstInspector).getByRole("button", { name: "Pause" }));
-    await waitFor(() => expect(api.pauseCampaignRun).toHaveBeenCalledWith(run.id));
+    await waitFor(() => expect(api.pauseCampaignRun).toHaveBeenCalledWith(
+      run.id,
+      expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    ));
 
     await user.click(screen.getByRole("button", { name: "Retention campaign" }));
     const secondInspector = await screen.findByRole("dialog", { name: "Retention campaign" });

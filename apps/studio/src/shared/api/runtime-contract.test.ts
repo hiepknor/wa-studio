@@ -29,6 +29,19 @@ type GroupListDeleteQuery = NonNullable<
 type CampaignDeleteQuery = NonNullable<
   paths["/api/v1/campaigns/{id}"]["delete"]["parameters"]["query"]
 >;
+type SessionSyncHeaders = paths["/api/v1/sessions/{id}/sync"]["post"]["parameters"]["header"];
+type CapabilityRefreshHeaders = paths[
+  "/api/v1/groups/{id}/capability-refreshes"
+]["post"]["parameters"]["header"];
+type PauseRunHeaders = paths[
+  "/api/v1/campaign-runs/{id}/pause"
+]["post"]["parameters"]["header"];
+type ResumeRunHeaders = paths[
+  "/api/v1/campaign-runs/{id}/resume"
+]["post"]["parameters"]["header"];
+type CancelRunHeaders = paths[
+  "/api/v1/campaign-runs/{id}/cancel"
+]["post"]["parameters"]["header"];
 
 describe("authoritative WA Runtime contract", () => {
   it("keeps the canonical snapshot at the pinned SHA-256", async () => {
@@ -38,7 +51,21 @@ describe("authoritative WA Runtime contract", () => {
     );
     const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(checksum)
-      .toBe("48ff0d5dfd8e27c4f1158419f42f2bb2e146df6ddfc60f18f75a473471b440ab");
+      .toBe("bddd43cbbe78dce5648d2f6bcd728fae3776c34eb6542c3b5e8b658de400ab6b");
+  });
+
+  it("requires operation keys for replay-safe Runtime mutations", () => {
+    const key = "00000000-0000-4000-8000-000000000001";
+    const sync: SessionSyncHeaders = { "Idempotency-Key": key };
+    const capability: CapabilityRefreshHeaders = { "Idempotency-Key": key };
+    const pause: PauseRunHeaders = { "Idempotency-Key": key };
+    const resume: ResumeRunHeaders = { "Idempotency-Key": key };
+    const cancel: CancelRunHeaders = { "Idempotency-Key": key };
+    expect(sync["Idempotency-Key"]).toBe(key);
+    expect(capability["Idempotency-Key"]).toBe(key);
+    expect(pause["Idempotency-Key"]).toBe(key);
+    expect(resume["Idempotency-Key"]).toBe(key);
+    expect(cancel["Idempotency-Key"]).toBe(key);
   });
 
   it("generates nullable scheduledAt for UpdateCampaignDto", () => {

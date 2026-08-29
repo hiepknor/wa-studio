@@ -111,4 +111,36 @@ describe('HealthController readiness', () => {
     });
     expect(response.status).toHaveBeenCalledWith(503);
   });
+
+  it('keeps local operations available while reporting an unavailable OpenWA component', async () => {
+    const database = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+    const queues = {
+      readiness: vi.fn().mockResolvedValue({ backend: 'postgres', ready: true }),
+      runtimeProcessHealth: vi.fn().mockResolvedValue({ worker: 'healthy', scheduler: 'healthy' }),
+    };
+    const response = { status: vi.fn().mockReturnThis() };
+    const openwa = {
+      snapshot: vi.fn().mockReturnValue({
+        status: 'UNAVAILABLE',
+        expectedRelease: '0.22.0',
+        observedRelease: null,
+        checkedAt: '2026-08-29T00:00:00.000Z',
+        lastSuccessfulAt: null,
+        reason: 'network_error',
+      }),
+    };
+    const controller = new HealthController(
+      database as unknown as DatabaseService,
+      queues as unknown as QueueService,
+      undefined,
+      openwa as never,
+    );
+
+    await expect(controller.operational(response as never)).resolves.toMatchObject({
+      status: 'degraded',
+      reason: 'upstream_unavailable',
+      components: { openwa: { status: 'UNAVAILABLE' } },
+    });
+    expect(response.status).not.toHaveBeenCalled();
+  });
 });

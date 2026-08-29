@@ -35,6 +35,7 @@ pub struct DesktopRuntimeConfig {
     openwa_api_key: String,
     openwa_webhook_secret: String,
     openwa_allowed_session_ids: String,
+    openwa_compatibility_freshness_ms: Option<u64>,
     allow_live_sends: bool,
     event_inbox: DesktopEventInboxConfig,
 }
@@ -61,6 +62,7 @@ impl DesktopRuntimeConfig {
             openwa_api_key: settings.openwa_api_key,
             openwa_webhook_secret: settings.openwa_webhook_secret,
             openwa_allowed_session_ids: settings.openwa_allowed_session_ids.join(","),
+            openwa_compatibility_freshness_ms: None,
             allow_live_sends: settings.allow_live_sends,
             event_inbox: DesktopEventInboxConfig {
                 base_url: settings.event_inbox.base_url,
@@ -160,6 +162,24 @@ impl DesktopRuntimeConfig {
                 "WA_DESKTOP_RUNTIME_NODE_ENV must be development, test, or production.".to_string(),
             );
         }
+        let openwa_compatibility_freshness_ms = optional_environment(
+            "WA_DESKTOP_OPENWA_COMPATIBILITY_FRESHNESS_MS",
+        )?
+        .map(|value| {
+            value.parse::<u64>().map_err(|_| {
+                "WA_DESKTOP_OPENWA_COMPATIBILITY_FRESHNESS_MS must be an integer between 1000 and 300000."
+                    .to_string()
+            })
+        })
+        .transpose()?;
+        if openwa_compatibility_freshness_ms
+            .is_some_and(|value| !(1_000..=300_000).contains(&value))
+        {
+            return Err(
+                "WA_DESKTOP_OPENWA_COMPATIBILITY_FRESHNESS_MS must be an integer between 1000 and 300000."
+                    .to_string(),
+            );
+        }
 
         Ok(Some(Self {
             port,
@@ -170,6 +190,7 @@ impl DesktopRuntimeConfig {
             openwa_api_key: value(&values, "WA_DESKTOP_OPENWA_API_KEY")?,
             openwa_webhook_secret: value(&values, "WA_DESKTOP_OPENWA_WEBHOOK_SECRET")?,
             openwa_allowed_session_ids: value(&values, "WA_DESKTOP_OPENWA_ALLOWED_SESSION_IDS")?,
+            openwa_compatibility_freshness_ms,
             allow_live_sends: std::env::var("WA_DESKTOP_ALLOW_LIVE_SENDS").ok().as_deref()
                 == Some("true"),
             event_inbox: DesktopEventInboxConfig {
@@ -186,7 +207,7 @@ impl DesktopRuntimeConfig {
         database_url: &str,
         openwa_release_tag: &str,
     ) -> Vec<(String, String)> {
-        vec![
+        let mut environment = vec![
             ("NODE_ENV".to_string(), self.node_environment.clone()),
             ("RUNTIME_PROFILE".to_string(), "desktop-managed".to_string()),
             ("RUNTIME_BIND_HOST".to_string(), "127.0.0.1".to_string()),
@@ -244,11 +265,14 @@ impl DesktopRuntimeConfig {
                 "OPENWA_WEBHOOK_CALLBACK_URL".to_string(),
                 self.event_inbox.callback_url.clone(),
             ),
-        ]
-    }
-
-    pub fn openwa_probe_credentials(&self) -> (String, String) {
-        (self.openwa_base_url.clone(), self.openwa_api_key.clone())
+        ];
+        if let Some(freshness_ms) = self.openwa_compatibility_freshness_ms {
+            environment.push((
+                "OPENWA_COMPATIBILITY_FRESHNESS_MS".to_string(),
+                freshness_ms.to_string(),
+            ));
+        }
+        environment
     }
 
     pub fn managed_backup_directory(
@@ -313,6 +337,7 @@ mod tests {
             openwa_api_key: "openwa-secret".to_string(),
             openwa_webhook_secret: "webhook-secret-with-at-least-32-characters".to_string(),
             openwa_allowed_session_ids: "00000000-0000-4000-8000-000000000001".to_string(),
+            openwa_compatibility_freshness_ms: None,
             allow_live_sends,
             event_inbox: DesktopEventInboxConfig {
                 base_url: "https://events.example.test".to_string(),
@@ -373,5 +398,22 @@ mod tests {
             "0.22.0",
         );
         assert!(environment.contains(&("ALLOW_LIVE_SENDS".to_string(), "true".to_string())));
+    }
+
+    #[test]
+    fn forwards_a_valid_developer_compatibility_freshness_override() {
+        let mut config = config(false);
+        config.openwa_compatibility_freshness_ms = Some(1_500);
+
+        let environment = config.runtime_environment(
+            "/app/runtime-migrations",
+            "postgresql://runtime:secret@127.0.0.1/runtime",
+            "0.22.0",
+        );
+
+        assert!(environment.contains(&(
+            "OPENWA_COMPATIBILITY_FRESHNESS_MS".to_string(),
+            "1500".to_string(),
+        )));
     }
 }

@@ -63,6 +63,8 @@ function context(): RuntimeConnectionContextValue {
       connection: null,
       error: null,
     },
+    operationalHealth: null,
+    refreshOperationalHealth: vi.fn().mockResolvedValue(false),
     refreshSessions: vi.fn(),
     selectedSessionId: null,
     selectSession: vi.fn(),

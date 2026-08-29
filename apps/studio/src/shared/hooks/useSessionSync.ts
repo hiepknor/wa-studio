@@ -41,6 +41,7 @@ export function useSessionSync({
   const [error, setError] = useState<string | null>(null);
   const revisionRef = useRef(0);
   const activeRevisionRef = useRef<number | null>(null);
+  const idempotencyKeyRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const targetRef = useRef({ runtimeOrigin, sessionId });
   const completedRef = useRef(onCompleted);
@@ -63,6 +64,7 @@ export function useSessionSync({
 
   const reset = useCallback(() => {
     cancel();
+    idempotencyKeyRef.current = null;
     setState("idle");
     setRun(null);
     setError(null);
@@ -80,13 +82,16 @@ export function useSessionSync({
     const origin = runtimeOrigin;
     const id = sessionId;
     const controller = new AbortController();
+    const idempotencyKey = idempotencyKeyRef.current ?? crypto.randomUUID();
+    idempotencyKeyRef.current = idempotencyKey;
     abortRef.current = controller;
     setState("requesting");
     setRun(null);
     setError(null);
 
     try {
-      const initialRun = await runtimeApi.requestSessionSync(id);
+      const initialRun = await runtimeApi.requestSessionSync(id, idempotencyKey);
+      idempotencyKeyRef.current = null;
       if (!flowIsCurrent(revision, origin, id)) return null;
       setRun(initialRun);
       setState("running");
@@ -132,8 +137,9 @@ export function useSessionSync({
     } catch (requestError) {
       if (!flowIsCurrent(revision, origin, id)) return null;
       const outcomeUnknown = isUnknownMutationOutcome(requestError);
+      if (!outcomeUnknown) idempotencyKeyRef.current = null;
       const message = outcomeUnknown
-        ? unknownMutationOutcomeMessage("observe-background")
+        ? unknownMutationOutcomeMessage("idempotent-retry")
         : userFacingErrorMessage(requestError, "Could not start session sync.");
       setState(outcomeUnknown ? "unknown" : "failed");
       setError(message);

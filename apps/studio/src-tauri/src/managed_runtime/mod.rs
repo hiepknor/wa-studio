@@ -866,18 +866,6 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
         publish_snapshot(app, ManagedRuntimeSnapshot::provisioning_required(manifest));
         return Ok(());
     };
-    let (openwa_base_url, openwa_api_key) = config.openwa_probe_credentials();
-    let expected_openwa_release = manifest.openwa_release_tag.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        provisioning::assert_compatible_release(
-            &openwa_base_url,
-            &openwa_api_key,
-            &expected_openwa_release,
-        )
-    })
-    .await
-    .map_err(|error| format!("OpenWA release probe task failed: {error}"))??;
-
     let resource_directory = app
         .path()
         .resource_dir()
@@ -1479,7 +1467,17 @@ fn operational_response_matches(response: &str, instance_id: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .is_some_and(|payload| {
-            payload.get("status").and_then(|value| value.as_str()) == Some("operational")
+            let status = payload.get("status").and_then(|value| value.as_str());
+            let upstream_only_degradation = status == Some("degraded")
+                && matches!(
+                    payload.get("reason").and_then(|value| value.as_str()),
+                    Some(
+                        "upstream_status_unknown"
+                            | "upstream_unavailable"
+                            | "upstream_incompatible"
+                    )
+                );
+            (status == Some("operational") || upstream_only_degradation)
                 && payload.get("instanceId").and_then(|value| value.as_str()) == Some(instance_id)
         })
 }
@@ -1738,8 +1736,14 @@ mod tests {
     #[test]
     fn operational_health_must_match_the_spawned_generation() {
         let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"operational\",\"instanceId\":\"desktop-7\"}";
+        let upstream_degraded = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\":\"degraded\",\"reason\":\"upstream_unavailable\",\"instanceId\":\"desktop-7\"}";
 
         assert!(operational_response_matches(response, "desktop-7"));
+        assert!(operational_response_matches(upstream_degraded, "desktop-7"));
+        assert!(!operational_response_matches(
+            &upstream_degraded.replace("upstream_unavailable", "background_process_degraded"),
+            "desktop-7"
+        ));
         assert!(!operational_response_matches(response, "desktop-6"));
         assert!(!operational_response_matches(
             &response.replace("200 OK", "503 Service Unavailable"),

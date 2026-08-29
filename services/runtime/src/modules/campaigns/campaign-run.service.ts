@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { isUUID } from 'class-validator';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
@@ -11,7 +12,12 @@ import {
   InvalidCampaignLivePreflightTokenError,
 } from './campaign-live-preflight-token.service';
 import { CampaignPreflightService } from './campaign-preflight.service';
-import { CampaignRunRepository } from './campaign-run.repository';
+import {
+  CampaignRunActionIdempotencyConflictError,
+  type CampaignRunActionRequest,
+  type CampaignRunActionResult,
+  CampaignRunRepository,
+} from './campaign-run.repository';
 import { CampaignService } from './campaign.service';
 import { CampaignError } from './campaign-error';
 
@@ -149,9 +155,8 @@ export class CampaignRunService {
 
   async get(id: string) {
     const run = await this.repository.find(id);
-    if (!run || !this.config.OPENWA_ALLOWED_SESSION_IDS.includes(run.sessionId)) {
-      throw new CampaignError(HttpStatus.NOT_FOUND, 'CAMPAIGN_RUN_NOT_FOUND', 'Campaign run not found');
-    }
+    if (!run) this.runNotFound();
+    this.assertRunVisible(run!);
     return run;
   }
 
@@ -198,58 +203,136 @@ export class CampaignRunService {
     return { data: result.data, meta: { total: result.total, limit: query.limit, offset: query.offset } };
   }
 
-  async pause(id: string) {
-    const current = await this.get(id);
-    if (!['SCHEDULED', 'RUNNING'].includes(current.status)) {
-      throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
-        `Campaign run cannot be paused from ${current.status}`);
-    }
-    const run = await this.repository.pause(id);
-    if (!run) throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
-      'Campaign run state changed; reload and retry');
-    return run;
-  }
-
-  async resume(id: string) {
-    const current = await this.get(id);
-    if (!['PAUSED', 'BLOCKED'].includes(current.status)) {
-      throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
-        `Campaign run cannot be resumed from ${current.status}`);
-    }
-    const context = await this.repository.getPreflightContext(id);
-    if (!context) throw new CampaignError(HttpStatus.NOT_FOUND, 'CAMPAIGN_RUN_NOT_FOUND', 'Campaign run not found');
-    const report = await this.preflights.evaluate({
-      executionMode: context.run.executionMode,
-      sessionId: context.run.sessionId,
-      content: context.run.content,
-      targets: context.targets,
-      campaignRevision: context.campaignRevision,
-      targetsRevision: context.targetsRevision,
+  async pause(id: string, rawIdempotencyKey: string | undefined) {
+    return this.withActionIdempotencyConflict(async () => {
+      const request = this.actionRequest(id, 'pause', rawIdempotencyKey);
+      const replay = await this.repository.findActionResult(id, request);
+      if (replay) return this.resolveActionResult(replay);
+      const current = await this.get(id);
+      if (!['SCHEDULED', 'RUNNING'].includes(current.status)) {
+        throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
+          `Campaign run cannot be paused from ${current.status}`);
+      }
+      const result = await this.repository.pause(id, request);
+      if (!result) throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
+        'Campaign run state changed; reload and retry');
+      return this.resolveActionResult(result);
     });
-    if (report.status === 'BLOCK') {
-      await this.repository.recordBlockedResume(id, report);
-      throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
-        'Campaign run is still blocked by preflight', { preflight: report });
-    }
-    const run = await this.repository.resume(id, report, context.targets);
-    if (run === 'STALE_INPUT') {
-      throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
-        'Group capability changed during resume preflight; retry with current state');
-    }
-    if (!run) throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
-      'Campaign run state changed; reload and retry');
-    return run;
   }
 
-  async cancel(id: string) {
-    const current = await this.get(id);
-    if (!['PREPARING', 'BLOCKED', 'SCHEDULED', 'RUNNING', 'PAUSED'].includes(current.status)) {
-      throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
-        `Campaign run cannot be cancelled from ${current.status}`);
+  async resume(id: string, rawIdempotencyKey: string | undefined) {
+    return this.withActionIdempotencyConflict(async () => {
+      const request = this.actionRequest(id, 'resume', rawIdempotencyKey);
+      const replay = await this.repository.findActionResult(id, request);
+      if (replay) return this.resolveActionResult(replay);
+      const current = await this.get(id);
+      if (!['PAUSED', 'BLOCKED'].includes(current.status)) {
+        throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
+          `Campaign run cannot be resumed from ${current.status}`);
+      }
+      const context = await this.repository.getPreflightContext(id);
+      if (!context) this.runNotFound();
+      const report = await this.preflights.evaluate({
+        executionMode: context!.run.executionMode,
+        sessionId: context!.run.sessionId,
+        content: context!.run.content,
+        targets: context!.targets,
+        campaignRevision: context!.campaignRevision,
+        targetsRevision: context!.targetsRevision,
+      });
+      if (report.status === 'BLOCK') {
+        const rejected = await this.repository.rejectResume(id, report, request);
+        if (!rejected) {
+          throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
+            'Campaign run state changed; reload and retry');
+        }
+        return this.resolveActionResult(rejected);
+      }
+      const result = await this.repository.resume(id, report, context!.targets, request);
+      if (result === 'STALE_INPUT') {
+        throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
+          'Group capability changed during resume preflight; retry with current state');
+      }
+      if (!result) throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
+        'Campaign run state changed; reload and retry');
+      return this.resolveActionResult(result);
+    });
+  }
+
+  async cancel(id: string, rawIdempotencyKey: string | undefined) {
+    return this.withActionIdempotencyConflict(async () => {
+      const request = this.actionRequest(id, 'cancel', rawIdempotencyKey);
+      const replay = await this.repository.findActionResult(id, request);
+      if (replay) return this.resolveActionResult(replay);
+      const current = await this.get(id);
+      if (!['PREPARING', 'BLOCKED', 'SCHEDULED', 'RUNNING', 'PAUSED'].includes(current.status)) {
+        throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
+          `Campaign run cannot be cancelled from ${current.status}`);
+      }
+      const result = await this.repository.cancel(id, request);
+      if (!result) throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
+        'Campaign run state changed; reload and retry');
+      return this.resolveActionResult(result);
+    });
+  }
+
+  private actionRequest(
+    id: string,
+    action: 'pause' | 'resume' | 'cancel',
+    rawIdempotencyKey: string | undefined,
+  ): CampaignRunActionRequest {
+    const idempotencyKey = rawIdempotencyKey?.trim();
+    if (!idempotencyKey) {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_RUN_ACTION_IDEMPOTENCY_KEY_REQUIRED',
+        'Idempotency-Key header is required');
     }
-    const run = await this.repository.cancel(id);
-    if (!run) throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_STATE_CONFLICT',
-      'Campaign run state changed; reload and retry');
-    return run;
+    if (!isUUID(idempotencyKey)) {
+      throw new CampaignError(HttpStatus.BAD_REQUEST, 'CAMPAIGN_RUN_ACTION_IDEMPOTENCY_KEY_INVALID',
+        'Idempotency-Key must be a UUID');
+    }
+    const operationType = ({
+      pause: 'CAMPAIGN_RUN_PAUSE',
+      resume: 'CAMPAIGN_RUN_RESUME',
+      cancel: 'CAMPAIGN_RUN_CANCEL',
+    } as const)[action];
+    const requestHash = createHash('sha256').update(JSON.stringify({
+      version: 1,
+      operation: operationType,
+      runId: id,
+    })).digest('hex');
+    return { operationType, idempotencyKey, requestHash };
+  }
+
+  private resolveActionResult(result: CampaignRunActionResult) {
+    this.assertRunVisible(result.run);
+    if (result.outcome === 'REJECTED') {
+      throw new CampaignError(
+        HttpStatus.CONFLICT,
+        result.errorCode,
+        result.errorMessage,
+        result.errorDetails,
+      );
+    }
+    return result.run;
+  }
+
+  private async withActionIdempotencyConflict<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error instanceof CampaignRunActionIdempotencyConflictError) {
+        throw new CampaignError(HttpStatus.CONFLICT, 'CAMPAIGN_RUN_ACTION_IDEMPOTENCY_CONFLICT',
+          error.message);
+      }
+      throw error;
+    }
+  }
+
+  private assertRunVisible(run: { sessionId: string }): void {
+    if (!this.config.OPENWA_ALLOWED_SESSION_IDS.includes(run.sessionId)) this.runNotFound();
+  }
+
+  private runNotFound(): never {
+    throw new CampaignError(HttpStatus.NOT_FOUND, 'CAMPAIGN_RUN_NOT_FOUND', 'Campaign run not found');
   }
 }

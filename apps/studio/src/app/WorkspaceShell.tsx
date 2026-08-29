@@ -25,6 +25,7 @@ import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { StatusDot } from "@/shared/ui/StatusDot";
 import type { FeedbackTone } from "@/shared/ui/feedback-tone";
+import type { RuntimeOperationalHealth } from "@/shared/api/runtime-client";
 import studioPackage from "../../package.json";
 import {
   resolveWorkspaceNavigationDialogCopy,
@@ -83,27 +84,35 @@ function storedRailCollapsed(): boolean {
   }
 }
 
-function runtimeStatus(phase: ManagedRuntimePhase): {
+function runtimeStatus(
+  phase: ManagedRuntimePhase,
+  health: RuntimeOperationalHealth | null,
+): {
   label: string;
   tone: FeedbackTone;
 } {
-  switch (phase) {
-    case "degraded":
-      return { label: "degraded", tone: "danger" };
-    case "databaseStarting":
-    case "discovering":
-    case "migrating":
-    case "provisioningRequired":
-    case "reconfiguring":
-    case "restoring":
-    case "runtimeStarting":
-    case "stopping":
-    case "updating":
-      return { label: "working", tone: "warning" };
-    case "ready":
-    case "unavailable":
-      return { label: "healthy", tone: "success" };
+  if (phase === "degraded") {
+    return { label: "degraded", tone: "danger" };
   }
+  if (!["ready", "unavailable"].includes(phase)) {
+    return { label: "working", tone: "warning" };
+  }
+  if (health?.reason === "upstream_incompatible") {
+    return { label: "OpenWA incompatible", tone: "danger" };
+  }
+  if (health?.reason === "upstream_unavailable") {
+    return { label: "local only", tone: "warning" };
+  }
+  if (health?.reason === "upstream_status_unknown") {
+    return { label: "checking OpenWA", tone: "warning" };
+  }
+  if (health?.status === "operational") {
+    return { label: "healthy", tone: "success" };
+  }
+  if (health?.status === "degraded") {
+    return { label: "degraded", tone: "danger" };
+  }
+  return { label: "checking health", tone: "warning" };
 }
 
 function renderPage(
@@ -160,6 +169,7 @@ export function WorkspaceShell({
   const {
     connected,
     managedRuntime,
+    operationalHealth,
     selectedSessionId,
     selectSession,
   } = useRuntimeConnection();
@@ -204,7 +214,7 @@ export function WorkspaceShell({
     connected.sessions.find((session) => session.id === selectedSessionId) ?? null;
   const isManagedWorkspace = openwaBaseUrl !== null || managedRuntime.phase !== "unavailable";
   const activePageLabel = findWorkspacePage(activePage).label;
-  const runtime = runtimeStatus(managedRuntime.phase);
+  const runtime = runtimeStatus(managedRuntime.phase, operationalHealth);
   const navigationDialogCopy = resolveWorkspaceNavigationDialogCopy(
     navigationGuard,
     pendingNavigation?.guard ?? null,

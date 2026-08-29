@@ -268,6 +268,10 @@ export function GroupsScreen() {
   const memberRequestKeyRef = useRef("");
   const memberTargetKeyRef = useRef("");
   const capabilityRevision = useRef(0);
+  const capabilityMutationRef = useRef<{
+    key: string;
+    target: string;
+  } | null>(null);
   const deleteRequestRef = useRef(0);
   const deleteActiveRequestRef = useRef<number | null>(null);
   const capabilityAbortRef = useRef<AbortController | null>(null);
@@ -918,28 +922,45 @@ export function GroupsScreen() {
     const revision = capabilityRevision.current;
     const sessionId = selectedSessionId;
     const groupId = selectedGroup.id;
-    const requestedAfter = Date.now() - 5_000;
+    const target = `${sessionId}\u0000${groupId}`;
+    const idempotencyKey = capabilityMutationRef.current?.target === target
+      ? capabilityMutationRef.current.key
+      : crypto.randomUUID();
+    capabilityMutationRef.current = { key: idempotencyKey, target };
     setCapabilityRefreshState("requesting");
     setCapabilityError(null);
     setCapabilityNotice(null);
+    let dispatchedOutcomeUnknown = false;
     try {
       let operation: RuntimeGroupCapabilityRefresh;
       try {
-        operation = await runtimeApi.requestGroupCapabilityRefresh(sessionId, groupId);
+        operation = await runtimeApi.requestGroupCapabilityRefresh(
+          sessionId,
+          groupId,
+          idempotencyKey,
+        );
       } catch (error) {
         if (!isUnknownMutationOutcome(error)) throw error;
-        const current = await runtimeApi.getCurrentGroupCapabilityRefresh(sessionId, groupId);
-        if (!current || new Date(current.requestedAt).getTime() < requestedAfter) throw error;
-        operation = current;
+        dispatchedOutcomeUnknown = true;
+        operation = await runtimeApi.requestGroupCapabilityRefresh(
+          sessionId,
+          groupId,
+          idempotencyKey,
+        );
       }
+      capabilityMutationRef.current = null;
       if (!capabilityFlowIsCurrent(revision, sessionId, groupId)) return;
       setCapabilityOperation(operation);
       await observeCapabilityRefresh(operation, revision, sessionId, groupId);
     } catch (error) {
       if (capabilityFlowIsCurrent(revision, sessionId, groupId)) {
+        const outcomeUnknown = dispatchedOutcomeUnknown || isUnknownMutationOutcome(error);
+        if (!outcomeUnknown) capabilityMutationRef.current = null;
         setCapabilityRefreshState("failed");
         setCapabilityError(
-          userFacingErrorMessage(error, "Could not refresh send capability."),
+          outcomeUnknown
+            ? unknownMutationOutcomeMessage("idempotent-retry")
+            : userFacingErrorMessage(error, "Could not refresh send capability."),
         );
       }
     }
@@ -1361,8 +1382,8 @@ export function GroupsScreen() {
       {syncState === "unknown" && (
         <InlineAlert
           action={
-            <Button onClick={() => void reloadGroups()} size="sm">
-              Reload groups
+            <Button onClick={() => void startSessionSync()} size="sm">
+              Retry request
             </Button>
           }
           indicator

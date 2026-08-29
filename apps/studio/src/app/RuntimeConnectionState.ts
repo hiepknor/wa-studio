@@ -5,6 +5,7 @@ import type {
   RuntimeConnectionInput,
   RuntimeConnectionProfile,
   RuntimeConnectionResult,
+  RuntimeOperationalHealth,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
 import type {
@@ -36,6 +37,8 @@ export interface RuntimeConnectionContextValue {
   managedConnectionFlow: ManagedConnectionFlow;
   managedConnectionError: string | null;
   managedRuntime: ManagedRuntimeSnapshot;
+  operationalHealth: RuntimeOperationalHealth | null;
+  refreshOperationalHealth: () => Promise<boolean>;
   refreshSessions: () => Promise<boolean>;
   selectedSessionId: string | null;
   selectSession: (sessionId: string) => void;

@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Logger, Res, ServiceUnavailableException } from '@nestjs/common';
+import { Controller, Get, Inject, Logger, Optional, Res, ServiceUnavailableException } from '@nestjs/common';
 import { ApiOkResponse, ApiSecurity, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Public } from '../../core/auth/public.decorator';
@@ -14,6 +14,10 @@ import { DatabaseService } from '../../core/database/database.service';
 import { QueueService } from '../../core/queue/queue.service';
 import type { QueueReadiness, RuntimeProcessHealth } from '../../core/queue/queue-transport';
 import { RUNTIME_SERVICE, RUNTIME_VERSION } from '../../core/release/runtime-release';
+import {
+  OpenWACompatibilityService,
+  type OpenWACompatibilitySnapshot,
+} from '../../integrations/openwa/openwa-compatibility.service';
 
 @ApiTags('health')
 @Controller('health')
@@ -24,6 +28,7 @@ export class HealthController {
     private readonly database: DatabaseService,
     private readonly queues: QueueService,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
+    @Optional() private readonly openwaCompatibility?: OpenWACompatibilityService,
   ) {}
 
   @Public()
@@ -70,10 +75,12 @@ export class HealthController {
   @ApiOkResponse({ type: HealthOperationalDto })
   @ApiServiceUnavailableResponse({ type: HealthOperationalDto })
   async operational(@Res({ passthrough: true }) response: Response): Promise<HealthOperationalDto> {
+    const openwa = this.openwaCompatibility?.snapshot() ?? this.unknownOpenWASnapshot();
     const base = {
       service: RUNTIME_SERVICE,
       version: RUNTIME_VERSION,
       instanceId: this.config.RUNTIME_INSTANCE_ID,
+      components: { openwa },
     } as const;
     let dependencies: HealthOperationalDto['dependencies'];
     let processes: RuntimeProcessHealth;
@@ -107,6 +114,30 @@ export class HealthController {
         reason: 'background_process_degraded',
       };
     }
+    if (openwa.status !== 'COMPATIBLE') {
+      return {
+        ...base,
+        status: 'degraded',
+        dependencies,
+        processes,
+        reason: openwa.status === 'INCOMPATIBLE'
+          ? 'upstream_incompatible'
+          : openwa.status === 'UNAVAILABLE'
+            ? 'upstream_unavailable'
+            : 'upstream_status_unknown',
+      };
+    }
     return { ...base, status: 'operational', dependencies, processes };
+  }
+
+  private unknownOpenWASnapshot(): OpenWACompatibilitySnapshot {
+    return {
+      status: 'UNKNOWN',
+      expectedRelease: this.config.OPENWA_RELEASE_TAG,
+      observedRelease: null,
+      checkedAt: null,
+      lastSuccessfulAt: null,
+      reason: 'not_checked',
+    };
   }
 }

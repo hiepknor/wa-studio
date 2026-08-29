@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, type OnModuleDestroy } from '@nestjs/common';
 import { z } from 'zod';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
@@ -7,6 +7,7 @@ import {
   readBoundedResponseJson,
   readBoundedResponseText,
 } from '../../core/http/bounded-response';
+import { OpenWACompatibilityService } from './openwa-compatibility.service';
 
 export type OpenWASessionStatus =
   | 'created'
@@ -143,13 +144,19 @@ export class OpenWAClient implements OnModuleDestroy {
   private readonly logger = new Logger(OpenWAClient.name);
   private readonly abort = new AbortController();
 
-  constructor(@Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig()) {}
+  constructor(
+    @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
+    @Optional() private readonly compatibility?: OpenWACompatibilityService,
+  ) {}
 
   onModuleDestroy(): void {
     this.abort.abort();
   }
 
   private async request<T>(operation: string, path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
+    if (operation !== 'health' && this.compatibility) {
+      await this.compatibility.requireCompatible();
+    }
     const started = performance.now();
     const method = init?.method ?? 'GET';
     const headers = new Headers(init?.headers);
@@ -223,6 +230,10 @@ export class OpenWAClient implements OnModuleDestroy {
   }
 
   async assertCompatibleRelease(): Promise<void> {
+    if (this.compatibility) {
+      await this.compatibility.requireCompatible({ force: true });
+      return;
+    }
     const health = await this.request('health', '/api/health', healthSchema);
     if (health.version !== this.config.OPENWA_RELEASE_TAG) {
       throw new Error(

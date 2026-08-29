@@ -1,19 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../core/database/database.service';
-import { MessageJobRepository } from '../messages/message-job.repository';
-import type { MessageJobStatus } from '../messages/message-job.types';
+import { MessageStatusProjectionService } from '../messages/message-status-projection.service';
 import { normalizeOpenWAWebhook } from './webhook-normalizer';
 import { RuntimeEventRepository } from './runtime-event.repository';
 import { WebhookRepository } from './webhook.repository';
 import { ContactMessageObserverService } from '../contacts/contact-message-observer.service';
-
-const webhookStatus = (event: string, data: Record<string, unknown>): MessageJobStatus | null => {
-  if (event === 'message.sent') return 'SENT';
-  if (event === 'message.failed') return 'FAILED';
-  if (event !== 'message.ack') return null;
-  const status = String(data.status ?? '').toLowerCase();
-  return ({ sent: 'SENT', delivered: 'DELIVERED', read: 'READ', failed: 'FAILED' } as const)[status] ?? null;
-};
 
 @Injectable()
 export class WebhookProcessorService {
@@ -21,7 +12,7 @@ export class WebhookProcessorService {
     private readonly database: DatabaseService,
     private readonly webhooks: WebhookRepository,
     private readonly runtimeEvents: RuntimeEventRepository,
-    private readonly messages: MessageJobRepository,
+    private readonly messageStatuses: MessageStatusProjectionService,
     private readonly contacts: ContactMessageObserverService,
   ) {}
 
@@ -31,11 +22,9 @@ export class WebhookProcessorService {
     const { envelope, leaseToken } = claim;
     try {
       const runtimeEvent = normalizeOpenWAWebhook(envelope);
-      const status = webhookStatus(envelope.event, envelope.data);
-      const messageId = String(envelope.data.messageId ?? envelope.data.id ?? '');
-      const owned = await this.database.transaction(async client => {
+      const outcome = await this.database.transaction(async client => {
         if (!await this.webhooks.lockProcessingLease(client, envelope.idempotencyKey, leaseToken)) {
-          return false;
+          return null;
         }
         await this.runtimeEvents.storeInTransaction(client, runtimeEvent);
         if (envelope.event === 'message.received') {
@@ -54,18 +43,22 @@ export class WebhookProcessorService {
             });
           }
         }
-        if (status && messageId) {
-          await this.messages.updateStatusByOpenWAMessageIdWithClient(client, messageId, status);
-        }
+        const projection = await this.messageStatuses.projectEventInTransaction(
+          client,
+          envelope.idempotencyKey,
+        );
         if (!await this.webhooks.markProcessedInTransaction(client, envelope.idempotencyKey, leaseToken)) {
           throw new Error(`Webhook processing lease changed while locked: ${envelope.idempotencyKey}`);
         }
-        return true;
+        return projection;
       });
-      if (!owned) {
+      if (!outcome) {
         return { skipped: true, lostOwnership: true };
       }
-      return { statusUpdated: Boolean(status && messageId) };
+      return {
+        statusUpdated: outcome.statusAdvanced,
+        projectionPending: outcome.state === 'PENDING',
+      };
     } catch (error) {
       await this.webhooks.markFailed(
         envelope.idempotencyKey,

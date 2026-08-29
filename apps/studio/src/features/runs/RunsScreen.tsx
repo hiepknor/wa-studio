@@ -107,6 +107,11 @@ export function RunsScreen({
   const detailRequestRef = useRef(0);
   const deliveryRequestRef = useRef(0);
   const mutationRequestRef = useRef(0);
+  const mutationIdempotencyRef = useRef<{
+    action: RunAction;
+    key: string;
+    runId: string;
+  } | null>(null);
   const sessionRef = useRef(selectedSessionId);
   const selectedSessionIdRef = useRef(selectedSessionId);
   const selectedRunIdRef = useRef(selectedRunId);
@@ -405,6 +410,12 @@ export function RunsScreen({
     const operationToken = mutationOperation.begin();
     if (operationToken === null) return;
     const targetRun = run;
+    const previousMutation = mutationIdempotencyRef.current;
+    const idempotencyKey = previousMutation?.runId === targetRun.id
+      && previousMutation.action === action
+      ? previousMutation.key
+      : crypto.randomUUID();
+    mutationIdempotencyRef.current = { action, key: idempotencyKey, runId: targetRun.id };
     const request = ++mutationRequestRef.current;
     runDetailRead.cancel();
     detailRequestRef.current += 1;
@@ -412,10 +423,13 @@ export function RunsScreen({
     setRunError(null);
     try {
       const updated = action === "pause"
-        ? await api.pauseCampaignRun(targetRun.id)
+        ? await api.pauseCampaignRun(targetRun.id, idempotencyKey)
         : action === "resume"
-          ? await api.resumeCampaignRun(targetRun.id)
-          : await api.cancelCampaignRun(targetRun.id);
+          ? await api.resumeCampaignRun(targetRun.id, idempotencyKey)
+          : await api.cancelCampaignRun(targetRun.id, idempotencyKey);
+      if (mutationIdempotencyRef.current?.key === idempotencyKey) {
+        mutationIdempotencyRef.current = null;
+      }
       if (
         !mutationOperation.isCurrent(operationToken)
         || request !== mutationRequestRef.current
@@ -430,13 +444,17 @@ export function RunsScreen({
       if (inspectorTab === "deliveries") void loadDeliveries(true);
       invalidate({ resources: ["campaigns"], sessionId: targetRun.sessionId });
     } catch (error) {
+      const outcomeUnknown = isUnknownMutationOutcome(error);
+      if (!outcomeUnknown && mutationIdempotencyRef.current?.key === idempotencyKey) {
+        mutationIdempotencyRef.current = null;
+      }
       if (
         !mutationOperation.isCurrent(operationToken)
         || request !== mutationRequestRef.current
         || selectedRunIdRef.current !== targetRun.id
       ) return;
-      setRunError(isUnknownMutationOutcome(error)
-        ? unknownMutationOutcomeMessage("canonical-reload")
+      setRunError(outcomeUnknown
+        ? unknownMutationOutcomeMessage("idempotent-retry")
         : userFacingErrorMessage(error, `Could not ${action} campaign run.`));
       void loadRun(targetRun.id, true, true);
       void loadRuns(listState, true);

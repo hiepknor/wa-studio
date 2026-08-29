@@ -91,6 +91,8 @@ function activityContext(
       connection: null,
       error: null,
     },
+    operationalHealth: null,
+    refreshOperationalHealth: vi.fn().mockResolvedValue(false),
     refreshSessions: vi.fn().mockResolvedValue(true),
     selectedSessionId,
     selectSession: vi.fn(),

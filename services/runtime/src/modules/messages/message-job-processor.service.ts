@@ -16,6 +16,8 @@ import {
   campaignImageSendMemoryWeight,
   MediaSendBudgetService,
 } from '../media-assets/media-send-budget.service';
+import { MessageStatusProjectionService } from './message-status-projection.service';
+import { OpenWACompatibilityService } from '../../integrations/openwa/openwa-compatibility.service';
 
 const randomDelay = (min: number, max: number) => min + Math.floor(Math.random() * (max - min + 1));
 
@@ -40,6 +42,8 @@ export class MessageJobProcessorService {
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
     @Optional() private readonly media?: MediaAssetService,
     @Optional() private readonly mediaBudget?: MediaSendBudgetService,
+    @Optional() private readonly statusProjections?: MessageStatusProjectionService,
+    @Optional() private readonly openwaCompatibility?: OpenWACompatibilityService,
   ) {}
 
   async process(payload: MessageSendQueuePayload): Promise<unknown> {
@@ -159,6 +163,7 @@ export class MessageJobProcessorService {
     verifyForSend: () => Promise<void>,
     onUpstreamStart: () => void,
   ) {
+    await this.openwaCompatibility?.requireCompatible();
     await verifyForSend();
     onUpstreamStart();
     return this.openwa.sendText(sessionId, recipientId, text);
@@ -173,12 +178,14 @@ export class MessageJobProcessorService {
   ) {
     const operation = async () => {
       const asset = await this.resolveMedia(sessionId, content);
+      const base64 = asset.content.toString('base64');
+      await this.openwaCompatibility?.requireCompatible();
       await verifyForSend();
       onUpstreamStart();
       return this.openwa.sendImage({
         sessionId,
         chatId: recipientId,
-        base64: asset.content.toString('base64'),
+        base64,
         mimetype: asset.mimeType,
         caption: content.caption ?? '',
       });
@@ -195,6 +202,11 @@ export class MessageJobProcessorService {
     status: MessageJobStatus,
     options: { openwaMessageId?: string; error?: string; response?: unknown },
   ): Promise<void> {
-    return this.database.transaction((client: PoolClient) => this.messages.updateResult(client, id, status, options));
+    return this.database.transaction(async (client: PoolClient) => {
+      await this.messages.updateResult(client, id, status, options);
+      if (options.openwaMessageId && this.statusProjections) {
+        await this.statusProjections.reconcilePendingForJobInTransaction(client, id);
+      }
+    });
   }
 }

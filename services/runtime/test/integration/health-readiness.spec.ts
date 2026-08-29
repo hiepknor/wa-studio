@@ -74,13 +74,20 @@ describe('HTTP readiness', () => {
     await redis.set(runtimeHeartbeatKey('default', 'scheduler'), new Date().toISOString(), 'EX', 60);
     const operational = await fetch(`${baseUrl}/health/operational`, { headers: runtimeHeaders });
     expect(operational.status).toBe(200);
-    await expect(operational.json()).resolves.toMatchObject({
-      status: 'operational',
+    const payload = await operational.json() as Record<string, any>;
+    expect(payload).toMatchObject({
       service: 'wa-runtime',
       version: '0.1.0',
       instanceId: 'default',
       processes: { worker: 'healthy', scheduler: 'healthy' },
+      components: { openwa: { expectedRelease: expect.any(String) } },
     });
+    expect(['operational', 'degraded']).toContain(payload.status);
+    if (payload.status === 'degraded') {
+      expect([
+        'upstream_status_unknown', 'upstream_unavailable', 'upstream_incompatible',
+      ]).toContain(payload.reason);
+    }
   });
 
   it('keeps detailed readiness behind the Runtime API credential', async () => {

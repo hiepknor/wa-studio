@@ -1,7 +1,12 @@
+import type { PoolClient } from 'pg';
 import type { SyncRunDto, SyncRunPhase, SyncRunStatus } from '../../contracts/sessions/sync-run.dto';
 import { GatewaySyncMode } from '../../contracts/sessions/sync-request.dto';
 import { DatabaseService } from '../../core/database/database.service';
-import { GatewaySyncModeConflictError } from './gateway-sync.types';
+import { RuntimeMutationReceiptRepository } from '../../core/database/runtime-mutation-receipt.repository';
+import {
+  GatewaySyncIdempotencyConflictError,
+  GatewaySyncModeConflictError,
+} from './gateway-sync.types';
 import { appendGatewaySyncActivity } from './gateway-sync-activity';
 
 interface SyncRunRow {
@@ -61,38 +66,83 @@ const mapSyncRun = (row: SyncRunRow): SyncRunDto => ({
 });
 
 export class GatewaySyncRunRepository {
+  private readonly mutationReceipts = new RuntimeMutationReceiptRepository();
+
   constructor(private readonly database: DatabaseService) {}
 
   async create(sessionId: string, mode: GatewaySyncMode = GatewaySyncMode.FULL): Promise<SyncRunDto> {
-    const id = await this.database.transaction(async client => {
-      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`gateway-sync:${sessionId}`]);
-      const active = await client.query<SyncRunRow>(
-        `SELECT * FROM sync_runs WHERE session_id = $1 AND status IN ('PENDING','RUNNING')
-         ORDER BY requested_at LIMIT 1`,
-        [sessionId],
-      );
-      if (active.rows[0]) {
-        const existing = mapSyncRun(active.rows[0]);
-        if (existing.syncType !== mode) {
-          throw new GatewaySyncModeConflictError(existing.id, existing.syncType);
-        }
-        return existing.id;
-      }
-      const result = await client.query<{ id: string }>(
-        `INSERT INTO sync_runs (session_id, sync_type) VALUES ($1, $2) RETURNING id`, [sessionId, mode]);
-      const createdId = result.rows[0]!.id;
-      await appendGatewaySyncActivity(client, {
-        syncRunId: createdId,
-        eventType: 'sync.requested',
-        severity: 'INFO',
-        origin: 'STUDIO',
-        dedupeKey: `sync-run:${createdId}:requested`,
-      });
-      return createdId;
-    });
+    const id = await this.database.transaction(client => this.createInTransaction(client, sessionId, mode));
     const run = await this.find(id);
     if (!run) throw new Error('Created sync run was not found');
     return run;
+  }
+
+  async request(
+    sessionId: string,
+    mode: GatewaySyncMode,
+    idempotency: { key: string; requestHash: string },
+  ): Promise<{ run: SyncRunDto; replayed: boolean }> {
+    const result = await this.database.transaction(async client => {
+      const receipt = await this.mutationReceipts.lockAndFind(
+        client,
+        'SESSION_SYNC',
+        idempotency.key,
+      );
+      if (receipt) {
+        if (receipt.requestHash !== idempotency.requestHash) {
+          throw new GatewaySyncIdempotencyConflictError();
+        }
+        return { id: receipt.resultId, replayed: true };
+      }
+
+      const id = await this.createInTransaction(client, sessionId, mode);
+      await this.mutationReceipts.record(client, {
+        operationType: 'SESSION_SYNC',
+        idempotencyKey: idempotency.key,
+        requestHash: idempotency.requestHash,
+        sessionId,
+        subjectId: sessionId,
+        resultId: id,
+        resultRevision: null,
+      });
+      return { id, replayed: false };
+    });
+    const run = await this.find(result.id);
+    if (!run) throw new Error('Idempotent sync receipt references a missing sync run');
+    return { run, replayed: result.replayed };
+  }
+
+  private async createInTransaction(
+    client: PoolClient,
+    sessionId: string,
+    mode: GatewaySyncMode,
+  ): Promise<string> {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`gateway-sync:${sessionId}`]);
+    const active = await client.query<SyncRunRow>(
+      `SELECT * FROM sync_runs WHERE session_id = $1 AND status IN ('PENDING','RUNNING')
+       ORDER BY requested_at LIMIT 1`,
+      [sessionId],
+    );
+    if (active.rows[0]) {
+      const existing = mapSyncRun(active.rows[0]);
+      if (existing.syncType !== mode) {
+        throw new GatewaySyncModeConflictError(existing.id, existing.syncType);
+      }
+      return existing.id;
+    }
+    const result = await client.query<{ id: string }>(
+      `INSERT INTO sync_runs (session_id, sync_type) VALUES ($1, $2) RETURNING id`,
+      [sessionId, mode],
+    );
+    const createdId = result.rows[0]!.id;
+    await appendGatewaySyncActivity(client, {
+      syncRunId: createdId,
+      eventType: 'sync.requested',
+      severity: 'INFO',
+      origin: 'STUDIO',
+      dedupeKey: `sync-run:${createdId}:requested`,
+    });
+    return createdId;
   }
 
   async findProgress(id: string, sessionId: string): Promise<{
@@ -154,6 +204,7 @@ export class GatewaySyncRunRepository {
            next_attempt_at = CASE WHEN attempt_count >= 3 THEN next_attempt_at ELSE now() END,
            lease_token = NULL, lease_expires_at = NULL,
            error = 'Recovered expired sync lease',
+           phase = CASE WHEN attempt_count >= 3 THEN 'COMPLETED' ELSE 'DISCOVERING' END,
            completed_at = CASE WHEN attempt_count >= 3 THEN now() ELSE NULL END,
            updated_at = now()
          WHERE status = 'RUNNING' AND lease_expires_at < now()
@@ -235,7 +286,8 @@ export class GatewaySyncRunRepository {
   async complete(id: string, leaseToken: string, groups: number, members: number): Promise<boolean> {
     return this.database.transaction(async client => {
       const result = await client.query(
-        `UPDATE sync_runs SET status = 'COMPLETED', groups_synced = $3, members_synced = $4,
+        `UPDATE sync_runs SET status = 'COMPLETED', phase = 'COMPLETED',
+           groups_synced = $3, members_synced = $4,
            error = NULL, lease_token = NULL, lease_expires_at = NULL,
            completed_at = now(), updated_at = now()
          WHERE id = $1 AND status = 'RUNNING' AND lease_token = $2 AND lease_expires_at > now()
@@ -267,6 +319,7 @@ export class GatewaySyncRunRepository {
         `UPDATE sync_runs SET
          status = CASE WHEN attempt_count >= 3 THEN 'FAILED'::gateway_sync_status
            ELSE 'PENDING'::gateway_sync_status END,
+         phase = CASE WHEN attempt_count >= 3 THEN 'COMPLETED' ELSE 'DISCOVERING' END,
          sync_epoch = CASE WHEN attempt_count >= 3 THEN sync_epoch ELSE NULL END,
          groups_synced = $3, members_synced = $4, error = $5,
          next_attempt_at = CASE WHEN attempt_count >= 3 THEN next_attempt_at

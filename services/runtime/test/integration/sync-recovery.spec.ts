@@ -68,6 +68,38 @@ describe('gateway sync recovery', () => {
     expect(await gateway.listPendingSyncRuns(10)).toHaveLength(1);
   });
 
+  it('rejects illegal persisted sync-run, sync-item, and group-intent transitions', async () => {
+    await seedSendableGroup(pool);
+    const run = await gateway.createSyncRun(INTEGRATION_SESSION_ID);
+    await expect(pool.query(
+      `UPDATE sync_runs SET status = 'COMPLETED', phase = 'COMPLETED', completed_at = now()
+       WHERE id = $1`,
+      [run.id],
+    )).rejects.toMatchObject({ code: '23514' });
+
+    const claim = await gateway.claimSyncRun(run.id);
+    expect(claim).not.toBeNull();
+    const item = await pool.query<{ id: string }>(
+      `INSERT INTO gateway_sync_items
+         (sync_run_id, session_id, group_id, ordinal, reason)
+       VALUES ($1, $2, $3, 0, 'STATE_GUARD_TEST') RETURNING id`,
+      [run.id, INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    );
+    await expect(pool.query(
+      `UPDATE gateway_sync_items SET status = 'COMPLETED', completed_at = now()
+       WHERE id = $1`,
+      [item.rows[0]!.id],
+    )).rejects.toMatchObject({ code: '23514' });
+
+    await groupIntents.requestCapabilityRefresh(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
+    await expect(pool.query(
+      `UPDATE gateway_group_reconciliation_intents
+       SET status = 'FAILED', completed_at = now()
+       WHERE session_id = $1 AND group_id = $2`,
+      [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    )).rejects.toMatchObject({ code: '23514' });
+  });
+
   it('synchronizes the fake OpenWA snapshot into the durable read model', async () => {
     const run = await gateway.createSyncRun(INTEGRATION_SESSION_ID);
 
@@ -342,7 +374,14 @@ describe('gateway sync recovery', () => {
       syncRunId: baseline.id, leaseToken: baselineClaim!.leaseToken, syncEpoch: baselineClaim!.syncEpoch,
     }, INTEGRATION_SESSION_ID, GatewaySyncMode.FULL, baselineGroups);
     await pool.query(
-      `UPDATE gateway_sync_items SET status = 'COMPLETED', completed_at = now()
+      `UPDATE gateway_sync_items SET status = 'RUNNING', attempt_count = attempt_count + 1,
+         lease_token = gen_random_uuid(), lease_expires_at = now() + interval '2 minutes'
+       WHERE sync_run_id = $1`,
+      [baseline.id],
+    );
+    await pool.query(
+      `UPDATE gateway_sync_items SET status = 'COMPLETED', completed_at = now(),
+         lease_token = NULL, lease_expires_at = NULL
        WHERE sync_run_id = $1`,
       [baseline.id],
     );

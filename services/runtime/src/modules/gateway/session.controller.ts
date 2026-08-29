@@ -1,5 +1,12 @@
-import { Body, Controller, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post } from '@nestjs/common';
-import { ApiAcceptedResponse, ApiBody, ApiConflictResponse, ApiOkResponse, ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import {
+  Body, Controller, Get, Headers, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post, Res,
+} from '@nestjs/common';
+import {
+  ApiAcceptedResponse, ApiBody, ApiExtraModels, ApiHeader, ApiOkResponse, ApiOperation,
+  ApiResponse, ApiSecurity, ApiTags, getSchemaPath,
+} from '@nestjs/swagger';
+import type { Response } from 'express';
+import { RuntimeErrorDto } from '../../contracts/common/runtime-error.dto';
 import { SessionDto, SessionListDto } from '../../contracts/sessions/session.dto';
 import { SyncRunDto } from '../../contracts/sessions/sync-run.dto';
 import { SyncRequestDto } from '../../contracts/sessions/sync-request.dto';
@@ -11,6 +18,7 @@ import { SessionScopeService } from './session-scope.service';
 
 @ApiTags('sessions')
 @ApiSecurity('runtime-key')
+@ApiExtraModels(RuntimeErrorDto, SyncModeConflictDto)
 @Controller('sessions')
 export class SessionController {
   constructor(
@@ -34,10 +42,28 @@ export class SessionController {
   @HttpCode(202)
   @ApiOperation({ summary: 'Queue durable discovery and group reconciliation' })
   @ApiBody({ type: SyncRequestDto, required: false })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
   @ApiAcceptedResponse({ type: SyncRunDto })
-  @ApiConflictResponse({ type: SyncModeConflictDto, description: 'A different sync mode is already active' })
-  requestSync(@Param('id', ParseUUIDPipe) id: string, @Body() request: SyncRequestDto = new SyncRequestDto()) {
-    return this.sync.request(id, request.mode);
+  @ApiResponse({ status: 200, type: SyncRunDto, description: 'Idempotent replay' })
+  @ApiResponse({
+    status: 409,
+    description: 'The operation key conflicts or another sync mode is active',
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(RuntimeErrorDto) },
+        { $ref: getSchemaPath(SyncModeConflictDto) },
+      ],
+    },
+  })
+  async requestSync(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() request: SyncRequestDto = new SyncRequestDto(),
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.sync.request(id, idempotencyKey, request.mode);
+    response.status(result.replayed ? 200 : 202);
+    return result.run;
   }
 
   @Get(':id/sync-runs/:runId')

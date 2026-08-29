@@ -268,20 +268,6 @@ fn connection_probe_client() -> Result<Client, String> {
         .map_err(|error| format!("Could not initialize the OpenWA connection probe: {error}"))
 }
 
-pub(crate) fn assert_compatible_release(
-    openwa_base_url: &str,
-    openwa_api_key: &str,
-    expected_release: &str,
-) -> Result<(), String> {
-    let client = connection_probe_client()?;
-    assert_compatible_release_with_client(
-        &client,
-        openwa_base_url,
-        openwa_api_key,
-        expected_release,
-    )
-}
-
 fn assert_compatible_release_with_client(
     client: &Client,
     openwa_base_url: &str,

@@ -47,6 +47,7 @@ export type RuntimeError = components["schemas"]["RuntimeErrorDto"];
 export type RuntimeActivityEvent = components["schemas"]["ActivityEventDto"];
 export type RuntimeActivityPage = components["schemas"]["ActivityPageDto"];
 export type RuntimeStateRevisions = components["schemas"]["StateRevisionsDto"];
+export type RuntimeOperationalHealth = components["schemas"]["HealthOperationalDto"];
 
 type RuntimeGroupDirectoryQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
 type RuntimeCampaignListQuery = NonNullable<
@@ -318,6 +319,24 @@ export class RuntimeApi {
     }
   }
 
+  async getOperationalHealth(
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeOperationalHealth> {
+    const result = await this.client.GET("/api/v1/health/operational", { ...options });
+    const payload = result.data ?? result.error;
+    if (
+      ![200, 503].includes(result.response.status)
+      || !payload
+      || !("status" in payload)
+      || !("components" in payload)
+    ) {
+      throw new RuntimeConnectionError(
+        `Could not inspect WA Runtime health (HTTP ${result.response.status}).`,
+      );
+    }
+    return payload;
+  }
+
   async listSessions(options: RuntimeReadOptions = {}): Promise<RuntimeSession[]> {
     const result = await this.client.GET("/api/v1/sessions", { ...options });
     if (!result.response.ok || !result.data) {
@@ -330,9 +349,15 @@ export class RuntimeApi {
     return result.data.data;
   }
 
-  async requestSessionSync(sessionId: string): Promise<RuntimeSyncRun> {
+  async requestSessionSync(
+    sessionId: string,
+    idempotencyKey: string,
+  ): Promise<RuntimeSyncRun> {
     const result = await this.client.POST("/api/v1/sessions/{id}/sync", {
-      params: { path: { id: sessionId } },
+      params: {
+        header: { "Idempotency-Key": idempotencyKey },
+        path: { id: sessionId },
+      },
     });
     if (!result.response.ok || !result.data) {
       throw new RuntimeRequestError(
@@ -446,9 +471,14 @@ export class RuntimeApi {
   async requestGroupCapabilityRefresh(
     sessionId: string,
     groupId: string,
+    idempotencyKey: string,
   ): Promise<RuntimeGroupCapabilityRefresh> {
     const result = await this.client.POST("/api/v1/groups/{id}/capability-refreshes", {
-      params: { path: { id: groupId }, query: { sessionId } },
+      params: {
+        header: { "Idempotency-Key": idempotencyKey },
+        path: { id: groupId },
+        query: { sessionId },
+      },
     });
     if (!result.response.ok || !result.data) {
       throw runtimeRequestError(
@@ -1120,13 +1150,19 @@ export class RuntimeApi {
   private async changeCampaignRunState(
     runId: string,
     action: "pause" | "resume" | "cancel",
+    idempotencyKey: string,
   ): Promise<RuntimeCampaignRun> {
     const path = action === "pause"
       ? "/api/v1/campaign-runs/{id}/pause" as const
       : action === "resume"
         ? "/api/v1/campaign-runs/{id}/resume" as const
         : "/api/v1/campaign-runs/{id}/cancel" as const;
-    const result = await this.client.POST(path, { params: { path: { id: runId } } });
+    const result = await this.client.POST(path, {
+      params: {
+        header: { "Idempotency-Key": idempotencyKey },
+        path: { id: runId },
+      },
+    });
     if (!result.response.ok || !result.data) {
       throw runtimeRequestError(
         `Could not ${action} campaign run`,
@@ -1137,16 +1173,16 @@ export class RuntimeApi {
     return result.data;
   }
 
-  pauseCampaignRun(runId: string): Promise<RuntimeCampaignRun> {
-    return this.changeCampaignRunState(runId, "pause");
+  pauseCampaignRun(runId: string, idempotencyKey: string): Promise<RuntimeCampaignRun> {
+    return this.changeCampaignRunState(runId, "pause", idempotencyKey);
   }
 
-  resumeCampaignRun(runId: string): Promise<RuntimeCampaignRun> {
-    return this.changeCampaignRunState(runId, "resume");
+  resumeCampaignRun(runId: string, idempotencyKey: string): Promise<RuntimeCampaignRun> {
+    return this.changeCampaignRunState(runId, "resume", idempotencyKey);
   }
 
-  cancelCampaignRun(runId: string): Promise<RuntimeCampaignRun> {
-    return this.changeCampaignRunState(runId, "cancel");
+  cancelCampaignRun(runId: string, idempotencyKey: string): Promise<RuntimeCampaignRun> {
+    return this.changeCampaignRunState(runId, "cancel", idempotencyKey);
   }
 }
 

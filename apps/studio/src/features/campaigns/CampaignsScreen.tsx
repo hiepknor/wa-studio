@@ -302,6 +302,11 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const [campaignDeleteError, setCampaignDeleteError] = useState<string | null>(null);
   const createIntentRef = useRef<CampaignCreateIntent | null>(null);
   const launchKeyRef = useRef<{ key: string; mode: RuntimeCampaignExecutionMode } | null>(null);
+  const runActionKeyRef = useRef<{
+    action: "pause" | "resume" | "cancel";
+    key: string;
+    runId: string;
+  } | null>(null);
   const editorEpochRef = useRef(0);
   const targetRequestRef = useRef(0);
   const runRequestRef = useRef(0);
@@ -1569,14 +1574,23 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     const epoch = editorEpochRef.current;
     const request = ++runRequestRef.current;
     const campaignId = campaign.id;
+    const previousAction = runActionKeyRef.current;
+    const idempotencyKey = previousAction?.runId === run.id
+      && previousAction.action === action
+      ? previousAction.key
+      : crypto.randomUUID();
+    runActionKeyRef.current = { action, key: idempotencyKey, runId: run.id };
     setRunMutation(`${action}:${run.id}`);
     setRunError(null);
     try {
       const updated = action === "pause"
-        ? await api.pauseCampaignRun(run.id)
+        ? await api.pauseCampaignRun(run.id, idempotencyKey)
         : action === "resume"
-          ? await api.resumeCampaignRun(run.id)
-          : await api.cancelCampaignRun(run.id);
+          ? await api.resumeCampaignRun(run.id, idempotencyKey)
+          : await api.cancelCampaignRun(run.id, idempotencyKey);
+      if (runActionKeyRef.current?.key === idempotencyKey) {
+        runActionKeyRef.current = null;
+      }
       if (
         !mutationOperation.isCurrent(operationToken)
         || epoch !== editorEpochRef.current
@@ -1591,14 +1605,17 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         );
       }
     } catch (error) {
+      const outcomeUnknown = isUnknownMutationOutcome(error);
+      if (!outcomeUnknown && runActionKeyRef.current?.key === idempotencyKey) {
+        runActionKeyRef.current = null;
+      }
       if (
         !mutationOperation.isCurrent(operationToken)
         || epoch !== editorEpochRef.current
         || request !== runRequestRef.current
       ) return;
-      const outcomeUnknown = isUnknownMutationOutcome(error);
       setRunError(outcomeUnknown
-        ? unknownMutationOutcomeMessage("canonical-reload")
+        ? unknownMutationOutcomeMessage("idempotent-retry")
         : campaignErrorMessage(error, `Could not ${action} campaign run.`));
       if (
         outcomeUnknown

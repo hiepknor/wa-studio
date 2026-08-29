@@ -39,6 +39,34 @@ export class RuntimeProcessHealthDto {
   scheduler!: 'healthy' | 'degraded';
 }
 
+export class OpenWAComponentHealthDto {
+  @ApiProperty({ enum: ['UNKNOWN', 'COMPATIBLE', 'UNAVAILABLE', 'INCOMPATIBLE'] })
+  status!: 'UNKNOWN' | 'COMPATIBLE' | 'UNAVAILABLE' | 'INCOMPATIBLE';
+
+  @ApiProperty({ example: OPENWA_RELEASE_TAG })
+  expectedRelease!: string;
+
+  @ApiProperty({ type: String, nullable: true, example: OPENWA_RELEASE_TAG })
+  observedRelease!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' })
+  checkedAt!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' })
+  lastSuccessfulAt!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    enum: ['not_checked', 'network_error', 'http_error', 'invalid_response', 'release_mismatch'],
+  })
+  reason!: 'not_checked' | 'network_error' | 'http_error' | 'invalid_response' | 'release_mismatch' | null;
+}
+
+export class RuntimeComponentHealthDto {
+  @ApiProperty({ type: OpenWAComponentHealthDto })
+  openwa!: OpenWAComponentHealthDto;
+}
+
 export class HealthReadyDto {
   @ApiProperty({ enum: ['ready'] })
   status!: 'ready';
@@ -86,8 +114,18 @@ export class HealthOperationalDto {
   @ApiProperty({ type: RuntimeProcessHealthDto })
   processes!: RuntimeProcessHealthDto;
 
+  @ApiProperty({ type: RuntimeComponentHealthDto })
+  components!: RuntimeComponentHealthDto;
+
   @ApiPropertyOptional({
-    enum: ['dependency_unavailable', 'background_process_degraded'],
+    enum: [
+      'dependency_unavailable',
+      'background_process_degraded',
+      'upstream_status_unknown',
+      'upstream_unavailable',
+      'upstream_incompatible',
+    ],
   })
-  reason?: 'dependency_unavailable' | 'background_process_degraded';
+  reason?: 'dependency_unavailable' | 'background_process_degraded'
+    | 'upstream_status_unknown' | 'upstream_unavailable' | 'upstream_incompatible';
 }

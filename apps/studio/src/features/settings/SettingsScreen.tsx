@@ -114,7 +114,11 @@ export function SettingsScreen({
   saveProvisioningProfile = reconfigureManagedRuntime,
   subscribeUpdateProgress = subscribeAppUpdateProgress,
 }: SettingsScreenProps = {}) {
-  const { managedRuntime } = useRuntimeConnection();
+  const {
+    managedRuntime,
+    operationalHealth,
+    refreshOperationalHealth,
+  } = useRuntimeConnection();
   const [activeTab, setActiveTab] = useState<SettingsTab>("overview");
   const [connectionNavigation, setConnectionNavigation] =
     useState<SettingsTaskNavigationState>(CLEAN_TASK_NAVIGATION_STATE);
@@ -161,9 +165,10 @@ export function SettingsScreen({
     setRuntimeLoading(true);
     setRuntimeError(null);
     try {
-      const [backupsResult, diagnosticsResult] = await Promise.allSettled([
+      const [backupsResult, diagnosticsResult, healthResult] = await Promise.allSettled([
         listBackups(),
         getDiagnostics(),
+        refreshOperationalHealth(),
       ]);
       if (!runtimeLoad.isCurrent(token)) return false;
       if (backupsResult.status === "fulfilled") setBackups(backupsResult.value);
@@ -177,13 +182,16 @@ export function SettingsScreen({
         diagnosticsResult.status === "rejected"
           ? userFacingErrorMessage(diagnosticsResult.reason, "Could not inspect Runtime diagnostics.")
           : null,
+        healthResult.status === "rejected"
+          ? userFacingErrorMessage(healthResult.reason, "Could not inspect component health.")
+          : null,
       ].filter((message): message is string => Boolean(message));
       setRuntimeError(failures.length ? failures.join(" ") : null);
       return failures.length === 0;
     } finally {
       if (runtimeLoad.isCurrent(token)) setRuntimeLoading(false);
     }
-  }, [getDiagnostics, listBackups, runtimeLoad]);
+  }, [getDiagnostics, listBackups, refreshOperationalHealth, runtimeLoad]);
 
   const loadUpdates = useCallback(async (): Promise<boolean> => {
     const token = updateLoad.begin();
@@ -330,6 +338,7 @@ export function SettingsScreen({
                 error={overviewError}
                 loading={runtimeLoading}
                 managedRuntime={managedRuntime}
+                operationalHealth={operationalHealth}
                 onNavigate={requestTab}
                 onRefresh={() => void refreshAll()}
                 refreshing={refreshing}

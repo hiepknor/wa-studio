@@ -55,6 +55,12 @@ const schema = z
     OPENWA_REQUEST_DEADLINE_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
     OPENWA_RESPONSE_MAX_BYTES: z.coerce.number().int()
       .min(65_536).max(134_217_728).default(33_554_432),
+    OPENWA_COMPATIBILITY_PROBE_TIMEOUT_MS: z.coerce.number().int()
+      .min(1_000).max(30_000).default(5_000),
+    OPENWA_COMPATIBILITY_FRESHNESS_MS: z.coerce.number().int()
+      .min(1_000).max(300_000).default(60_000),
+    OPENWA_COMPATIBILITY_PROBE_INTERVAL_MS: z.coerce.number().int()
+      .min(10_000).max(3_600_000).default(60_000),
     OPENWA_WEBHOOK_SECRET: z.string().min(32),
     OPENWA_WEBHOOK_RECONCILIATION_ENABLED: booleanFromEnv(false),
     OPENWA_WEBHOOK_CALLBACK_URL: z.url().optional(),

@@ -113,9 +113,10 @@ drawer/dialog closure and component unmount abort any remaining read. Request re
 keys remain a second guard against adapters that resolve after cancellation. Submitted mutations are
 not automatically aborted because a lost response cannot prove that Runtime did not commit the
 operation. The HTTP boundary records whether a failed request reached the transport adapter. A
-post-dispatch mutation failure is treated as an unknown outcome: idempotent creates retain their
-original request key, revisioned updates and state transitions reload canonical Runtime state while
-preserving staged operator input, deletes confirm presence before offering another attempt, and
+post-dispatch mutation failure is treated as an unknown outcome: idempotent creates, session sync,
+capability refresh, and run lifecycle actions retain their original request key; revisioned updates
+reload canonical Runtime state while preserving staged operator input; deletes confirm presence
+before offering another attempt; and
 asynchronous requests continue observation when a durable result can still appear. Session changes,
 target changes and unmount invalidate the UI continuation so a late mutation cannot write old-session
 state or start a later step in a multi-step save. Typed HTTP failures remain authoritative and are
@@ -140,11 +141,12 @@ Campaign refresh fails, Studio keeps the canonical run result and reports only t
 never presenting a committed launch or state change as safe to retry.
 
 The Runs inspector cancels any in-flight detail poll before dispatching a lifecycle mutation and
-admits only one pause, resume, or cancel request at a time. Retargeting or closing the inspector
-invalidates the old continuation without attempting to abort a possibly committed write. When the
-write response is ambiguous, canonical detail/list reconciliation preserves the ambiguity warning
-instead of clearing it at refresh start, so refreshed state never masquerades as proof that the
-original request failed.
+admits only one pause, resume, or cancel request at a time. Each action/run intent owns one UUID that
+survives an unconfirmed response. Retrying that intent replays the Runtime receipt instead of applying
+the transition twice. Retargeting or closing the inspector invalidates the old continuation without
+attempting to abort a possibly committed write. When the write response is ambiguous, canonical
+detail/list reconciliation preserves the ambiguity warning instead of clearing it at refresh start,
+so refreshed state never masquerades as proof that the original request failed.
 
 Initial managed setup and developer fallback attachment use the same synchronous single-flight
 boundary, so repeated form or confirmation events cannot dispatch overlapping provision, restore,
@@ -173,7 +175,7 @@ accepted, so a screen that disconnects or unmounts never announces a stale reloa
 
 The shell treats the selected session as shared workspace context. Its toolbar selector is therefore the single context switch used by current and future Groups, Campaigns, Runs, and Activity pages. Destinations and availability live in `src/app/workspace-pages.ts`; adding a feature page means registering it there and adding its renderer, without duplicating sidebar or status-bar logic. Unimplemented destinations remain visibly disabled rather than presenting mock workflows.
 
-Disconnect clears the connection profile, API client, sessions, and selection. A monotonically increasing connection revision prevents late connect or refresh responses from restoring state after disconnect. Session full sync follows the durable WA Runtime workflow: create a sync run, poll its status, then refresh session read models after completion. Studio admits one sync dispatch before React busy state renders, cancels polling when its session or screen loses ownership, and removes abort listeners after each completed poll delay.
+Disconnect clears the connection profile, API client, sessions, and selection. A monotonically increasing connection revision prevents late connect or refresh responses from restoring state after disconnect. Session full sync follows the durable WA Runtime workflow: request a sync run with one stable UUID, poll its status, then refresh session read models after completion. The UUID is retained only while the dispatch outcome is unknown, so a retry observes the original durable run. Studio admits one sync dispatch before React busy state renders, cancels polling when its session or screen loses ownership, and removes abort listeners after each completed poll delay.
 
 ## Campaign draft boundary
 
@@ -185,7 +187,7 @@ The editor keeps Runtime DTOs authoritative. The transport canonicalizes IMMEDIA
 
 Preflight evaluates persisted state only. The UI renders Runtime status, counters, policy version, stable check codes, and issue reasons—including stale capability—without recomputing policy, with a safe display fallback for future codes. Local edits make a displayed result stale, successful details/target persistence clears it, and returned campaign/target revisions are checked against the current campaign.
 
-Run creation is a separate, explicit action after review. Studio sends both reviewed campaign and target revisions with an idempotency key retained across transport retry. LIVE also returns the signed, short-lived proof from the displayed passing preflight, so confirmation is bound to that campaign/session/revision snapshot. DRY_RUN can be repeated while the campaign remains DRAFT. LIVE requires confirmation; a successful launch refreshes the campaign into its Runtime-owned read-only lifecycle. Revision, proof, and launch conflicts are never retried with newer state: Studio reloads campaign, target, and run state and requires review/preflight again. Pause, resume, and cancel reconcile both run state and the coarser campaign lifecycle. Run `targetSource` is immutable audit data and is never resolved through the current Group List.
+Run creation is a separate, explicit action after review. Studio sends both reviewed campaign and target revisions with an idempotency key retained across transport retry. LIVE also returns the signed, short-lived proof from the displayed passing preflight, so confirmation is bound to that campaign/session/revision snapshot. DRY_RUN can be repeated while the campaign remains DRAFT. LIVE requires confirmation; a successful launch refreshes the campaign into its Runtime-owned read-only lifecycle. Revision, proof, and launch conflicts are never retried with newer state: Studio reloads campaign, target, and run state and requires review/preflight again. Pause, resume, and cancel each retain a per-action/run UUID after response loss; Runtime replays the receipt, including a prior blocked-resume rejection, while returning the current canonical run on successful replay. They reconcile both run state and the coarser campaign lifecycle. Run `targetSource` is immutable audit data and is never resolved through the current Group List.
 
 Campaign deletion is a revision-safe removal from the active workspace, not audit erasure. Studio sends the displayed campaign and target revisions, waits for Runtime HTTP 204 before removing the row, and preserves current list criteria while refreshing the authoritative page. Only DRAFT and ARCHIVED snapshots can enter confirmation locally; Runtime remains authoritative for lifecycle and unfinished-run conflicts. Revision conflicts refresh without automatic retry and require a new operator confirmation. Runtime retains run, delivery, and message-job history.
 

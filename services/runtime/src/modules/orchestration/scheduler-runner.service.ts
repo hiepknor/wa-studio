@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { withCorrelationContext } from '../../core/observability/correlation-context';
@@ -21,6 +21,7 @@ import { ContactResolutionTick } from '../contacts/contact-resolution.tick';
 import { ContactProjectionTick } from '../contacts/contact-projection.tick';
 import { SchedulerLeadershipService } from './scheduler-leadership.service';
 import { ContactMessageObservationTick } from '../contacts/contact-message-observation.tick';
+import { MessageStatusProjectionService } from '../messages/message-status-projection.service';
 
 @Injectable()
 export class SchedulerRunnerService {
@@ -46,6 +47,7 @@ export class SchedulerRunnerService {
     private readonly contactMessageObservations: ContactMessageObservationTick,
     private readonly leadership: SchedulerLeadershipService,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
+    @Optional() private readonly messageStatusProjections?: MessageStatusProjectionService,
   ) {}
 
   async run(): Promise<void> {
@@ -116,6 +118,17 @@ export class SchedulerRunnerService {
         2 * 60_000,
         () => this.webhookRegistrations.run(),
       ),
+      ...(this.messageStatusProjections ? [this.tick(
+        'message-status-projections',
+        5_000,
+        60_000,
+        async () => {
+          const repaired = await this.messageStatusProjections!.repairPending();
+          if (repaired > 0) {
+            this.logger.log({ event: 'messages.status_projection.repaired', count: repaired });
+          }
+        },
+      )] : []),
     ];
     this.started = true;
     try {

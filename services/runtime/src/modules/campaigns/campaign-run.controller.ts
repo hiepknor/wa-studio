@@ -1,6 +1,8 @@
-import { Controller, Get, Param, ParseUUIDPipe, Post, Query, UseFilters } from '@nestjs/common';
 import {
-  ApiBadRequestResponse, ApiConflictResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation,
+  Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Post, Query, UseFilters,
+} from '@nestjs/common';
+import {
+  ApiBadRequestResponse, ApiConflictResponse, ApiHeader, ApiNotFoundResponse, ApiOkResponse, ApiOperation,
   ApiQuery, ApiSecurity, ApiTags,
 } from '@nestjs/swagger';
 import { CampaignDeliveryListDto } from '../../contracts/campaigns/campaign-delivery.dto';
@@ -42,17 +44,32 @@ export class CampaignRunController {
   }
 
   @Post(':id/pause')
+  @HttpCode(200)
   @ApiOperation({ summary: 'Pause new delivery materialization for a campaign run' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
   @ApiOkResponse({ type: CampaignRunDto })
-  pause(@Param('id', ParseUUIDPipe) id: string) { return this.runs.pause(id); }
+  pause(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ) { return this.runs.pause(id, idempotencyKey); }
 
   @Post(':id/resume')
+  @HttpCode(200)
   @ApiOperation({ summary: 'Re-run preflight and resume a paused or blocked campaign run' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
   @ApiOkResponse({ type: CampaignRunDto })
-  resume(@Param('id', ParseUUIDPipe) id: string) { return this.runs.resume(id); }
+  resume(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ) { return this.runs.resume(id, idempotencyKey); }
 
   @Post(':id/cancel')
+  @HttpCode(200)
   @ApiOperation({ summary: 'Cancel pending work for a campaign run' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
   @ApiOkResponse({ type: CampaignRunDto })
-  cancel(@Param('id', ParseUUIDPipe) id: string) { return this.runs.cancel(id); }
+  cancel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ) { return this.runs.cancel(id, idempotencyKey); }
 }

@@ -37,7 +37,12 @@ describe('campaign draft contract HTTP API', () => {
   let messageProcessor: { process(payload: { messageJobId: string }): Promise<unknown> };
   let runRepository: {
     getPreflightContext(runId: string): Promise<Record<string, any> | null>;
-    resume(runId: string, report: Record<string, any>, targets: Record<string, any>[]): Promise<unknown>;
+    resume(
+      runId: string,
+      report: Record<string, any>,
+      targets: Record<string, any>[],
+      request: Record<string, string>,
+    ): Promise<unknown>;
     claimPreparation(runId: string): Promise<{ leaseToken: string } | null>;
     applyPreflight(
       runId: string,
@@ -47,6 +52,8 @@ describe('campaign draft contract HTTP API', () => {
     ): Promise<unknown>;
     auditLifecycle(): Promise<Record<string, number>>;
     materializePending(runId: string, maxBuffered: number): Promise<number>;
+    reconcileDeliveries(): Promise<number>;
+    finalizeRuns(limit: number): Promise<number>;
   };
   const auth = { 'x-runtime-key': process.env.RUNTIME_API_KEY! };
 
@@ -110,6 +117,17 @@ describe('campaign draft contract HTTP API', () => {
         text: 'Hello group',
         ...overrides,
       }),
+    });
+  }
+
+  async function runAction(
+    runId: string,
+    action: 'pause' | 'resume' | 'cancel',
+    idempotencyKey: string = randomUUID(),
+  ) {
+    return jsonRequest(`/campaign-runs/${runId}/${action}`, {
+      method: 'POST',
+      headers: { 'idempotency-key': idempotencyKey },
     });
   }
 
@@ -480,7 +498,7 @@ describe('campaign draft contract HTTP API', () => {
     expect(blocked.response.status).toBe(409);
     expect(blocked.body.code).toBe('CAMPAIGN_DELETE_RUN_CONFLICT');
 
-    expect((await jsonRequest(`/campaign-runs/${runId}/cancel`, { method: 'POST' })).response.status).toBe(201);
+    expect((await runAction(runId, 'cancel')).response.status).toBe(200);
     expect((await jsonRequest(
       `/campaigns/${campaignId}?expectedRevision=1&expectedTargetsRevision=0`,
       { method: 'DELETE' },
@@ -514,7 +532,7 @@ describe('campaign draft contract HTTP API', () => {
       code: 'CAMPAIGN_DELETE_STATE_CONFLICT', details: { currentStatus: 'ACTIVE' },
     });
 
-    await jsonRequest(`/campaign-runs/${run.body.id as string}/cancel`, { method: 'POST' });
+    await runAction(run.body.id as string, 'cancel');
     expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('ARCHIVED');
     expect((await jsonRequest(
       `/campaigns/${campaignId}?expectedRevision=1&expectedTargetsRevision=1`,
@@ -1165,11 +1183,11 @@ describe('campaign draft contract HTTP API', () => {
 
     await runPreparer.prepare(winner.body.id as string);
     expect((await jsonRequest(`/campaign-runs/${winner.body.id as string}`)).body.status).toBe('RUNNING');
-    await jsonRequest(`/campaign-runs/${winner.body.id as string}/pause`, { method: 'POST' });
+    await runAction(winner.body.id as string, 'pause');
     expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('PAUSED');
-    await jsonRequest(`/campaign-runs/${winner.body.id as string}/resume`, { method: 'POST' });
+    await runAction(winner.body.id as string, 'resume');
     expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('ACTIVE');
-    const cancelled = await jsonRequest(`/campaign-runs/${winner.body.id as string}/cancel`, { method: 'POST' });
+    const cancelled = await runAction(winner.body.id as string, 'cancel');
     expect(cancelled.body.status).toBe('CANCELLED');
     expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('ARCHIVED');
     const edit = await jsonRequest(`/campaigns/${campaignId}`, {
@@ -1213,7 +1231,7 @@ describe('campaign draft contract HTTP API', () => {
       body: JSON.stringify(launchInput),
     });
     await runPreparer.prepare(run.body.id as string);
-    await jsonRequest(`/campaign-runs/${run.body.id as string}/pause`, { method: 'POST' });
+    await runAction(run.body.id as string, 'pause');
     await pool.query(
       `UPDATE gateway_groups SET send_capability = 'DENIED',
          send_capability_reason = 'GROUP_READ_ONLY', capability_revision = capability_revision + 1
@@ -1221,10 +1239,168 @@ describe('campaign draft contract HTTP API', () => {
       [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
     );
 
-    const resume = await jsonRequest(`/campaign-runs/${run.body.id as string}/resume`, { method: 'POST' });
+    const resumeKey = randomUUID();
+    const resume = await runAction(run.body.id as string, 'resume', resumeKey);
     expect(resume.response.status).toBe(409);
+    expect(resume.body.code).toBe('CAMPAIGN_RUN_STATE_CONFLICT');
     expect((await jsonRequest(`/campaign-runs/${run.body.id as string}`)).body.status).toBe('BLOCKED');
     expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('PAUSED');
+
+    await pool.query(
+      `UPDATE gateway_groups SET send_capability = 'ALLOWED',
+         send_capability_reason = 'SEND_ALLOWED', capability_checked_at = now(),
+         capability_invalidated_at = NULL, capability_revision = capability_revision + 1
+       WHERE session_id = $1 AND id = $2`,
+      [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    );
+    const rejectedReplay = await runAction(run.body.id as string, 'resume', resumeKey);
+    expect(rejectedReplay.response.status).toBe(409);
+    expect(rejectedReplay.body).toEqual(resume.body);
+    expect((await jsonRequest(`/campaign-runs/${run.body.id as string}`)).body.status).toBe('BLOCKED');
+    expect((await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM activity_events
+       WHERE run_id = $1 AND event_type = 'campaign_run.blocked'`,
+      [run.body.id],
+    )).rows[0]?.count).toBe('1');
+
+    const resumed = await runAction(run.body.id as string, 'resume');
+    expect(resumed.response.status).toBe(200);
+    expect(resumed.body.status).toBe('RUNNING');
+  });
+
+  it('converges a completed run to partial failure after a late definitive delivery failure', async () => {
+    const campaign = await createCampaign();
+    const campaignId = campaign.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const launchInput = await passingLiveLaunchInput(campaignId);
+    const launch = await jsonRequest(`/campaigns/${campaignId}/runs`, {
+      method: 'POST',
+      headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify(launchInput),
+    });
+    const runId = launch.body.id as string;
+    await runPreparer.prepare(runId);
+    expect(await runRepository.materializePending(runId, 10)).toBe(1);
+
+    await pool.query(
+      `UPDATE message_jobs SET status = 'QUEUED', updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)`,
+      [runId],
+    );
+    await pool.query(
+      `UPDATE message_jobs SET status = 'PROCESSING', lease_expires_at = now() + interval '2 minutes',
+         updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)`,
+      [runId],
+    );
+    await pool.query(
+      `UPDATE message_jobs SET status = 'ACCEPTED', openwa_message_id = 'late-failure-message',
+         lease_expires_at = NULL,
+         updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)`,
+      [runId],
+    );
+    expect(await runRepository.reconcileDeliveries()).toBe(1);
+    expect(await runRepository.finalizeRuns(10)).toBe(1);
+    expect((await jsonRequest(`/campaign-runs/${runId}`)).body).toMatchObject({
+      status: 'COMPLETED',
+      progress: { accepted: 1, failed: 0 },
+    });
+    expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('ARCHIVED');
+
+    await pool.query(
+      `UPDATE message_jobs SET status = 'FAILED', last_error = 'Definitive late failure', updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)`,
+      [runId],
+    );
+    expect(await runRepository.reconcileDeliveries()).toBe(1);
+    expect((await jsonRequest(`/campaign-runs/${runId}`)).body).toMatchObject({
+      status: 'COMPLETED',
+      progress: { accepted: 0, failed: 1 },
+    });
+
+    expect(await runRepository.finalizeRuns(10)).toBe(1);
+    expect(await runRepository.finalizeRuns(10)).toBe(0);
+    expect((await jsonRequest(`/campaign-runs/${runId}`)).body).toMatchObject({
+      status: 'PARTIAL_FAILED',
+      statusReason: 'ONE_OR_MORE_DELIVERIES_FAILED',
+      progress: { accepted: 0, failed: 1 },
+    });
+    expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('ARCHIVED');
+    const activity = await pool.query<{ event_type: string; metadata: Record<string, unknown> }>(
+      `SELECT event_type, metadata FROM activity_events
+       WHERE run_id = $1 AND event_type IN ('campaign_run.completed','campaign_run.partial_failed')
+       ORDER BY occurred_at, id`,
+      [runId],
+    );
+    expect(activity.rows).toEqual([
+      expect.objectContaining({ event_type: 'campaign_run.completed' }),
+      expect.objectContaining({
+        event_type: 'campaign_run.partial_failed',
+        metadata: expect.objectContaining({
+          previousStatus: 'COMPLETED', reason: 'LATE_DELIVERY_FAILURE',
+        }),
+      }),
+    ]);
+
+    const resolvingCampaign = await createCampaign({ name: 'Resolve unknown delivery' });
+    const resolvingCampaignId = resolvingCampaign.body.id as string;
+    await jsonRequest(`/campaigns/${resolvingCampaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const resolvingInput = await passingLiveLaunchInput(resolvingCampaignId);
+    const resolvingLaunch = await jsonRequest(`/campaigns/${resolvingCampaignId}/runs`, {
+      method: 'POST',
+      headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify(resolvingInput),
+    });
+    const resolvingRunId = resolvingLaunch.body.id as string;
+    await runPreparer.prepare(resolvingRunId);
+    expect(await runRepository.materializePending(resolvingRunId, 10)).toBe(1);
+    await pool.query(
+      `UPDATE message_jobs SET status = 'QUEUED', updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)`,
+      [resolvingRunId],
+    );
+    await pool.query(
+      `UPDATE message_jobs SET status = 'PROCESSING', lease_expires_at = now() + interval '2 minutes',
+         updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)`,
+      [resolvingRunId],
+    );
+    await pool.query(
+      `UPDATE message_jobs SET status = 'UNKNOWN', last_error = 'Response lost',
+         lease_expires_at = NULL, updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)`,
+      [resolvingRunId],
+    );
+    expect(await runRepository.reconcileDeliveries()).toBe(1);
+    expect(await runRepository.finalizeRuns(10)).toBe(1);
+    expect((await jsonRequest(`/campaign-runs/${resolvingRunId}`)).body.status).toBe('PARTIAL_FAILED');
+
+    await pool.query(
+      `UPDATE message_jobs SET status = 'SENT', last_error = NULL, updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)`,
+      [resolvingRunId],
+    );
+    expect(await runRepository.reconcileDeliveries()).toBe(1);
+    expect(await runRepository.finalizeRuns(10)).toBe(1);
+    expect((await jsonRequest(`/campaign-runs/${resolvingRunId}`)).body).toMatchObject({
+      status: 'COMPLETED',
+      statusReason: null,
+      progress: { sent: 1, unknown: 0 },
+    });
+    const resolution = await pool.query<{ metadata: Record<string, unknown> }>(
+      `SELECT metadata FROM activity_events
+       WHERE run_id = $1 AND event_type = 'campaign_run.completed'
+       ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+      [resolvingRunId],
+    );
+    expect(resolution.rows[0]?.metadata).toEqual(expect.objectContaining({
+      previousStatus: 'PARTIAL_FAILED', reason: 'LATE_DELIVERY_RESOLUTION',
+    }));
   });
 
   it('does not resume from a capability snapshot that changed during preflight', async () => {
@@ -1241,7 +1417,7 @@ describe('campaign draft contract HTTP API', () => {
     });
     const runId = run.body.id as string;
     await runPreparer.prepare(runId);
-    await jsonRequest(`/campaign-runs/${runId}/pause`, { method: 'POST' });
+    await runAction(runId, 'pause');
     const observed = await runRepository.getPreflightContext(runId);
     expect(observed?.run.preflight.status).toBe('PASS');
     await pool.query(
@@ -1250,7 +1426,11 @@ describe('campaign draft contract HTTP API', () => {
       [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
     );
 
-    expect(await runRepository.resume(runId, observed!.run.preflight, observed!.targets))
+    expect(await runRepository.resume(runId, observed!.run.preflight, observed!.targets, {
+      operationType: 'CAMPAIGN_RUN_RESUME',
+      idempotencyKey: randomUUID(),
+      requestHash: '0'.repeat(64),
+    }))
       .toBe('STALE_INPUT');
     expect((await jsonRequest(`/campaign-runs/${runId}`)).body.status).toBe('PAUSED');
     expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('PAUSED');
@@ -1317,6 +1497,57 @@ describe('campaign draft contract HTTP API', () => {
     });
   });
 
+  it('rejects illegal persisted Run, Delivery, and Message Job state transitions', async () => {
+    const campaign = await createCampaign();
+    const campaignId = campaign.body.id as string;
+    const run = await pool.query<{ id: string }>(
+      `INSERT INTO campaign_runs
+         (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+          payload_snapshot, scheduled_at)
+       VALUES ($1, $2, 'Transition guard', 'transition-guard', 'LIVE',
+         '{"type":"TEXT","text":"guard"}', now())
+       RETURNING id`,
+      [campaignId, INTEGRATION_SESSION_ID],
+    );
+    const runId = run.rows[0]!.id;
+    await expect(pool.query(
+      `UPDATE campaign_runs SET status = 'COMPLETED', completed_at = now() WHERE id = $1`,
+      [runId],
+    )).rejects.toMatchObject({ code: '23514' });
+
+    const job = await pool.query<{ id: string }>(
+      `INSERT INTO message_jobs
+         (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id,
+          payload, scheduled_at, dry_run)
+       VALUES ('transition-guard', 'transition-guard', $1, $2, $3,
+         '{"type":"TEXT","text":"guard"}', now(), false)
+       RETURNING id`,
+      ['0'.repeat(64), INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    );
+    await expect(pool.query(
+      `UPDATE message_jobs SET status = 'ACCEPTED' WHERE id = $1`,
+      [job.rows[0]!.id],
+    )).rejects.toMatchObject({ code: '23514' });
+
+    await pool.query(
+      `INSERT INTO campaign_run_targets
+         (run_id, session_id, group_id, group_name, capability, capability_reason,
+          capability_revision, capability_checked_at)
+       SELECT $1, session_id, id, name, send_capability, send_capability_reason,
+         capability_revision, capability_checked_at
+       FROM gateway_groups WHERE session_id = $2 AND id = $3`,
+      [runId, INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    );
+    await pool.query(
+      `INSERT INTO campaign_deliveries (run_id, group_id) VALUES ($1, $2)`,
+      [runId, INTEGRATION_GROUP_ID],
+    );
+    await expect(pool.query(
+      `UPDATE campaign_deliveries SET status = 'READ', message_job_id = $2 WHERE run_id = $1`,
+      [runId, job.rows[0]!.id],
+    )).rejects.toMatchObject({ code: '23514' });
+  });
+
   it('prepares, pauses, resumes, and cancels a dry-run without calling the send adapter', async () => {
     const campaign = await createCampaign();
     const campaignId = campaign.body.id as string;
@@ -1342,13 +1573,26 @@ describe('campaign draft contract HTTP API', () => {
       'SELECT count(*)::text AS count FROM campaign_deliveries WHERE run_id = $1', [runId],
     )).rows[0]?.count).toBe('1');
 
-    const paused = await jsonRequest(`/campaign-runs/${runId}/pause`, { method: 'POST' });
-    expect(paused.body.status).toBe('PAUSED');
-    const resumed = await jsonRequest(`/campaign-runs/${runId}/resume`, { method: 'POST' });
+    const pauseKey = randomUUID();
+    const pauses = await Promise.all([
+      runAction(runId, 'pause', pauseKey),
+      runAction(runId, 'pause', pauseKey),
+    ]);
+    expect(pauses.map(result => result.response.status)).toEqual([200, 200]);
+    expect(pauses.map(result => result.body.status)).toEqual(['PAUSED', 'PAUSED']);
+    const resumed = await runAction(runId, 'resume');
     expect(resumed.body.status).toBe('RUNNING');
-    const cancelled = await jsonRequest(`/campaign-runs/${runId}/cancel`, { method: 'POST' });
+    const pauseReplay = await runAction(runId, 'pause', pauseKey);
+    expect(pauseReplay.response.status).toBe(200);
+    expect(pauseReplay.body.status).toBe('RUNNING');
+    expect((await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM activity_events
+       WHERE run_id = $1 AND event_type = 'campaign_run.paused'`,
+      [runId],
+    )).rows[0]?.count).toBe('1');
+    const cancelled = await runAction(runId, 'cancel');
     expect(cancelled.body.status).toBe('CANCELLED');
-    const invalidPause = await jsonRequest(`/campaign-runs/${runId}/pause`, { method: 'POST' });
+    const invalidPause = await runAction(runId, 'pause');
     expect(invalidPause.response.status).toBe(409);
     expect(invalidPause.body.code).toBe('CAMPAIGN_RUN_STATE_CONFLICT');
 

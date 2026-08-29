@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { Pool } from 'pg';
 import { DatabaseService } from '../../src/core/database/database.service';
 import { runtimeConfig } from '../../src/core/config/runtime-config';
-import type { MessageJobRepository } from '../../src/modules/messages/message-job.repository';
+import { MessageStatusProjectionService } from '../../src/modules/messages/message-status-projection.service';
+import { MessageJobRepository } from '../../src/modules/messages/message-job.repository';
 import { RuntimeEventRepository } from '../../src/modules/webhooks/runtime-event.repository';
 import { GatewayGroupIntentRepository } from '../../src/modules/gateway/gateway-group-intent.repository';
 import { GatewaySyncRateLimitRepository } from '../../src/modules/gateway/gateway-sync-rate-limit.repository';
@@ -57,7 +58,7 @@ describe('durable webhook processing', () => {
       database,
       webhooks,
       runtimeEvents,
-      { updateStatusByOpenWAMessageId: vi.fn() } as unknown as MessageJobRepository,
+      new MessageStatusProjectionService(database),
       new ContactMessageObserverService(
         new ContactRepository(database),
         new ContactMessageObservationIntentRepository(database),
@@ -93,6 +94,149 @@ describe('durable webhook processing', () => {
     });
     expect(stored.rows[0]!.event_payload).not.toHaveProperty('body');
     expect(stored.rows[0]!.event_payload).toMatchObject({ bodyBytes: 5 });
+  });
+
+  it('projects an OpenWA message status only inside the owning session', async () => {
+    const otherSessionId = '00000000-0000-4000-8000-000000000099';
+    const openwaMessageId = 'shared-openwa-message';
+    const jobs = await pool.query<{ id: string; session_id: string }>(
+      `INSERT INTO message_jobs
+         (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id,
+          payload, scheduled_at, status, dry_run, openwa_message_id)
+       VALUES
+         ('test', 'session-one', 'hash-one', $1, 'one@g.us', '{"type":"TEXT","text":"one"}', now(),
+          'ACCEPTED', false, $3),
+         ('test', 'session-two', 'hash-two', $2, 'two@g.us', '{"type":"TEXT","text":"two"}', now(),
+          'ACCEPTED', false, $3)
+       RETURNING id, session_id`,
+      [INTEGRATION_SESSION_ID, otherSessionId, openwaMessageId],
+    );
+    const envelope: OpenWAWebhookEnvelope = {
+      event: 'message.ack', timestamp: '2026-08-11T00:00:00.000Z',
+      sessionId: INTEGRATION_SESSION_ID, idempotencyKey: 'session-scoped-status',
+      deliveryId: 'session-scoped-delivery', data: { messageId: openwaMessageId, status: 'delivered' },
+    };
+    const projections = new MessageStatusProjectionService(database);
+    const processor = new WebhookProcessorService(
+      database,
+      webhooks,
+      new RuntimeEventRepository(database, new GatewayGroupIntentRepository(database)),
+      projections,
+      new ContactMessageObserverService(
+        new ContactRepository(database),
+        new ContactMessageObservationIntentRepository(database),
+        true,
+      ),
+    );
+
+    await webhooks.insert(envelope);
+    expect(await processor.process(envelope.idempotencyKey)).toEqual({
+      statusUpdated: true,
+      projectionPending: false,
+    });
+
+    const states = await pool.query<{ id: string; session_id: string; status: string }>(
+      `SELECT id, session_id, status FROM message_jobs ORDER BY session_id`,
+    );
+    expect(states.rows).toEqual([
+      { ...jobs.rows.find(job => job.session_id === INTEGRATION_SESSION_ID)!, status: 'DELIVERED' },
+      { ...jobs.rows.find(job => job.session_id === otherSessionId)!, status: 'ACCEPTED' },
+    ]);
+    const projection = await pool.query<{ projection_state: string; projected_job_id: string }>(
+      `SELECT projection_state, projected_job_id FROM message_events WHERE event_id = $1`,
+      [envelope.idempotencyKey],
+    );
+    expect(projection.rows[0]).toEqual({
+      projection_state: 'APPLIED',
+      projected_job_id: jobs.rows.find(job => job.session_id === INTEGRATION_SESSION_ID)!.id,
+    });
+  });
+
+  it('reconciles a callback that arrives before the OpenWA message id is bound', async () => {
+    const openwaMessageId = 'early-openwa-message';
+    const job = await pool.query<{ id: string }>(
+      `INSERT INTO message_jobs
+         (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id,
+          payload, scheduled_at, status, dry_run, attempt_count)
+       VALUES ('test', 'early-callback', 'early-hash', $1, 'early@g.us',
+         '{"type":"TEXT","text":"early"}', now(), 'PROCESSING', false, 1)
+       RETURNING id`,
+      [INTEGRATION_SESSION_ID],
+    );
+    const envelope: OpenWAWebhookEnvelope = {
+      event: 'message.ack', timestamp: '2026-08-11T00:00:00.000Z',
+      sessionId: INTEGRATION_SESSION_ID, idempotencyKey: 'early-status-event',
+      deliveryId: 'early-status-delivery', data: { messageId: openwaMessageId, status: 'delivered' },
+    };
+    const projections = new MessageStatusProjectionService(database);
+    const processor = new WebhookProcessorService(
+      database,
+      webhooks,
+      new RuntimeEventRepository(database, new GatewayGroupIntentRepository(database)),
+      projections,
+      new ContactMessageObserverService(
+        new ContactRepository(database),
+        new ContactMessageObservationIntentRepository(database),
+        true,
+      ),
+    );
+
+    await webhooks.insert(envelope);
+    expect(await processor.process(envelope.idempotencyKey)).toEqual({
+      statusUpdated: false,
+      projectionPending: true,
+    });
+    expect((await pool.query<{ projection_state: string }>(
+      `SELECT projection_state FROM message_events WHERE event_id = $1`,
+      [envelope.idempotencyKey],
+    )).rows[0]?.projection_state).toBe('PENDING');
+
+    const messages = new MessageJobRepository(database);
+    await database.transaction(async client => {
+      await messages.updateResult(client, job.rows[0]!.id, 'ACCEPTED', { openwaMessageId });
+      expect(await projections.reconcilePendingForJobInTransaction(client, job.rows[0]!.id)).toBe(1);
+    });
+
+    expect((await pool.query<{ status: string }>(
+      `SELECT status FROM message_jobs WHERE id = $1`, [job.rows[0]!.id],
+    )).rows[0]?.status).toBe('DELIVERED');
+    expect((await pool.query<{ projection_state: string }>(
+      `SELECT projection_state FROM message_events WHERE event_id = $1`,
+      [envelope.idempotencyKey],
+    )).rows[0]?.projection_state).toBe('APPLIED');
+  });
+
+  it('repairs a pending projection left behind across independent commits', async () => {
+    const openwaMessageId = 'repair-openwa-message';
+    const eventId = 'repair-status-event';
+    const runtimeEvents = new RuntimeEventRepository(database, new GatewayGroupIntentRepository(database));
+    await runtimeEvents.store({
+      eventId,
+      sourceEventType: 'message.ack',
+      eventType: 'message.ack',
+      eventVersion: 1,
+      sessionId: INTEGRATION_SESSION_ID,
+      occurredAt: new Date('2026-08-11T00:00:00.000Z'),
+      payload: { messageId: openwaMessageId, groupId: null, deliveryStatus: 'read' },
+    });
+    const job = await pool.query<{ id: string }>(
+      `INSERT INTO message_jobs
+         (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id,
+          payload, scheduled_at, status, dry_run, openwa_message_id)
+       VALUES ('test', 'repair-callback', 'repair-hash', $1, 'repair@g.us',
+         '{"type":"TEXT","text":"repair"}', now(), 'ACCEPTED', false, $2)
+       RETURNING id`,
+      [INTEGRATION_SESSION_ID, openwaMessageId],
+    );
+    const projections = new MessageStatusProjectionService(database);
+
+    expect(await projections.repairPending()).toBe(1);
+    expect((await pool.query<{ status: string }>(
+      `SELECT status FROM message_jobs WHERE id = $1`, [job.rows[0]!.id],
+    )).rows[0]?.status).toBe('READ');
+    expect((await pool.query<{ projection_state: string }>(
+      `SELECT projection_state FROM message_events WHERE event_id = $1`, [eventId],
+    )).rows[0]?.projection_state).toBe('APPLIED');
   });
 
   it('enriches a synchronized member from message push-name evidence without storing raw contact data', async () => {
@@ -136,7 +280,7 @@ describe('durable webhook processing', () => {
     );
     const processor = new WebhookProcessorService(
       database, webhooks, runtimeEvents,
-      { updateStatusByOpenWAMessageId: vi.fn() } as unknown as MessageJobRepository,
+      new MessageStatusProjectionService(database),
       observer,
     );
 
@@ -178,8 +322,8 @@ describe('durable webhook processing', () => {
       webhooks,
       runtimeEvents,
       {
-        updateStatusByOpenWAMessageIdWithClient: vi.fn().mockRejectedValue(new Error('projection unavailable')),
-      } as unknown as MessageJobRepository,
+        projectEventInTransaction: vi.fn().mockRejectedValue(new Error('projection unavailable')),
+      } as unknown as MessageStatusProjectionService,
       new ContactMessageObserverService(
         new ContactRepository(database),
         new ContactMessageObservationIntentRepository(database),
@@ -367,7 +511,7 @@ describe('durable webhook processing', () => {
       database,
       webhooks,
       runtimeEvents,
-      { updateStatusByOpenWAMessageId: vi.fn() } as unknown as MessageJobRepository,
+      new MessageStatusProjectionService(database),
       new ContactMessageObserverService(
         new ContactRepository(database),
         new ContactMessageObservationIntentRepository(database),
@@ -398,6 +542,21 @@ describe('durable webhook processing', () => {
     expect(stored.rows[0]).toMatchObject({
       requested_revision: '20', coalesced_count: '19', status: 'PENDING', reasons: ['group.update'],
     });
+    const operations = await pool.query<{ request_revision: string; status: string }>(
+      `SELECT request_revision::text, status
+       FROM gateway_group_reconciliation_operations
+       WHERE session_id = $1 AND group_id = $2
+       ORDER BY request_revision`,
+      [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    );
+    expect(operations.rows).toHaveLength(20);
+    expect(operations.rows.every(operation => operation.status === 'PENDING')).toBe(true);
+    expect((await pool.query<{ bounded: boolean }>(
+      `SELECT min(updated_at) < max(updated_at) AS bounded
+       FROM gateway_group_reconciliation_operations
+       WHERE session_id = $1 AND group_id = $2`,
+      [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    )).rows[0]?.bounded).toBe(true);
     const dispatchable = await intents.listDispatchable(10);
     expect(dispatchable).toHaveLength(1);
     expect(dispatchable[0]!.availableAt).toBeInstanceOf(Date);

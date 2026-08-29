@@ -699,6 +699,29 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        RuntimeErrorDto: {
+            /** @example CAMPAIGN_NOT_FOUND */
+            code: string;
+            message: string;
+            fieldErrors?: {
+                [key: string]: string[];
+            };
+            details?: {
+                [key: string]: unknown;
+            };
+        };
+        SyncModeConflictDto: {
+            /** @example 409 */
+            statusCode: number;
+            /** @example SYNC_MODE_CONFLICT */
+            code: string;
+            /** @example A different synchronization mode is already active */
+            message: string;
+            /** Format: uuid */
+            activeRunId: string;
+            /** @enum {string} */
+            activeMode: "FULL" | "INCREMENTAL";
+        };
         SessionDto: {
             /** Format: uuid */
             id: string;
@@ -773,29 +796,6 @@ export interface components {
             startedAt: string | null;
             /** Format: date-time */
             completedAt: string | null;
-        };
-        SyncModeConflictDto: {
-            /** @example 409 */
-            statusCode: number;
-            /** @example SYNC_MODE_CONFLICT */
-            code: string;
-            /** @example A different synchronization mode is already active */
-            message: string;
-            /** Format: uuid */
-            activeRunId: string;
-            /** @enum {string} */
-            activeMode: "FULL" | "INCREMENTAL";
-        };
-        RuntimeErrorDto: {
-            /** @example CAMPAIGN_NOT_FOUND */
-            code: string;
-            message: string;
-            fieldErrors?: {
-                [key: string]: string[];
-            };
-            details?: {
-                [key: string]: unknown;
-            };
         };
         GroupSendCapabilityDto: {
             /** @enum {string} */
@@ -1453,6 +1453,23 @@ export interface components {
             /** @enum {string} */
             reason: "Runtime dependency unavailable";
         };
+        OpenWAComponentHealthDto: {
+            /** @enum {string} */
+            status: "UNKNOWN" | "COMPATIBLE" | "UNAVAILABLE" | "INCOMPATIBLE";
+            /** @example 0.23.3 */
+            expectedRelease: string;
+            /** @example 0.23.3 */
+            observedRelease: string | null;
+            /** Format: date-time */
+            checkedAt: string | null;
+            /** Format: date-time */
+            lastSuccessfulAt: string | null;
+            /** @enum {string|null} */
+            reason: "not_checked" | "network_error" | "http_error" | "invalid_response" | "release_mismatch" | null;
+        };
+        RuntimeComponentHealthDto: {
+            openwa: components["schemas"]["OpenWAComponentHealthDto"];
+        };
         HealthOperationalDto: {
             /** @enum {string} */
             status: "operational" | "degraded";
@@ -1464,8 +1481,9 @@ export interface components {
             instanceId: string;
             dependencies: components["schemas"]["HealthDependenciesDto"] | null;
             processes: components["schemas"]["RuntimeProcessHealthDto"];
+            components: components["schemas"]["RuntimeComponentHealthDto"];
             /** @enum {string} */
-            reason?: "dependency_unavailable" | "background_process_degraded";
+            reason?: "dependency_unavailable" | "background_process_degraded" | "upstream_status_unknown" | "upstream_unavailable" | "upstream_incompatible";
         };
         InboundMessageDto: {
             /** Format: uuid */
@@ -1591,7 +1609,9 @@ export interface operations {
     SessionController_requestSync: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 id: string;
             };
@@ -1603,6 +1623,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncRunDto"];
+                };
+            };
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -1611,13 +1640,13 @@ export interface operations {
                     "application/json": components["schemas"]["SyncRunDto"];
                 };
             };
-            /** @description A different sync mode is already active */
+            /** @description The operation key conflicts or another sync mode is active */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SyncModeConflictDto"];
+                    "application/json": components["schemas"]["RuntimeErrorDto"] | components["schemas"]["SyncModeConflictDto"];
                 };
             };
         };
@@ -1694,6 +1723,14 @@ export interface operations {
                     "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
         };
     };
     GroupController_get: {
@@ -1727,6 +1764,14 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1778,6 +1823,14 @@ export interface operations {
                     "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
         };
     };
     GroupController_refreshCapability: {
@@ -1786,7 +1839,9 @@ export interface operations {
                 /** @description Gateway session owning the group */
                 sessionId: string;
             };
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 id: string;
             };
@@ -1794,6 +1849,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupCapabilityRefreshDto"];
+                };
+            };
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -1811,6 +1875,14 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1858,6 +1930,14 @@ export interface operations {
                     "application/json": components["schemas"]["RuntimeErrorDto"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
         };
     };
     GroupController_getCapabilityRefresh: {
@@ -1892,6 +1972,14 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3086,7 +3174,9 @@ export interface operations {
     CampaignRunController_pause: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 id: string;
             };
@@ -3131,7 +3221,9 @@ export interface operations {
     CampaignRunController_resume: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 id: string;
             };
@@ -3176,7 +3268,9 @@ export interface operations {
     CampaignRunController_cancel: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 id: string;
             };

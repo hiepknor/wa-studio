@@ -5,8 +5,15 @@ import type { SyncRunDto } from '../../contracts/sessions/sync-run.dto';
 import { GatewaySyncMode } from '../../contracts/sessions/sync-request.dto';
 import { OpenWAClient, OpenWAHttpError, OpenWAResponseValidationError } from '../../integrations/openwa/openwa.client';
 import { GatewayRepository, type SyncWriteFence } from './gateway.repository';
+import {
+  requireGatewayMutationKey,
+  sessionSyncRequestHash,
+} from './gateway-mutation-idempotency';
 import { GatewaySyncItemRepository } from './gateway-sync-item.repository';
-import { GatewaySyncModeConflictError } from './gateway-sync.types';
+import {
+  GatewaySyncIdempotencyConflictError,
+  GatewaySyncModeConflictError,
+} from './gateway-sync.types';
 import { GatewayGroupIntentRepository } from './gateway-group-intent.repository';
 import { ContactSyncService } from '../contacts/contact-sync.service';
 
@@ -23,17 +30,33 @@ export class GatewaySyncService {
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
   ) {}
 
-  async request(sessionId: string, mode: GatewaySyncMode = GatewaySyncMode.FULL): Promise<SyncRunDto> {
+  async request(
+    sessionId: string,
+    rawIdempotencyKey: string | undefined,
+    mode: GatewaySyncMode = GatewaySyncMode.FULL,
+  ): Promise<{ run: SyncRunDto; replayed: boolean }> {
     if (!this.config.OPENWA_ALLOWED_SESSION_IDS.includes(sessionId)) {
       throw new ForbiddenException('Session is not in OPENWA_ALLOWED_SESSION_IDS');
     }
+    const idempotencyKey = requireGatewayMutationKey('SESSION_SYNC', rawIdempotencyKey);
     try {
-      return await this.repository.createSyncRun(sessionId, mode);
+      return await this.repository.requestSyncRun(sessionId, mode, {
+        key: idempotencyKey,
+        requestHash: sessionSyncRequestHash(sessionId, mode),
+      });
     } catch (error) {
       if (error instanceof GatewaySyncModeConflictError) {
         throw new ConflictException({
           statusCode: 409, code: 'SYNC_MODE_CONFLICT', message: error.message,
           activeRunId: error.activeRunId, activeMode: error.activeMode,
+        });
+      }
+      if (error instanceof GatewaySyncIdempotencyConflictError) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'SESSION_SYNC_IDEMPOTENCY_CONFLICT',
+          message: error.message,
+          details: {},
         });
       }
       throw error;

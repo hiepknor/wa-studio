@@ -1,8 +1,11 @@
-import { Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query, UseFilters } from '@nestjs/common';
 import {
-  ApiAcceptedResponse, ApiBadRequestResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation,
-  ApiQuery, ApiSecurity, ApiTags,
+  Controller, Get, Headers, HttpCode, Param, ParseIntPipe, Post, Query, Res, UseFilters,
+} from '@nestjs/common';
+import {
+  ApiAcceptedResponse, ApiBadRequestResponse, ApiConflictResponse, ApiHeader, ApiNotFoundResponse, ApiOkResponse,
+  ApiOperation, ApiQuery, ApiResponse, ApiSecurity, ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { RuntimeErrorDto } from '../../contracts/common/runtime-error.dto';
 import { GroupDetailDto, GroupListDto, GroupMemberListDto } from '../../contracts/groups/group.dto';
 import { GroupCapabilityRefreshDto } from '../../contracts/groups/group-capability-refresh.dto';
@@ -14,6 +17,7 @@ import { GroupHttpExceptionFilter } from './group-http-exception.filter';
 @ApiSecurity('runtime-key')
 @ApiBadRequestResponse({ type: RuntimeErrorDto })
 @ApiNotFoundResponse({ type: RuntimeErrorDto })
+@ApiConflictResponse({ type: RuntimeErrorDto })
 @UseFilters(GroupHttpExceptionFilter)
 @Controller('groups')
 export class GroupController {
@@ -68,9 +72,18 @@ export class GroupController {
   @Post(':id/capability-refreshes')
   @HttpCode(202)
   @ApiOperation({ summary: 'Create or join a durable capability refresh operation' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
   @ApiAcceptedResponse({ type: GroupCapabilityRefreshDto })
-  refreshCapability(@Param('id') id: string, @Query() query: GroupIdentityQueryDto) {
-    return this.groups.refreshCapability(query.sessionId, id);
+  @ApiResponse({ status: 200, type: GroupCapabilityRefreshDto, description: 'Idempotent replay' })
+  async refreshCapability(
+    @Param('id') id: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Query() query: GroupIdentityQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.groups.refreshCapability(query.sessionId, id, idempotencyKey);
+    response.status(result.replayed ? 200 : 202);
+    return result.operation;
   }
 
   @Get(':id/capability-refreshes/current')

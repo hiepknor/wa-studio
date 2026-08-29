@@ -9,6 +9,9 @@ import { DatabaseService } from '../../core/database/database.service';
 import { MessageJobRepository } from '../messages/message-job.repository';
 import { CampaignDeliveryRepository } from './campaign-delivery.repository';
 import {
+  CampaignRunActionIdempotencyConflictError,
+  type CampaignRunActionRequest,
+  type CampaignRunActionResult,
   CampaignResumeResult,
   CampaignRunLifecycleRepository,
 } from './campaign-run-lifecycle.repository';
@@ -31,6 +34,11 @@ export interface ClaimedCampaignPreparation {
 export type CampaignPreparationResult = 'PREPARING' | 'FAILED' | 'LOST_OWNERSHIP';
 export type CampaignPreflightApplyResult = 'APPLIED' | 'STALE_INPUT' | 'LOST_OWNERSHIP';
 export type { CampaignResumeResult } from './campaign-run-lifecycle.repository';
+export type {
+  CampaignRunActionRequest,
+  CampaignRunActionResult,
+} from './campaign-run-lifecycle.repository';
+export { CampaignRunActionIdempotencyConflictError } from './campaign-run-lifecycle.repository';
 
 export interface CampaignLifecycleDrift {
   draftWithLive: number;
@@ -581,24 +589,42 @@ export class CampaignRunRepository {
     return this.lifecycle.finalize(limit);
   }
 
-  async pause(id: string): Promise<CampaignRunDto | null> {
-    return this.lifecycle.pause(id);
+  async findActionResult(
+    id: string,
+    request: CampaignRunActionRequest,
+  ): Promise<CampaignRunActionResult | null> {
+    return this.lifecycle.findActionResult(id, request);
   }
 
-  async recordBlockedResume(id: string, report: CampaignPreflightDto): Promise<void> {
-    return this.lifecycle.recordBlockedResume(id, report);
+  async pause(
+    id: string,
+    request: CampaignRunActionRequest,
+  ): Promise<CampaignRunActionResult | null> {
+    return this.lifecycle.pause(id, request);
+  }
+
+  async rejectResume(
+    id: string,
+    report: CampaignPreflightDto,
+    request: CampaignRunActionRequest,
+  ): Promise<CampaignRunActionResult | null> {
+    return this.lifecycle.rejectResume(id, report, request);
   }
 
   async resume(
     id: string,
     report: CampaignPreflightDto,
     observedTargets: CampaignTargetDto[],
+    request: CampaignRunActionRequest,
   ): Promise<CampaignResumeResult> {
-    return this.lifecycle.resume(id, report, observedTargets);
+    return this.lifecycle.resume(id, report, observedTargets, request);
   }
 
-  async cancel(id: string): Promise<CampaignRunDto | null> {
-    return this.lifecycle.cancel(id);
+  async cancel(
+    id: string,
+    request: CampaignRunActionRequest,
+  ): Promise<CampaignRunActionResult | null> {
+    return this.lifecycle.cancel(id, request);
   }
 
   async listRunningIds(limit: number): Promise<string[]> {

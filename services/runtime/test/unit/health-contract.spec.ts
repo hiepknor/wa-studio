@@ -44,13 +44,33 @@ describe('health OpenAPI contract', () => {
 
     const operational = contract.components.schemas.HealthOperationalDto!;
     expect(operational.required).toEqual([
-      'status', 'service', 'version', 'instanceId', 'dependencies', 'processes',
+      'status', 'service', 'version', 'instanceId', 'dependencies', 'processes', 'components',
     ]);
     expect(operational.properties).toMatchObject({
       status: { enum: ['operational', 'degraded'] },
       instanceId: { type: 'string' },
       dependencies: { nullable: true },
-      reason: { enum: ['dependency_unavailable', 'background_process_degraded'] },
+      components: { $ref: '#/components/schemas/RuntimeComponentHealthDto' },
+      reason: { enum: [
+        'dependency_unavailable',
+        'background_process_degraded',
+        'upstream_status_unknown',
+        'upstream_unavailable',
+        'upstream_incompatible',
+      ] },
     });
+    expect(contract.components.schemas.OpenWAComponentHealthDto?.properties).toMatchObject({
+      status: { enum: ['UNKNOWN', 'COMPATIBLE', 'UNAVAILABLE', 'INCOMPATIBLE'] },
+      expectedRelease: { type: 'string' },
+      observedRelease: { type: 'string', nullable: true },
+    });
+    expect(contract.components.schemas.OpenWAComponentHealthDto?.required).toEqual([
+      'status',
+      'expectedRelease',
+      'observedRelease',
+      'checkedAt',
+      'lastSuccessfulAt',
+      'reason',
+    ]);
   });
 });

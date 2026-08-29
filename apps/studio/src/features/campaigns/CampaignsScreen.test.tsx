@@ -1122,10 +1122,16 @@ describe("CampaignsScreen", () => {
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: "Review & launch" }));
     await user.click(await screen.findByRole("button", { name: "Pause" }));
-    await waitFor(() => expect(pauseCampaignRun).toHaveBeenCalledWith(running.id));
+    await waitFor(() => expect(pauseCampaignRun).toHaveBeenCalledWith(
+      running.id,
+      expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    ));
     expect(await screen.findByText(/Campaign lifecycle: Paused/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Resume" }));
-    await waitFor(() => expect(resumeCampaignRun).toHaveBeenCalledWith(running.id));
+    await waitFor(() => expect(resumeCampaignRun).toHaveBeenCalledWith(
+      running.id,
+      expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    ));
     expect(await screen.findByText(/Campaign lifecycle: Active/)).toBeInTheDocument();
   });
 
@@ -1201,6 +1207,36 @@ describe("CampaignsScreen", () => {
     expect(getCampaign).toHaveBeenCalledWith(campaign.id);
     expect(screen.getByText("Paused")).toBeInTheDocument();
     expect(screen.getByText(/Campaign lifecycle: Paused/)).toBeInTheDocument();
+  });
+
+  it("reuses the same run action key after an unconfirmed pause", async () => {
+    const user = userEvent.setup();
+    const running = campaignRun("LIVE", "RUNNING");
+    const pauseCampaignRun = vi.fn()
+      .mockRejectedValueOnce(new RuntimeTransportError(
+        "response lost",
+        { requestDispatched: true },
+      ))
+      .mockResolvedValueOnce({ ...running, status: "PAUSED" as const });
+    renderCampaigns({
+      getCampaignRun: vi.fn().mockResolvedValue(running),
+      listCampaignRuns: vi.fn().mockResolvedValue({
+        data: [running],
+        meta: { total: 1, limit: 20, offset: 0 },
+      }),
+      pauseCampaignRun,
+    });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
+
+    await user.click(await screen.findByRole("button", { name: "Pause" }));
+    expect(await screen.findByText(/same request key/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Pause" }));
+
+    await waitFor(() => expect(pauseCampaignRun).toHaveBeenCalledTimes(2));
+    expect(pauseCampaignRun.mock.calls[0]?.[1]).toBe(pauseCampaignRun.mock.calls[1]?.[1]);
+    expect(await screen.findByText("Paused")).toBeInTheDocument();
   });
 
   it("renders an ARCHIVED Campaign after a terminal LIVE cancellation", async () => {

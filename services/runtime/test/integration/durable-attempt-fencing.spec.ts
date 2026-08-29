@@ -172,6 +172,78 @@ describe('durable attempt fencing', () => {
     )).toMatchObject({ status: 'FAILED', errorCode: 'UPSTREAM_VALIDATION_ERROR' });
   });
 
+  it('keeps capability refresh history stable while a newer revision runs', async () => {
+    const first = await groupIntents.requestCapabilityRefresh(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+    );
+    const firstClaim = await groupIntents.claim(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
+    expect(firstClaim).not.toBeNull();
+
+    const second = await database.transaction(client => groupIntents.scheduleInTransaction(
+      client,
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      'group.update',
+      { immediate: true },
+    ));
+    expect(second.requestedRevision).toBe(first!.requestRevision + 1);
+    expect(await groupIntents.findCapabilityRefresh(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      first!.requestRevision,
+    )).toMatchObject({ status: 'RUNNING', attemptCount: 1 });
+    expect(await groupIntents.findCapabilityRefresh(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      second.requestedRevision,
+    )).toMatchObject({ status: 'PENDING', attemptCount: 0 });
+
+    expect(await groupIntents.complete(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      firstClaim!.leaseToken,
+      first!.requestRevision,
+    )).toBe('PENDING');
+    const completedFirst = await groupIntents.findCapabilityRefresh(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      first!.requestRevision,
+    );
+    expect(completedFirst).toMatchObject({ status: 'COMPLETED', errorCode: null });
+    expect(completedFirst!.completedAt).toBeInstanceOf(Date);
+
+    await pool.query(
+      `UPDATE gateway_sync_rate_limits SET next_request_at = now()
+       WHERE session_id = $1`,
+      [INTEGRATION_SESSION_ID],
+    );
+    const secondClaim = await groupIntents.claim(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
+    expect(secondClaim).not.toBeNull();
+    expect(await groupIntents.fail(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      secondClaim!.leaseToken,
+      second.requestedRevision,
+      { retryable: false, ratePressure: false, code: 'SECOND_REVISION_FAILED' },
+    )).toBe('FAILED');
+
+    expect(await groupIntents.findCapabilityRefresh(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      first!.requestRevision,
+    )).toMatchObject({
+      status: 'COMPLETED',
+      completedAt: completedFirst!.completedAt,
+      errorCode: null,
+    });
+    expect(await groupIntents.findCapabilityRefresh(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      second.requestedRevision,
+    )).toMatchObject({ status: 'FAILED', errorCode: 'SECOND_REVISION_FAILED' });
+  });
+
   it('suppresses capability refresh claims while a full session sync is running', async () => {
     await groupIntents.requestCapabilityRefresh(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
     const run = await gateway.createSyncRun(INTEGRATION_SESSION_ID);

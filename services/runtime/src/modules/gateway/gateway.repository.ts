@@ -224,6 +224,18 @@ export class GatewayRepository {
     );
   }
 
+  async requestGroupCapabilityRefreshIdempotent(
+    sessionId: string,
+    groupId: string,
+    idempotency: { key: string; requestHash: string },
+  ): Promise<{ operation: GroupCapabilityRefreshDto; replayed: boolean } | null> {
+    return this.groupIntentRepository.requestCapabilityRefreshIdempotent(
+      sessionId,
+      groupId,
+      idempotency,
+    );
+  }
+
   async findGroupCapabilityRefresh(
     sessionId: string,
     groupId: string,
@@ -252,6 +264,14 @@ export class GatewayRepository {
 
   async createSyncRun(sessionId: string, mode: GatewaySyncMode = GatewaySyncMode.FULL): Promise<SyncRunDto> {
     return this.syncRuns.create(sessionId, mode);
+  }
+
+  async requestSyncRun(
+    sessionId: string,
+    mode: GatewaySyncMode,
+    idempotency: { key: string; requestHash: string },
+  ): Promise<{ run: SyncRunDto; replayed: boolean }> {
+    return this.syncRuns.request(sessionId, mode, idempotency);
   }
 
   async findSyncRunProgress(id: string, sessionId: string): Promise<{

@@ -193,9 +193,13 @@ PENDING/MATERIALIZED -> CANCELLED
 ```
 
 `ACCEPTED` means OpenWA accepted the send call; later webhooks can advance it to `SENT`, `DELIVERED`
-or `READ`. The campaign is considered dispatch-complete once no delivery remains in `PENDING`,
+or `READ`, or record a definitive failure while the message is still only accepted. The campaign is considered dispatch-complete once no delivery remains in `PENDING`,
 `MATERIALIZED` or `PROCESSING`. Any failed, unknown, capability-blocked or cancelled delivery makes
-the final run `PARTIAL_FAILED`; otherwise it becomes `COMPLETED`.
+the final run `PARTIAL_FAILED`; otherwise it becomes `COMPLETED`. If later authoritative evidence
+changes an accepted delivery to failed, or resolves an unknown delivery to sent, reconciliation
+updates `COMPLETED`/`PARTIAL_FAILED` to match the current durable delivery aggregate and records an
+audit event. The evidence transition is monotonic even though the aggregate label may be corrected.
+It never resends the message or rewrites the underlying delivery history.
 
 The run response exposes counts for every delivery state. Clients should render these server counts
 and must not derive authoritative progress from locally cached rows.

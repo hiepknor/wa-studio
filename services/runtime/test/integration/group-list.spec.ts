@@ -29,6 +29,7 @@ describe('group list HTTP API', () => {
   let app: INestApplication;
   let baseUrl: string;
   const headers = { 'x-runtime-key': process.env.RUNTIME_API_KEY! };
+  const mutationHeaders = (key: string) => ({ ...headers, 'idempotency-key': key });
 
   beforeAll(async () => {
     pool = integrationPool();
@@ -207,7 +208,10 @@ describe('group list HTTP API', () => {
 
     const refresh = await fetch(
       `${baseUrl}/groups/${groupId}/capability-refreshes?sessionId=${INTEGRATION_SESSION_ID}`,
-      { method: 'POST', headers },
+      {
+        method: 'POST',
+        headers: mutationHeaders('00000000-0000-4000-8000-000000000020'),
+      },
     );
     expect(refresh.status).toBe(404);
     expect(await refresh.json()).toMatchObject({ code: 'GROUP_NOT_FOUND' });
@@ -216,8 +220,9 @@ describe('group list HTTP API', () => {
   it('creates one durable refresh operation and preserves the last capability while it is stale', async () => {
     const groupId = '120363000000000000@g.us';
     const endpoint = `${baseUrl}/groups/${groupId}/capability-refreshes?sessionId=${INTEGRATION_SESSION_ID}`;
+    const firstKey = '00000000-0000-4000-8000-000000000021';
 
-    const first = await fetch(endpoint, { method: 'POST', headers });
+    const first = await fetch(endpoint, { method: 'POST', headers: mutationHeaders(firstKey) });
     expect(first.status).toBe(202);
     const operation = await first.json() as {
       requestRevision: number;
@@ -226,7 +231,14 @@ describe('group list HTTP API', () => {
     };
     expect(operation).toMatchObject({ requestRevision: 1, status: 'PENDING', source: 'MANUAL' });
 
-    const second = await fetch(endpoint, { method: 'POST', headers });
+    const replay = await fetch(endpoint, { method: 'POST', headers: mutationHeaders(firstKey) });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ requestRevision: 1, status: 'PENDING' });
+
+    const second = await fetch(endpoint, {
+      method: 'POST',
+      headers: mutationHeaders('00000000-0000-4000-8000-000000000022'),
+    });
     expect(second.status).toBe(202);
     expect(await second.json()).toMatchObject({ requestRevision: 1, status: 'PENDING' });
 
@@ -258,6 +270,42 @@ describe('group list HTTP API', () => {
       priority: 1,
     });
     expect(stored.rows[0]!.invalidated_at).toBeInstanceOf(Date);
+
+    await pool.query(
+      `UPDATE gateway_group_reconciliation_intents
+       SET status = 'COMPLETED', completed_revision = requested_revision,
+         completed_at = now(), updated_at = now()
+       WHERE session_id = $1 AND group_id = $2`,
+      [INTEGRATION_SESSION_ID, groupId],
+    );
+    const terminalReplay = await fetch(endpoint, {
+      method: 'POST',
+      headers: mutationHeaders(firstKey),
+    });
+    expect(terminalReplay.status).toBe(200);
+    expect(await terminalReplay.json()).toMatchObject({
+      requestRevision: 1,
+      status: 'COMPLETED',
+      source: 'MANUAL',
+    });
+  });
+
+  it('collapses concurrent capability refresh requests with the same durable operation key', async () => {
+    const groupId = '120363000000000001@g.us';
+    const endpoint = `${baseUrl}/groups/${groupId}/capability-refreshes?sessionId=${INTEGRATION_SESSION_ID}`;
+    const request = () => fetch(endpoint, {
+      method: 'POST',
+      headers: mutationHeaders('00000000-0000-4000-8000-000000000023'),
+    });
+    const responses = await Promise.all([request(), request()]);
+    expect(responses.map(response => response.status).sort()).toEqual([200, 202]);
+    const operations = await Promise.all(responses.map(response =>
+      response.json() as Promise<{ requestRevision: number }>));
+    expect(operations.map(operation => operation.requestRevision)).toEqual([1, 1]);
+    expect((await pool.query(
+      `SELECT count(*)::int AS count FROM runtime_mutation_receipts
+       WHERE operation_type = 'GROUP_CAPABILITY_REFRESH'`,
+    )).rows[0].count).toBe(1);
   });
 
   it('supports inclusive minimum, maximum, exact, and combined participant bounds including zero', async () => {

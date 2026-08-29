@@ -68,9 +68,10 @@ describe('data retention', () => {
     );
     await pool.query(
       `INSERT INTO sync_runs
-         (session_id, sync_type, status, requested_at, completed_at, sync_epoch, lease_token, lease_expires_at)
-       VALUES ($1,'full','COMPLETED',$2,$2,NULL,NULL,NULL),
-              ($1,'full','RUNNING',$2,NULL,1,gen_random_uuid(),now() + interval '2 minutes')`,
+         (session_id, sync_type, status, phase, requested_at, completed_at,
+          sync_epoch, lease_token, lease_expires_at)
+       VALUES ($1,'full','COMPLETED','COMPLETED',$2,$2,NULL,NULL,NULL),
+              ($1,'full','RUNNING','DISCOVERING',$2,NULL,1,gen_random_uuid(),now() + interval '2 minutes')`,
       [INTEGRATION_SESSION_ID, old],
     );
     const campaign = await pool.query<{ id: string }>(
@@ -97,6 +98,7 @@ describe('data retention', () => {
     const result = await new DataRetentionTick(database).cleanup();
 
     expect(result).toEqual({
+      mutationReceipts: 0, groupReconciliationOperations: 0,
       activityEvents: 1, campaignRuns: 1, messageJobs: 1, inboundMessages: 0,
       runtimeEvents: 1, webhookEvents: 1, syncRuns: 1,
       contactObservations: 0,
@@ -110,6 +112,48 @@ describe('data retention', () => {
     await expectCount('sync_runs', 1);
     await expectCount('campaign_runs', 1);
     await expectCount('activity_events', 1);
+  });
+
+  it('expires mutation receipts before their old revision projections and preserves current history', async () => {
+    const old = new Date(Date.now() - 100 * 86_400_000);
+    await pool.query(
+      `INSERT INTO gateway_group_reconciliation_intents
+         (session_id, group_id, requested_revision, completed_revision, status,
+          first_requested_at, last_requested_at, completed_at, updated_at)
+       VALUES ($1, $2, 3, 3, 'COMPLETED', $3, $3, $3, $3)`,
+      [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, old],
+    );
+    await pool.query(
+      `INSERT INTO gateway_group_reconciliation_operations
+         (session_id, group_id, request_revision, source, status, requested_at,
+          next_attempt_at, completed_at, updated_at)
+       VALUES ($1, $2, 1, 'MANUAL', 'COMPLETED', $3, $3, $3, $3),
+              ($1, $2, 2, 'MANUAL', 'FAILED', $3, $3, $3, $3)`,
+      [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, old],
+    );
+    await pool.query(
+      `INSERT INTO runtime_mutation_receipts
+         (operation_type, idempotency_key, request_hash, session_id, subject_id,
+          result_id, result_revision, accepted_at)
+       VALUES ('GROUP_CAPABILITY_REFRESH', $1, $3, $4, $5, $5, 1, $6),
+              ('GROUP_CAPABILITY_REFRESH', $2, $3, $4, $5, $5, 2, now())`,
+      [randomUUID(), randomUUID(), 'b'.repeat(64), INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, old],
+    );
+
+    const result = await new DataRetentionTick(database).cleanup();
+
+    expect(result).toMatchObject({
+      mutationReceipts: 1,
+      groupReconciliationOperations: 1,
+      capacityExhausted: false,
+    });
+    expect((await pool.query<{ request_revision: string }>(
+      `SELECT request_revision::text FROM gateway_group_reconciliation_operations
+       ORDER BY request_revision`,
+    )).rows).toEqual([{ request_revision: '2' }, { request_revision: '3' }]);
+    expect((await pool.query<{ result_revision: string }>(
+      `SELECT result_revision::text FROM runtime_mutation_receipts`,
+    )).rows).toEqual([{ result_revision: '2' }]);
   });
 
   it('drains more than one delete batch without one long transaction', async () => {
@@ -262,12 +306,13 @@ describe('data retention', () => {
        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
        WHERE namespace.nspname = 'public'
          AND relation.relname IN (
-           'webhook_events', 'runtime_events', 'inbound_messages', 'contact_observations'
+           'webhook_events', 'runtime_events', 'inbound_messages', 'contact_observations',
+           'runtime_mutation_receipts', 'gateway_group_reconciliation_operations'
          )
        ORDER BY relation.relname`,
     );
 
-    expect(result.rows).toHaveLength(4);
+    expect(result.rows).toHaveLength(6);
     for (const row of result.rows) {
       expect(new Set(row.reloptions)).toEqual(new Set([
         'autovacuum_vacuum_threshold=10000',
@@ -278,17 +323,18 @@ describe('data retention', () => {
     }
   });
 
-  it('indexes active-work and protected-observation retention guards', async () => {
+  it('indexes active-work, mutation-receipt, and protected-observation retention guards', async () => {
     const result = await pool.query<{ indexname: string; indexdef: string }>(
       `SELECT indexname, indexdef FROM pg_indexes
        WHERE schemaname = 'public' AND indexname IN (
          'idx_contact_projection_work_active_session',
-         'idx_resolved_contact_clusters_name_observation'
+         'idx_resolved_contact_clusters_name_observation',
+         'idx_runtime_mutation_receipts_retention'
        )
        ORDER BY indexname`,
     );
 
-    expect(result.rows).toHaveLength(2);
+    expect(result.rows).toHaveLength(3);
     expect(result.rows[0]).toMatchObject({
       indexname: 'idx_contact_projection_work_active_session',
     });
@@ -298,6 +344,10 @@ describe('data retention', () => {
     });
     expect(result.rows[1]!.indexdef).toContain('(session_id, contact_name_observation_id)');
     expect(result.rows[1]!.indexdef).toContain('contact_name_observation_id IS NOT NULL');
+    expect(result.rows[2]).toMatchObject({
+      indexname: 'idx_runtime_mutation_receipts_retention',
+    });
+    expect(result.rows[2]!.indexdef).toContain('(accepted_at, operation_type, idempotency_key)');
   });
 
   it('compacts old push-name history only after derived contact work is idle', async () => {

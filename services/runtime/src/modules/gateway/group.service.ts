@@ -1,7 +1,12 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { GroupQueryDto } from '../../contracts/groups/group-query.dto';
 import { GatewayRepository } from './gateway.repository';
 import { SessionScopeService } from './session-scope.service';
+import {
+  capabilityRefreshRequestHash,
+  GroupCapabilityRefreshIdempotencyConflictError,
+  requireGatewayMutationKey,
+} from './gateway-mutation-idempotency';
 
 @Injectable()
 export class GroupService {
@@ -45,11 +50,37 @@ export class GroupService {
     };
   }
 
-  async refreshCapability(sessionId: string, groupId: string) {
+  async refreshCapability(
+    sessionId: string,
+    groupId: string,
+    rawIdempotencyKey: string | undefined,
+  ) {
     this.sessions.assertVisible(sessionId);
-    const operation = await this.repository.requestGroupCapabilityRefresh(sessionId, groupId);
-    if (!operation) throw new NotFoundException('Group not found');
-    return operation;
+    const idempotencyKey = requireGatewayMutationKey(
+      'GROUP_CAPABILITY_REFRESH',
+      rawIdempotencyKey,
+    );
+    try {
+      const result = await this.repository.requestGroupCapabilityRefreshIdempotent(
+        sessionId,
+        groupId,
+        {
+          key: idempotencyKey,
+          requestHash: capabilityRefreshRequestHash(sessionId, groupId),
+        },
+      );
+      if (!result) throw new NotFoundException('Group not found');
+      return result;
+    } catch (error) {
+      if (error instanceof GroupCapabilityRefreshIdempotencyConflictError) {
+        throw new ConflictException({
+          code: 'GROUP_CAPABILITY_REFRESH_IDEMPOTENCY_CONFLICT',
+          message: error.message,
+          details: {},
+        });
+      }
+      throw error;
+    }
   }
 
   async getCapabilityRefresh(sessionId: string, groupId: string, requestRevision?: number) {

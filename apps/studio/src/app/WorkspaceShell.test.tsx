@@ -144,6 +144,24 @@ describe("WorkspaceShell", () => {
     };
     const probeConnection = vi.fn().mockResolvedValue(connectionResult);
     const fakeApi = {
+      getOperationalHealth: vi.fn().mockResolvedValue({
+        status: "operational",
+        service: "wa-runtime",
+        version: "0.1.0",
+        instanceId: "test",
+        dependencies: { postgres: true, queue: { backend: "postgres", ready: true } },
+        processes: { worker: "healthy", scheduler: "healthy" },
+        components: {
+          openwa: {
+            status: "COMPATIBLE",
+            expectedRelease: "0.23.3",
+            observedRelease: "0.23.3",
+            checkedAt: "2026-08-29T00:00:00.000Z",
+            lastSuccessfulAt: "2026-08-29T00:00:00.000Z",
+            reason: null,
+          },
+        },
+      }),
       getSessionSyncRun: vi.fn(),
       listSessions: vi.fn().mockResolvedValue([session]),
       requestSessionSync: vi.fn(),
@@ -643,6 +661,7 @@ describe("WorkspaceShell", () => {
       expect(requestGroupCapabilityRefresh).toHaveBeenCalledWith(
         session.id,
         group.id,
+        expect.stringMatching(/^[0-9a-f-]{36}$/u),
       ),
     );
     expect(screen.getByText("Refresh requested")).toBeInTheDocument();

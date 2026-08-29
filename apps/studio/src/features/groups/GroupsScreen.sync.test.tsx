@@ -196,7 +196,10 @@ describe("GroupsScreen Reload and Sync", () => {
     await user.click(sync);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
 
-    await waitFor(() => expect(requestSessionSync).toHaveBeenCalledWith(session.id));
+    await waitFor(() => expect(requestSessionSync).toHaveBeenCalledWith(
+      session.id,
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
+    ));
     expect(getSessionSyncRun).toHaveBeenCalledWith(
       session.id,
       pendingRun.id,
@@ -234,7 +237,7 @@ describe("GroupsScreen Reload and Sync", () => {
     expect(screen.getByRole("button", { name: "Sync groups" })).toBeEnabled();
   });
 
-  it("does not invite a duplicate sync when the POST result is unconfirmed", async () => {
+  it("offers an idempotent retry when the sync response is unconfirmed", async () => {
     const user = userEvent.setup();
     const requestSessionSync = vi.fn().mockRejectedValue(new RuntimeTransportError(
       "response lost",
@@ -246,9 +249,10 @@ describe("GroupsScreen Reload and Sync", () => {
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sync" }));
 
     expect(await screen.findByText("Sync request not confirmed")).toBeInTheDocument();
-    expect(screen.getByText(/may still be running/)).toBeInTheDocument();
+    expect(screen.getByText(/same request key/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Reload groups" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Retry request" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Reload groups" })).toHaveLength(1);
     expect(requestSessionSync).toHaveBeenCalledTimes(1);
     expect(pollSessionSync).not.toHaveBeenCalled();
   });

@@ -75,6 +75,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "requestBody": {
@@ -88,6 +97,16 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "Idempotent replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncRunDto"
+                }
+              }
+            }
+          },
           "202": {
             "description": "",
             "content": {
@@ -99,11 +118,18 @@
             }
           },
           "409": {
-            "description": "A different sync mode is already active",
+            "description": "The operation key conflicts or another sync mode is active",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SyncModeConflictDto"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RuntimeErrorDto"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SyncModeConflictDto"
+                    }
+                  ]
                 }
               }
             }
@@ -311,6 +337,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -369,6 +405,16 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "",
             "content": {
               "application/json": {
@@ -475,6 +521,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -509,9 +565,28 @@
               "format": "uuid",
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
+          "200": {
+            "description": "Idempotent replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupCapabilityRefreshDto"
+                }
+              }
+            }
+          },
           "202": {
             "description": "",
             "content": {
@@ -533,6 +608,16 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "",
             "content": {
               "application/json": {
@@ -607,6 +692,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -673,6 +768,16 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "",
             "content": {
               "application/json": {
@@ -2669,6 +2774,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2735,6 +2849,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2800,6 +2923,15 @@
             "in": "path",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3983,6 +4115,70 @@
       }
     },
     "schemas": {
+      "RuntimeErrorDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "CAMPAIGN_NOT_FOUND"
+          },
+          "message": {
+            "type": "string"
+          },
+          "fieldErrors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "SyncModeConflictDto": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "number",
+            "example": 409
+          },
+          "code": {
+            "type": "string",
+            "example": "SYNC_MODE_CONFLICT"
+          },
+          "message": {
+            "type": "string",
+            "example": "A different synchronization mode is already active"
+          },
+          "activeRunId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "activeMode": {
+            "type": "string",
+            "enum": [
+              "FULL",
+              "INCREMENTAL"
+            ]
+          }
+        },
+        "required": [
+          "statusCode",
+          "code",
+          "message",
+          "activeRunId",
+          "activeMode"
+        ]
+      },
       "SessionDto": {
         "type": "object",
         "properties": {
@@ -4204,70 +4400,6 @@
           "requestedAt",
           "startedAt",
           "completedAt"
-        ]
-      },
-      "SyncModeConflictDto": {
-        "type": "object",
-        "properties": {
-          "statusCode": {
-            "type": "number",
-            "example": 409
-          },
-          "code": {
-            "type": "string",
-            "example": "SYNC_MODE_CONFLICT"
-          },
-          "message": {
-            "type": "string",
-            "example": "A different synchronization mode is already active"
-          },
-          "activeRunId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "activeMode": {
-            "type": "string",
-            "enum": [
-              "FULL",
-              "INCREMENTAL"
-            ]
-          }
-        },
-        "required": [
-          "statusCode",
-          "code",
-          "message",
-          "activeRunId",
-          "activeMode"
-        ]
-      },
-      "RuntimeErrorDto": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string",
-            "example": "CAMPAIGN_NOT_FOUND"
-          },
-          "message": {
-            "type": "string"
-          },
-          "fieldErrors": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "details": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        },
-        "required": [
-          "code",
-          "message"
         ]
       },
       "GroupSendCapabilityDto": {
@@ -6425,6 +6557,69 @@
           "reason"
         ]
       },
+      "OpenWAComponentHealthDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "UNKNOWN",
+              "COMPATIBLE",
+              "UNAVAILABLE",
+              "INCOMPATIBLE"
+            ]
+          },
+          "expectedRelease": {
+            "type": "string",
+            "example": "0.23.3"
+          },
+          "observedRelease": {
+            "type": "string",
+            "nullable": true,
+            "example": "0.23.3"
+          },
+          "checkedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "lastSuccessfulAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "not_checked",
+              "network_error",
+              "http_error",
+              "invalid_response",
+              "release_mismatch"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "expectedRelease",
+          "observedRelease",
+          "checkedAt",
+          "lastSuccessfulAt",
+          "reason"
+        ]
+      },
+      "RuntimeComponentHealthDto": {
+        "type": "object",
+        "properties": {
+          "openwa": {
+            "$ref": "#/components/schemas/OpenWAComponentHealthDto"
+          }
+        },
+        "required": [
+          "openwa"
+        ]
+      },
       "HealthOperationalDto": {
         "type": "object",
         "properties": {
@@ -6461,11 +6656,17 @@
           "processes": {
             "$ref": "#/components/schemas/RuntimeProcessHealthDto"
           },
+          "components": {
+            "$ref": "#/components/schemas/RuntimeComponentHealthDto"
+          },
           "reason": {
             "type": "string",
             "enum": [
               "dependency_unavailable",
-              "background_process_degraded"
+              "background_process_degraded",
+              "upstream_status_unknown",
+              "upstream_unavailable",
+              "upstream_incompatible"
             ]
           }
         },
@@ -6475,7 +6676,8 @@
           "version",
           "instanceId",
           "dependencies",
-          "processes"
+          "processes",
+          "components"
         ]
       },
       "InboundMessageDto": {

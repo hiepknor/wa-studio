@@ -13,6 +13,7 @@ import {
   probeRuntimeConnection,
   RuntimeApi,
   type RuntimeConnectionInput,
+  type RuntimeOperationalHealth,
   type RuntimeConnectionProfile,
 } from "@/shared/api/runtime-client";
 import { userFacingErrorMessage } from "@/shared/errors/error-message";
@@ -83,6 +84,8 @@ export function RuntimeConnectionProvider({
     useState<ManagedConnectionFlow>("booting");
   const [managedConnectionError, setManagedConnectionError] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [operationalHealth, setOperationalHealth] =
+    useState<RuntimeOperationalHealth | null>(null);
   const connectionRevision = useRef(0);
   const managedConfigurationInFlight = useRef(false);
   const managedConnectionInFlight = useRef<string | null>(null);
@@ -90,6 +93,7 @@ export function RuntimeConnectionProvider({
   const managedConfigurationOperation = useLatestOperation();
   const connectionRead = useLatestRequest();
   const sessionsRead = useLatestRequest();
+  const healthRead = useLatestRequest();
 
   const setManagedConnectionFlow = useCallback((flow: ManagedConnectionFlow) => {
     managedConnectionFlowRef.current = flow;
@@ -108,6 +112,7 @@ export function RuntimeConnectionProvider({
         ) throw supersededRequestError(signal);
         const profile = normalizeRuntimeProfile(input);
         setConnected({ api: createApi(profile), profile, sessions: result.sessions });
+        setOperationalHealth(null);
         setManagedConnectionFlow("connected");
         setSelectedSessionId(
           result.sessions.find((session) => session.status === "ready")?.id ??
@@ -257,13 +262,48 @@ export function RuntimeConnectionProvider({
   const disconnect = useCallback(() => {
     connectionRead.cancel();
     sessionsRead.cancel();
+    healthRead.cancel();
     connectionRevision.current += 1;
     managedConnectionInFlight.current = null;
     setConnected(null);
     setManagedConnectionError(null);
     setManagedConnectionFlow(managedRuntime.phase === "unavailable" ? "manual" : "configure");
     setSelectedSessionId(null);
-  }, [connectionRead, managedRuntime.phase, sessionsRead, setManagedConnectionFlow]);
+    setOperationalHealth(null);
+  }, [connectionRead, healthRead, managedRuntime.phase, sessionsRead, setManagedConnectionFlow]);
+
+  const refreshOperationalHealth = useCallback(async () => {
+    if (!connected || typeof connected.api.getOperationalHealth !== "function") return false;
+    const revision = connectionRevision.current;
+    const signal = healthRead.begin();
+    try {
+      const health = await connected.api.getOperationalHealth({ signal });
+      if (
+        revision !== connectionRevision.current
+        || !healthRead.isCurrent(signal)
+      ) return false;
+      setOperationalHealth(health);
+      return true;
+    } catch (error) {
+      if (
+        revision === connectionRevision.current
+        && healthRead.isCurrent(signal)
+        && !isAbortError(error)
+      ) setOperationalHealth(null);
+      throw error;
+    } finally {
+      healthRead.complete(signal);
+    }
+  }, [connected, healthRead]);
+
+  useEffect(() => {
+    if (!connected) return;
+    void refreshOperationalHealth().catch(() => undefined);
+    const interval = window.setInterval(() => {
+      void refreshOperationalHealth().catch(() => undefined);
+    }, 30_000);
+    return () => window.clearInterval(interval);
+  }, [connected, refreshOperationalHealth]);
 
   const refreshSessions = useCallback(async () => {
     if (!connected) return false;
@@ -304,6 +344,8 @@ export function RuntimeConnectionProvider({
       managedConnectionFlow,
       managedConnectionError,
       managedRuntime,
+      operationalHealth,
+      refreshOperationalHealth,
       refreshSessions,
       selectedSessionId,
       selectSession: setSelectedSessionId,
@@ -316,6 +358,8 @@ export function RuntimeConnectionProvider({
       managedConnectionFlow,
       managedConnectionError,
       managedRuntime,
+      operationalHealth,
+      refreshOperationalHealth,
       refreshSessions,
       selectedSessionId,
     ],

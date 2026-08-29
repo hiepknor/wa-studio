@@ -382,13 +382,13 @@ describe("GroupsScreen capability refresh", () => {
       operation: completedOperation,
       status: "completed",
     });
-    renderGroups({
-      requestGroupCapabilityRefresh: vi.fn().mockRejectedValue(
+    const requestGroupCapabilityRefresh = vi.fn()
+      .mockRejectedValueOnce(
         new RuntimeTransportError("response lost", { requestDispatched: true }),
-      ),
-      getCurrentGroupCapabilityRefresh: vi.fn()
-        .mockResolvedValueOnce(null)
-        .mockResolvedValue(pendingOperation),
+      )
+      .mockResolvedValueOnce(pendingOperation);
+    renderGroups({
+      requestGroupCapabilityRefresh,
       getGroup: vi.fn().mockResolvedValueOnce(detail).mockResolvedValueOnce(refreshed),
     });
     await openInspector(user);
@@ -396,6 +396,10 @@ describe("GroupsScreen capability refresh", () => {
     await user.click(screen.getByRole("button", { name: "Refresh capability" }));
 
     expect(await screen.findByText("Capability updated")).toBeInTheDocument();
+    expect(requestGroupCapabilityRefresh).toHaveBeenCalledTimes(2);
+    expect(requestGroupCapabilityRefresh.mock.calls[1]?.[2]).toBe(
+      requestGroupCapabilityRefresh.mock.calls[0]?.[2],
+    );
     expect(pollCapabilityRefresh).toHaveBeenCalledTimes(1);
     expect(screen.getByText("The latest capability result is now shown.")).toBeInTheDocument();
   });
@@ -523,7 +527,11 @@ describe("GroupsScreen capability refresh", () => {
     await user.click(refresh);
 
     expect(automaticSignal.aborted).toBe(true);
-    expect(requestGroupCapabilityRefresh).toHaveBeenCalledWith(session.id, group.id);
+    expect(requestGroupCapabilityRefresh).toHaveBeenCalledWith(
+      session.id,
+      group.id,
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
+    );
     expect(await screen.findByText("Refresh requested")).toBeInTheDocument();
     expect(refresh).toBeDisabled();
     expect(pollCapabilityRefresh).toHaveBeenCalledTimes(2);

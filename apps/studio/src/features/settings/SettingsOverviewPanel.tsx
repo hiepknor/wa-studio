@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { RuntimeOperationalHealth } from "@/shared/api/runtime-client";
 
 import type { AppUpdateSnapshot } from "@/shared/native/app-updates";
 import type {
@@ -19,6 +20,7 @@ interface SettingsOverviewPanelProps {
   error: string | null;
   loading: boolean;
   managedRuntime: ManagedRuntimeSnapshot;
+  operationalHealth: RuntimeOperationalHealth | null;
   onNavigate: (tab: SettingsTab) => void;
   onRefresh: () => void;
   refreshing: boolean;
@@ -44,13 +46,33 @@ function storagePresentation(diagnostics: ManagedRuntimeDiagnostics | null): {
   return { description, label: "Available", tone: "success" };
 }
 
-function runtimePresentation(phase: ManagedRuntimeSnapshot["phase"]): {
+function runtimePresentation(
+  phase: ManagedRuntimeSnapshot["phase"],
+  health: RuntimeOperationalHealth | null,
+): {
   badgeLabel: string;
   description: ReactNode;
   label: string;
   tone: OverviewTone;
 } {
   if (phase === "ready") {
+    if (health?.reason === "dependency_unavailable"
+      || health?.reason === "background_process_degraded") {
+      return {
+        badgeLabel: "Degraded",
+        description: "One or more local Runtime services need attention.",
+        label: "WA Runtime needs attention",
+        tone: "danger",
+      };
+    }
+    if (health?.status === "degraded") {
+      return {
+        badgeLabel: "Ready locally",
+        description: "Local services and data remain available while OpenWA operations are paused.",
+        label: "Local Runtime is ready",
+        tone: "warning",
+      };
+    }
     return {
       badgeLabel: "Ready",
       description: "API, workers, scheduler, database, and queue are available on this device.",
@@ -82,6 +104,40 @@ function runtimePresentation(phase: ManagedRuntimeSnapshot["phase"]): {
   };
 }
 
+function openwaPresentation(health: RuntimeOperationalHealth | null): {
+  description: string;
+  label: string;
+  tone: OverviewTone;
+} {
+  const openwa = health?.components.openwa;
+  if (openwa?.status === "COMPATIBLE") {
+    return {
+      description: `Connected to reviewed OpenWA ${openwa.observedRelease ?? openwa.expectedRelease}.`,
+      label: "Connected",
+      tone: "success",
+    };
+  }
+  if (openwa?.status === "INCOMPATIBLE") {
+    return {
+      description: `Server ${openwa.observedRelease ?? "unknown"} does not match reviewed ${openwa.expectedRelease}; upstream operations are blocked.`,
+      label: "Upgrade blocked",
+      tone: "danger",
+    };
+  }
+  if (openwa?.status === "UNAVAILABLE") {
+    return {
+      description: "OpenWA is unreachable; local data remains available and upstream operations are paused.",
+      label: "Unreachable",
+      tone: "warning",
+    };
+  }
+  return {
+    description: "WA Runtime is checking the configured OpenWA release.",
+    label: "Checking",
+    tone: "neutral",
+  };
+}
+
 function freshnessPresentation(freshness: ProtectionFreshness | undefined): {
   label: string;
   tone: OverviewTone;
@@ -97,12 +153,14 @@ export function SettingsOverviewPanel({
   error,
   loading,
   managedRuntime,
+  operationalHealth,
   onNavigate,
   onRefresh,
   refreshing,
   updateState,
 }: SettingsOverviewPanelProps) {
-  const runtime = runtimePresentation(managedRuntime.phase);
+  const runtime = runtimePresentation(managedRuntime.phase, operationalHealth);
+  const openwa = openwaPresentation(operationalHealth);
   const protection = freshnessPresentation(diagnostics?.recoveryFreshness);
   const storage = storagePresentation(diagnostics);
   const updatePending = updateState?.pending;
@@ -166,10 +224,13 @@ export function SettingsOverviewPanel({
         titleId="settings-runtime-status-title"
       >
         <SettingsRow
-          action={<Button onClick={() => onNavigate("connection")} size="sm" variant="ghost">Manage connection</Button>}
-          description={managedRuntime.connection
-            ? `Connected through ${managedRuntime.connection.baseUrl}`
-            : "No active local Runtime connection is available."}
+          action={(
+            <div className="settings-row-actions">
+              <Badge tone={openwa.tone} variant="status">{openwa.label}</Badge>
+              <Button onClick={() => onNavigate("connection")} size="sm" variant="ghost">Manage connection</Button>
+            </div>
+          )}
+          description={openwa.description}
           label="OpenWA connection"
         />
         <SettingsRow

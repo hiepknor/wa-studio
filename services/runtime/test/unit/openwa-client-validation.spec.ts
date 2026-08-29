@@ -56,6 +56,21 @@ describe('OpenWAClient response validation', () => {
     expect((firstRequest?.[1] as RequestInit | undefined)?.redirect).toBe('error');
   });
 
+  it('requires a fresh compatible circuit before issuing integration requests', async () => {
+    const compatibility = { requireCompatible: vi.fn().mockResolvedValue(undefined) };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      id: 'session-1', name: 'Session', status: 'ready', engineLoaded: true,
+      restriction: null, createdAt: '2026-08-12T00:00:00Z', updatedAt: '2026-08-12T00:00:00Z',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new OpenWAClient(undefined, compatibility as never).getSession('session-1');
+
+    expect(compatibility.requireCompatible).toHaveBeenCalledOnce();
+    expect(compatibility.requireCompatible.mock.invocationCallOrder[0])
+      .toBeLessThan(fetchMock.mock.invocationCallOrder[0]!);
+  });
+
   it('rejects oversized response bodies before parsing them', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', {
       headers: { 'content-length': '33554433', 'content-type': 'application/json' },

@@ -5,6 +5,8 @@ import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { DatabaseService } from '../../core/database/database.service';
 
 export interface RetentionResult {
+  mutationReceipts: number;
+  groupReconciliationOperations: number;
   activityEvents: number;
   campaignRuns: number;
   messageJobs: number;
@@ -37,7 +39,8 @@ export class DataRetentionTick {
   async run(): Promise<void> {
     const started = performance.now();
     const result = await this.cleanup();
-    const deleted = result.activityEvents + result.campaignRuns + result.messageJobs + result.inboundMessages + result.runtimeEvents
+    const deleted = result.mutationReceipts + result.groupReconciliationOperations
+      + result.activityEvents + result.campaignRuns + result.messageJobs + result.inboundMessages + result.runtimeEvents
       + result.webhookEvents + result.syncRuns + result.contactObservations + result.mediaUploads + result.mediaAssets;
     this.logger.log({
       event: 'data.retention.completed', deleted, durationMs: Math.round(performance.now() - started), ...result,
@@ -61,6 +64,8 @@ export class DataRetentionTick {
     const maxBatches = options.maxBatches ?? this.config.RUNTIME_RETENTION_MAX_BATCHES_PER_RUN;
     const deadline = performance.now() + (options.timeBudgetMs ?? this.config.RUNTIME_RETENTION_TIME_BUDGET_MS);
     const total: RetentionResult = {
+      mutationReceipts: 0,
+      groupReconciliationOperations: 0,
       activityEvents: 0,
       campaignRuns: 0, messageJobs: 0, inboundMessages: 0, runtimeEvents: 0, webhookEvents: 0, syncRuns: 0,
       contactObservations: 0,
@@ -75,6 +80,12 @@ export class DataRetentionTick {
         break;
       }
       const current = await this.database.transaction(async client => ({
+        mutationReceipts: await this.deleteMutationReceipts(client, operationalCutoff, limit),
+        groupReconciliationOperations: await this.deleteGroupReconciliationOperations(
+          client,
+          operationalCutoff,
+          limit,
+        ),
         activityEvents: await this.deleteActivityEvents(client, activityCutoff, limit),
         campaignRuns: await this.deleteCampaignRuns(client, operationalCutoff, limit),
         messageJobs: await this.deleteMessageJobs(client, operationalCutoff, limit),
@@ -91,6 +102,8 @@ export class DataRetentionTick {
         mediaAssets: await this.deleteOrphanMediaAssets(client, mediaOrphanCutoff, limit),
       }));
       total.batches += 1;
+      total.mutationReceipts += current.mutationReceipts;
+      total.groupReconciliationOperations += current.groupReconciliationOperations;
       total.activityEvents += current.activityEvents;
       total.campaignRuns += current.campaignRuns;
       total.messageJobs += current.messageJobs;
@@ -108,6 +121,55 @@ export class DataRetentionTick {
     }
     if (!drained && total.batches === maxBatches) total.capacityExhausted = true;
     return total;
+  }
+
+  private async deleteMutationReceipts(client: PoolClient, cutoff: Date, limit: number): Promise<number> {
+    return this.count(await client.query(
+      `WITH candidates AS (
+         SELECT operation_type, idempotency_key
+         FROM runtime_mutation_receipts
+         WHERE accepted_at < $1
+         ORDER BY accepted_at, operation_type, idempotency_key
+         LIMIT $2 FOR UPDATE SKIP LOCKED
+       )
+       DELETE FROM runtime_mutation_receipts receipt USING candidates
+       WHERE receipt.operation_type = candidates.operation_type
+         AND receipt.idempotency_key = candidates.idempotency_key`,
+      [cutoff, limit],
+    ));
+  }
+
+  private async deleteGroupReconciliationOperations(
+    client: PoolClient,
+    cutoff: Date,
+    limit: number,
+  ): Promise<number> {
+    return this.count(await client.query(
+      `WITH candidates AS (
+         SELECT operations.session_id, operations.group_id, operations.request_revision
+         FROM gateway_group_reconciliation_operations operations
+         JOIN gateway_group_reconciliation_intents intents
+           ON intents.session_id = operations.session_id AND intents.group_id = operations.group_id
+         WHERE operations.status IN ('COMPLETED', 'FAILED')
+           AND operations.completed_at < $1
+           AND operations.request_revision < intents.requested_revision
+           AND NOT EXISTS (
+             SELECT 1 FROM runtime_mutation_receipts receipt
+             WHERE receipt.operation_type = 'GROUP_CAPABILITY_REFRESH'
+               AND receipt.session_id = operations.session_id
+               AND receipt.subject_id = operations.group_id
+               AND receipt.result_revision = operations.request_revision
+           )
+         ORDER BY operations.completed_at, operations.session_id,
+           operations.group_id, operations.request_revision
+         LIMIT $2 FOR UPDATE OF operations SKIP LOCKED
+       )
+       DELETE FROM gateway_group_reconciliation_operations operations USING candidates
+       WHERE operations.session_id = candidates.session_id
+         AND operations.group_id = candidates.group_id
+         AND operations.request_revision = candidates.request_revision`,
+      [cutoff, limit],
+    ));
   }
 
   private async deleteActivityEvents(client: PoolClient, cutoff: Date, limit: number): Promise<number> {
