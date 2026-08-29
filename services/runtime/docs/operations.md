@@ -163,6 +163,13 @@ pagination behavior before retrying full synchronization.
 
 ## Outbound pacing and retention
 
+All OpenWA-bound work is additionally governed by the durable, cross-process safety boundary in
+[ADR 021](adr/021-openwa-safety-governor.md). Follow the
+[OpenWA Safety Governor runbook](runbooks/openwa-safety-governor.md) for canary activation, `429`,
+cooldown, ambiguous outcomes, restrictions, manual block/resume, profile promotion, and rollback.
+The governor supersedes process-local delay as the authoritative admission decision; the delay
+settings below remain a lower-level scheduling jitter and lease constraint.
+
 `OUTBOUND_MIN_DELAY_MS` and `OUTBOUND_MAX_DELAY_MS` apply inside a token-owned PostgreSQL
 per-session lease. `MESSAGE_WORKER_CONCURRENCY`, `WEBHOOK_WORKER_CONCURRENCY`,
 `GATEWAY_WORKER_CONCURRENCY` and `CAMPAIGN_WORKER_CONCURRENCY` set per-process BullMQ concurrency

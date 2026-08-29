@@ -46,18 +46,26 @@ from any failures recorded before or after it. Before the canary clock starts:
 
 - [ ] Install the notarized 0.2.0 canary DMG and connect through production discovery protocol v2.
 - [ ] Create a backup before UAT; verify R2 readback checksum and complete an isolated restore drill.
+- [ ] Confirm the selected session reports OpenWA Safety policy version 5, effective state `READY`,
+      profile `CANARY`, no unexpired recovery lease, and zero unexplained unknown Message Jobs.
 - [ ] Synchronize sessions, groups, group lists, participants, Runs, Activity, and Settings; reopen the
       app and verify persisted state after a managed Runtime restart.
 - [ ] Disconnect the desktop, generate a test callback, reconnect, and verify exactly-once drain from
       Event Inbox into local Runtime with a complete Activity trail.
 - [ ] Run exactly one outbound campaign to the dedicated test group after confirming the target
-      snapshot and recipient count. Verify terminal outcomes and reconcile them with OpenWA.
+      snapshot and recipient count. Verify terminal outcomes and reconcile them with OpenWA. Keep
+      `CANARY`; do not promote to `STANDARD` during the acceptance window.
+- [ ] Exercise durable safety block/resume between permit reservation and upstream dispatch, then
+      verify the final send fence prevents a new OpenWA request and leaves an Activity trail.
+- [ ] Exercise an isolated OpenWA `429` in staging and verify scope-wide throttling, cooldown,
+      single-probe recovery, durable deferral, and gradual recovery without a blind message retry.
 - [ ] Exercise pairing revoke/reconnect and verify the retired device token cannot reclaim a session.
 - [ ] Verify public liveness and discovery, private readiness/metrics, TLS expiry, disk alerts, backup
       freshness, restore freshness, and Telegram firing/resolved delivery.
 - [ ] Observe the unchanged candidate digest for 24 continuous hours with no critical alert,
       new OpenWA terminal webhook failure, unexplained callback loss, duplicate outbound effect,
-      `UNKNOWN` delivery, or storage pressure.
+      `UNKNOWN` delivery, recurring OpenWA cooldown, safety metric snapshot failure, or storage
+      pressure.
 
 ## Go/no-go record
 
