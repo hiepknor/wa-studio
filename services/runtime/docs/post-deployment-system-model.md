@@ -121,6 +121,7 @@ oldest-pending and configured-limit metrics. Caddy publishes neither detailed en
 | Malformed callback | Runtime NACKs dead; later events continue | Inspect dead count without exposing payload |
 | Event Inbox restart | PostgreSQL retains committed rows and leases | Consumer resumes |
 | OpenWA unavailable during pairing | Pairing fails closed; credential-store entries are unchanged | Restore OpenWA, retry Connect |
+| OpenWA unavailable after pairing | Runtime remains locally ready, operational health reports upstream degradation, and durable snapshots remain readable; upstream mutations fail closed | Restore OpenWA; compatibility probing returns operational state automatically |
 | Pairing abuse | Durable global and HMACed per-IP buckets return 429 before OpenWA validation | Investigate private pairing-rate metrics before changing limits |
 | Master secret rotation | Existing device token/signature become invalid | Reconnect Studio and reconcile webhook |
 | Event Inbox host/volume loss | Restore the latest verified encrypted logical backup and matching escrowed master secret | Run the isolated restore drill before reopening ingress |

@@ -109,6 +109,7 @@ async function main() {
         WA_DESKTOP_OPENWA_API_KEY: profile.openwaApiKey,
         WA_DESKTOP_OPENWA_WEBHOOK_SECRET: profile.webhookSecret,
         WA_DESKTOP_OPENWA_ALLOWED_SESSION_IDS: profile.allowedSessionIds,
+        WA_DESKTOP_OPENWA_COMPATIBILITY_FRESHNESS_MS: "1000",
         WA_DESKTOP_ALLOW_LIVE_SENDS: "false",
         ...(eventInboxBaseUrl
           ? {
@@ -160,6 +161,8 @@ async function main() {
     await waitForEventInboxDrain(eventInboxBaseUrl);
     await assertLocalWebhookCommitted(event, 1);
 
+    await exerciseOpenWaOfflineRecovery(openwa, profile.runtimeApiKey);
+
     nativeQuitStudio();
     await waitForChildExit(app, 30_000, "WA Studio did not exit after the native quit request");
     app = spawn(appBinary, [], { env: appEnvironment, stdio: "inherit" });
@@ -204,7 +207,7 @@ async function main() {
   if (oneShot) {
     if (!successfulNativeQuit) throw new Error("Packaged E2E did not complete a native app shutdown.");
     process.stdout.write(
-      `Packaged managed Runtime E2E passed: OpenWA ${openWaReleaseTag} registration, durable Event Inbox claim/ACK, local PostgreSQL dedup, verified encrypted restart backup, safe native shutdown.\n`,
+      `Packaged managed Runtime E2E passed: OpenWA ${openWaReleaseTag} registration, offline degradation/recovery, durable Event Inbox claim/ACK, local PostgreSQL dedup, verified encrypted restart backup, safe native shutdown.\n`,
     );
   }
 }
@@ -286,6 +289,7 @@ function developmentOpenWa(baseUrl) {
 async function startOpenWaStub(apiKey, webhookSecret) {
   const registrations = [];
   const metrics = { releaseProbes: 0 };
+  const availability = { available: true };
   let requestFailure;
   const server = createHttpServer((request, response) => {
     void handleOpenWaRequest(request, response, {
@@ -293,6 +297,7 @@ async function startOpenWaStub(apiKey, webhookSecret) {
       metrics,
       registrations,
       webhookSecret,
+      availability,
     }).catch(error => {
       requestFailure = error;
       response.writeHead(500, { "content-type": "application/json" });
@@ -308,6 +313,7 @@ async function startOpenWaStub(apiKey, webhookSecret) {
     registrations,
     releaseProbeCount: () => metrics.releaseProbes,
     requestFailure: () => requestFailure,
+    setAvailable: available => { availability.available = available; },
     close: async () => {
       server.close();
       await once(server, "close");
@@ -318,6 +324,9 @@ async function startOpenWaStub(apiKey, webhookSecret) {
 async function handleOpenWaRequest(request, response, state) {
   if (request.headers["x-api-key"] !== state.apiKey) {
     return json(response, 401, { error: "invalid OpenWA API key" });
+  }
+  if (!state.availability.available) {
+    return json(response, 503, { error: "OpenWA is temporarily unavailable" });
   }
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   if (request.method === "GET" && url.pathname === "/api/health") {
@@ -550,6 +559,51 @@ function assertCompleteRuntimeHealth(health) {
   assert(health.allowedSessionCount === 1, "Packaged Runtime allowed-session scope drifted");
 }
 
+async function exerciseOpenWaOfflineRecovery(openwa, runtimeApiKey) {
+  const headers = { "x-runtime-key": runtimeApiKey };
+  const sessionsUrl = `http://127.0.0.1:${runtimePort}/api/v1/sessions`;
+  const operationalUrl = `http://127.0.0.1:${runtimePort}/api/v1/health/operational`;
+  const readyUrl = `http://127.0.0.1:${runtimePort}/api/v1/health/ready`;
+
+  openwa.setAvailable(false);
+  await delay(1_100);
+  const offlineSessions = await fetch(sessionsUrl, { headers });
+  assert(offlineSessions.ok, `Durable session snapshot returned HTTP ${offlineSessions.status} offline`);
+  const offlineSnapshot = await offlineSessions.json();
+  assert(
+    offlineSnapshot.data?.some(session => session.id === sessionId),
+    "Durable session snapshot disappeared while OpenWA was unavailable",
+  );
+  const degraded = await waitForJson(
+    operationalUrl,
+    value => value.status === "degraded"
+      && value.reason === "upstream_unavailable"
+      && value.components?.openwa?.status === "UNAVAILABLE"
+      && value.components.openwa.lastSuccessfulAt !== null
+      && value.dependencies?.postgres === true
+      && value.processes?.worker === "healthy"
+      && value.processes?.scheduler === "healthy",
+    10_000,
+    { headers },
+  );
+  assert(degraded.components.openwa.observedRelease === null, "Offline probe retained a false observed release");
+  const ready = await fetch(readyUrl, { headers });
+  assert(ready.ok, `Runtime durable readiness returned HTTP ${ready.status} during an OpenWA outage`);
+
+  openwa.setAvailable(true);
+  await delay(1_100);
+  const recoveredSessions = await fetch(sessionsUrl, { headers });
+  assert(recoveredSessions.ok, `Session refresh returned HTTP ${recoveredSessions.status} after recovery`);
+  await waitForJson(
+    operationalUrl,
+    value => value.status === "operational"
+      && value.components?.openwa?.status === "COMPATIBLE"
+      && value.components.openwa.observedRelease === openWaReleaseTag,
+    10_000,
+    { headers },
+  );
+}
+
 async function requestFullSync(runtimeApiKey) {
   const response = await fetch(
     `http://127.0.0.1:${runtimePort}/api/v1/sessions/${sessionId}/sync`,
@@ -557,13 +611,17 @@ async function requestFullSync(runtimeApiKey) {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        "idempotency-key": randomUUID(),
         "x-runtime-key": runtimeApiKey,
       },
       body: JSON.stringify({ mode: "FULL" }),
     },
   );
   if (response.status !== 202) {
-    throw new Error(`Packaged Runtime sync request returned HTTP ${response.status}.`);
+    const body = await response.text();
+    throw new Error(
+      `Packaged Runtime sync request returned HTTP ${response.status}: ${body.slice(0, 1_000)}`,
+    );
   }
   return response.json();
 }

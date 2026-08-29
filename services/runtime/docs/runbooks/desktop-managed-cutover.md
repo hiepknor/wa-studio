@@ -6,9 +6,13 @@ event is migrated, and there is no dual delivery or fallback mode.
 ## 1. Release gates
 
 1. Pin OpenWA to the reviewed tag in `release/components.json` and record its immutable image.
-2. Run Runtime check, Event Inbox E2E, Prometheus config/rule validation, Studio check, and packaged managed-runtime E2E.
+2. Run Runtime check, Event Inbox E2E, Prometheus config/rule validation, Studio check, the populated
+   migration-051 forward-upgrade integration test, and packaged managed-runtime E2E.
 3. Build immutable amd64 Event Inbox and signed universal Studio artifacts.
-4. Record both image/app digests and verify no generated secret is in source control.
+4. Before publishing the signed app, require its packaged E2E to prove OpenWA-offline degradation,
+   durable snapshot reads, automatic compatibility recovery, encrypted restart backup, and native
+   shutdown against an isolated PostgreSQL instance.
+5. Record both image/app digests and verify no generated secret is in source control.
 
 ## 2. Stage the new server boundary
 

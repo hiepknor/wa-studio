@@ -135,6 +135,21 @@ jobs:
           WA_STUDIO_UPDATER_ENDPOINT: ${{ secrets.WA_STUDIO_UPDATER_ENDPOINT }}
           WA_STUDIO_UPDATER_PUBLIC_KEY: ${{ secrets.WA_STUDIO_UPDATER_PUBLIC_KEY }}
         run: npm run build:desktop:signed-update
+      - name: Start isolated release-drill PostgreSQL
+        run: |
+          brew install postgresql@17
+          brew services start postgresql@17
+          for _ in {1..60}; do
+            "$(brew --prefix postgresql@17)/bin/pg_isready" && exit 0
+            sleep 1
+          done
+          exit 1
+      - name: Exercise signed packaged Runtime offline recovery and backup path
+        run: |
+          DATABASE_USER="$(whoami)"
+          export DATABASE_URL="postgresql://${DATABASE_USER}@127.0.0.1:5432/postgres"
+          export WA_STUDIO_APP_BINARY="$PWD/apps/studio/src-tauri/target/release/bundle/macos/WA Studio.app/Contents/MacOS/wa-studio"
+          npm run test:managed-runtime:event-inbox
       - name: Generate desktop SPDX SBOM
         uses: anchore/sbom-action@a930d0ac434e3182448fe678398ba5713717112a # v0.21.0
         with:
