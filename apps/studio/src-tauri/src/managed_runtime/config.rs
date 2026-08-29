@@ -36,6 +36,7 @@ pub struct DesktopRuntimeConfig {
     openwa_webhook_secret: String,
     openwa_allowed_session_ids: String,
     openwa_compatibility_freshness_ms: Option<u64>,
+    openwa_compatibility_probe_interval_ms: Option<u64>,
     allow_live_sends: bool,
     event_inbox: DesktopEventInboxConfig,
 }
@@ -63,6 +64,7 @@ impl DesktopRuntimeConfig {
             openwa_webhook_secret: settings.openwa_webhook_secret,
             openwa_allowed_session_ids: settings.openwa_allowed_session_ids.join(","),
             openwa_compatibility_freshness_ms: None,
+            openwa_compatibility_probe_interval_ms: None,
             allow_live_sends: settings.allow_live_sends,
             event_inbox: DesktopEventInboxConfig {
                 base_url: settings.event_inbox.base_url,
@@ -180,6 +182,24 @@ impl DesktopRuntimeConfig {
                     .to_string(),
             );
         }
+        let openwa_compatibility_probe_interval_ms = optional_environment(
+            "WA_DESKTOP_OPENWA_COMPATIBILITY_PROBE_INTERVAL_MS",
+        )?
+        .map(|value| {
+            value.parse::<u64>().map_err(|_| {
+                "WA_DESKTOP_OPENWA_COMPATIBILITY_PROBE_INTERVAL_MS must be an integer between 10000 and 3600000."
+                    .to_string()
+            })
+        })
+        .transpose()?;
+        if openwa_compatibility_probe_interval_ms
+            .is_some_and(|value| !(10_000..=3_600_000).contains(&value))
+        {
+            return Err(
+                "WA_DESKTOP_OPENWA_COMPATIBILITY_PROBE_INTERVAL_MS must be an integer between 10000 and 3600000."
+                    .to_string(),
+            );
+        }
 
         Ok(Some(Self {
             port,
@@ -191,6 +211,7 @@ impl DesktopRuntimeConfig {
             openwa_webhook_secret: value(&values, "WA_DESKTOP_OPENWA_WEBHOOK_SECRET")?,
             openwa_allowed_session_ids: value(&values, "WA_DESKTOP_OPENWA_ALLOWED_SESSION_IDS")?,
             openwa_compatibility_freshness_ms,
+            openwa_compatibility_probe_interval_ms,
             allow_live_sends: std::env::var("WA_DESKTOP_ALLOW_LIVE_SENDS").ok().as_deref()
                 == Some("true"),
             event_inbox: DesktopEventInboxConfig {
@@ -272,6 +293,12 @@ impl DesktopRuntimeConfig {
                 freshness_ms.to_string(),
             ));
         }
+        if let Some(probe_interval_ms) = self.openwa_compatibility_probe_interval_ms {
+            environment.push((
+                "OPENWA_COMPATIBILITY_PROBE_INTERVAL_MS".to_string(),
+                probe_interval_ms.to_string(),
+            ));
+        }
         environment
     }
 
@@ -338,6 +365,7 @@ mod tests {
             openwa_webhook_secret: "webhook-secret-with-at-least-32-characters".to_string(),
             openwa_allowed_session_ids: "00000000-0000-4000-8000-000000000001".to_string(),
             openwa_compatibility_freshness_ms: None,
+            openwa_compatibility_probe_interval_ms: None,
             allow_live_sends,
             event_inbox: DesktopEventInboxConfig {
                 base_url: "https://events.example.test".to_string(),
@@ -401,9 +429,10 @@ mod tests {
     }
 
     #[test]
-    fn forwards_a_valid_developer_compatibility_freshness_override() {
+    fn forwards_valid_developer_compatibility_timing_overrides() {
         let mut config = config(false);
         config.openwa_compatibility_freshness_ms = Some(1_500);
+        config.openwa_compatibility_probe_interval_ms = Some(10_000);
 
         let environment = config.runtime_environment(
             "/app/runtime-migrations",
@@ -414,6 +443,10 @@ mod tests {
         assert!(environment.contains(&(
             "OPENWA_COMPATIBILITY_FRESHNESS_MS".to_string(),
             "1500".to_string(),
+        )));
+        assert!(environment.contains(&(
+            "OPENWA_COMPATIBILITY_PROBE_INTERVAL_MS".to_string(),
+            "10000".to_string(),
         )));
     }
 }

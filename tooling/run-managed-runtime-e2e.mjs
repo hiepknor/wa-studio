@@ -110,6 +110,7 @@ async function main() {
         WA_DESKTOP_OPENWA_WEBHOOK_SECRET: profile.webhookSecret,
         WA_DESKTOP_OPENWA_ALLOWED_SESSION_IDS: profile.allowedSessionIds,
         WA_DESKTOP_OPENWA_COMPATIBILITY_FRESHNESS_MS: "1000",
+        WA_DESKTOP_OPENWA_COMPATIBILITY_PROBE_INTERVAL_MS: "10000",
         WA_DESKTOP_ALLOW_LIVE_SENDS: "false",
         ...(eventInboxBaseUrl
           ? {
@@ -583,7 +584,7 @@ async function exerciseOpenWaOfflineRecovery(openwa, runtimeApiKey) {
       && value.dependencies?.postgres === true
       && value.processes?.worker === "healthy"
       && value.processes?.scheduler === "healthy",
-    10_000,
+    20_000,
     { headers },
   );
   assert(degraded.components.openwa.observedRelease === null, "Offline probe retained a false observed release");
@@ -599,7 +600,7 @@ async function exerciseOpenWaOfflineRecovery(openwa, runtimeApiKey) {
     value => value.status === "operational"
       && value.components?.openwa?.status === "COMPATIBLE"
       && value.components.openwa.observedRelease === openWaReleaseTag,
-    10_000,
+    20_000,
     { headers },
   );
 }
