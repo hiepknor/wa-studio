@@ -7,7 +7,11 @@ import {
   type OpenWAGroupSummary,
 } from '../../integrations/openwa/openwa.client';
 import { ContactRepository } from '../contacts/contact.repository';
-import { evaluateGroupCapability, type GroupSendCapabilityStatus } from './group-capability';
+import {
+  evaluateGroupCapability,
+  inferSessionAdminStatus,
+  type GroupSendCapabilityStatus,
+} from './group-capability';
 import type { GroupIntentWriteFence, SyncItemWriteFence } from './gateway-sync-item.types';
 import {
   GatewayWriteFenceRepository,
@@ -34,12 +38,13 @@ interface GroupRow {
   capability_checked_at: Date | null;
   capability_invalidated_at: Date | null;
   capability_revision: number;
-  capability_refresh_attempt_count: number;
-  capability_refresh_lease_token: string | null;
-  capability_refresh_lease_expires_at: Date | null;
-  capability_refresh_lease_valid?: boolean;
   details_fingerprint: string | null;
   members_fingerprint: string | null;
+}
+
+interface SessionGroupRow extends GroupRow {
+  existing_group_id: string | null;
+  session_phone: string | null;
 }
 
 const detailsFingerprint = (group: OpenWAGroup): string => createHash('sha256').update(JSON.stringify({
@@ -145,8 +150,6 @@ export class GatewayGroupSnapshotRepository {
     sessionId: string,
     group: OpenWAGroup,
     options: {
-      expectedRevision?: number;
-      capabilityLeaseToken?: string;
       syncFence?: SyncWriteFence;
       syncItemFence?: SyncItemWriteFence;
       groupIntentFence?: GroupIntentWriteFence;
@@ -157,24 +160,28 @@ export class GatewayGroupSnapshotRepository {
       if (options.syncFence) await this.fences.assertSyncWriteOwnership(client, sessionId, options.syncFence);
       if (options.syncItemFence) await this.fences.assertSyncItemWriteOwnership(client, options.syncItemFence);
       if (options.groupIntentFence) await this.fences.assertGroupIntentWriteOwnership(client, options.groupIntentFence);
-      const existingResult = await client.query<GroupRow>(
-        `SELECT *, capability_refresh_lease_expires_at > now() AS capability_refresh_lease_valid
-         FROM gateway_groups WHERE session_id = $1 AND id = $2 FOR UPDATE`,
+      const existingResult = await client.query<SessionGroupRow>(
+        `SELECT existing.*, sessions.phone AS session_phone
+         FROM gateway_sessions sessions
+         LEFT JOIN LATERAL (
+           SELECT groups.*, groups.id AS existing_group_id
+           FROM gateway_groups groups
+           WHERE groups.session_id = sessions.id AND groups.id = $2
+           FOR UPDATE
+         ) existing ON true
+         WHERE sessions.id = $1`,
         [sessionId, group.id],
       );
-      const existing = existingResult.rows[0];
+      const sessionGroup = existingResult.rows[0];
+      const existing = sessionGroup?.existing_group_id ? sessionGroup : undefined;
       const fingerprint = detailsFingerprint(group);
       const memberFingerprint = membersFingerprint(group);
       const membersChanged = existing?.members_fingerprint !== memberFingerprint;
-      if (options.expectedRevision !== undefined && existing?.capability_revision !== options.expectedRevision) {
-        return { members: 0, applied: false };
-      }
-      if (options.capabilityLeaseToken !== undefined
-        && (existing?.capability_refresh_lease_token !== options.capabilityLeaseToken
-          || existing.capability_refresh_lease_valid !== true)) {
-        return { members: 0, applied: false };
-      }
-      const isAdmin = group.isAdmin ?? existing?.is_admin ?? null;
+      const inferredAdmin = inferSessionAdminStatus(
+        sessionGroup?.session_phone,
+        group.participants,
+      );
+      const isAdmin = group.isAdmin ?? inferredAdmin ?? existing?.is_admin ?? null;
       const isReadOnly = group.isReadOnly ?? null;
       const isAnnounce = group.announce ?? group.isAnnounce ?? null;
       const capability = evaluateGroupCapability({

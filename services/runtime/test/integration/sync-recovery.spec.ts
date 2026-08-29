@@ -95,6 +95,36 @@ describe('gateway sync recovery', () => {
     });
   });
 
+  it('infers an announce-group session administrator from participant evidence', async () => {
+    const session = await new OpenWAClient().getSession(INTEGRATION_SESSION_ID);
+    await gateway.upsertSession({ ...session, phone: '84970000000' });
+
+    await gateway.upsertGroupDetails(INTEGRATION_SESSION_ID, {
+      id: INTEGRATION_GROUP_ID,
+      name: 'Admin-only group',
+      announce: true,
+      isReadOnly: false,
+      participants: [{
+        id: '84970000000:7@s.whatsapp.net',
+        number: '84970000000',
+        name: null,
+        isAdmin: true,
+        isSuperAdmin: true,
+      }],
+    });
+
+    expect(await gateway.findGroup(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID)).toMatchObject({
+      isAdmin: true,
+      isAnnounce: true,
+      isReadOnly: false,
+      sendCapability: {
+        status: 'ALLOWED',
+        reason: 'SEND_ALLOWED',
+        invalidatedAt: null,
+      },
+    });
+  });
+
   it('resumes group details after a failed attempt without overwriting hydrated subjects', async () => {
     const session = await new OpenWAClient().getSession(INTEGRATION_SESSION_ID);
     const firstId = 'resume-first@g.us';
@@ -397,7 +427,12 @@ describe('gateway sync recovery', () => {
       status: 'COMPLETED', groupsScheduled: 0,
     });
 
-    await gateway.invalidateGroupCapability(INTEGRATION_SESSION_ID, detail.id, 'GROUP_CHANGED');
+    await pool.query(
+      `UPDATE gateway_groups SET capability_invalidated_at = now(),
+         capability_revision = capability_revision + 1
+       WHERE session_id = $1 AND id = $2`,
+      [INTEGRATION_SESSION_ID, detail.id],
+    );
     const invalidated = await gateway.createSyncRun(INTEGRATION_SESSION_ID, GatewaySyncMode.INCREMENTAL);
     const invalidatedClaim = await gateway.claimSyncRun(invalidated.id);
     await items.publishDiscovery({

@@ -1,3 +1,5 @@
+import { normalizeContactIdentity } from '../contacts/contact-normalization';
+
 export type GroupSendCapabilityStatus = 'ALLOWED' | 'DENIED' | 'UNKNOWN';
 
 export type GroupSendCapabilityReason =
@@ -25,6 +27,36 @@ export interface GroupCapabilityDecision {
   reason: GroupSendCapabilityReason;
 }
 
+export interface GroupParticipantAdminEvidence {
+  id: string;
+  number: string;
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+}
+
+function normalizedPhone(value: string | null | undefined): string | null {
+  const candidate = value?.trim().replace(/^\+/u, '');
+  if (!candidate) return null;
+  const identity = normalizeContactIdentity(
+    candidate.includes('@') ? candidate : `${candidate}@c.us`,
+  );
+  return identity.phone;
+}
+
+export function inferSessionAdminStatus(
+  sessionPhone: string | null | undefined,
+  participants: readonly GroupParticipantAdminEvidence[],
+): boolean | null {
+  const phone = normalizedPhone(sessionPhone);
+  if (!phone) return null;
+  const matches = participants.filter(participant =>
+    normalizedPhone(participant.number) === phone
+      || normalizedPhone(participant.id) === phone,
+  );
+  if (matches.length === 0) return null;
+  return matches.some(participant => participant.isAdmin || participant.isSuperAdmin);
+}
+
 export function evaluateGroupCapability(input: GroupCapabilityInput): GroupCapabilityDecision {
   if (!input.isActive) return { status: 'DENIED', reason: 'GROUP_INACTIVE' };
   if (!input.hasDetails) return { status: 'UNKNOWN', reason: 'METADATA_INCOMPLETE' };
@@ -34,6 +66,9 @@ export function evaluateGroupCapability(input: GroupCapabilityInput): GroupCapab
   }
   if (input.isAnnounce === true && input.isAdmin === null) {
     return { status: 'UNKNOWN', reason: 'ADMIN_STATUS_UNKNOWN' };
+  }
+  if (input.isAnnounce === true && input.isAdmin === true) {
+    return { status: 'ALLOWED', reason: 'SEND_ALLOWED' };
   }
   if (input.isAnnounce === false && input.isReadOnly === false) {
     return { status: 'ALLOWED', reason: 'SEND_ALLOWED' };

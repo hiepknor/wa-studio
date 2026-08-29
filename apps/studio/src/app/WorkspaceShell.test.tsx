@@ -11,6 +11,7 @@ import type {
   RuntimeApi,
   RuntimeConnectionResult,
   RuntimeGroup,
+  RuntimeGroupCapabilityRefresh,
   RuntimeGroupDetail,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
@@ -67,6 +68,20 @@ const group: RuntimeGroup = {
 
 const groupDetail: RuntimeGroupDetail = {
   ...group,
+};
+
+const capabilityOperation: RuntimeGroupCapabilityRefresh = {
+  sessionId: session.id,
+  groupId: group.id,
+  requestRevision: 1,
+  status: "PENDING",
+  source: "MANUAL",
+  attemptCount: 0,
+  requestedAt: "2026-08-11T09:00:00.000Z",
+  startedAt: null,
+  nextAttemptAt: "2026-08-11T09:00:00.000Z",
+  completedAt: null,
+  errorCode: null,
 };
 
 const groupMemberPage = {
@@ -483,6 +498,10 @@ describe("WorkspaceShell", () => {
         meta: { total: 21, limit: 20, offset: 0 },
       })
       .mockResolvedValueOnce({
+        data: [group],
+        meta: { total: 21, limit: 20, offset: 0 },
+      })
+      .mockResolvedValueOnce({
         data: [secondGroup],
         meta: { total: 21, limit: 20, offset: 20 },
       });
@@ -499,9 +518,16 @@ describe("WorkspaceShell", () => {
       .mockResolvedValueOnce(groupDetail)
       .mockResolvedValue(refreshedDetail);
     const listGroupMembers = vi.fn().mockResolvedValue(groupMemberPage);
-    const requestGroupCapabilityRefresh = vi.fn().mockResolvedValue(undefined);
+    const requestGroupCapabilityRefresh = vi.fn().mockResolvedValue(capabilityOperation);
     const fakeApi = {
       getGroup,
+      getCurrentGroupCapabilityRefresh: vi.fn().mockResolvedValue(null),
+      getGroupCapabilityRefresh: vi.fn().mockResolvedValue({
+        ...capabilityOperation,
+        status: "COMPLETED",
+        nextAttemptAt: null,
+        completedAt: "2026-08-11T09:01:00.000Z",
+      }),
       getSessionSyncRun: vi.fn(),
       listGroupMembers,
       listGroups,
@@ -621,7 +647,7 @@ describe("WorkspaceShell", () => {
     );
     expect(screen.getByText("Refresh requested")).toBeInTheDocument();
     expect(
-      screen.getByText("Waiting for WA Runtime to publish a new result…"),
+      screen.getByText("WA Runtime has queued this capability check."),
     ).toBeInTheDocument();
     expect(screen.queryByText("Capability updated")).not.toBeInTheDocument();
     await waitFor(() => expect(getGroup).toHaveBeenCalledTimes(2));
@@ -687,6 +713,7 @@ describe("WorkspaceShell", () => {
     );
     const fakeApi = {
       getGroup: vi.fn().mockResolvedValue(groupDetail),
+      getCurrentGroupCapabilityRefresh: vi.fn().mockResolvedValue(null),
       getSessionSyncRun: vi.fn(),
       listGroupMembers,
       listGroups: vi.fn().mockResolvedValue({
@@ -857,6 +884,7 @@ describe("WorkspaceShell", () => {
             : groupDetail,
         ),
       ),
+      getCurrentGroupCapabilityRefresh: vi.fn().mockResolvedValue(null),
       getSessionSyncRun: vi.fn(),
       listGroupMembers: vi.fn(({ groupId }: { groupId: string }) =>
         groupId === secondGroup.id
@@ -918,6 +946,7 @@ describe("WorkspaceShell", () => {
       .mockRejectedValue(new Error("Runtime detail unavailable."));
     const fakeApi = {
       getGroup,
+      getCurrentGroupCapabilityRefresh: vi.fn().mockResolvedValue(null),
       getSessionSyncRun: vi.fn(),
       listGroupMembers: vi.fn().mockResolvedValue({
         data: [],

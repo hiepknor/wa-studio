@@ -15,6 +15,11 @@ import {
 import { userFacingErrorMessage } from "@/shared/errors/error-message";
 import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
 import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
+import {
+  useRuntimeInvalidation,
+  useRuntimeResourceRevision,
+} from "@/shared/server-state/runtime-invalidation";
+import { reconciledPageOffset } from "@/shared/server-state/server-page";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -75,6 +80,9 @@ export function RunsScreen({
   const { connected, selectedSessionId } = useRuntimeConnection();
   if (!connected) throw new Error("RunsScreen requires a Runtime connection");
   const api = connected.api;
+  const { invalidate } = useRuntimeInvalidation();
+  const runsResourceRevision = useRuntimeResourceRevision(["runs"], selectedSessionId);
+  const deliveriesResourceRevision = useRuntimeResourceRevision(["deliveries"], selectedSessionId);
   const [listState, setListState] = useState<RunsListState>(initialRunsListState);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState<RuntimeCampaignRunSummaryPage | null>(null);
@@ -102,6 +110,9 @@ export function RunsScreen({
   const sessionRef = useRef(selectedSessionId);
   const selectedSessionIdRef = useRef(selectedSessionId);
   const selectedRunIdRef = useRef(selectedRunId);
+  const observedRunsListRevisionRef = useRef(runsResourceRevision);
+  const observedRunDetailRevisionRef = useRef(runsResourceRevision);
+  const observedDeliveriesRevisionRef = useRef(deliveriesResourceRevision);
   const runsRead = useLatestRequest();
   const runDetailRead = useLatestRequest();
   const deliveriesRead = useLatestRequest();
@@ -161,11 +172,14 @@ export function RunsScreen({
         executionModes: state.executionModes,
       }, { signal });
       if (request !== listRequestRef.current || !runsRead.isCurrent(signal)) return;
-      if (state.offset > 0 && result.meta.total <= state.offset) {
-        const lastOffset = result.meta.total === 0
-          ? 0
-          : Math.floor((result.meta.total - 1) / RUNS_PAGE_SIZE) * RUNS_PAGE_SIZE;
-        setListState((current) => ({ ...current, offset: lastOffset }));
+      const recoveredOffset = reconciledPageOffset({
+        limit: RUNS_PAGE_SIZE,
+        offset: state.offset,
+        rowCount: result.data.length,
+        total: result.meta.total,
+      });
+      if (recoveredOffset !== null) {
+        setListState((current) => ({ ...current, offset: recoveredOffset }));
         return;
       }
       setPage(result);
@@ -214,6 +228,12 @@ export function RunsScreen({
 
   useEffect(() => { void loadRuns(listState); }, [listState, loadRuns]);
 
+  useEffect(() => {
+    if (observedRunsListRevisionRef.current === runsResourceRevision) return;
+    observedRunsListRevisionRef.current = runsResourceRevision;
+    void loadRuns(listState, true);
+  }, [listState, loadRuns, runsResourceRevision]);
+
   useEffect(() => () => {
     listRequestRef.current += 1;
     detailRequestRef.current += 1;
@@ -221,7 +241,9 @@ export function RunsScreen({
     mutationRequestRef.current += 1;
   }, []);
 
-  const hasActiveRun = page?.data.some((candidate) => !RUN_TERMINAL_STATUSES.has(candidate.status)) ?? false;
+  const hasActiveRun = page?.data.some(
+    (candidate) => !RUN_TERMINAL_STATUSES.has(candidate.status),
+  ) ?? false;
   useEffect(() => {
     if (!hasActiveRun) return;
     const interval = window.setInterval(() => {
@@ -260,7 +282,7 @@ export function RunsScreen({
       const current = request === detailRequestRef.current
         && runDetailRead.isCurrent(signal);
       runDetailRead.complete(signal);
-      if (current && !background) setRunLoading(false);
+      if (current) setRunLoading(false);
     }
   }, [api, runDetailRead, selectedSessionId]);
 
@@ -274,6 +296,12 @@ export function RunsScreen({
   }, [loadRun, runDetailRead, selectedRunId]);
 
   useEffect(() => {
+    if (observedRunDetailRevisionRef.current === runsResourceRevision) return;
+    observedRunDetailRevisionRef.current = runsResourceRevision;
+    if (selectedRunId) void loadRun(selectedRunId, true, true);
+  }, [loadRun, runsResourceRevision, selectedRunId]);
+
+  useEffect(() => {
     if (!run || mutation || RUN_TERMINAL_STATUSES.has(run.status)) return;
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void loadRun(run.id, true);
@@ -281,7 +309,7 @@ export function RunsScreen({
     return () => window.clearInterval(interval);
   }, [loadRun, mutation, run]);
 
-  const loadDeliveries = useCallback(async () => {
+  const loadDeliveries = useCallback(async (background = false) => {
     if (!selectedRunId || inspectorTab !== "deliveries") {
       deliveriesRead.cancel();
       deliveryRequestRef.current += 1;
@@ -290,8 +318,10 @@ export function RunsScreen({
     }
     const request = ++deliveryRequestRef.current;
     const signal = deliveriesRead.begin();
-    setDeliveriesLoading(true);
-    setDeliveriesError(null);
+    if (!background) {
+      setDeliveriesLoading(true);
+      setDeliveriesError(null);
+    }
     try {
       const result = await api.listCampaignDeliveries({
         runId: selectedRunId,
@@ -318,6 +348,12 @@ export function RunsScreen({
   }, [api, deliveriesRead, deliveryFilter, deliveryOffset, deliveryQuery, inspectorTab, selectedRunId]);
 
   useEffect(() => { void loadDeliveries(); }, [loadDeliveries]);
+
+  useEffect(() => {
+    if (observedDeliveriesRevisionRef.current === deliveriesResourceRevision) return;
+    observedDeliveriesRevisionRef.current = deliveriesResourceRevision;
+    void loadDeliveries(true);
+  }, [deliveriesResourceRevision, loadDeliveries]);
 
   function selectRun(item: RuntimeCampaignRunSummary) {
     mutationOperation.cancel();
@@ -391,7 +427,8 @@ export function RunsScreen({
       setRun(updated);
       setCancelConfirmationOpen(false);
       void loadRuns(listState, true);
-      if (inspectorTab === "deliveries") void loadDeliveries();
+      if (inspectorTab === "deliveries") void loadDeliveries(true);
+      invalidate({ resources: ["campaigns"], sessionId: targetRun.sessionId });
     } catch (error) {
       if (
         !mutationOperation.isCurrent(operationToken)

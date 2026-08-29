@@ -47,8 +47,19 @@ export class GroupService {
 
   async refreshCapability(sessionId: string, groupId: string) {
     this.sessions.assertVisible(sessionId);
-    if (!await this.repository.findGroup(sessionId, groupId)) throw new NotFoundException('Group not found');
-    await this.repository.invalidateGroupCapability(sessionId, groupId, 'MANUAL_REFRESH');
-    return { accepted: true };
+    const operation = await this.repository.requestGroupCapabilityRefresh(sessionId, groupId);
+    if (!operation) throw new NotFoundException('Group not found');
+    return operation;
+  }
+
+  async getCapabilityRefresh(sessionId: string, groupId: string, requestRevision?: number) {
+    this.sessions.assertVisible(sessionId);
+    const operation = await this.repository.findGroupCapabilityRefresh(
+      sessionId,
+      groupId,
+      requestRevision,
+    );
+    if (!operation) throw new NotFoundException('Capability refresh not found');
+    return operation;
   }
 }

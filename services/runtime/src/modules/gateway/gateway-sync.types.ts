@@ -12,12 +12,6 @@ export interface GroupReconciliationPayload {
   groupId: string;
 }
 
-export interface GroupCapabilityRefreshPayload {
-  sessionId: string;
-  groupId: string;
-  expectedRevision: number;
-}
-
 export interface TargetedGroupReconciliationPayload {
   sessionId: string;
   groupId: string;

@@ -43,13 +43,9 @@ export class GatewayDispatchTick {
   private async dispatchOnce(): Promise<void> {
     const recovered = await this.gateway.recoverExpiredSyncRuns();
     const recoveredItems = await this.syncItems.recoverExpired();
-    const recoveredCapabilities = await this.gateway.recoverExpiredCapabilityRefreshes();
     const recoveredIntents = await this.groupIntents.recoverExpired();
     if (recovered > 0) this.logger.warn({ event: 'sync_runs.recovered', count: recovered });
     if (recoveredItems > 0) this.logger.warn({ event: 'gateway_sync_items.recovered', count: recoveredItems });
-    if (recoveredCapabilities > 0) {
-      this.logger.warn({ event: 'group_capability_refreshes.recovered', count: recoveredCapabilities });
-    }
     if (recoveredIntents > 0) {
       this.logger.warn({ event: 'gateway_group_intents.recovered', count: recoveredIntents });
     }
@@ -92,29 +88,6 @@ export class GatewayDispatchTick {
       }
     }
 
-    const refreshes = await this.gateway.listGroupsNeedingCapabilityRefresh(100);
-    for (const refresh of refreshes) {
-      try {
-        await this.queues.publish(GATEWAY_SYNC_QUEUE, 'refresh-group-capability', {
-          sessionId: refresh.sessionId,
-          groupId: refresh.groupId,
-          expectedRevision: refresh.revision,
-        }, {
-          jobId: stableQueueJobId('group-capability', `${refresh.sessionId}:${refresh.groupId}:${refresh.revision}`),
-          priority: 1,
-          attempts: 1,
-          removeOnComplete: true,
-          removeOnFail: true,
-        });
-      } catch (error) {
-        this.logger.error({
-          event: 'queue.publish.failed', queue: 'gateway_sync', jobName: 'refresh-group-capability',
-          sessionId: refresh.sessionId, error,
-        });
-        // Capability invalidation remains durable in PostgreSQL.
-      }
-    }
-
     const intents = await this.groupIntents.listDispatchable(100);
     for (const intent of intents) {
       try {
@@ -123,7 +96,7 @@ export class GatewayDispatchTick {
             'targeted-group-reconciliation',
             `${intent.sessionId}:${intent.groupId}:${intent.requestedRevision}`,
           ),
-          priority: 5,
+          priority: intent.priority,
           delay: Math.max(0, intent.availableAt.valueOf() - Date.now()),
           attempts: 1,
           removeOnComplete: true,

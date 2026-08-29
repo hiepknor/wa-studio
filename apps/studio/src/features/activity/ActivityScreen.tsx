@@ -4,6 +4,7 @@ import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import type { RuntimeActivityEvent } from "@/shared/api/runtime-client";
 import { userFacingErrorMessage } from "@/shared/errors/error-message";
 import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
+import { useRuntimeResourceRevision } from "@/shared/server-state/runtime-invalidation";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { DateTime } from "@/shared/ui/DateTime";
@@ -38,6 +39,7 @@ export function ActivityScreen({
   const { connected, selectedSessionId } = useRuntimeConnection();
   if (!connected) throw new Error("ActivityScreen requires a Runtime connection");
   const api = connected.api;
+  const activityResourceRevision = useRuntimeResourceRevision(["activity"], selectedSessionId);
   const [state, setState] = useState<ActivityListState>(initialActivityListState);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [events, setEvents] = useState<RuntimeActivityEvent[]>([]);
@@ -50,8 +52,11 @@ export function ActivityScreen({
   const [selectedEventId, setSelectedEventId] = useState<string | null>(initialEventId);
   const requestRef = useRef(0);
   const activeReadRef = useRef<"append" | "background" | "foreground" | null>(null);
+  const loadedOlderRef = useRef(loadedOlder);
+  const observedActivityRevisionRef = useRef(activityResourceRevision);
   const sessionRef = useRef(selectedSessionId);
   const activityRead = useLatestRequest();
+  loadedOlderRef.current = loadedOlder;
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === selectedEventId) ?? null,
@@ -70,7 +75,13 @@ export function ActivityScreen({
     append = false,
     background = false,
     cursor,
-  }: { append?: boolean; background?: boolean; cursor?: string } = {}) => {
+    preserveHistory = false,
+  }: {
+    append?: boolean;
+    background?: boolean;
+    cursor?: string;
+    preserveHistory?: boolean;
+  } = {}) => {
     if (!selectedSessionId) return;
     if (background && activeReadRef.current) return;
     const request = ++requestRef.current;
@@ -91,8 +102,13 @@ export function ActivityScreen({
       if (request !== requestRef.current || !activityRead.isCurrent(signal)) return;
       setEvents((current) => append
         ? [...current, ...result.data.filter((event) => !current.some((candidate) => candidate.id === event.id))]
-        : result.data);
-      setNextCursor(result.meta.nextCursor);
+        : preserveHistory
+          ? [
+            ...result.data,
+            ...current.filter((event) => !result.data.some((candidate) => candidate.id === event.id)),
+          ]
+          : result.data);
+      if (!preserveHistory) setNextCursor(result.meta.nextCursor);
       setRetentionDays(result.meta.retentionDays);
       if (append) setLoadedOlder(true);
     } catch (loadError) {
@@ -135,12 +151,24 @@ export function ActivityScreen({
   }, [load]);
 
   useEffect(() => {
-    if (loadedOlder) return;
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load({ background: true });
-    }, 5_000);
-    return () => window.clearInterval(interval);
-  }, [load, loadedOlder]);
+    if (observedActivityRevisionRef.current === activityResourceRevision) return;
+    observedActivityRevisionRef.current = activityResourceRevision;
+    let disposed = false;
+    let timeout: number | undefined;
+    const reconcile = () => {
+      if (disposed) return;
+      if (activeReadRef.current) {
+        timeout = window.setTimeout(reconcile, 100);
+        return;
+      }
+      void load({ background: true, preserveHistory: loadedOlderRef.current });
+    };
+    reconcile();
+    return () => {
+      disposed = true;
+      if (timeout !== undefined) window.clearTimeout(timeout);
+    };
+  }, [activityResourceRevision, load]);
 
   useEffect(() => {
     if (initialEventId) setSelectedEventId(initialEventId);

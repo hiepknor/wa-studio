@@ -122,6 +122,7 @@ export class GatewaySyncService {
     heartbeat.unref();
     let stage: 'UPSTREAM' | 'PERSISTENCE' = 'UPSTREAM';
     try {
+      const observedAfter = new Date();
       const group = await this.openwa.getGroup(claim.sessionId, claim.groupId);
       stage = 'PERSISTENCE';
       if (ownershipLost || !await this.items.renewLease(claim.id, claim.leaseToken)) {
@@ -143,6 +144,11 @@ export class GatewaySyncService {
       if (!result.applied || !await this.items.complete(claim.id, claim.leaseToken, result.members)) {
         return { skipped: true };
       }
+      await this.groupIntents.completeFromAuthoritativeSync(
+        claim.sessionId,
+        claim.groupId,
+        observedAfter,
+      );
       this.logger.log({
         event: 'gateway.sync.item.completed', syncRunId: claim.syncRunId,
         sessionId: claim.sessionId, membersSynced: result.members,
@@ -216,7 +222,7 @@ export class GatewaySyncService {
       );
       if (outcome === 'LOST_OWNERSHIP') return { skipped: true };
       this.logger.log({
-        event: 'gateway.group_reconciliation.completed', source: 'WEBHOOK',
+        event: 'gateway.group_reconciliation.completed', source: claim.source,
         sessionId, durationMs: Date.now() - startedAt,
         queueAgeMs: Date.now() - claim.requestedAt.valueOf(),
         coalescedEvents: claim.coalescedCount, outcome,
@@ -226,7 +232,7 @@ export class GatewaySyncService {
       if (stage === 'UPSTREAM' && error instanceof OpenWAHttpError && error.status === 404) {
         await this.groupIntents.skipMissing(sessionId, groupId, claim.leaseToken, claim.requestedRevision);
         this.logger.warn({
-          event: 'gateway.group_reconciliation.skipped', source: 'WEBHOOK', sessionId,
+          event: 'gateway.group_reconciliation.skipped', source: claim.source, sessionId,
           reason: 'GROUP_NOT_FOUND', durationMs: Date.now() - startedAt,
         });
         return { skipped: true };
@@ -238,7 +244,7 @@ export class GatewaySyncService {
         sessionId, groupId, claim.leaseToken, claim.requestedRevision, policy,
       );
       this.logger.warn({
-        event: 'gateway.group_reconciliation.failed', source: 'WEBHOOK', sessionId,
+        event: 'gateway.group_reconciliation.failed', source: claim.source, sessionId,
         outcome, code: policy.code, durationMs: Date.now() - startedAt,
       });
       throw error;
@@ -275,48 +281,4 @@ export class GatewaySyncService {
     }
   }
 
-  async refreshGroupCapability(
-    sessionId: string,
-    groupId: string,
-    expectedRevision: number,
-  ): Promise<{ applied: boolean }> {
-    if (!this.config.OPENWA_ALLOWED_SESSION_IDS.includes(sessionId)) {
-      throw new ForbiddenException('Session is not in OPENWA_ALLOWED_SESSION_IDS');
-    }
-    const pacingLease = await this.items.reserveSessionRequest(sessionId);
-    if (!pacingLease) return { applied: false };
-    const claim = await this.repository.claimCapabilityRefresh(sessionId, groupId, expectedRevision);
-    if (!claim) {
-      await this.items.releaseSessionRequest(sessionId, pacingLease);
-      return { applied: false };
-    }
-    let stage: 'UPSTREAM' | 'PERSISTENCE' = 'UPSTREAM';
-    try {
-      const group = await this.openwa.getGroup(sessionId, groupId);
-      stage = 'PERSISTENCE';
-      const result = await this.repository.upsertGroupDetails(
-        sessionId,
-        group,
-        { expectedRevision, capabilityLeaseToken: claim.leaseToken },
-      );
-      await this.items.recordSessionRequestOutcome(sessionId, pacingLease, true);
-      return { applied: result.applied };
-    } catch (error) {
-      const policy = stage === 'UPSTREAM'
-        ? this.classifyGroupReadFailure(error)
-        : { retryable: true, ratePressure: false, code: 'PERSISTENCE_ERROR' };
-      await this.items.recordSessionRequestOutcome(
-        sessionId, pacingLease, false, policy.ratePressure, policy.reduceRate === true,
-      );
-      await this.repository.failCapabilityRefreshAttempt(
-        sessionId,
-        groupId,
-        expectedRevision,
-        claim.leaseToken,
-        policy.code,
-        policy.retryable,
-      );
-      throw error;
-    }
-  }
 }

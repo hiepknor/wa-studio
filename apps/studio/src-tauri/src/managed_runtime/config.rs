@@ -194,6 +194,14 @@ impl DesktopRuntimeConfig {
             ("DATABASE_URL".to_string(), database_url.to_string()),
             ("QUEUE_BACKEND".to_string(), "postgres".to_string()),
             (
+                "GATEWAY_TARGETED_RECONCILIATION_ENABLED".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "GATEWAY_SYNC_NOTIFY_WAKEUP_ENABLED".to_string(),
+                "true".to_string(),
+            ),
+            (
                 "RUNTIME_PARENT_PID".to_string(),
                 std::process::id().to_string(),
             ),
@@ -327,6 +335,14 @@ mod tests {
         );
         assert!(environment.contains(&("RUNTIME_BIND_HOST".to_string(), "127.0.0.1".to_string())));
         assert!(environment.contains(&("QUEUE_BACKEND".to_string(), "postgres".to_string())));
+        assert!(environment.contains(&(
+            "GATEWAY_TARGETED_RECONCILIATION_ENABLED".to_string(),
+            "true".to_string()
+        )));
+        assert!(environment.contains(&(
+            "GATEWAY_SYNC_NOTIFY_WAKEUP_ENABLED".to_string(),
+            "true".to_string()
+        )));
         assert!(environment.contains(&(
             "EVENT_INBOX_BASE_URL".to_string(),
             "https://events.example.test".to_string()

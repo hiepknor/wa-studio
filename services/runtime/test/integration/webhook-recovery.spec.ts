@@ -5,6 +5,7 @@ import { runtimeConfig } from '../../src/core/config/runtime-config';
 import type { MessageJobRepository } from '../../src/modules/messages/message-job.repository';
 import { RuntimeEventRepository } from '../../src/modules/webhooks/runtime-event.repository';
 import { GatewayGroupIntentRepository } from '../../src/modules/gateway/gateway-group-intent.repository';
+import { GatewaySyncRateLimitRepository } from '../../src/modules/gateway/gateway-sync-rate-limit.repository';
 import { GatewayRepository } from '../../src/modules/gateway/gateway.repository';
 import { ContactRepository } from '../../src/modules/contacts/contact.repository';
 import { ContactMessageObserverService } from '../../src/modules/contacts/contact-message-observer.service';
@@ -418,6 +419,58 @@ describe('durable webhook processing', () => {
     await expect(sync.reconcileTargetedGroup(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID))
       .resolves.toMatchObject({ members: 0 });
     expect(openwa.getGroup).toHaveBeenCalledTimes(1);
+    expect(await intents.findCapabilityRefresh(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      20,
+    )).toMatchObject({ status: 'COMPLETED', requestRevision: 20 });
+    expect(await new GatewayRepository(
+      database,
+      new ContactRepository(database),
+    ).findGroup(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID)).toMatchObject({
+      sendCapability: {
+        status: 'ALLOWED',
+        invalidatedAt: null,
+      },
+    });
+  });
+
+  it('keeps automatic reconciliation gated while manual refresh remains dispatchable', async () => {
+    await seedSendableGroup(pool);
+    const config = {
+      ...runtimeConfig(),
+      GATEWAY_TARGETED_RECONCILIATION_ENABLED: false,
+    };
+    const intents = new GatewayGroupIntentRepository(
+      database,
+      new GatewaySyncRateLimitRepository(database, config),
+      config,
+    );
+    await database.transaction(client => intents.scheduleInTransaction(
+      client,
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      'group.update',
+      { immediate: true },
+    ));
+    expect(await intents.listDispatchable(10)).toEqual([]);
+
+    const operation = await intents.requestCapabilityRefresh(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+    );
+    expect(operation).toMatchObject({
+      requestRevision: 1,
+      source: 'MANUAL',
+      status: 'PENDING',
+    });
+    expect(await intents.listDispatchable(10)).toEqual([
+      expect.objectContaining({
+        groupId: INTEGRATION_GROUP_ID,
+        priority: 1,
+        requestedRevision: 1,
+      }),
+    ]);
   });
 
   it('runs a subsequent revision when an event arrives during targeted reconciliation', async () => {

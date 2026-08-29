@@ -10,7 +10,7 @@ import { QueueService } from '../../core/queue/queue.service';
 import type { RuntimeQueueWorker } from '../../core/queue/queue-transport';
 import { CampaignRunProcessorService } from '../campaigns/campaign-run-processor.service';
 import { GatewaySyncProcessorService } from '../gateway/gateway-sync-processor.service';
-import type { FullGatewaySyncPayload, GroupCapabilityRefreshPayload, GroupReconciliationPayload, TargetedGroupReconciliationPayload } from '../gateway/gateway-sync.types';
+import type { FullGatewaySyncPayload, GroupReconciliationPayload, TargetedGroupReconciliationPayload } from '../gateway/gateway-sync.types';
 import { MessageJobProcessorService } from '../messages/message-job-processor.service';
 import type { MessageSendQueuePayload } from '../messages/message-job.types';
 import { WebhookProcessorService } from '../webhooks/webhook-processor.service';
@@ -65,7 +65,7 @@ export class WorkerRunnerService {
         }, () => this.webhookProcessor.process(job.payload.idempotencyKey)),
         error => this.logger.error({ event: 'worker.connection.error', queue: WEBHOOK_QUEUE, error }),
       ));
-      workers.push(this.queues.startWorker<FullGatewaySyncPayload | GroupCapabilityRefreshPayload | GroupReconciliationPayload | TargetedGroupReconciliationPayload>(
+      workers.push(this.queues.startWorker<FullGatewaySyncPayload | GroupReconciliationPayload | TargetedGroupReconciliationPayload>(
         GATEWAY_SYNC_QUEUE,
         config.GATEWAY_WORKER_CONCURRENCY,
         job => this.runJob('gateway_sync', job.name, job.id, {

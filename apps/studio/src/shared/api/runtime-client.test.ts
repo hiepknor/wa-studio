@@ -261,6 +261,33 @@ describe("RuntimeApi", () => {
     );
   });
 
+  it("reads the resource revision vector for a session", async () => {
+    const runtimeFetch = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({
+      sessionId: "session-id",
+      sessions: 1,
+      groups: 2,
+      groupLists: 3,
+      campaigns: 4,
+      runs: 5,
+      deliveries: 6,
+      activity: 7,
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
+      runtimeFetch,
+    );
+
+    await api.getStateRevisions("session-id");
+    await api.getStateRevisions(null);
+
+    expect((runtimeFetch.mock.calls[0][0] as Request).url).toBe(
+      "http://127.0.0.1:3100/api/v1/state-revisions?sessionId=session-id",
+    );
+    expect((runtimeFetch.mock.calls[1][0] as Request).url).toBe(
+      "http://127.0.0.1:3100/api/v1/state-revisions",
+    );
+  });
+
   it("keeps the caller-owned Idempotency-Key stable across create retries and accepts HTTP 200 replay", async () => {
     const created = {
       id: "campaign-id",
@@ -679,21 +706,69 @@ describe("RuntimeApi", () => {
   );
 
   it("queues a group capability refresh", async () => {
+    const operation = {
+      sessionId: "session id",
+      groupId: "120363@g.us",
+      requestRevision: 1,
+      status: "PENDING" as const,
+      source: "MANUAL" as const,
+      attemptCount: 0,
+      requestedAt: "2026-08-29T00:00:00.000Z",
+      startedAt: null,
+      nextAttemptAt: "2026-08-29T00:00:00.000Z",
+      completedAt: null,
+      errorCode: null,
+    };
     const runtimeFetch = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(new Response(null, { status: 202 }));
+      .mockResolvedValue(Response.json(operation, { status: 202 }));
     const api = new RuntimeApi(
       { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
       runtimeFetch,
     );
 
     await expect(api.requestGroupCapabilityRefresh("session id", "120363@g.us"))
-      .resolves.toBeUndefined();
+      .resolves.toEqual(operation);
 
     const request = runtimeFetch.mock.calls[0][0] as Request;
     expect(request.method).toBe("POST");
     expect(request.url).toBe(
-      "http://127.0.0.1:3100/api/v1/groups/120363%40g.us/refresh-capability?sessionId=session%20id",
+      "http://127.0.0.1:3100/api/v1/groups/120363%40g.us/capability-refreshes?sessionId=session%20id",
+    );
+  });
+
+  it("reads a capability refresh by revision and treats a missing current operation as empty", async () => {
+    const runtimeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({
+        sessionId: "session id",
+        groupId: "120363@g.us",
+        requestRevision: 4,
+        status: "RUNNING",
+        source: "MANUAL",
+        attemptCount: 1,
+        requestedAt: "2026-08-29T00:00:00.000Z",
+        startedAt: "2026-08-29T00:00:01.000Z",
+        nextAttemptAt: null,
+        completedAt: null,
+        errorCode: null,
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
+      runtimeFetch,
+    );
+
+    await expect(api.getGroupCapabilityRefresh("session id", "120363@g.us", 4))
+      .resolves.toMatchObject({ requestRevision: 4, status: "RUNNING" });
+    await expect(api.getCurrentGroupCapabilityRefresh("session id", "120363@g.us"))
+      .resolves.toBeNull();
+
+    expect((runtimeFetch.mock.calls[0][0] as Request).url).toContain(
+      "/api/v1/groups/120363%40g.us/capability-refreshes/4?sessionId=session%20id",
+    );
+    expect((runtimeFetch.mock.calls[1][0] as Request).url).toContain(
+      "/api/v1/groups/120363%40g.us/capability-refreshes/current?sessionId=session%20id",
     );
   });
 

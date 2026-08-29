@@ -32,7 +32,9 @@ describe('GatewayRepository bulk member replacement', () => {
   it('replaces a large member collection with one database insert', async () => {
     const query = vi.fn()
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      .mockResolvedValueOnce({ rows: [{ details_fingerprint: null }] })
+      .mockResolvedValueOnce({
+        rows: [{ existing_group_id: 'group-1', session_phone: null, details_fingerprint: null }],
+      })
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })
       .mockResolvedValueOnce({
         rows: Array.from({ length: 1000 }, (_, index) => ({ participant_id: `participant-${index}` })),
@@ -75,7 +77,9 @@ describe('GatewayRepository bulk member replacement', () => {
   it('seeds contact projection only for inserted or changed members', async () => {
     const query = vi.fn()
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })
-      .mockResolvedValueOnce({ rows: [{ members_fingerprint: 'before' }] })
+      .mockResolvedValueOnce({
+        rows: [{ existing_group_id: 'group-1', session_phone: null, members_fingerprint: 'before' }],
+      })
       .mockResolvedValueOnce({ rows: [], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [{ participant_id: 'participant-2' }], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [], rowCount: 0 });

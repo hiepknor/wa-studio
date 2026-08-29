@@ -12,6 +12,10 @@ import {
   unknownMutationOutcomeMessage,
 } from "@/shared/api/runtime-mutation";
 import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
+import {
+  useRuntimeInvalidation,
+  useRuntimeResourceRevision,
+} from "@/shared/server-state/runtime-invalidation";
 import type { GroupsTableRow } from "./GroupsTable";
 import {
   createGroupListDraft,
@@ -84,6 +88,9 @@ export function useGroupsScopeController({
   api,
   sessionId,
 }: UseGroupsScopeControllerInput) {
+  const { invalidate } = useRuntimeInvalidation();
+  const groupsResourceRevision = useRuntimeResourceRevision(["groups"], sessionId);
+  const groupListsResourceRevision = useRuntimeResourceRevision(["groupLists"], sessionId);
   const [scope, setScope] = useState<GroupsScope>({ mode: "directory" });
   const [directoryIds, setDirectoryIds] = useState<string[]>([]);
   const [knownRows, setKnownRows] = useState<Record<string, RuntimeGroupListGroup>>({});
@@ -220,7 +227,15 @@ export function useGroupsScopeController({
       if (current && request === catalogRequestRef.current) setCatalogLoading(false);
     });
     return () => catalogRead.cancel();
-  }, [api, catalogOffset, catalogQuery, catalogRead, catalogRevision, sessionId]);
+  }, [
+    api,
+    catalogOffset,
+    catalogQuery,
+    catalogRead,
+    catalogRevision,
+    groupListsResourceRevision,
+    sessionId,
+  ]);
 
   useEffect(() => {
     if (scope.mode !== "list:view") return;
@@ -258,7 +273,14 @@ export function useGroupsScopeController({
       if (current && request === membershipRequestRef.current) setMembershipLoading(false);
     });
     return () => membershipRead.cancel();
-  }, [api, membershipRead, membershipRevision, scope.mode === "list:view" ? scope.list.id : null, sessionId]);
+  }, [
+    api,
+    groupsResourceRevision,
+    membershipRead,
+    membershipRevision,
+    scope.mode === "list:view" ? scope.list.id : null,
+    sessionId,
+  ]);
 
   useEffect(() => () => {
     membershipRequestRef.current += 1;
@@ -540,6 +562,7 @@ export function useGroupsScopeController({
       setScope({ list: savedMembership.list, mode: "list:view" });
       setCatalogLists((current) => mergeCatalog(current, [savedMembership.list]));
       setCatalogRevision((revision) => revision + 1);
+      invalidate({ resources: ["groupLists"], sessionId: targetSessionId });
       createIntentRef.current = null;
       return savedMembership.list;
     } catch (error) {

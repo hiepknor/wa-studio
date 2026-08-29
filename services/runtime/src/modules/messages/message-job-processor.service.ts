@@ -115,9 +115,21 @@ export class MessageJobProcessorService {
       await this.update(job.id, status, { error: description });
       if (error instanceof OpenWAHttpError && job.recipientId.endsWith('@g.us')) {
         if (error.status === 403) {
-          await this.gateway.invalidateGroupCapability(job.sessionId, job.recipientId, 'GATEWAY_PERMISSION_DENIED');
+          await this.gateway.requestGroupCapabilityRefresh(
+            job.sessionId,
+            job.recipientId,
+            'GATEWAY_PERMISSION_DENIED',
+            'send.permission_denied',
+            1,
+          );
         } else if (error.status === 404) {
-          await this.gateway.invalidateGroupCapability(job.sessionId, job.recipientId, 'GROUP_CHANGED');
+          await this.gateway.requestGroupCapabilityRefresh(
+            job.sessionId,
+            job.recipientId,
+            'GROUP_CHANGED',
+            'send.group_not_found',
+            1,
+          );
         }
       }
       throw error;

@@ -9,6 +9,7 @@ import {
 import type {
   RuntimeApi,
   RuntimeGroup,
+  RuntimeGroupCapabilityRefresh,
   RuntimeGroupDetail,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
@@ -71,6 +72,31 @@ const group: RuntimeGroup = {
 };
 
 const detail: RuntimeGroupDetail = { ...group };
+const pendingOperation: RuntimeGroupCapabilityRefresh = {
+  sessionId: session.id,
+  groupId: group.id,
+  requestRevision: 1,
+  status: "PENDING",
+  source: "MANUAL",
+  attemptCount: 0,
+  requestedAt: new Date().toISOString(),
+  startedAt: null,
+  nextAttemptAt: new Date().toISOString(),
+  completedAt: null,
+  errorCode: null,
+};
+const systemPendingOperation: RuntimeGroupCapabilityRefresh = {
+  ...pendingOperation,
+  source: "SYSTEM",
+};
+const completedOperation: RuntimeGroupCapabilityRefresh = {
+  ...pendingOperation,
+  status: "COMPLETED",
+  attemptCount: 1,
+  startedAt: new Date().toISOString(),
+  nextAttemptAt: null,
+  completedAt: new Date().toISOString(),
+};
 const secondGroup: RuntimeGroup = {
   ...group,
   id: "second-group@g.us",
@@ -145,7 +171,9 @@ function renderGroups(overrides: Partial<RuntimeApi> = {}) {
       data: [group],
       meta: { total: 1, limit: 20, offset: 0 },
     }),
-    requestGroupCapabilityRefresh: vi.fn().mockResolvedValue(undefined),
+    getCurrentGroupCapabilityRefresh: vi.fn().mockResolvedValue(null),
+    getGroupCapabilityRefresh: vi.fn().mockResolvedValue(pendingOperation),
+    requestGroupCapabilityRefresh: vi.fn().mockResolvedValue(pendingOperation),
     ...overrides,
   } as unknown as RuntimeApi;
   render(
@@ -229,10 +257,14 @@ describe("GroupsScreen capability refresh", () => {
     expect(capabilityCard.closest("section")).toHaveTextContent("Stale");
   });
 
-  it("shows requested then timeout semantics while preserving the member page", async () => {
+  it("shows authoritative operation progress then background semantics while preserving the member page", async () => {
     const user = userEvent.setup();
     let resolvePoll:
-      | ((result: { status: "timed-out"; detail: null; error: null }) => void)
+      | ((result: {
+          status: "background";
+          operation: RuntimeGroupCapabilityRefresh;
+          error: null;
+        }) => void)
       | undefined;
     pollCapabilityRefresh.mockReturnValue(
       new Promise((resolve) => {
@@ -268,7 +300,7 @@ describe("GroupsScreen capability refresh", () => {
 
     expect(await screen.findByText("Refresh requested")).toBeInTheDocument();
     expect(
-      screen.getByText("Waiting for WA Runtime to publish a new result…"),
+      screen.getByText("WA Runtime has queued this capability check."),
     ).toBeInTheDocument();
     expect(
       screen
@@ -279,16 +311,22 @@ describe("GroupsScreen capability refresh", () => {
     );
     expect(screen.queryByText("Capability updated")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Refreshing capability…" }),
+      screen.getByRole("button", { name: "Refresh capability" }),
     ).toBeDisabled();
     expect(listGroupMembers).toHaveBeenCalledTimes(memberCallsBeforeRefresh);
 
     await act(async () =>
-      resolvePoll?.({ status: "timed-out", detail: null, error: null }),
+      resolvePoll?.({
+        status: "background",
+        operation: pendingOperation,
+        error: null,
+      }),
     );
 
-    expect(screen.getByText("Refresh still processing")).toBeInTheDocument();
-    expect(screen.getByText("Reopen or retry shortly.")).toBeInTheDocument();
+    expect(screen.getByText("Refresh continues in background")).toBeInTheDocument();
+    expect(screen.getByText(
+      "WA Runtime is still processing this request. You can close the inspector; progress will resume when reopened.",
+    )).toBeInTheDocument();
     expect(screen.queryByText("Capability updated")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /Members/ }));
     expect(screen.getByText("Last member")).toBeInTheDocument();
@@ -341,13 +379,17 @@ describe("GroupsScreen capability refresh", () => {
       },
     };
     pollCapabilityRefresh.mockResolvedValue({
-      detail: refreshed,
+      operation: completedOperation,
       status: "completed",
     });
     renderGroups({
       requestGroupCapabilityRefresh: vi.fn().mockRejectedValue(
         new RuntimeTransportError("response lost", { requestDispatched: true }),
       ),
+      getCurrentGroupCapabilityRefresh: vi.fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue(pendingOperation),
+      getGroup: vi.fn().mockResolvedValueOnce(detail).mockResolvedValueOnce(refreshed),
     });
     await openInspector(user);
 
@@ -356,6 +398,138 @@ describe("GroupsScreen capability refresh", () => {
     expect(await screen.findByText("Capability updated")).toBeInTheDocument();
     expect(pollCapabilityRefresh).toHaveBeenCalledTimes(1);
     expect(screen.getByText("The latest capability result is now shown.")).toBeInTheDocument();
+  });
+
+  it("revalidates the authoritative filtered page after capability membership changes", async () => {
+    const user = userEvent.setup();
+    const refreshed = {
+      ...detail,
+      sendCapability: {
+        ...detail.sendCapability,
+        checkedAt: "2026-08-13T01:01:00.000Z",
+        invalidatedAt: null,
+        revision: 9,
+        status: "ALLOWED" as const,
+      },
+    };
+    let filteredReads = 0;
+    const listGroups = vi.fn((input: { capabilityStatus?: string[] }) => {
+      if (input.capabilityStatus?.includes("UNKNOWN")) {
+        filteredReads += 1;
+        return Promise.resolve(filteredReads === 1
+          ? { data: [group], meta: { total: 1, limit: 20, offset: 0 } }
+          : { data: [], meta: { total: 0, limit: 20, offset: 0 } });
+      }
+      return Promise.resolve({
+        data: [group],
+        meta: { total: 1, limit: 20, offset: 0 },
+      });
+    });
+    pollCapabilityRefresh.mockResolvedValue({
+      operation: completedOperation,
+      status: "completed",
+    });
+    renderGroups({
+      getGroup: vi.fn().mockResolvedValueOnce(detail).mockResolvedValueOnce(refreshed),
+      listGroups,
+    });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    await user.click(screen.getByRole("checkbox", { name: "Unknown" }));
+    await waitFor(() => expect(filteredReads).toBe(1));
+    await user.click(screen.getByRole("button", { name: "View Staging group" }));
+
+    await user.click(screen.getByRole("button", { name: "Refresh capability" }));
+
+    expect(await screen.findByText("Capability updated")).toBeInTheDocument();
+    await waitFor(() => expect(filteredReads).toBe(2));
+    expect(screen.queryByRole("button", { name: "View Staging group" })).not.toBeInTheDocument();
+    expect(screen.getByText("0 matches")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Staging group" })).toBeInTheDocument();
+  });
+
+  it("reports a completed check without claiming an unknown result was updated", async () => {
+    const user = userEvent.setup();
+    pollCapabilityRefresh.mockResolvedValue({
+      operation: completedOperation,
+      status: "completed",
+    });
+    renderGroups();
+    await openInspector(user);
+
+    await user.click(screen.getByRole("button", { name: "Refresh capability" }));
+
+    expect(await screen.findByText("Capability check completed")).toBeInTheDocument();
+    expect(screen.getByText(
+      "WA Runtime checked the latest group data but still could not determine send readiness.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText("Capability updated")).not.toBeInTheDocument();
+  });
+
+  it("resumes an active Runtime operation when the inspector is reopened", async () => {
+    const user = userEvent.setup();
+    pollCapabilityRefresh.mockImplementation(
+      ({ signal }) => new Promise((resolve) => {
+        signal.addEventListener(
+          "abort",
+          () => resolve({ status: "cancelled" }),
+          { once: true },
+        );
+      }),
+    );
+    renderGroups({
+      getCurrentGroupCapabilityRefresh: vi.fn().mockResolvedValue(pendingOperation),
+    });
+
+    await openInspector(user);
+
+    expect(await screen.findByText("Refresh requested")).toBeInTheDocument();
+    expect(screen.getByText("WA Runtime has queued this capability check.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh capability" })).toBeDisabled();
+    expect(pollCapabilityRefresh).toHaveBeenCalledWith(expect.objectContaining({
+      initialOperation: pendingOperation,
+    }));
+  });
+
+  it("keeps manual refresh available while an automatic reconciliation is queued", async () => {
+    const user = userEvent.setup();
+    pollCapabilityRefresh.mockImplementation(
+      ({ signal }) => new Promise((resolve) => {
+        signal.addEventListener(
+          "abort",
+          () => resolve({ status: "cancelled" }),
+          { once: true },
+        );
+      }),
+    );
+    const requestGroupCapabilityRefresh = vi.fn().mockResolvedValue(pendingOperation);
+    renderGroups({
+      getCurrentGroupCapabilityRefresh: vi.fn().mockResolvedValue(systemPendingOperation),
+      requestGroupCapabilityRefresh,
+    });
+
+    await openInspector(user);
+
+    expect(await screen.findByText("Automatic check queued")).toBeInTheDocument();
+    expect(screen.getByText(
+      "WA Runtime queued an automatic reconciliation for this group. Refresh capability to prioritize it now.",
+    )).toBeInTheDocument();
+    const refresh = screen.getByRole("button", { name: "Refresh capability" });
+    expect(refresh).toBeEnabled();
+    expect(pollCapabilityRefresh).toHaveBeenCalledTimes(1);
+    const automaticSignal = pollCapabilityRefresh.mock.calls[0][0]
+      .signal as AbortSignal;
+
+    await user.click(refresh);
+
+    expect(automaticSignal.aborted).toBe(true);
+    expect(requestGroupCapabilityRefresh).toHaveBeenCalledWith(session.id, group.id);
+    expect(await screen.findByText("Refresh requested")).toBeInTheDocument();
+    expect(refresh).toBeDisabled();
+    expect(pollCapabilityRefresh).toHaveBeenCalledTimes(2);
+    expect(pollCapabilityRefresh).toHaveBeenCalledWith(expect.objectContaining({
+      initialOperation: pendingOperation,
+    }));
   });
 
   it("aborts and ignores the pending refresh when the inspector closes", async () => {

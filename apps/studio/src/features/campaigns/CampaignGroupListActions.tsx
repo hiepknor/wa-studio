@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RuntimeApi, RuntimeGroupList } from "@/shared/api/runtime-client";
 import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
 import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
+import { useRuntimeResourceRevision } from "@/shared/server-state/runtime-invalidation";
+import { reconciledPageOffset } from "@/shared/server-state/server-page";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DateTime } from "@/shared/ui/DateTime";
@@ -33,6 +35,7 @@ export function CampaignGroupListActions({
   onApply,
   sessionId,
 }: CampaignGroupListActionsProps) {
+  const groupListsResourceRevision = useRuntimeResourceRevision(["groupLists"], sessionId);
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"select" | "review">("select");
   const [inputQuery, setInputQuery] = useState("");
@@ -100,11 +103,14 @@ export function CampaignGroupListActions({
         || requestTarget !== targetRef.current
       ) return;
       const activeLists = page.data.filter((list) => list.archivedAt === null);
-      if (offset > 0 && activeLists.length === 0 && page.meta.total <= offset) {
-        const lastOffset = page.meta.total === 0
-          ? 0
-          : Math.floor((page.meta.total - 1) / LIST_PAGE_SIZE) * LIST_PAGE_SIZE;
-        setOffset(lastOffset);
+      const recoveredOffset = reconciledPageOffset({
+        limit: LIST_PAGE_SIZE,
+        offset,
+        rowCount: activeLists.length,
+        total: page.meta.total,
+      });
+      if (recoveredOffset !== null) {
+        setOffset(recoveredOffset);
         return;
       }
       setLists(activeLists);
@@ -147,7 +153,7 @@ export function CampaignGroupListActions({
   useEffect(() => {
     if (!open || contextRef.current !== context || query !== normalizedInput) return;
     void loadLists();
-  }, [context, loadLists, normalizedInput, open, query]);
+  }, [context, groupListsResourceRevision, loadLists, normalizedInput, open, query]);
 
   useEffect(() => () => {
     listRequestRef.current += 1;

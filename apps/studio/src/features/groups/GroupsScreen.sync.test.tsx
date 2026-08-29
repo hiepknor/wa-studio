@@ -88,6 +88,8 @@ function Harness() {
 function renderGroups(overrides: Partial<RuntimeApi> = {}) {
   const api = {
     getGroup: vi.fn(),
+    getCurrentGroupCapabilityRefresh: vi.fn().mockResolvedValue(null),
+    getGroupCapabilityRefresh: vi.fn(),
     getSessionSyncRun: vi.fn(),
     listGroupMembers: vi.fn(),
     listGroups: vi.fn().mockResolvedValue(page),

@@ -108,7 +108,7 @@ describe('message durability and delivery', () => {
     expect(await messages.find(created.job.id)).toMatchObject({ status: 'ACCEPTED', openwaMessageId: result.messageId });
   });
 
-  it('records a proven 403 failure and invalidates group capability', async () => {
+  it('records a proven 403 failure and schedules a high-priority stale capability refresh', async () => {
     const created = await create('denied-send', 'simulate-403', false);
     await messages.claimDue(10);
     const gateway = new GatewayRepository(database, new ContactRepository(database));
@@ -121,11 +121,16 @@ describe('message durability and delivery', () => {
     await expect(processor.process({ messageJobId: created.job.id })).rejects.toBeInstanceOf(OpenWAHttpError);
     expect(await messages.find(created.job.id)).toMatchObject({ status: 'FAILED' });
     expect(await gateway.findGroup(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID)).toMatchObject({
-      sendCapability: { status: 'UNKNOWN', reason: 'GATEWAY_PERMISSION_DENIED' },
+      sendCapability: { status: 'ALLOWED', reason: 'SEND_ALLOWED', invalidatedAt: expect.any(Date) },
     });
+    expect((await pool.query(
+      `SELECT reasons, priority FROM gateway_group_reconciliation_intents
+       WHERE session_id = $1 AND group_id = $2`,
+      [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    )).rows[0]).toMatchObject({ reasons: ['send.permission_denied'], priority: 1 });
   });
 
-  it('records a proven 404 failure and marks the group as changed', async () => {
+  it('records a proven 404 failure and schedules a high-priority group reconciliation', async () => {
     const created = await create('missing-group-send', 'simulate-404', false);
     await messages.claimDue(10);
     const gateway = new GatewayRepository(database, new ContactRepository(database));
@@ -138,8 +143,13 @@ describe('message durability and delivery', () => {
     await expect(processor.process({ messageJobId: created.job.id })).rejects.toMatchObject({ status: 404 });
     expect(await messages.find(created.job.id)).toMatchObject({ status: 'FAILED' });
     expect(await gateway.findGroup(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID)).toMatchObject({
-      sendCapability: { status: 'UNKNOWN', reason: 'GROUP_CHANGED' },
+      sendCapability: { status: 'ALLOWED', reason: 'SEND_ALLOWED', invalidatedAt: expect.any(Date) },
     });
+    expect((await pool.query(
+      `SELECT reasons, priority FROM gateway_group_reconciliation_intents
+       WHERE session_id = $1 AND group_id = $2`,
+      [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    )).rows[0]).toMatchObject({ reasons: ['send.group_not_found'], priority: 1 });
   });
 
   it('rechecks live policy after acquiring the session lease and before dispatch', async () => {

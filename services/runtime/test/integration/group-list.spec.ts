@@ -206,11 +206,58 @@ describe('group list HTTP API', () => {
     });
 
     const refresh = await fetch(
-      `${baseUrl}/groups/${groupId}/refresh-capability?sessionId=${INTEGRATION_SESSION_ID}`,
+      `${baseUrl}/groups/${groupId}/capability-refreshes?sessionId=${INTEGRATION_SESSION_ID}`,
       { method: 'POST', headers },
     );
     expect(refresh.status).toBe(404);
     expect(await refresh.json()).toMatchObject({ code: 'GROUP_NOT_FOUND' });
+  });
+
+  it('creates one durable refresh operation and preserves the last capability while it is stale', async () => {
+    const groupId = '120363000000000000@g.us';
+    const endpoint = `${baseUrl}/groups/${groupId}/capability-refreshes?sessionId=${INTEGRATION_SESSION_ID}`;
+
+    const first = await fetch(endpoint, { method: 'POST', headers });
+    expect(first.status).toBe(202);
+    const operation = await first.json() as {
+      requestRevision: number;
+      status: string;
+      source: string;
+    };
+    expect(operation).toMatchObject({ requestRevision: 1, status: 'PENDING', source: 'MANUAL' });
+
+    const second = await fetch(endpoint, { method: 'POST', headers });
+    expect(second.status).toBe(202);
+    expect(await second.json()).toMatchObject({ requestRevision: 1, status: 'PENDING' });
+
+    const current = await fetch(
+      `${baseUrl}/groups/${groupId}/capability-refreshes/current?sessionId=${INTEGRATION_SESSION_ID}`,
+      { headers },
+    );
+    expect(current.status).toBe(200);
+    expect(await current.json()).toMatchObject({ requestRevision: 1, status: 'PENDING' });
+
+    const stored = await pool.query<{
+      capability: string;
+      invalidated_at: Date | null;
+      requested_revision: string;
+      priority: number;
+    }>(
+      `SELECT groups.send_capability AS capability,
+         groups.capability_invalidated_at AS invalidated_at,
+         intents.requested_revision::text, intents.priority
+       FROM gateway_groups groups
+       JOIN gateway_group_reconciliation_intents intents
+         ON intents.session_id = groups.session_id AND intents.group_id = groups.id
+       WHERE groups.session_id = $1 AND groups.id = $2`,
+      [INTEGRATION_SESSION_ID, groupId],
+    );
+    expect(stored.rows[0]).toMatchObject({
+      capability: 'ALLOWED',
+      requested_revision: '1',
+      priority: 1,
+    });
+    expect(stored.rows[0]!.invalidated_at).toBeInstanceOf(Date);
   });
 
   it('supports inclusive minimum, maximum, exact, and combined participant bounds including zero', async () => {

@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeApi, RuntimeGroupList } from "@/shared/api/runtime-client";
+import { RuntimeInvalidationProvider } from "@/shared/server-state/runtime-invalidation";
 import { useGroupsScopeController } from "./useGroupsScopeController";
 
 const sessionId = "primary-session";
@@ -25,6 +26,10 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function wrapper({ children }: { children: React.ReactNode }) {
+  return <RuntimeInvalidationProvider>{children}</RuntimeInvalidationProvider>;
+}
+
 describe("useGroupsScopeController", () => {
   it("ignores a catalog response after its search is superseded", async () => {
     const pendingCatalog = deferred<{
@@ -33,7 +38,10 @@ describe("useGroupsScopeController", () => {
     }>();
     const listGroupLists = vi.fn().mockReturnValue(pendingCatalog.promise);
     const api = { listGroupLists } as unknown as RuntimeApi;
-    const { result, unmount } = renderHook(() => useGroupsScopeController({ api, sessionId }));
+    const { result, unmount } = renderHook(
+      () => useGroupsScopeController({ api, sessionId }),
+      { wrapper },
+    );
 
     await waitFor(() => expect(listGroupLists).toHaveBeenCalledTimes(1));
     act(() => result.current.setCatalogInputQuery("priority"));
@@ -61,7 +69,10 @@ describe("useGroupsScopeController", () => {
         meta: { limit: 50, offset: 0, total: 0 },
       }),
     } as unknown as RuntimeApi;
-    const { result, unmount } = renderHook(() => useGroupsScopeController({ api, sessionId }));
+    const { result, unmount } = renderHook(
+      () => useGroupsScopeController({ api, sessionId }),
+      { wrapper },
+    );
 
     act(() => result.current.requestMetadata());
     act(() => result.current.continueMetadata({

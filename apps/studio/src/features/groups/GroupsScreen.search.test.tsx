@@ -98,6 +98,8 @@ function GroupsHarness() {
 function renderGroups(listGroups: RuntimeApi["listGroups"]) {
   const api = {
     getGroup: vi.fn(),
+    getCurrentGroupCapabilityRefresh: vi.fn().mockResolvedValue(null),
+    getGroupCapabilityRefresh: vi.fn(),
     listGroupMembers: vi.fn(),
     listGroups,
     requestGroupCapabilityRefresh: vi.fn(),

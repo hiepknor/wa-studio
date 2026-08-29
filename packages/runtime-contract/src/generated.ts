@@ -129,7 +129,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/groups/{id}/refresh-capability": {
+    "/api/v1/groups/{id}/capability-refreshes": {
         parameters: {
             query?: never;
             header?: never;
@@ -138,8 +138,42 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Request an asynchronous capability refresh for one group */
+        /** Create or join a durable capability refresh operation */
         post: operations["GroupController_refreshCapability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/groups/{id}/capability-refreshes/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the latest capability refresh operation for one group */
+        get: operations["GroupController_getCurrentCapabilityRefresh"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/groups/{id}/capability-refreshes/{revision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read capability refresh progress by request revision */
+        get: operations["GroupController_getCapabilityRefresh"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -644,6 +678,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/state-revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the current revision vector for filterable Runtime resources */
+        get: operations["StateRevisionsController_read"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -845,6 +896,27 @@ export interface components {
             data: components["schemas"]["GroupMemberDto"][];
             /** @description Pagination metadata for the filtered synchronized member dataset */
             meta: components["schemas"]["GroupMemberPageMetaDto"];
+        };
+        GroupCapabilityRefreshDto: {
+            /** Format: uuid */
+            sessionId: string;
+            /** @example 120363000000000000@g.us */
+            groupId: string;
+            requestRevision: number;
+            /** @enum {string} */
+            status: "PENDING" | "RUNNING" | "RETRYING" | "COMPLETED" | "FAILED";
+            /** @enum {string} */
+            source: "MANUAL" | "SYSTEM";
+            attemptCount: number;
+            /** Format: date-time */
+            requestedAt: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            nextAttemptAt: string | null;
+            /** Format: date-time */
+            completedAt: string | null;
+            errorCode: string | null;
         };
         SavedGroupListDto: {
             /** Format: uuid */
@@ -1456,6 +1528,17 @@ export interface components {
             data: components["schemas"]["ActivityEventDto"][];
             meta: components["schemas"]["ActivityPageMetaDto"];
         };
+        StateRevisionsDto: {
+            /** Format: uuid */
+            sessionId: string | null;
+            sessions: number;
+            groups: number;
+            groupLists: number;
+            campaigns: number;
+            runs: number;
+            deliveries: number;
+            activity: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -1716,7 +1799,88 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["GroupCapabilityRefreshDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    GroupController_getCurrentCapabilityRefresh: {
+        parameters: {
+            query: {
+                /** @description Gateway session owning the group */
+                sessionId: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupCapabilityRefreshDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    GroupController_getCapabilityRefresh: {
+        parameters: {
+            query: {
+                /** @description Gateway session owning the group */
+                sessionId: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+                revision: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupCapabilityRefreshDto"];
                 };
             };
             400: {
@@ -3760,6 +3924,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    StateRevisionsController_read: {
+        parameters: {
+            query?: {
+                /** @description Gateway session owning scoped revisions. Omit to observe session discovery only. */
+                sessionId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StateRevisionsDto"];
                 };
             };
         };

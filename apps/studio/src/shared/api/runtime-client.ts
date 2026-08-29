@@ -12,6 +12,8 @@ export type RuntimeGroupDetail = components["schemas"]["GroupDetailDto"];
 export type RuntimeGroupPage = components["schemas"]["GroupListDto"];
 export type RuntimeGroupMember = components["schemas"]["GroupMemberDto"];
 export type RuntimeGroupMemberPage = components["schemas"]["GroupMemberListDto"];
+export type RuntimeGroupCapabilityRefresh =
+  components["schemas"]["GroupCapabilityRefreshDto"];
 // Runtime retains legacy schema identifiers; Studio exposes Group List terminology.
 export type RuntimeGroupList = components["schemas"]["SavedGroupListDto"];
 export type RuntimeGroupListPage = components["schemas"]["SavedGroupListPageDto"];
@@ -44,6 +46,7 @@ export type RuntimeCampaignExecutionMode =
 export type RuntimeError = components["schemas"]["RuntimeErrorDto"];
 export type RuntimeActivityEvent = components["schemas"]["ActivityEventDto"];
 export type RuntimeActivityPage = components["schemas"]["ActivityPageDto"];
+export type RuntimeStateRevisions = components["schemas"]["StateRevisionsDto"];
 
 type RuntimeGroupDirectoryQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
 type RuntimeCampaignListQuery = NonNullable<
@@ -443,15 +446,67 @@ export class RuntimeApi {
   async requestGroupCapabilityRefresh(
     sessionId: string,
     groupId: string,
-  ): Promise<void> {
-    const result = await this.client.POST("/api/v1/groups/{id}/refresh-capability", {
+  ): Promise<RuntimeGroupCapabilityRefresh> {
+    const result = await this.client.POST("/api/v1/groups/{id}/capability-refreshes", {
       params: { path: { id: groupId }, query: { sessionId } },
     });
-    if (!result.response.ok) {
-      throw new RuntimeRequestError(
-        `Could not refresh send capability (HTTP ${result.response.status}).`,
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not refresh send capability",
+        result.response.status,
+        result.error,
       );
     }
+    return result.data;
+  }
+
+  async getGroupCapabilityRefresh(
+    sessionId: string,
+    groupId: string,
+    requestRevision: number,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeGroupCapabilityRefresh> {
+    const result = await this.client.GET(
+      "/api/v1/groups/{id}/capability-refreshes/{revision}",
+      {
+        ...options,
+        params: {
+          path: { id: groupId, revision: requestRevision },
+          query: { sessionId },
+        },
+      },
+    );
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not read capability refresh",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async getCurrentGroupCapabilityRefresh(
+    sessionId: string,
+    groupId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeGroupCapabilityRefresh | null> {
+    const result = await this.client.GET(
+      "/api/v1/groups/{id}/capability-refreshes/current",
+      {
+        ...options,
+        params: { path: { id: groupId }, query: { sessionId } },
+      },
+    );
+    if (result.response.status === 404) return null;
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not read the latest capability refresh",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
   }
 
   async listGroupLists({
@@ -997,6 +1052,24 @@ export class RuntimeApi {
     if (!result.response.ok || !result.data) {
       throw runtimeRequestError(
         "Could not load operational activity",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async getStateRevisions(
+    sessionId: string | null,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeStateRevisions> {
+    const result = await this.client.GET("/api/v1/state-revisions", {
+      ...options,
+      params: { query: sessionId ? { sessionId } : {} },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not read Runtime state revisions",
         result.response.status,
         result.error,
       );

@@ -148,6 +148,8 @@ function renderMembers(listGroupMembers: RuntimeApi["listGroupMembers"]) {
         meta: { total: 1, limit: 20, offset: 0 },
       }),
     ),
+    getCurrentGroupCapabilityRefresh: vi.fn().mockResolvedValue(null),
+    getGroupCapabilityRefresh: vi.fn(),
     requestGroupCapabilityRefresh: vi.fn(),
   } as unknown as RuntimeApi;
   const view = render(

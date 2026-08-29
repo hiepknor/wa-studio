@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { GroupDto, GroupMemberDto } from '../../contracts/groups/group.dto';
+import type { GroupCapabilityRefreshDto } from '../../contracts/groups/group-capability-refresh.dto';
 import type { GroupQueryDto } from '../../contracts/groups/group-query.dto';
 import type { SessionDto } from '../../contracts/sessions/session.dto';
 import type { SyncRunDto } from '../../contracts/sessions/sync-run.dto';
@@ -21,21 +22,13 @@ import {
 } from './gateway-sync-run.repository';
 import { GatewayGroupQueryRepository } from './gateway-group-query.repository';
 import {
-  GatewayCapabilityRepository,
-  type CapabilityRefreshAttemptResult,
-  type ClaimedCapabilityRefresh,
-} from './gateway-capability.repository';
-import {
   GatewayWriteFenceRepository,
   type SyncWriteFence,
 } from './gateway-write-fence.repository';
 import { GatewayGroupSnapshotRepository } from './gateway-group-snapshot.repository';
+import { GatewayGroupIntentRepository } from './gateway-group-intent.repository';
 
 export type { ClaimedSyncRun, SyncAttemptResult } from './gateway-sync-run.repository';
-export type {
-  CapabilityRefreshAttemptResult,
-  ClaimedCapabilityRefresh,
-} from './gateway-capability.repository';
 export type { SyncWriteFence } from './gateway-write-fence.repository';
 
 interface SessionRow {
@@ -74,7 +67,7 @@ const mapSession = (row: SessionRow): SessionDto => ({
 export class GatewayRepository {
   private readonly syncRuns: GatewaySyncRunRepository;
   private readonly groupQueries: GatewayGroupQueryRepository;
-  private readonly capabilities: GatewayCapabilityRepository;
+  private groupIntents: GatewayGroupIntentRepository | undefined;
   private readonly fences = new GatewayWriteFenceRepository();
   private readonly groupSnapshots: GatewayGroupSnapshotRepository;
 
@@ -86,8 +79,12 @@ export class GatewayRepository {
   ) {
     this.syncRuns = syncRuns ?? new GatewaySyncRunRepository(database);
     this.groupQueries = new GatewayGroupQueryRepository(database, readContactProjection);
-    this.capabilities = new GatewayCapabilityRepository(database);
     this.groupSnapshots = new GatewayGroupSnapshotRepository(database, contacts, this.fences);
+  }
+
+  private get groupIntentRepository(): GatewayGroupIntentRepository {
+    this.groupIntents ??= new GatewayGroupIntentRepository(this.database);
+    return this.groupIntents;
   }
 
   async upsertSession(session: OpenWASession, syncFence?: SyncWriteFence): Promise<SessionDto> {
@@ -203,8 +200,6 @@ export class GatewayRepository {
     sessionId: string,
     group: OpenWAGroup,
     options: {
-      expectedRevision?: number;
-      capabilityLeaseToken?: string;
       syncFence?: SyncWriteFence;
       syncItemFence?: SyncItemWriteFence;
       groupIntentFence?: GroupIntentWriteFence;
@@ -213,45 +208,28 @@ export class GatewayRepository {
     return this.groupSnapshots.upsertGroupDetails(sessionId, group, options);
   }
 
-  async invalidateGroupCapability(
+  async requestGroupCapabilityRefresh(
     sessionId: string,
     groupId: string,
-    reason: GroupSendCapabilityReason,
-  ): Promise<boolean> {
-    return this.capabilities.invalidate(sessionId, groupId, reason);
-  }
-
-  async listGroupsNeedingCapabilityRefresh(limit: number): Promise<Array<{
-    sessionId: string;
-    groupId: string;
-    revision: number;
-  }>> {
-    return this.capabilities.listNeedingRefresh(limit);
-  }
-
-  async claimCapabilityRefresh(
-    sessionId: string,
-    groupId: string,
-    expectedRevision: number,
-  ): Promise<ClaimedCapabilityRefresh | null> {
-    return this.capabilities.claim(sessionId, groupId, expectedRevision);
-  }
-
-  async failCapabilityRefreshAttempt(
-    sessionId: string,
-    groupId: string,
-    expectedRevision: number,
-    leaseToken: string,
-    error: string,
-    retryable = true,
-  ): Promise<CapabilityRefreshAttemptResult> {
-    return this.capabilities.failAttempt(
-      sessionId, groupId, expectedRevision, leaseToken, error, retryable,
+    capabilityReason: GroupSendCapabilityReason = 'MANUAL_REFRESH',
+    requestReason = 'manual.capability_refresh',
+    priority = 1,
+  ): Promise<GroupCapabilityRefreshDto | null> {
+    return this.groupIntentRepository.requestCapabilityRefresh(
+      sessionId,
+      groupId,
+      capabilityReason,
+      requestReason,
+      priority,
     );
   }
 
-  async recoverExpiredCapabilityRefreshes(): Promise<number> {
-    return this.capabilities.recoverExpired();
+  async findGroupCapabilityRefresh(
+    sessionId: string,
+    groupId: string,
+    requestRevision?: number,
+  ): Promise<GroupCapabilityRefreshDto | null> {
+    return this.groupIntentRepository.findCapabilityRefresh(sessionId, groupId, requestRevision);
   }
 
   async listGroups(query: GroupQueryDto): Promise<{ data: GroupDto[]; total: number }> {

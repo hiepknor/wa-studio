@@ -488,7 +488,7 @@
         ]
       }
     },
-    "/api/v1/groups/{id}/refresh-capability": {
+    "/api/v1/groups/{id}/capability-refreshes": {
       "post": {
         "operationId": "GroupController_refreshCapability",
         "parameters": [
@@ -517,9 +517,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "example": {
-                    "accepted": true
-                  }
+                  "$ref": "#/components/schemas/GroupCapabilityRefreshDto"
                 }
               }
             }
@@ -550,7 +548,147 @@
             "runtime-key": []
           }
         ],
-        "summary": "Request an asynchronous capability refresh for one group",
+        "summary": "Create or join a durable capability refresh operation",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
+    "/api/v1/groups/{id}/capability-refreshes/current": {
+      "get": {
+        "operationId": "GroupController_getCurrentCapabilityRefresh",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "query",
+            "description": "Gateway session owning the group",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupCapabilityRefreshDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read the latest capability refresh operation for one group",
+        "tags": [
+          "groups"
+        ]
+      }
+    },
+    "/api/v1/groups/{id}/capability-refreshes/{revision}": {
+      "get": {
+        "operationId": "GroupController_getCapabilityRefresh",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "query",
+            "description": "Gateway session owning the group",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupCapabilityRefreshDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read capability refresh progress by request revision",
         "tags": [
           "groups"
         ]
@@ -3788,6 +3926,44 @@
           "activity"
         ]
       }
+    },
+    "/api/v1/state-revisions": {
+      "get": {
+        "operationId": "StateRevisionsController_read",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": false,
+            "in": "query",
+            "description": "Gateway session owning scoped revisions. Omit to observe session discovery only.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateRevisionsDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read the current revision vector for filterable Runtime resources",
+        "tags": [
+          "state-revisions"
+        ]
+      }
     }
   },
   "info": {
@@ -4441,6 +4617,80 @@
         "required": [
           "data",
           "meta"
+        ]
+      },
+      "GroupCapabilityRefreshDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "groupId": {
+            "type": "string",
+            "example": "120363000000000000@g.us"
+          },
+          "requestRevision": {
+            "type": "number",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "RUNNING",
+              "RETRYING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "MANUAL",
+              "SYSTEM"
+            ]
+          },
+          "attemptCount": {
+            "type": "number",
+            "minimum": 0
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "nextAttemptAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "sessionId",
+          "groupId",
+          "requestRevision",
+          "status",
+          "source",
+          "attemptCount",
+          "requestedAt",
+          "startedAt",
+          "nextAttemptAt",
+          "completedAt",
+          "errorCode"
         ]
       },
       "SavedGroupListDto": {
@@ -6451,6 +6701,54 @@
         "required": [
           "data",
           "meta"
+        ]
+      },
+      "StateRevisionsDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "sessions": {
+            "type": "number",
+            "minimum": 0
+          },
+          "groups": {
+            "type": "number",
+            "minimum": 0
+          },
+          "groupLists": {
+            "type": "number",
+            "minimum": 0
+          },
+          "campaigns": {
+            "type": "number",
+            "minimum": 0
+          },
+          "runs": {
+            "type": "number",
+            "minimum": 0
+          },
+          "deliveries": {
+            "type": "number",
+            "minimum": 0
+          },
+          "activity": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "sessionId",
+          "sessions",
+          "groups",
+          "groupLists",
+          "campaigns",
+          "runs",
+          "deliveries",
+          "activity"
         ]
       }
     }

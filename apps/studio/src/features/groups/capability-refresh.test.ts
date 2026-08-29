@@ -1,120 +1,82 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RuntimeGroupDetail } from "@/shared/api/runtime-client";
+import type { RuntimeGroupCapabilityRefresh } from "@/shared/api/runtime-client";
 import {
   CAPABILITY_REFRESH_POLL_DELAYS_MS,
-  capabilityRefreshCompleted,
+  capabilityRefreshIsActive,
   pollCapabilityRefresh,
 } from "./capability-refresh";
 
-const baselineDetail: RuntimeGroupDetail = {
+const pendingOperation: RuntimeGroupCapabilityRefresh = {
   sessionId: "session-id",
-  id: "group@g.us",
-  name: "Group",
-  description: null,
-  ownerId: null,
-  linkedParentId: null,
-  participantsCount: 1,
-  isAdmin: true,
-  isReadOnly: false,
-  isAnnounce: false,
-  settingsLocked: false,
-  isActive: true,
-  detailsSyncedAt: "2026-08-13T01:00:00.000Z",
-  syncedAt: "2026-08-13T01:00:00.000Z",
-  sendCapability: {
-    status: "DENIED",
-    reason: "session_is_member",
-    checkedAt: "2026-08-13T01:00:00.000Z",
-    invalidatedAt: null,
-    revision: 4,
-  },
+  groupId: "group@g.us",
+  requestRevision: 4,
+  status: "PENDING",
+  source: "MANUAL",
+  attemptCount: 0,
+  requestedAt: "2026-08-29T00:00:00.000Z",
+  startedAt: null,
+  nextAttemptAt: "2026-08-29T00:00:00.000Z",
+  completedAt: null,
+  errorCode: null,
 };
 
-const pendingDetail: RuntimeGroupDetail = {
-  ...baselineDetail,
-  sendCapability: {
-    status: "UNKNOWN",
-    reason: "MANUAL_REFRESH",
-    checkedAt: baselineDetail.sendCapability.checkedAt,
-    invalidatedAt: "2026-08-13T01:01:00.000Z",
-    revision: 5,
-  },
+const completedOperation: RuntimeGroupCapabilityRefresh = {
+  ...pendingOperation,
+  status: "COMPLETED",
+  attemptCount: 1,
+  startedAt: "2026-08-29T00:00:01.000Z",
+  nextAttemptAt: null,
+  completedAt: "2026-08-29T00:00:02.000Z",
 };
 
-const completedDetail: RuntimeGroupDetail = {
-  ...baselineDetail,
-  detailsSyncedAt: "2026-08-13T01:01:02.000Z",
-  sendCapability: {
-    ...baselineDetail.sendCapability,
-    checkedAt: "2026-08-13T01:01:02.000Z",
-    revision: 5,
-  },
-};
-
-describe("capability refresh polling", () => {
+describe("capability refresh operation polling", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it("requires a new completed check rather than a revision-only invalidation", () => {
-    expect(capabilityRefreshCompleted(
-      baselineDetail.sendCapability,
-      pendingDetail.sendCapability,
-    )).toBe(false);
-    expect(capabilityRefreshCompleted(
-      baselineDetail.sendCapability,
-      {
-        ...completedDetail.sendCapability,
-        revision: baselineDetail.sendCapability.revision,
-      },
-    )).toBe(true);
+  it("classifies only non-terminal Runtime operations as active", () => {
+    expect(capabilityRefreshIsActive(pendingOperation)).toBe(true);
+    expect(capabilityRefreshIsActive({ ...pendingOperation, status: "RUNNING" })).toBe(true);
+    expect(capabilityRefreshIsActive({ ...pendingOperation, status: "RETRYING" })).toBe(true);
+    expect(capabilityRefreshIsActive(completedOperation)).toBe(false);
+    expect(capabilityRefreshIsActive(null)).toBe(false);
   });
 
-  it("polls with bounded backoff until checkedAt changes even when status and reason do not", async () => {
+  it("polls the operation until Runtime marks the requested revision complete", async () => {
     vi.useFakeTimers();
+    const running = { ...pendingOperation, status: "RUNNING" as const, attemptCount: 1 };
     const read = vi.fn()
-      .mockResolvedValueOnce(pendingDetail)
-      .mockResolvedValueOnce({
-        ...completedDetail,
-        sendCapability: {
-          ...completedDetail.sendCapability,
-          revision: baselineDetail.sendCapability.revision,
-        },
-      });
+      .mockResolvedValueOnce(running)
+      .mockResolvedValueOnce(completedOperation);
     const onObservation = vi.fn();
-    const controller = new AbortController();
     const resultPromise = pollCapabilityRefresh({
-      baseline: baselineDetail.sendCapability,
-      signal: controller.signal,
+      initialOperation: pendingOperation,
+      signal: new AbortController().signal,
       read,
       onObservation,
     });
 
-    expect(read).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(CAPABILITY_REFRESH_POLL_DELAYS_MS[0]);
-    expect(read).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(CAPABILITY_REFRESH_POLL_DELAYS_MS[1]);
 
-    await expect(resultPromise).resolves.toMatchObject({ status: "completed" });
-    expect(read).toHaveBeenCalledTimes(2);
-    expect(onObservation).toHaveBeenLastCalledWith(expect.objectContaining({
-      sendCapability: expect.objectContaining({
-        status: baselineDetail.sendCapability.status,
-        reason: baselineDetail.sendCapability.reason,
-      }),
-    }));
+    await expect(resultPromise).resolves.toEqual({
+      status: "completed",
+      operation: completedOperation,
+    });
+    expect(onObservation).toHaveBeenNthCalledWith(1, running);
+    expect(onObservation).toHaveBeenNthCalledWith(2, completedOperation);
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("retries read failures and completes on a later observation", async () => {
+  it("retries transient reads and completes on a later observation", async () => {
     vi.useFakeTimers();
     const read = vi.fn()
-      .mockRejectedValueOnce(new Error("Could not load group details (HTTP 503)."))
-      .mockResolvedValueOnce(completedDetail);
+      .mockRejectedValueOnce(new Error("HTTP 503"))
+      .mockResolvedValueOnce(completedOperation);
     const resultPromise = pollCapabilityRefresh({
-      baseline: baselineDetail.sendCapability,
+      initialOperation: pendingOperation,
       signal: new AbortController().signal,
       read,
       onObservation: vi.fn(),
@@ -128,11 +90,11 @@ describe("capability refresh polling", () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
-  it("stops after the bounded timeout and returns the latest observation", async () => {
+  it("hands an active operation back to the background after bounded observation", async () => {
     vi.useFakeTimers();
-    const read = vi.fn().mockResolvedValue(pendingDetail);
+    const read = vi.fn().mockResolvedValue(pendingOperation);
     const resultPromise = pollCapabilityRefresh({
-      baseline: baselineDetail.sendCapability,
+      initialOperation: pendingOperation,
       signal: new AbortController().signal,
       read,
       onObservation: vi.fn(),
@@ -142,36 +104,45 @@ describe("capability refresh polling", () => {
       CAPABILITY_REFRESH_POLL_DELAYS_MS.reduce((total, delay) => total + delay, 0),
     );
 
-    await expect(resultPromise).resolves.toMatchObject({
-      status: "timed-out",
-      detail: pendingDetail,
+    await expect(resultPromise).resolves.toEqual({
+      status: "background",
+      operation: pendingOperation,
       error: null,
     });
     expect(read).toHaveBeenCalledTimes(CAPABILITY_REFRESH_POLL_DELAYS_MS.length);
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("reports a terminal Runtime refresh failure as failed", async () => {
+  it("returns terminal failed operations with their Runtime error code", async () => {
     vi.useFakeTimers();
-    const failedDetail = {
-      ...completedDetail,
-      sendCapability: {
-        ...completedDetail.sendCapability,
-        status: "UNKNOWN" as const,
-        reason: "REFRESH_FAILED",
-      },
+    const failed = {
+      ...pendingOperation,
+      status: "FAILED" as const,
+      nextAttemptAt: null,
+      completedAt: "2026-08-29T00:00:02.000Z",
+      errorCode: "UPSTREAM_HTTP_403",
     };
     const resultPromise = pollCapabilityRefresh({
-      baseline: baselineDetail.sendCapability,
+      initialOperation: pendingOperation,
       signal: new AbortController().signal,
-      read: vi.fn().mockResolvedValue(failedDetail),
+      read: vi.fn().mockResolvedValue(failed),
       onObservation: vi.fn(),
     });
 
     await vi.advanceTimersByTimeAsync(CAPABILITY_REFRESH_POLL_DELAYS_MS[0]);
 
-    await expect(resultPromise).resolves.toMatchObject({ status: "failed" });
-    expect(vi.getTimerCount()).toBe(0);
+    await expect(resultPromise).resolves.toEqual({ status: "failed", operation: failed });
+  });
+
+  it("returns an already terminal operation without scheduling a read", async () => {
+    const read = vi.fn();
+    await expect(pollCapabilityRefresh({
+      initialOperation: completedOperation,
+      signal: new AbortController().signal,
+      read,
+      onObservation: vi.fn(),
+    })).resolves.toEqual({ status: "completed", operation: completedOperation });
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("cancels a pending timer without reading or leaking timers", async () => {
@@ -179,7 +150,7 @@ describe("capability refresh polling", () => {
     const controller = new AbortController();
     const read = vi.fn();
     const resultPromise = pollCapabilityRefresh({
-      baseline: baselineDetail.sendCapability,
+      initialOperation: pendingOperation,
       signal: controller.signal,
       read,
       onObservation: vi.fn(),
@@ -194,23 +165,21 @@ describe("capability refresh polling", () => {
 
   it("ignores an in-flight read that resolves after cancellation", async () => {
     vi.useFakeTimers();
-    let resolveRead: ((detail: RuntimeGroupDetail) => void) | undefined;
-    const read = vi.fn(() => new Promise<RuntimeGroupDetail>((resolve) => {
+    let resolveRead: ((operation: RuntimeGroupCapabilityRefresh) => void) | undefined;
+    const read = vi.fn(() => new Promise<RuntimeGroupCapabilityRefresh>((resolve) => {
       resolveRead = resolve;
     }));
     const onObservation = vi.fn();
     const controller = new AbortController();
     const resultPromise = pollCapabilityRefresh({
-      baseline: baselineDetail.sendCapability,
+      initialOperation: pendingOperation,
       signal: controller.signal,
       read,
       onObservation,
     });
     await vi.advanceTimersByTimeAsync(CAPABILITY_REFRESH_POLL_DELAYS_MS[0]);
-    expect(read).toHaveBeenCalledTimes(1);
-
     controller.abort();
-    resolveRead?.(completedDetail);
+    resolveRead?.(completedOperation);
 
     await expect(resultPromise).resolves.toEqual({ status: "cancelled" });
     expect(onObservation).not.toHaveBeenCalled();

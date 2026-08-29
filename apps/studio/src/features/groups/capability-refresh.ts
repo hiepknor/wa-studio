@@ -1,22 +1,45 @@
-import type { RuntimeGroup, RuntimeGroupDetail } from "@/shared/api/runtime-client";
+import type { RuntimeGroupCapabilityRefresh } from "@/shared/api/runtime-client";
 
-type Capability = RuntimeGroup["sendCapability"];
-
-export const CAPABILITY_REFRESH_POLL_DELAYS_MS = [500, 1_000, 2_000, 3_000, 4_000] as const;
+export const CAPABILITY_REFRESH_POLL_DELAYS_MS = [
+  500,
+  1_000,
+  2_000,
+  3_000,
+  5_000,
+  5_000,
+  5_000,
+  5_000,
+  5_000,
+] as const;
 
 export type CapabilityRefreshPollResult =
-  | { status: "completed"; detail: RuntimeGroupDetail }
-  | { status: "failed"; detail: RuntimeGroupDetail }
-  | { status: "timed-out"; detail: RuntimeGroupDetail | null; error: unknown | null }
+  | { status: "completed"; operation: RuntimeGroupCapabilityRefresh }
+  | { status: "failed"; operation: RuntimeGroupCapabilityRefresh }
+  | {
+      status: "background";
+      operation: RuntimeGroupCapabilityRefresh;
+      error: unknown | null;
+    }
   | { status: "cancelled" };
 
-export function capabilityRefreshCompleted(
-  baseline: Capability,
-  current: Capability,
-): boolean {
-  if (!current.checkedAt || current.invalidatedAt) return false;
-  if (!baseline.checkedAt) return true;
-  return new Date(current.checkedAt).getTime() > new Date(baseline.checkedAt).getTime();
+export function capabilityRefreshIsActive(
+  operation: RuntimeGroupCapabilityRefresh | null,
+): operation is RuntimeGroupCapabilityRefresh {
+  return operation?.status === "PENDING"
+    || operation?.status === "RUNNING"
+    || operation?.status === "RETRYING";
+}
+
+function terminalResult(
+  operation: RuntimeGroupCapabilityRefresh,
+): CapabilityRefreshPollResult | null {
+  if (operation.status === "COMPLETED") {
+    return { status: "completed", operation };
+  }
+  if (operation.status === "FAILED") {
+    return { status: "failed", operation };
+  }
+  return null;
 }
 
 function waitForPoll(delayMs: number, signal: AbortSignal): Promise<boolean> {
@@ -35,40 +58,42 @@ function waitForPoll(delayMs: number, signal: AbortSignal): Promise<boolean> {
 }
 
 interface PollCapabilityRefreshInput {
-  baseline: Capability;
+  initialOperation: RuntimeGroupCapabilityRefresh;
   signal: AbortSignal;
-  read: () => Promise<RuntimeGroupDetail>;
-  onObservation: (detail: RuntimeGroupDetail) => void;
+  read: () => Promise<RuntimeGroupCapabilityRefresh>;
+  onObservation: (operation: RuntimeGroupCapabilityRefresh) => void;
   delays?: readonly number[];
 }
 
 export async function pollCapabilityRefresh({
-  baseline,
+  initialOperation,
   signal,
   read,
   onObservation,
   delays = CAPABILITY_REFRESH_POLL_DELAYS_MS,
 }: PollCapabilityRefreshInput): Promise<CapabilityRefreshPollResult> {
-  let latest: RuntimeGroupDetail | null = null;
-  let lastError: unknown | null = null;
+  const initialResult = terminalResult(initialOperation);
+  if (initialResult) return initialResult;
 
+  let latest = initialOperation;
+  let lastError: unknown | null = null;
   for (const delay of delays) {
-    if (!await waitForPoll(delay, signal) || signal.aborted) return { status: "cancelled" };
+    if (!await waitForPoll(delay, signal) || signal.aborted) {
+      return { status: "cancelled" };
+    }
     try {
-      const detail = await read();
+      const operation = await read();
       if (signal.aborted) return { status: "cancelled" };
-      latest = detail;
+      latest = operation;
       lastError = null;
-      onObservation(detail);
-      if (!capabilityRefreshCompleted(baseline, detail.sendCapability)) continue;
-      return detail.sendCapability.reason === "REFRESH_FAILED"
-        ? { status: "failed", detail }
-        : { status: "completed", detail };
+      onObservation(operation);
+      const result = terminalResult(operation);
+      if (result) return result;
     } catch (error) {
       if (signal.aborted) return { status: "cancelled" };
       lastError = error;
     }
   }
 
-  return { status: "timed-out", detail: latest, error: lastError };
+  return { status: "background", operation: latest, error: lastError };
 }

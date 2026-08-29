@@ -29,6 +29,8 @@ import {
 } from "@/shared/api/runtime-mutation";
 import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
 import { useSingleFlightOperation } from "@/shared/hooks/useSingleFlightOperation";
+import { useRuntimeResourceRevision } from "@/shared/server-state/runtime-invalidation";
+import { reconciledPageOffset } from "@/shared/server-state/server-page";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
@@ -257,6 +259,8 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   if (!connected) throw new Error("CampaignsScreen requires a Runtime connection");
 
   const api = connected.api;
+  const campaignsResourceRevision = useRuntimeResourceRevision(["campaigns"], selectedSessionId);
+  const runsResourceRevision = useRuntimeResourceRevision(["runs"], selectedSessionId);
   const [campaignPage, setCampaignPage] = useState<RuntimeCampaignPage | null>(null);
   const [listState, setListState] = useState(() => initialCampaignListState(selectedSessionId));
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -312,6 +316,8 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const listStateRef = useRef(listState);
   const editorRef = useRef(editor);
   const selectedSessionIdRef = useRef(selectedSessionId);
+  const observedCampaignsRevisionRef = useRef(campaignsResourceRevision);
+  const observedRunsRevisionRef = useRef(runsResourceRevision);
   const campaignsRead = useLatestRequest();
   const targetsRead = useLatestRequest();
   const runsRead = useLatestRequest();
@@ -389,12 +395,12 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       || form.scheduleType !== "IMMEDIATE",
     );
 
-  const loadCampaigns = useCallback(async (state: CampaignListRequestState) => {
+  const loadCampaigns = useCallback(async (state: CampaignListRequestState, background = false) => {
     if (!state.sessionId) return;
     const request = ++listRequestRef.current;
     const signal = campaignsRead.begin();
     const requestKey = campaignListRequestKey(state);
-    setListLoading(true);
+    if (!background) setListLoading(true);
     setListError(null);
     try {
       const page = await api.listCampaigns({
@@ -406,16 +412,19 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         ...(state.scheduleTypes.length ? { scheduleTypes: state.scheduleTypes } : {}),
       }, { signal });
       if (request !== listRequestRef.current || requestKey !== listTargetRef.current) return;
-      if (state.offset > 0 && page.data.length === 0 && page.meta.total <= state.offset) {
-        const lastOffset = page.meta.total === 0
-          ? 0
-          : Math.floor((page.meta.total - 1) / PAGE_SIZE) * PAGE_SIZE;
+      const recoveredOffset = reconciledPageOffset({
+        limit: PAGE_SIZE,
+        offset: state.offset,
+        rowCount: page.data.length,
+        total: page.meta.total,
+      });
+      if (recoveredOffset !== null) {
         if (page.meta.total === 0) {
           setCampaignPage({ data: [...page.data], meta: { ...page.meta } });
           pageKeyRef.current = requestKey;
         }
         setListState((current) => campaignListRequestKey(current) === requestKey
-          ? { ...current, offset: lastOffset }
+          ? { ...current, offset: recoveredOffset }
           : current);
         return;
       }
@@ -487,6 +496,14 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     if (listState.sessionId !== selectedSessionId || !listState.sessionId) return;
     void loadCampaigns(listStateRef.current);
   }, [currentListRequestKey, listState.sessionId, loadCampaigns, selectedSessionId]);
+
+  useEffect(() => {
+    if (observedCampaignsRevisionRef.current === campaignsResourceRevision) return;
+    observedCampaignsRevisionRef.current = campaignsResourceRevision;
+    if (listStateRef.current.sessionId === selectedSessionId) {
+      void loadCampaigns(listStateRef.current, true);
+    }
+  }, [campaignsResourceRevision, loadCampaigns, selectedSessionId]);
 
   useEffect(() => {
     const normalizedQuery = listState.inputQuery.trim();
@@ -594,10 +611,15 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     }
   }
 
-  async function loadRuns(campaignId: string, epoch: number, refreshCampaign = false) {
+  async function loadRuns(
+    campaignId: string,
+    epoch: number,
+    refreshCampaign = false,
+    background = false,
+  ) {
     const request = ++runRequestRef.current;
     const signal = runsRead.begin();
-    setRunsLoading(true);
+    if (!background) setRunsLoading(true);
     setRunError(null);
     try {
       const page = await api.listCampaignRuns(campaignId, 20, 0, { signal });
@@ -623,9 +645,20 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       setRunError(campaignErrorMessage(error, "Could not load campaign runs."));
     } finally {
       runsRead.complete(signal);
-      if (epoch === editorEpochRef.current && request === runRequestRef.current) setRunsLoading(false);
+      if (epoch === editorEpochRef.current && request === runRequestRef.current) {
+        setRunsLoading(false);
+      }
     }
   }
+
+  useEffect(() => {
+    if (observedRunsRevisionRef.current === runsResourceRevision) return;
+    observedRunsRevisionRef.current = runsResourceRevision;
+    const current = editorRef.current;
+    if (current.kind === "open" && current.campaign) {
+      void loadRuns(current.campaign.id, editorEpochRef.current, false, true);
+    }
+  }, [runsResourceRevision]);
 
   function resetMediaEditorState() {
     mediaUploadAbortRef.current?.abort();

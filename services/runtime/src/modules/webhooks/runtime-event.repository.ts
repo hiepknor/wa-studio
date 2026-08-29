@@ -120,20 +120,26 @@ export class RuntimeEventRepository {
         [event.sessionId],
       );
       if (sessionExists.rowCount !== 1) return true;
-      const scheduled = await this.groupIntents.scheduleInTransaction(
-        client,
-        event.sessionId,
-        groupId,
-        event.eventType,
-      );
+      const scheduled = this.config.GATEWAY_TARGETED_RECONCILIATION_ENABLED
+        ? await this.groupIntents.scheduleInTransaction(
+            client,
+            event.sessionId,
+            groupId,
+            event.eventType,
+          )
+        : null;
       await client.query(
-        `UPDATE gateway_groups SET send_capability = 'UNKNOWN',
-           send_capability_reason = 'GROUP_CHANGED', capability_invalidated_at = now(),
+        `UPDATE gateway_groups SET
+           send_capability = CASE WHEN capability_checked_at IS NULL
+             THEN 'UNKNOWN'::group_send_capability ELSE send_capability END,
+           send_capability_reason = CASE WHEN capability_checked_at IS NULL
+             THEN 'GROUP_CHANGED' ELSE send_capability_reason END,
+           capability_invalidated_at = now(),
            capability_revision = capability_revision + 1, updated_at = now()
          WHERE session_id = $1 AND id = $2 AND is_active = true`,
         [event.sessionId, groupId],
       );
-      if (scheduled.created) {
+      if (scheduled?.created) {
         this.logger.log({
           event: 'gateway.group_reconciliation.intent_created',
           sessionId: event.sessionId, source: 'WEBHOOK',

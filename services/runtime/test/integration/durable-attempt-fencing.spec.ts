@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { DatabaseService } from '../../src/core/database/database.service';
 import { CampaignRunRepository } from '../../src/modules/campaigns/campaign-run.repository';
 import { GatewayRepository } from '../../src/modules/gateway/gateway.repository';
+import { GatewayGroupIntentRepository } from '../../src/modules/gateway/gateway-group-intent.repository';
 import { ContactRepository } from '../../src/modules/contacts/contact.repository';
 import { MessageJobRepository } from '../../src/modules/messages/message-job.repository';
 import {
@@ -17,12 +18,14 @@ describe('durable attempt fencing', () => {
   let pool: Pool;
   let database: DatabaseService;
   let gateway: GatewayRepository;
+  let groupIntents: GatewayGroupIntentRepository;
   let campaigns: CampaignRunRepository;
 
   beforeAll(() => {
     pool = integrationPool();
     database = new DatabaseService();
     gateway = new GatewayRepository(database, new ContactRepository(database));
+    groupIntents = new GatewayGroupIntentRepository(database);
     campaigns = new CampaignRunRepository(database, new MessageJobRepository(database));
   });
   beforeEach(async () => {
@@ -98,86 +101,92 @@ describe('durable attempt fencing', () => {
   });
 
   it('prevents a stale capability refresh from failing a reclaimed attempt', async () => {
-    await gateway.invalidateGroupCapability(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, 'MANUAL_REFRESH');
-    const group = await gateway.findGroup(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
-    const revision = group!.sendCapability.revision;
-    const stale = await gateway.claimCapabilityRefresh(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, revision);
+    const operation = await groupIntents.requestCapabilityRefresh(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+    );
+    const revision = operation!.requestRevision;
+    const stale = await groupIntents.claim(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
     expect(stale).not.toBeNull();
     await pool.query(
-      `UPDATE gateway_groups SET capability_refresh_lease_expires_at = now() - interval '1 second'
-       WHERE session_id = $1 AND id = $2`,
+      `UPDATE gateway_group_reconciliation_intents
+       SET lease_expires_at = now() - interval '1 second'
+       WHERE session_id = $1 AND group_id = $2`,
       [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
     );
-    await gateway.recoverExpiredCapabilityRefreshes();
-    const current = await gateway.claimCapabilityRefresh(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, revision);
+    await pool.query(
+      `UPDATE gateway_sync_rate_limits
+       SET active_lease_expires_at = now() - interval '1 second'
+       WHERE session_id = $1`,
+      [INTEGRATION_SESSION_ID],
+    );
+    await groupIntents.recoverExpired();
+    await pool.query(
+      `UPDATE gateway_sync_rate_limits SET next_request_at = now()
+       WHERE session_id = $1`,
+      [INTEGRATION_SESSION_ID],
+    );
+    const current = await groupIntents.claim(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
     expect(current).not.toBeNull();
 
-    expect(await gateway.failCapabilityRefreshAttempt(
+    expect(await groupIntents.fail(
       INTEGRATION_SESSION_ID,
       INTEGRATION_GROUP_ID,
-      revision,
       stale!.leaseToken,
-      'stale failure',
+      revision,
+      { retryable: true, ratePressure: false, code: 'STALE_FAILURE' },
     )).toBe('LOST_OWNERSHIP');
-    expect(await gateway.failCapabilityRefreshAttempt(
+    expect(await groupIntents.fail(
       INTEGRATION_SESSION_ID,
       INTEGRATION_GROUP_ID,
-      revision,
       current!.leaseToken,
-      'current failure',
+      revision,
+      { retryable: true, ratePressure: false, code: 'CURRENT_FAILURE' },
     )).toBe('RETRY');
   });
 
   it('terminates a non-retryable capability refresh failure immediately', async () => {
-    await gateway.invalidateGroupCapability(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, 'MANUAL_REFRESH');
-    const group = await gateway.findGroup(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
-    const revision = group!.sendCapability.revision;
-    const claim = await gateway.claimCapabilityRefresh(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, revision);
+    const operation = await groupIntents.requestCapabilityRefresh(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+    );
+    const revision = operation!.requestRevision;
+    const claim = await groupIntents.claim(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
     expect(claim).not.toBeNull();
 
-    expect(await gateway.failCapabilityRefreshAttempt(
+    expect(await groupIntents.fail(
       INTEGRATION_SESSION_ID,
       INTEGRATION_GROUP_ID,
-      revision,
       claim!.leaseToken,
-      'UPSTREAM_VALIDATION_ERROR',
-      false,
+      revision,
+      { retryable: false, ratePressure: false, code: 'UPSTREAM_VALIDATION_ERROR' },
     )).toBe('FAILED');
-    expect(await gateway.claimCapabilityRefresh(
+    expect(await groupIntents.claim(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+    )).toBeNull();
+    expect(await groupIntents.findCapabilityRefresh(
       INTEGRATION_SESSION_ID,
       INTEGRATION_GROUP_ID,
       revision,
-    )).toBeNull();
+    )).toMatchObject({ status: 'FAILED', errorCode: 'UPSTREAM_VALIDATION_ERROR' });
   });
 
   it('suppresses capability refresh claims while a full session sync is running', async () => {
-    await gateway.invalidateGroupCapability(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, 'MANUAL_REFRESH');
-    const group = await gateway.findGroup(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
+    await groupIntents.requestCapabilityRefresh(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
     const run = await gateway.createSyncRun(INTEGRATION_SESSION_ID);
 
-    expect(await gateway.listGroupsNeedingCapabilityRefresh(10)).toEqual([]);
-    expect(await gateway.claimCapabilityRefresh(
-      INTEGRATION_SESSION_ID,
-      INTEGRATION_GROUP_ID,
-      group!.sendCapability.revision,
-    )).toBeNull();
+    expect(await groupIntents.listDispatchable(10)).toEqual([]);
+    expect(await groupIntents.claim(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID)).toBeNull();
 
     const syncClaim = await gateway.claimSyncRun(run.id);
     expect(syncClaim).not.toBeNull();
 
-    expect(await gateway.listGroupsNeedingCapabilityRefresh(10)).toEqual([]);
-    expect(await gateway.claimCapabilityRefresh(
-      INTEGRATION_SESSION_ID,
-      INTEGRATION_GROUP_ID,
-      group!.sendCapability.revision,
-    )).toBeNull();
+    expect(await groupIntents.listDispatchable(10)).toEqual([]);
+    expect(await groupIntents.claim(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID)).toBeNull();
 
     expect(await gateway.completeSyncRun(run.id, syncClaim!.leaseToken, 0, 0)).toBe(true);
-    expect(await gateway.listGroupsNeedingCapabilityRefresh(10)).toHaveLength(1);
-    expect(await gateway.claimCapabilityRefresh(
-      INTEGRATION_SESSION_ID,
-      INTEGRATION_GROUP_ID,
-      group!.sendCapability.revision,
-    )).not.toBeNull();
+    expect(await groupIntents.listDispatchable(10)).toHaveLength(1);
+    expect(await groupIntents.claim(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID)).not.toBeNull();
   });
 });

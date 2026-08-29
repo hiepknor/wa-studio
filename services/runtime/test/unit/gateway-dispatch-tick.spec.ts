@@ -10,9 +10,7 @@ describe('GatewayDispatchTick', () => {
     const availableAt = new Date(Date.now() + 1_500);
     const gateway = {
       recoverExpiredSyncRuns: vi.fn().mockResolvedValue(0),
-      recoverExpiredCapabilityRefreshes: vi.fn().mockResolvedValue(0),
       listPendingSyncRuns: vi.fn().mockResolvedValue([]),
-      listGroupsNeedingCapabilityRefresh: vi.fn().mockResolvedValue([]),
     } as unknown as GatewayRepository;
     const syncItems = {
       recoverExpired: vi.fn().mockResolvedValue(0),
@@ -44,9 +42,7 @@ describe('GatewayDispatchTick', () => {
     const blocked = new Promise<void>(resolve => { release = resolve; });
     const gateway = {
       recoverExpiredSyncRuns: vi.fn().mockImplementationOnce(() => blocked).mockResolvedValue(0),
-      recoverExpiredCapabilityRefreshes: vi.fn().mockResolvedValue(0),
       listPendingSyncRuns: vi.fn().mockResolvedValue([]),
-      listGroupsNeedingCapabilityRefresh: vi.fn().mockResolvedValue([]),
     } as unknown as GatewayRepository;
     const syncItems = {
       recoverExpired: vi.fn().mockResolvedValue(0), listDispatchable: vi.fn().mockResolvedValue([]),

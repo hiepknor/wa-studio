@@ -1,10 +1,11 @@
-import { Controller, Get, HttpCode, Param, Post, Query, UseFilters } from '@nestjs/common';
+import { Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query, UseFilters } from '@nestjs/common';
 import {
   ApiAcceptedResponse, ApiBadRequestResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation,
   ApiQuery, ApiSecurity, ApiTags,
 } from '@nestjs/swagger';
 import { RuntimeErrorDto } from '../../contracts/common/runtime-error.dto';
 import { GroupDetailDto, GroupListDto, GroupMemberListDto } from '../../contracts/groups/group.dto';
+import { GroupCapabilityRefreshDto } from '../../contracts/groups/group-capability-refresh.dto';
 import { GroupIdentityQueryDto, GroupMemberQueryDto, GroupQueryDto } from '../../contracts/groups/group-query.dto';
 import { GroupService } from './group.service';
 import { GroupHttpExceptionFilter } from './group-http-exception.filter';
@@ -64,11 +65,30 @@ export class GroupController {
     return this.groups.members(query.sessionId, id, query.limit, query.offset, query.query);
   }
 
-  @Post(':id/refresh-capability')
+  @Post(':id/capability-refreshes')
   @HttpCode(202)
-  @ApiOperation({ summary: 'Request an asynchronous capability refresh for one group' })
-  @ApiAcceptedResponse({ schema: { example: { accepted: true } } })
+  @ApiOperation({ summary: 'Create or join a durable capability refresh operation' })
+  @ApiAcceptedResponse({ type: GroupCapabilityRefreshDto })
   refreshCapability(@Param('id') id: string, @Query() query: GroupIdentityQueryDto) {
     return this.groups.refreshCapability(query.sessionId, id);
   }
+
+  @Get(':id/capability-refreshes/current')
+  @ApiOperation({ summary: 'Read the latest capability refresh operation for one group' })
+  @ApiOkResponse({ type: GroupCapabilityRefreshDto })
+  getCurrentCapabilityRefresh(@Param('id') id: string, @Query() query: GroupIdentityQueryDto) {
+    return this.groups.getCapabilityRefresh(query.sessionId, id);
+  }
+
+  @Get(':id/capability-refreshes/:revision')
+  @ApiOperation({ summary: 'Read capability refresh progress by request revision' })
+  @ApiOkResponse({ type: GroupCapabilityRefreshDto })
+  getCapabilityRefresh(
+    @Param('id') id: string,
+    @Param('revision', ParseIntPipe) revision: number,
+    @Query() query: GroupIdentityQueryDto,
+  ) {
+    return this.groups.getCapabilityRefresh(query.sessionId, id, revision);
+  }
+
 }

@@ -5,6 +5,7 @@ export interface GatewayGroupIntentDispatch {
   groupId: string;
   requestedRevision: number;
   availableAt: Date;
+  priority: number;
 }
 
 export interface ClaimedGatewayGroupIntent {
@@ -15,6 +16,7 @@ export interface ClaimedGatewayGroupIntent {
   attemptNumber: number;
   coalescedCount: number;
   requestedAt: Date;
+  source: 'MANUAL' | 'SYSTEM';
 }
 
 export type GatewayGroupIntentFailurePolicy = GatewaySyncFailurePolicy;

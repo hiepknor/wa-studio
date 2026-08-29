@@ -18,6 +18,7 @@ import {
 import { userFacingErrorMessage } from "@/shared/errors/error-message";
 import { useLatestOperation } from "@/shared/hooks/useLatestOperation";
 import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
+import { RuntimeInvalidationProvider } from "@/shared/server-state/runtime-invalidation";
 import {
   getManagedRuntimeState,
   provisionManagedRuntime,
@@ -322,7 +323,14 @@ export function RuntimeConnectionProvider({
 
   return (
     <RuntimeConnectionContext.Provider value={value}>
-      {children}
+      <RuntimeInvalidationProvider
+        api={connected?.api}
+        key={connected?.profile.baseUrl ?? "disconnected"}
+        onSessionsChanged={refreshSessions}
+        sessionId={selectedSessionId}
+      >
+        {children}
+      </RuntimeInvalidationProvider>
     </RuntimeConnectionContext.Provider>
   );
 }

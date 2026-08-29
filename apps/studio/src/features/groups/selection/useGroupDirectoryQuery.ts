@@ -7,6 +7,8 @@ import {
   type RuntimeGroupPage,
 } from "@/shared/api/runtime-client";
 import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
+import { useRuntimeResourceRevision } from "@/shared/server-state/runtime-invalidation";
+import { reconciledPageOffset } from "@/shared/server-state/server-page";
 import {
   activeGroupSelectionFilterCount,
   emptyGroupSelectionFilters,
@@ -51,6 +53,7 @@ export function useGroupDirectoryQuery({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadRevision, setReloadRevision] = useState(0);
+  const groupsResourceRevision = useRuntimeResourceRevision(["groups"], sessionId);
   const requestRevision = useRef(0);
   const directoryRead = useLatestRequest();
   const context = `${sessionId ?? ""}:${scopeKey}`;
@@ -135,12 +138,15 @@ export function useGroupDirectoryQuery({
           : { maxParticipants: filters.maxParticipants }),
       }, { signal });
       if (revision !== requestRevision.current || committedKey !== targetRef.current) return;
-      if (offset > 0 && page.data.length === 0 && page.meta.total <= offset) {
-        const lastOffset = page.meta.total === 0
-          ? 0
-          : Math.floor((page.meta.total - 1) / pageSize) * pageSize;
+      const recoveredOffset = reconciledPageOffset({
+        limit: pageSize,
+        offset,
+        rowCount: page.data.length,
+        total: page.meta.total,
+      });
+      if (recoveredOffset !== null) {
         if (page.meta.total === 0) setMeta({ ...page.meta });
-        setOffsetState(lastOffset);
+        setOffsetState(recoveredOffset);
         return;
       }
       setGroups(page.data);
@@ -172,7 +178,7 @@ export function useGroupDirectoryQuery({
   useEffect(() => {
     if (!committedKey || committedKey !== targetKey) return;
     void load();
-  }, [committedKey, load, reloadRevision, targetKey]);
+  }, [committedKey, groupsResourceRevision, load, reloadRevision, targetKey]);
 
   useEffect(() => () => {
     requestRevision.current += 1;

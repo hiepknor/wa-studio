@@ -15,6 +15,7 @@ import type {
   RuntimeApi,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
+import { RuntimeInvalidationProvider } from "@/shared/server-state/runtime-invalidation";
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ToastProvider } from "@/shared/ui/Toast";
 import { ActivityScreen } from "./ActivityScreen";
@@ -202,7 +203,9 @@ describe("ActivityScreen", () => {
     const api = { listActivity } as unknown as RuntimeApi;
     const content = (selectedSessionId: string | null) => (
       <RuntimeConnectionContext.Provider value={activityContext(api, selectedSessionId)}>
-        <DrawerProvider><ActivityScreen /><DrawerHost /></DrawerProvider>
+        <RuntimeInvalidationProvider>
+          <DrawerProvider><ActivityScreen /><DrawerHost /></DrawerProvider>
+        </RuntimeInvalidationProvider>
       </RuntimeConnectionContext.Provider>
     );
     const view = render(content(session.id));
