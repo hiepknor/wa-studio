@@ -1,4 +1,4 @@
-export type SettingsTab = "overview" | "connection" | "recovery" | "updates";
+export type SettingsTab = "overview" | "connection" | "safety" | "recovery" | "updates";
 
 export interface SettingsTaskNavigationState {
   busy: boolean;

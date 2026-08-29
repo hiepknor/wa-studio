@@ -18,6 +18,7 @@ export const RUN_ACTIVE_STATUSES: RuntimeCampaignRunStatus[] = [
   "SCHEDULED",
   "RUNNING",
   "PAUSED",
+  "CANCELLING",
 ];
 
 export const RUN_ATTENTION_STATUSES: RuntimeCampaignRunStatus[] = [
@@ -34,7 +35,8 @@ export function runStatusLabel(status: string): string {
 
 export function runTone(status: RuntimeCampaignRunStatus) {
   if (status === "COMPLETED" || status === "RUNNING") return "success" as const;
-  if (status === "SCHEDULED" || status === "PAUSED" || status === "PREPARING") {
+  if (status === "SCHEDULED" || status === "PAUSED" || status === "PREPARING"
+    || status === "CANCELLING") {
     return "warning" as const;
   }
   if (status === "BLOCKED" || status === "PARTIAL_FAILED" || status === "FAILED") {

@@ -48,6 +48,9 @@ export type RuntimeActivityEvent = components["schemas"]["ActivityEventDto"];
 export type RuntimeActivityPage = components["schemas"]["ActivityPageDto"];
 export type RuntimeStateRevisions = components["schemas"]["StateRevisionsDto"];
 export type RuntimeOperationalHealth = components["schemas"]["HealthOperationalDto"];
+export type RuntimeOpenWASafetyScope = components["schemas"]["OpenWASafetyScopeDto"];
+export type RuntimeOpenWASafetyProfile =
+  components["schemas"]["OpenWASafetyProfileChangeDto"]["profile"];
 
 type RuntimeGroupDirectoryQuery = paths["/api/v1/groups"]["get"]["parameters"]["query"];
 type RuntimeCampaignListQuery = NonNullable<
@@ -379,6 +382,75 @@ export class RuntimeApi {
     if (!result.response.ok || !result.data) {
       throw new RuntimeRequestError(
         `Could not read session sync (HTTP ${result.response.status}).`,
+      );
+    }
+    return result.data;
+  }
+
+  async getOpenWASafety(
+    sessionId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeOpenWASafetyScope> {
+    const result = await this.client.GET("/api/v1/openwa-safety/sessions/{sessionId}", {
+      ...options,
+      params: { path: { sessionId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load OpenWA safety state",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async controlOpenWASafety(
+    sessionId: string,
+    action: "BLOCK" | "RESUME",
+    idempotencyKey: string,
+    reason?: string,
+  ): Promise<RuntimeOpenWASafetyScope> {
+    const result = await this.client.POST(
+      "/api/v1/openwa-safety/sessions/{sessionId}/control",
+      {
+        body: { action, ...(reason ? { reason } : {}) },
+        params: {
+          header: { "Idempotency-Key": idempotencyKey },
+          path: { sessionId },
+        },
+      },
+    );
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        `Could not ${action === "BLOCK" ? "block" : "resume"} OpenWA operations`,
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
+  async setOpenWASafetyProfile(
+    sessionId: string,
+    profile: RuntimeOpenWASafetyProfile,
+    idempotencyKey: string,
+  ): Promise<RuntimeOpenWASafetyScope> {
+    const result = await this.client.PUT(
+      "/api/v1/openwa-safety/sessions/{sessionId}/profile",
+      {
+        body: { profile },
+        params: {
+          header: { "Idempotency-Key": idempotencyKey },
+          path: { sessionId },
+        },
+      },
+    );
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not change the OpenWA safety profile",
+        result.response.status,
+        result.error,
       );
     }
     return result.data;

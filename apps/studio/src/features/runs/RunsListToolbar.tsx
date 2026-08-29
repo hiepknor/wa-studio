@@ -13,7 +13,7 @@ import { runStatusLabel } from "./run-presentation";
 import { toggleRunFilter, type RunsListState } from "./runs-list-state";
 
 const STATUS_OPTIONS: RuntimeCampaignRunStatus[] = [
-  "PREPARING", "BLOCKED", "SCHEDULED", "RUNNING", "PAUSED",
+  "PREPARING", "BLOCKED", "SCHEDULED", "RUNNING", "PAUSED", "CANCELLING",
   "COMPLETED", "PARTIAL_FAILED", "CANCELLED", "FAILED",
 ];
 const MODE_OPTIONS: RuntimeCampaignExecutionMode[] = ["LIVE", "DRY_RUN"];

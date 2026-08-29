@@ -22,6 +22,9 @@ const EVENT_TITLES: Record<string, string> = {
   "sync.failed": "Session sync failed",
   "session.discovered": "Session discovered",
   "session.health_changed": "Session health changed",
+  "openwa_safety.session_blocked": "OpenWA operations blocked",
+  "openwa_safety.session_resumed": "OpenWA operations resumed",
+  "openwa_safety.profile_changed": "OpenWA safety profile changed",
 };
 
 export function activityTitle(event: RuntimeActivityEvent): string {

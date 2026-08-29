@@ -109,6 +109,9 @@
 }
 
 .settings-configuration-form { display: block; }
+.settings-safety-empty,
+.settings-safety-guidance { margin: var(--space-panel); }
+.settings-safety-profile { width: min(22rem, 42vw); }
 .settings-configuration-form > .inline-alert { margin: var(--space-panel); }
 .settings-field-grid {
   display: grid;

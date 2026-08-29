@@ -102,6 +102,7 @@ const NON_TERMINAL_RUN_STATUSES = new Set<RuntimeCampaignRun["status"]>([
   "SCHEDULED",
   "RUNNING",
   "PAUSED",
+  "CANCELLING",
 ]);
 const SCHEDULE_OPTIONS = [
   {
@@ -138,6 +139,7 @@ const PREFLIGHT_CHECK_LABELS: Partial<Record<RuntimeCampaignPreflight["checks"][
   GROUP_CAPABILITY: "Group capability",
   LIVE_SEND_ALLOWED: "Live sending policy",
   SESSION_SENDABLE: "Runtime session",
+  SAFETY_READY: "OpenWA safety",
   TARGETS_VALID: "Target set",
 };
 
@@ -194,7 +196,7 @@ function preflightCheckStatusLabel(status: RuntimeCampaignPreflight["checks"][nu
 
 function runTone(status: RuntimeCampaignRun["status"]) {
   if (status === "COMPLETED" || status === "RUNNING") return "success" as const;
-  if (status === "SCHEDULED" || status === "PAUSED" || status === "PREPARING") return "warning" as const;
+  if (status === "SCHEDULED" || status === "PAUSED" || status === "PREPARING" || status === "CANCELLING") return "warning" as const;
   if (status === "BLOCKED" || status === "PARTIAL_FAILED" || status === "FAILED") return "danger" as const;
   return "neutral" as const;
 }
@@ -2065,7 +2067,7 @@ function CampaignRunsPanel({
         {onOpenRun && <Button disabled={Boolean(mutation)} onClick={() => onOpenRun(run.id)} size="sm" variant="ghost">Open in Runs</Button>}
         {(run.status === "RUNNING" || run.status === "SCHEDULED") && <Button disabled={Boolean(mutation)} loading={mutation === `pause:${run.id}`} onClick={() => onAction(run, "pause")} size="sm">Pause</Button>}
         {(run.status === "PAUSED" || run.status === "BLOCKED") && <Button disabled={Boolean(mutation)} loading={mutation === `resume:${run.id}`} onClick={() => onAction(run, "resume")} size="sm">Resume</Button>}
-        {!terminal.has(run.status) && <Button disabled={Boolean(mutation)} loading={mutation === `cancel:${run.id}`} onClick={() => onAction(run, "cancel")} size="sm" variant="ghost">Cancel</Button>}
+        {!terminal.has(run.status) && run.status !== "CANCELLING" && <Button disabled={Boolean(mutation)} loading={mutation === `cancel:${run.id}`} onClick={() => onAction(run, "cancel")} size="sm" variant="ghost">Cancel</Button>}
       </div>
     </article>)}
   </section>;

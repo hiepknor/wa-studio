@@ -627,7 +627,7 @@ function RunActions({ mutation, onAction, run }: {
     <div>
       {(run.status === "RUNNING" || run.status === "SCHEDULED") && <Button disabled={Boolean(mutation)} loading={mutation === "pause"} onClick={() => onAction("pause")}>Pause</Button>}
       {(run.status === "PAUSED" || run.status === "BLOCKED") && <Button disabled={Boolean(mutation)} loading={mutation === "resume"} onClick={() => onAction("resume")} variant="primary">Resume</Button>}
-      {!terminal && <Button disabled={Boolean(mutation)} onClick={() => onAction("cancel")} variant="danger">Cancel</Button>}
+      {!terminal && run.status !== "CANCELLING" && <Button disabled={Boolean(mutation)} onClick={() => onAction("cancel")} variant="danger">Cancel</Button>}
     </div>
   </div>;
 }

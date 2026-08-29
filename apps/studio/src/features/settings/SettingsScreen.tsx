@@ -36,6 +36,7 @@ import { Tabs, type TabItem } from "@/shared/ui/Tabs";
 import { AppUpdateSettings } from "./AppUpdateSettings";
 import { BackupRecoverySettings } from "./BackupRecoverySettings";
 import { ManagedRuntimeConfigurationPanel } from "./ManagedRuntimeConfigurationPanel";
+import { OpenWASafetySettings } from "./OpenWASafetySettings";
 import { SettingsOverviewPanel } from "./SettingsOverviewPanel";
 import type { SettingsTab, SettingsTaskNavigationState } from "./settings-types";
 import "./settings.css";
@@ -58,6 +59,7 @@ interface SettingsScreenProps {
 const SETTINGS_TABS: readonly TabItem<SettingsTab>[] = [
   { id: "overview", label: "Overview" },
   { id: "connection", label: "Connection" },
+  { id: "safety", label: "Safety" },
   { id: "recovery", label: "Backups & recovery" },
   { id: "updates", label: "Updates" },
 ];
@@ -115,9 +117,11 @@ export function SettingsScreen({
   subscribeUpdateProgress = subscribeAppUpdateProgress,
 }: SettingsScreenProps = {}) {
   const {
+    connected,
     managedRuntime,
     operationalHealth,
     refreshOperationalHealth,
+    selectedSessionId,
   } = useRuntimeConnection();
   const [activeTab, setActiveTab] = useState<SettingsTab>("overview");
   const [connectionNavigation, setConnectionNavigation] =
@@ -351,6 +355,13 @@ export function SettingsScreen({
                 onNavigationStateChange={setConnectionNavigation}
                 phase={managedRuntime.phase}
                 saveProfile={saveProvisioningProfile}
+              />
+            )}
+            {activeTab === "safety" && (
+              <OpenWASafetySettings
+                api={connected?.api ?? null}
+                sessionId={selectedSessionId}
+                sessionName={connected?.sessions.find(session => session.id === selectedSessionId)?.name}
               />
             )}
             {activeTab === "recovery" && (
