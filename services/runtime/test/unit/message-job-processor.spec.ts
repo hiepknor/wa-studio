@@ -16,6 +16,39 @@ import type { MessageJobRepository } from '../../src/modules/messages/message-jo
 import type { MessageSendPolicyService } from '../../src/modules/messages/message-send-policy.service';
 import type { OutboundSessionLeaseService } from '../../src/modules/messages/outbound-session-lease.service';
 import type { MessageStatusProjectionService } from '../../src/modules/messages/message-status-projection.service';
+import type { OpenWASafetyGovernorService } from '../../src/integrations/openwa/safety/openwa-safety-governor.service';
+import type {
+  CommittedOpenWAMessagePermit,
+  OpenWAMessagePermit,
+} from '../../src/integrations/openwa/safety/openwa-safety.types';
+
+const governedSafety = () => ({
+  reserveMessage: vi.fn(async (input: {
+    sessionId: string;
+    messageJobId: string;
+    recipientId: string;
+    operationClass: 'MESSAGE_SEND_TEXT' | 'MESSAGE_SEND_IMAGE';
+  }) => ({
+    outcome: 'GRANTED' as const,
+    permit: {
+      ...input,
+      leaseToken: '11111111-1111-4111-8111-111111111111',
+      permitToken: '11111111-1111-4111-8111-111111111111',
+      upstreamId: 'a'.repeat(64),
+      policyProfile: 'CANARY',
+      policyVersion: 4,
+      reservedAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+    } as OpenWAMessagePermit,
+  })),
+  commitMessageStart: vi.fn(async (permit: OpenWAMessagePermit) => ({
+    ...permit,
+    upstreamStartedAt: new Date(),
+    upstreamAttemptNumber: 1,
+  }) as CommittedOpenWAMessagePermit),
+  recordOutcome: vi.fn().mockResolvedValue(undefined),
+  release: vi.fn().mockResolvedValue(undefined),
+}) as unknown as OpenWASafetyGovernorService;
 
 describe('MessageJobProcessorService Campaign media', () => {
   it('loads verified bytes inside the weighted budget and calls the matching OpenWA media adapter', async () => {
@@ -93,6 +126,8 @@ describe('MessageJobProcessorService Campaign media', () => {
       media as unknown as MediaAssetService,
       budget as unknown as MediaSendBudgetService,
       statusProjections as unknown as MessageStatusProjectionService,
+      undefined,
+      governedSafety(),
     );
 
     await expect(processor.process({ messageJobId: job.id }))
@@ -104,13 +139,16 @@ describe('MessageJobProcessorService Campaign media', () => {
       { onWait: expect.any(Function) },
     );
     expect(media.readForSend).toHaveBeenCalledWith(content.mediaAssetId, job.sessionId);
-    expect(openwa.sendImage).toHaveBeenCalledWith({
-      sessionId: job.sessionId,
-      chatId: job.recipientId,
-      base64: imageBytes.toString('base64'),
-      mimetype: content.mimeType,
-      caption: content.caption,
-    });
+    expect(openwa.sendImage).toHaveBeenCalledWith(
+      expect.objectContaining({ operationClass: 'MESSAGE_SEND_IMAGE', upstreamAttemptNumber: 1 }),
+      {
+        sessionId: job.sessionId,
+        chatId: job.recipientId,
+        base64: imageBytes.toString('base64'),
+        mimetype: content.mimeType,
+        caption: content.caption,
+      },
+    );
     expect(messages.updateResult).toHaveBeenCalledWith(
       client,
       job.id,
@@ -162,6 +200,7 @@ describe('MessageJobProcessorService Campaign media', () => {
         OUTBOUND_MIN_DELAY_MS: 0,
         OUTBOUND_MAX_DELAY_MS: 0,
       },
+      undefined, undefined, undefined, undefined, governedSafety(),
     );
 
     await expect(processor.process({ messageJobId: job.id }))
@@ -227,6 +266,7 @@ describe('MessageJobProcessorService Campaign media', () => {
       undefined,
       undefined,
       compatibility as unknown as OpenWACompatibilityService,
+      governedSafety(),
     );
 
     await expect(processor.process({ messageJobId: job.id })).rejects.toBe(compatibilityFailure);

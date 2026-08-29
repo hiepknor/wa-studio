@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
 import {
@@ -97,10 +98,12 @@ describe('campaign lifecycle reconciliation', () => {
 
   it('preserves both valid campaign states for a BLOCKED LIVE run', async () => {
     for (const status of ['ACTIVE', 'PAUSED']) {
+      const sessionId = randomUUID();
+      await seedSendableGroup(pool, sessionId);
       const campaign = await pool.query<{ id: string }>(
         `INSERT INTO campaigns (session_id, name, payload, status)
          VALUES ($1, $2, '{"type":"TEXT","text":"hello"}', $3::campaign_status) RETURNING id`,
-        [INTEGRATION_SESSION_ID, `Blocked ${status}`, status],
+        [sessionId, `Blocked ${status}`, status],
       );
       await pool.query(
         `INSERT INTO campaign_runs
@@ -108,7 +111,7 @@ describe('campaign lifecycle reconciliation', () => {
             payload_snapshot, scheduled_at, status)
          VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
            $3, 'LIVE', '{"type":"TEXT","text":"hello"}', now(), 'BLOCKED')`,
-        [campaign.rows[0]!.id, INTEGRATION_SESSION_ID, `blocked-${status.toLowerCase()}`],
+        [campaign.rows[0]!.id, sessionId, `blocked-${status.toLowerCase()}`],
       );
     }
     const client = await pool.connect();

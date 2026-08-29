@@ -10,6 +10,7 @@ import {
   CampaignContentType,
   type CampaignContentDto,
 } from '../../contracts/campaigns/campaign-content.dto';
+import type { OpenWASafetyStatus } from '../../integrations/openwa/safety/openwa-safety.types';
 
 export interface CampaignPreflightSessionState {
   status: string;
@@ -25,6 +26,7 @@ export function evaluateCampaignPreflight(input: {
   targets: CampaignTargetDto[];
   session: CampaignPreflightSessionState;
   liveSendsEnabled: boolean;
+  safetyStatus?: OpenWASafetyStatus;
   campaignRevision: number;
   targetsRevision: number;
   checkedAt?: Date;
@@ -63,6 +65,18 @@ export function evaluateCampaignPreflight(input: {
     message: content.type === CampaignContentType.TEXT
       ? content.text.trim() && content.text.length <= 4096 ? 'Text content is valid' : 'Text content is invalid'
       : (content.caption ?? '').length <= 1024 ? 'Image content is valid' : 'Image caption is invalid',
+  });
+  const safetyReady = input.executionMode !== CampaignExecutionMode.LIVE
+    || input.safetyStatus === undefined
+    || input.safetyStatus === 'READY';
+  checks.push({
+    code: CampaignPreflightCheckCode.SAFETY_READY,
+    status: safetyReady ? CampaignPreflightStatus.PASS : CampaignPreflightStatus.BLOCK,
+    message: input.executionMode !== CampaignExecutionMode.LIVE
+      ? 'Dry-run does not consume the live safety budget'
+      : safetyReady
+        ? 'Session safety controls are ready'
+        : `Session safety controls are ${input.safetyStatus?.toLowerCase()}`,
   });
   if (content.type !== CampaignContentType.TEXT) {
     checks.push({
@@ -107,7 +121,7 @@ export function evaluateCampaignPreflight(input: {
       ? CampaignPreflightStatus.WARN : CampaignPreflightStatus.PASS;
   return {
     status,
-    policyVersion: 3,
+    policyVersion: 4,
     campaignRevision: input.campaignRevision,
     targetsRevision: input.targetsRevision,
     executionMode: input.executionMode,

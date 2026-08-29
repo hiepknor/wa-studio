@@ -612,6 +612,31 @@ export class GatewayGroupIntentRepository {
     });
   }
 
+  async defer(
+    sessionId: string,
+    groupId: string,
+    leaseToken: string,
+    claimedRevision: number,
+    notBefore: Date,
+    reason: string,
+  ): Promise<boolean> {
+    return this.database.transaction(async client => {
+      const result = await client.query(
+        `UPDATE gateway_group_reconciliation_intents SET status = 'RETRY',
+           attempt_count = GREATEST(0, attempt_count - 1),
+           next_attempt_at = GREATEST(not_before, now(), $5),
+           claimed_revision = NULL, lease_token = NULL, lease_expires_at = NULL,
+           last_error_code = $6, updated_at = now()
+         WHERE session_id = $1 AND group_id = $2 AND status = 'RUNNING'
+           AND lease_token = $3 AND lease_expires_at > now() AND claimed_revision = $4`,
+        [sessionId, groupId, leaseToken, claimedRevision, notBefore, reason],
+      );
+      if (result.rowCount !== 1) return false;
+      await this.rateLimits.release(client, sessionId, leaseToken);
+      return true;
+    });
+  }
+
   async recoverExpired(): Promise<number> {
     const result = await this.database.query(
       `WITH recovered AS (

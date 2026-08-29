@@ -100,6 +100,69 @@ describe('gateway sync recovery', () => {
     )).rejects.toMatchObject({ code: '23514' });
   });
 
+  it('defers safety-governed discovery without spending a sync-run attempt', async () => {
+    const run = await gateway.createSyncRun(INTEGRATION_SESSION_ID);
+    const claim = await gateway.claimSyncRun(run.id);
+    const notBefore = new Date(Date.now() + 90_000);
+    expect(claim).not.toBeNull();
+
+    await expect(gateway.deferSyncRunAttempt(
+      run.id, claim!.leaseToken, notBefore, 'OPENWA_SAFETY_RATE_BUDGET',
+    )).resolves.toBe(true);
+
+    const state = (await pool.query<{
+      status: string; attempt_count: number; next_attempt_at: Date; lease_token: string | null;
+    }>(
+      `SELECT status, attempt_count, next_attempt_at, lease_token FROM sync_runs WHERE id = $1`,
+      [run.id],
+    )).rows[0]!;
+    expect(state).toMatchObject({ status: 'PENDING', attempt_count: 0, lease_token: null });
+    expect(state.next_attempt_at.valueOf()).toBeGreaterThanOrEqual(notBefore.valueOf());
+  });
+
+  it('defers a safety-governed sync item without spending its attempt budget', async () => {
+    await seedSendableGroup(pool);
+    const run = await gateway.createSyncRun(INTEGRATION_SESSION_ID);
+    const runClaim = await gateway.claimSyncRun(run.id);
+    await items.publishDiscovery({
+      syncRunId: run.id, leaseToken: runClaim!.leaseToken, syncEpoch: runClaim!.syncEpoch,
+    }, INTEGRATION_SESSION_ID, GatewaySyncMode.FULL, [{
+      id: INTEGRATION_GROUP_ID, name: 'Safety deferred group',
+    }]);
+    const [dispatch] = await items.listDispatchable(10);
+    const itemClaim = await items.claim(dispatch!.id);
+    const notBefore = new Date(Date.now() + 90_000);
+    expect(itemClaim).not.toBeNull();
+    await expect(items.defer(
+      dispatch!.id, itemClaim!.leaseToken, notBefore, 'OPENWA_SAFETY_RATE_BUDGET',
+    )).resolves.toBe(true);
+    expect((await pool.query(
+      `SELECT status, attempt_count, lease_token FROM gateway_sync_items WHERE id = $1`,
+      [dispatch!.id],
+    )).rows[0]).toMatchObject({ status: 'RETRY', attempt_count: 0, lease_token: null });
+  });
+
+  it('defers a safety-governed group intent without spending its attempt budget', async () => {
+    await seedSendableGroup(pool);
+    await groupIntents.requestCapabilityRefresh(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
+    const intentClaim = await groupIntents.claim(INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID);
+    const notBefore = new Date(Date.now() + 90_000);
+    expect(intentClaim).not.toBeNull();
+    await expect(groupIntents.defer(
+      INTEGRATION_SESSION_ID,
+      INTEGRATION_GROUP_ID,
+      intentClaim!.leaseToken,
+      intentClaim!.requestedRevision,
+      notBefore,
+      'OPENWA_SAFETY_RATE_BUDGET',
+    )).resolves.toBe(true);
+    expect((await pool.query(
+      `SELECT status, attempt_count, lease_token
+       FROM gateway_group_reconciliation_intents WHERE session_id = $1 AND group_id = $2`,
+      [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    )).rows[0]).toMatchObject({ status: 'RETRY', attempt_count: 0, lease_token: null });
+  });
+
   it('synchronizes the fake OpenWA snapshot into the durable read model', async () => {
     const run = await gateway.createSyncRun(INTEGRATION_SESSION_ID);
 
@@ -722,6 +785,37 @@ describe('gateway sync recovery', () => {
     );
     expect(perSession.rows).toHaveLength(2);
     expect(perSession.rows[0]?.contact_id).not.toBe(perSession.rows[1]?.contact_id);
+  });
+
+  it('defers a safety-governed contact snapshot without spending its attempt budget', async () => {
+    const contacts = new ContactRepository(database);
+    await gateway.upsertSession(await new OpenWAClient().getSession(INTEGRATION_SESSION_ID));
+    const claim = await contacts.beginObservedSnapshot(INTEGRATION_SESSION_ID);
+    const notBefore = new Date(Date.now() + 90_000);
+    expect(claim).not.toBeNull();
+    await pool.query(
+      `UPDATE contact_sync_state SET attempt_count = 4
+       WHERE session_id = $1 AND sync_generation = $2 AND lease_token = $3`,
+      [INTEGRATION_SESSION_ID, claim!.generation, claim!.leaseToken],
+    );
+
+    await contacts.deferObservedSnapshot(
+      INTEGRATION_SESSION_ID,
+      claim!.generation,
+      claim!.leaseToken,
+      notBefore,
+      'OPENWA_SAFETY_RATE_BUDGET',
+    );
+
+    const state = (await pool.query<{
+      attempt_count: number; next_attempt_at: Date; lease_token: string | null;
+    }>(
+      `SELECT attempt_count, next_attempt_at, lease_token
+       FROM contact_sync_state WHERE session_id = $1`,
+      [INTEGRATION_SESSION_ID],
+    )).rows[0]!;
+    expect(state).toMatchObject({ attempt_count: 3, lease_token: null });
+    expect(state.next_attempt_at.valueOf()).toBeGreaterThanOrEqual(notBefore.valueOf());
   });
 
   it('ingests observed contacts and materializes deterministic name precedence', async () => {

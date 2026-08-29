@@ -45,7 +45,13 @@ export class WebhookRegistrationReconciliationTick {
     let failed = 0;
     for (const sessionId of this.options.allowedSessionIds) {
       try {
-        const counts = await this.reconcileSession(sessionId, this.options.callbackUrl);
+        const counts = await this.openwa.reconcileWebhookRegistration({
+          sessionId,
+          url: this.options.callbackUrl,
+          events: [...RUNTIME_OPENWA_WEBHOOK_EVENTS],
+          secret: this.options.secret,
+          retryCount: 3,
+        });
         totals.created += counts.created;
         totals.updated += counts.updated;
         totals.deleted += counts.deleted;
@@ -67,40 +73,4 @@ export class WebhookRegistrationReconciliationTick {
     this.logger.log(details);
   }
 
-  private async reconcileSession(sessionId: string, callbackUrl: string): Promise<ReconciliationCounts> {
-    const normalizedCallbackUrl = normalizeUrl(callbackUrl);
-    const registrations = await this.openwa.listWebhooks(sessionId);
-    const managed = registrations
-      .filter(registration => normalizeUrl(registration.url) === normalizedCallbackUrl)
-      .sort((left, right) => left.id.localeCompare(right.id));
-    const events = [...RUNTIME_OPENWA_WEBHOOK_EVENTS];
-
-    if (managed.length === 0) {
-      await this.openwa.registerWebhook({
-        sessionId,
-        url: normalizedCallbackUrl,
-        events,
-        secret: this.options.secret,
-        retryCount: 3,
-      });
-      return { created: 1, updated: 0, deleted: 0 };
-    }
-
-    const retained = managed[0]!;
-    await this.openwa.updateWebhook({
-      sessionId,
-      webhookId: retained.id,
-      url: normalizedCallbackUrl,
-      events,
-      secret: this.options.secret,
-      active: true,
-      retryCount: 3,
-    });
-    for (const duplicate of managed.slice(1)) {
-      await this.openwa.deleteWebhook(sessionId, duplicate.id);
-    }
-    return { created: 0, updated: 1, deleted: managed.length - 1 };
-  }
 }
-
-const normalizeUrl = (value: string): string => new URL(value).toString();

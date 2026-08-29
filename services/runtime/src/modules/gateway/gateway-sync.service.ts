@@ -4,6 +4,7 @@ import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import type { SyncRunDto } from '../../contracts/sessions/sync-run.dto';
 import { GatewaySyncMode } from '../../contracts/sessions/sync-request.dto';
 import { OpenWAClient, OpenWAHttpError, OpenWAResponseValidationError } from '../../integrations/openwa/openwa.client';
+import { openWASafetyDeferralAt } from '../../integrations/openwa/safety/openwa-safety.types';
 import { GatewayRepository, type SyncWriteFence } from './gateway.repository';
 import {
   requireGatewayMutationKey,
@@ -116,6 +117,13 @@ export class GatewaySyncService {
       return { groups: discovery.discovered, members: 0 };
     } catch (error) {
       const description = error instanceof Error ? error.message : String(error);
+      const safetyNotBefore = openWASafetyDeferralAt(error);
+      if (safetyNotBefore) {
+        await this.repository.deferSyncRunAttempt(
+          syncRunId, leaseToken, safetyNotBefore, description,
+        );
+        return { skipped: true };
+      }
       await this.repository.failSyncRunAttempt(
         syncRunId,
         leaseToken,
@@ -184,6 +192,14 @@ export class GatewaySyncService {
           event: 'gateway.sync.item.skipped', syncRunId: claim.syncRunId,
           sessionId: claim.sessionId, reason: 'GROUP_NOT_FOUND',
         });
+        return { skipped: true };
+      }
+      const safetyNotBefore = stage === 'UPSTREAM' ? openWASafetyDeferralAt(error) : null;
+      if (safetyNotBefore) {
+        await this.items.defer(
+          claim.id, claim.leaseToken, safetyNotBefore,
+          error instanceof Error ? error.message : 'OPENWA_SAFETY_DEFERRED',
+        );
         return { skipped: true };
       }
       const policy = stage === 'UPSTREAM'
@@ -258,6 +274,14 @@ export class GatewaySyncService {
           event: 'gateway.group_reconciliation.skipped', source: claim.source, sessionId,
           reason: 'GROUP_NOT_FOUND', durationMs: Date.now() - startedAt,
         });
+        return { skipped: true };
+      }
+      const safetyNotBefore = stage === 'UPSTREAM' ? openWASafetyDeferralAt(error) : null;
+      if (safetyNotBefore) {
+        await this.groupIntents.defer(
+          sessionId, groupId, claim.leaseToken, claim.requestedRevision, safetyNotBefore,
+          error instanceof Error ? error.message : 'OPENWA_SAFETY_DEFERRED',
+        );
         return { skipped: true };
       }
       const policy = stage === 'UPSTREAM'

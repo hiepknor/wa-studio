@@ -3,6 +3,8 @@ import type { Pool } from 'pg';
 import { runtimeConfig } from '../../src/core/config/runtime-config';
 import { DatabaseService } from '../../src/core/database/database.service';
 import { OpenWAClient, OpenWAHttpError } from '../../src/integrations/openwa/openwa.client';
+import { OpenWASafetyGovernorService } from '../../src/integrations/openwa/safety/openwa-safety-governor.service';
+import { OpenWASafetyRepository } from '../../src/integrations/openwa/safety/openwa-safety.repository';
 import { GatewayRepository } from '../../src/modules/gateway/gateway.repository';
 import { ContactRepository } from '../../src/modules/contacts/contact.repository';
 import { SessionScopeService } from '../../src/modules/gateway/session-scope.service';
@@ -19,6 +21,9 @@ describe('message durability and delivery', () => {
   let database: DatabaseService;
   let messages: MessageJobRepository;
   let outboundSessions: OutboundSessionLeaseService;
+  const safetyFor = (database: DatabaseService) => new OpenWASafetyGovernorService(
+    new OpenWASafetyRepository(database),
+  );
 
   beforeAll(() => {
     pool = integrationPool();
@@ -76,7 +81,9 @@ describe('message durability and delivery', () => {
     await messages.claimDue(10);
     await messages.markProcessing(created.job.id);
     await pool.query(
-      `UPDATE message_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1`,
+      `UPDATE message_jobs SET lease_expires_at = now() - interval '1 second',
+         current_upstream_started_at = now() - interval '2 seconds', attempt_count = 1
+       WHERE id = $1`,
       [created.job.id],
     );
 
@@ -92,6 +99,25 @@ describe('message durability and delivery', () => {
     });
   });
 
+  it('safely reschedules an expired PROCESSING lease before the upstream boundary', async () => {
+    const created = await create('expired-before-send', 'hello', false);
+    await messages.claimDue(10);
+    await messages.markProcessing(created.job.id);
+    await pool.query(
+      `UPDATE message_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1`,
+      [created.job.id],
+    );
+
+    expect(await messages.markExpiredProcessingUnknown()).toBe(0);
+    expect(await messages.find(created.job.id)).toMatchObject({
+      status: 'SCHEDULED', lastError: 'Recovered processing job before upstream start',
+      attemptCount: 0,
+    });
+    expect((await pool.query(
+      'SELECT 1 FROM message_attempts WHERE message_job_id = $1', [created.job.id],
+    )).rowCount).toBe(0);
+  });
+
   it('sends through fake OpenWA and persists ACCEPTED with the upstream message ID', async () => {
     const created = await create('accepted-send', 'integration-success', false);
     await messages.claimDue(10);
@@ -100,6 +126,7 @@ describe('message durability and delivery', () => {
       database, messages,
       new MessageSendPolicyService(gateway, new SessionScopeService()),
       new OpenWAClient(), gateway, outboundSessions,
+      undefined, undefined, undefined, undefined, undefined, safetyFor(database),
     );
 
     const result = await processor.process({ messageJobId: created.job.id }) as { messageId: string };
@@ -116,6 +143,7 @@ describe('message durability and delivery', () => {
       database, messages,
       new MessageSendPolicyService(gateway, new SessionScopeService()),
       new OpenWAClient(), gateway, outboundSessions,
+      undefined, undefined, undefined, undefined, undefined, safetyFor(database),
     );
 
     await expect(processor.process({ messageJobId: created.job.id })).rejects.toBeInstanceOf(OpenWAHttpError);
@@ -138,6 +166,7 @@ describe('message durability and delivery', () => {
       database, messages,
       new MessageSendPolicyService(gateway, new SessionScopeService()),
       new OpenWAClient(), gateway, outboundSessions,
+      undefined, undefined, undefined, undefined, undefined, safetyFor(database),
     );
 
     await expect(processor.process({ messageJobId: created.job.id })).rejects.toMatchObject({ status: 404 });
@@ -159,40 +188,40 @@ describe('message durability and delivery', () => {
     const openwa = {
       sendText: vi.fn().mockResolvedValue({ messageId: 'must-not-exist', timestamp: Date.now() }),
     } as unknown as OpenWAClient;
-    const lease = {
-      withLease: async (
-        _sessionId: string,
-        _messageJobId: string,
-        operation: (verifyForSend: () => Promise<void>) => Promise<unknown>,
-      ) => {
+    const safety = safetyFor(database);
+    const reserve = safety.reserveMessage.bind(safety);
+    vi.spyOn(safety, 'reserveMessage').mockImplementation(async input => {
+      const decision = await reserve(input);
+      if (decision.outcome === 'GRANTED') {
         await pool.query(
           `UPDATE gateway_sessions SET status = 'disconnected', updated_at = now() WHERE id = $1`,
           [INTEGRATION_SESSION_ID],
         );
-        return operation(async () => undefined);
-      },
-    } as unknown as OutboundSessionLeaseService;
+      }
+      return decision;
+    });
     const processor = new MessageJobProcessorService(
       database,
       messages,
       new MessageSendPolicyService(gateway, new SessionScopeService()),
       openwa,
       gateway,
-      lease,
+      outboundSessions,
       {
         ...runtimeConfig(),
         ALLOW_LIVE_SENDS: true,
         OUTBOUND_MIN_DELAY_MS: 0,
         OUTBOUND_MAX_DELAY_MS: 0,
       },
+      undefined, undefined, undefined, undefined, safety,
     );
 
     await expect(processor.process({ messageJobId: created.job.id }))
-      .rejects.toThrow('Live send blocked: Gateway session is not sendable');
+      .resolves.toMatchObject({ safetyDeferred: true, reason: 'FINAL_SEND_FENCE_REJECTED' });
     expect(openwa.sendText).not.toHaveBeenCalled();
     expect(await messages.find(created.job.id)).toMatchObject({
-      status: 'FAILED',
-      lastError: 'Live send blocked: Gateway session is not sendable',
+      status: 'SCHEDULED',
+      lastError: 'Final send fence rejected current session, recipient, campaign, or cancellation state',
     });
   });
 
@@ -204,6 +233,7 @@ describe('message durability and delivery', () => {
       database, messages,
       new MessageSendPolicyService(gateway, new SessionScopeService()),
       new OpenWAClient(), gateway, outboundSessions,
+      undefined, undefined, undefined, undefined, undefined, safetyFor(database),
     );
 
     await expect(processor.process({ messageJobId: created.job.id })).rejects.toBeInstanceOf(Error);
@@ -225,6 +255,7 @@ describe('message durability and delivery', () => {
       database, messages,
       new MessageSendPolicyService(gateway, new SessionScopeService()),
       new OpenWAClient(), gateway, outboundSessions,
+      undefined, undefined, undefined, undefined, undefined, safetyFor(database),
     );
 
     await expect(processor.process({ messageJobId: created.job.id })).rejects.toBeInstanceOf(OpenWAHttpError);

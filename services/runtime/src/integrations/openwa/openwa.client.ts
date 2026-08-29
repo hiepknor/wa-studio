@@ -1,13 +1,26 @@
 import { Inject, Injectable, Logger, Optional, type OnModuleDestroy } from '@nestjs/common';
+import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import {
-  delayWithSignal,
   readBoundedResponseJson,
   readBoundedResponseText,
 } from '../../core/http/bounded-response';
 import { OpenWACompatibilityService } from './openwa-compatibility.service';
+import {
+  parseOpenWARateLimitHints,
+  type OpenWARateLimitHints,
+} from './safety/openwa-rate-limit-hints';
+import type { CommittedOpenWAMessagePermit } from './safety/openwa-safety.types';
+import {
+  OpenWASafetyBlockedError,
+  OpenWASafetyDeferredError,
+  type OpenWAOperationClass,
+  type OpenWAOperationOutcome,
+  type OpenWAOperationPermit,
+} from './safety/openwa-safety.types';
+import { OpenWASafetyGovernorService } from './safety/openwa-safety-governor.service';
 
 export type OpenWASessionStatus =
   | 'created'
@@ -107,9 +120,13 @@ const webhookSchema = z.object({
 });
 const healthSchema = z.object({ status: nonEmptyString, timestamp: dateTimeString, version: nonEmptyString });
 const sendMessageResultSchema = z.object({ messageId: nonEmptyString, timestamp: z.number().int().nonnegative() });
-const maxRateLimitRetries = 12;
-const maxTransientReadRetries = 4;
 const maximumErrorResponseBytes = 64 * 1024;
+
+interface OpenWARequestSafetyContext {
+  sessionId?: string;
+  operationClass: Exclude<OpenWAOperationClass, 'MESSAGE_SEND_TEXT' | 'MESSAGE_SEND_IMAGE'>;
+  holderType: 'GATEWAY_SYNC' | 'GROUP_REFRESH' | 'CONTACT_SYNC' | 'WEBHOOK_RECONCILIATION' | 'PROBE';
+}
 
 export type OpenWASendTextResult = z.infer<typeof sendMessageResultSchema>;
 export type OpenWASendImageResult = z.infer<typeof sendMessageResultSchema>;
@@ -120,12 +137,18 @@ export type OpenWAGroup = z.infer<typeof groupSchema>;
 export type OpenWAContact = z.infer<typeof contactSchema>;
 export type OpenWAWebhook = z.infer<typeof webhookSchema>;
 export type OpenWAHealth = z.infer<typeof healthSchema>;
+export interface OpenWAWebhookReconciliationResult {
+  created: number;
+  updated: number;
+  deleted: number;
+}
 
 export class OpenWAHttpError extends Error {
   constructor(
     readonly status: number,
     readonly responseBody: string,
     readonly retryAfterMs?: number,
+    readonly rateLimitHints?: OpenWARateLimitHints,
   ) {
     super(`OpenWA returned HTTP ${status}`);
     this.name = 'OpenWAHttpError';
@@ -143,22 +166,42 @@ export class OpenWAResponseValidationError extends Error {
 export class OpenWAClient implements OnModuleDestroy {
   private readonly logger = new Logger(OpenWAClient.name);
   private readonly abort = new AbortController();
+  private safetySequence = 0;
 
   constructor(
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
     @Optional() private readonly compatibility?: OpenWACompatibilityService,
+    @Optional() private readonly safety?: OpenWASafetyGovernorService,
   ) {}
 
   onModuleDestroy(): void {
     this.abort.abort();
   }
 
-  private async request<T>(operation: string, path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
+  private async request<T>(
+    operation: string,
+    path: string,
+    schema: z.ZodType<T>,
+    init?: RequestInit,
+    safetyContext?: OpenWARequestSafetyContext,
+  ): Promise<T> {
     if (operation !== 'health' && this.compatibility) {
       await this.compatibility.requireCompatible();
     }
     const started = performance.now();
     const method = init?.method ?? 'GET';
+    let safetyPermit: OpenWAOperationPermit | undefined;
+    if (this.safety && safetyContext) {
+      const decision = await this.safety.reserveOperation({
+        ...safetyContext,
+        holderId: `${operation}:${process.pid}:${++this.safetySequence}`,
+      });
+      if (decision.outcome === 'DEFERRED') {
+        throw new OpenWASafetyDeferredError(decision.notBefore, decision.reason);
+      }
+      if (decision.outcome === 'BLOCKED') throw new OpenWASafetyBlockedError(decision.reason);
+      safetyPermit = decision.permit;
+    }
     const headers = new Headers(init?.headers);
     headers.set('accept', 'application/json');
     headers.set('x-api-key', this.config.OPENWA_API_KEY);
@@ -167,54 +210,40 @@ export class OpenWAClient implements OnModuleDestroy {
       AbortSignal.timeout(this.config.OPENWA_REQUEST_DEADLINE_MS),
     ]);
     try {
-      let rateLimitRetries = 0;
-      let transientRetries = 0;
-      for (;;) {
-        const response = await fetch(new URL(path, this.config.OPENWA_BASE_URL), {
-          ...init,
-          redirect: 'error',
-          signal: AbortSignal.any([
-            deadline,
-            AbortSignal.timeout(this.config.OPENWA_REQUEST_TIMEOUT_MS),
-          ]),
-          headers,
-        });
-        if (response.status === 429 && method === 'GET' && operation !== 'get_group'
-          && rateLimitRetries < maxRateLimitRetries) {
-          response.body?.cancel().catch(() => undefined);
-          await delayWithSignal(rateLimitDelayMs(response.headers, rateLimitRetries), deadline);
-          rateLimitRetries += 1;
-          continue;
-        }
-        if (response.status >= 500 && method === 'GET' && operation !== 'get_group'
-          && transientRetries < maxTransientReadRetries) {
-          response.body?.cancel().catch(() => undefined);
-          await delayWithSignal(jitteredBackoffMs(transientRetries, 5_000), deadline);
-          transientRetries += 1;
-          continue;
-        }
-        if (!response.ok) {
-          throw new OpenWAHttpError(
-            response.status,
-            await readBoundedResponseText(response, maximumErrorResponseBytes),
-            parseRetryAfterMs(response.headers),
-          );
-        }
-        const parsed = schema.safeParse(
-          response.status === 204
-            ? undefined
-            : await readBoundedResponseJson(response, this.config.OPENWA_RESPONSE_MAX_BYTES),
+      const response = await fetch(new URL(path, this.config.OPENWA_BASE_URL), {
+        ...init,
+        redirect: 'error',
+        signal: AbortSignal.any([
+          deadline,
+          AbortSignal.timeout(this.config.OPENWA_REQUEST_TIMEOUT_MS),
+        ]),
+        headers,
+      });
+      if (!response.ok) {
+        const rateLimitHints = parseOpenWARateLimitHints(response.headers);
+        throw new OpenWAHttpError(
+          response.status,
+          await readBoundedResponseText(response, maximumErrorResponseBytes),
+          rateLimitHints.retryAfterMs,
+          rateLimitHints,
         );
-        if (!parsed.success) throw new OpenWAResponseValidationError(operation, parsed.error.issues.length);
-        this.logger.debug({
-          event: 'openwa.request.completed', operation, method, statusCode: response.status,
-          durationMs: Math.round((performance.now() - started) * 100) / 100,
-          rateLimitRetries,
-          transientRetries,
-        });
-        return parsed.data;
       }
+      const parsed = schema.safeParse(
+        response.status === 204
+          ? undefined
+          : await readBoundedResponseJson(response, this.config.OPENWA_RESPONSE_MAX_BYTES),
+      );
+      if (!parsed.success) throw new OpenWAResponseValidationError(operation, parsed.error.issues.length);
+      if (safetyPermit) await this.recordSafetyOutcome(safetyPermit, { kind: 'SUCCESS' });
+      this.logger.debug({
+        event: 'openwa.request.completed', operation, method, statusCode: response.status,
+        durationMs: Math.round((performance.now() - started) * 100) / 100,
+        rateLimitRetries: 0,
+        transientRetries: 0,
+      });
+      return parsed.data;
     } catch (error) {
+      if (safetyPermit) await this.recordSafetyOutcome(safetyPermit, this.safetyOutcome(error));
       this.logger.error({
         event: 'openwa.request.failed', operation, method,
         statusCode: error instanceof OpenWAHttpError ? error.status : undefined,
@@ -225,8 +254,81 @@ export class OpenWAClient implements OnModuleDestroy {
     }
   }
 
+  private async requestWhenSafetyReady<T>(
+    operation: string,
+    path: string,
+    schema: z.ZodType<T>,
+    safetyContext: OpenWARequestSafetyContext,
+  ): Promise<T> {
+    const deadlineAt = Date.now() + this.config.OPENWA_REQUEST_DEADLINE_MS;
+    for (;;) {
+      try {
+        return await this.request(operation, path, schema, undefined, safetyContext);
+      } catch (error) {
+        if (!(error instanceof OpenWASafetyDeferredError)
+          || error.notBefore.valueOf() > deadlineAt) throw error;
+        await delay(Math.max(1, error.notBefore.valueOf() - Date.now()), undefined, {
+          signal: this.abort.signal,
+        });
+      }
+    }
+  }
+
+  private async withSafetyWorkflow<T>(
+    operation: string,
+    context: OpenWARequestSafetyContext & { upstreamCost: number },
+    workflow: () => Promise<T>,
+  ): Promise<T> {
+    if (this.compatibility) await this.compatibility.requireCompatible();
+    if (!this.safety) return workflow();
+    const decision = await this.safety.reserveOperation({
+      ...context,
+      holderId: `${operation}:${process.pid}:${++this.safetySequence}`,
+    });
+    if (decision.outcome === 'DEFERRED') {
+      throw new OpenWASafetyDeferredError(decision.notBefore, decision.reason);
+    }
+    if (decision.outcome === 'BLOCKED') throw new OpenWASafetyBlockedError(decision.reason);
+    try {
+      const result = await workflow();
+      await this.recordSafetyOutcome(decision.permit, { kind: 'SUCCESS' });
+      return result;
+    } catch (error) {
+      await this.recordSafetyOutcome(decision.permit, this.safetyOutcome(error));
+      throw error;
+    }
+  }
+
+  private safetyOutcome(error: unknown): OpenWAOperationOutcome {
+    if (error instanceof OpenWAHttpError) {
+      if (error.status === 429) return { kind: 'RATE_LIMITED', retryAfterMs: error.retryAfterMs };
+      if (error.status === 401) return { kind: 'TRANSIENT_FAILURE' };
+      if (error.status >= 500 || error.status === 408) return { kind: 'TRANSIENT_FAILURE' };
+      return { kind: 'SAFE_REJECTION' };
+    }
+    return { kind: 'TRANSIENT_FAILURE' };
+  }
+
+  private async recordSafetyOutcome(
+    permit: OpenWAOperationPermit,
+    outcome: OpenWAOperationOutcome,
+  ): Promise<void> {
+    try {
+      await this.safety?.recordOutcome(permit, outcome);
+    } catch (error) {
+      this.logger.error({
+        event: 'openwa.safety.outcome_record_failed',
+        operationClass: permit.operationClass,
+        outcome: outcome.kind,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   listSessions(): Promise<OpenWASession[]> {
-    return this.request('list_sessions', '/api/sessions?limit=1000', z.array(sessionSchema).max(1000));
+    return this.request('list_sessions', '/api/sessions?limit=1000', z.array(sessionSchema).max(1000), undefined, {
+      operationClass: 'SESSION_READ', holderType: 'GATEWAY_SYNC',
+    });
   }
 
   async assertCompatibleRelease(): Promise<void> {
@@ -234,7 +336,9 @@ export class OpenWAClient implements OnModuleDestroy {
       await this.compatibility.requireCompatible({ force: true });
       return;
     }
-    const health = await this.request('health', '/api/health', healthSchema);
+    const health = await this.request('health', '/api/health', healthSchema, undefined, {
+      operationClass: 'RECOVERY_PROBE', holderType: 'PROBE',
+    });
     if (health.version !== this.config.OPENWA_RELEASE_TAG) {
       throw new Error(
         `OpenWA release mismatch: expected ${this.config.OPENWA_RELEASE_TAG}, received ${health.version}`,
@@ -243,7 +347,9 @@ export class OpenWAClient implements OnModuleDestroy {
   }
 
   getSession(sessionId: string): Promise<OpenWASession> {
-    return this.request('get_session', `/api/sessions/${encodeURIComponent(sessionId)}`, sessionSchema);
+    return this.request('get_session', `/api/sessions/${encodeURIComponent(sessionId)}`, sessionSchema, undefined, {
+      sessionId, operationClass: 'SESSION_READ', holderType: 'GATEWAY_SYNC',
+    });
   }
 
   async listGroups(sessionId: string): Promise<OpenWAGroupSummary[]> {
@@ -253,9 +359,15 @@ export class OpenWAClient implements OnModuleDestroy {
     const groupIds = new Set<string>();
     for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
       const offset = pageNumber * pageSize;
-      const page = await this.request('list_groups',
+      const page = await this.requestWhenSafetyReady(
+        'list_groups_page',
         `/api/sessions/${encodeURIComponent(sessionId)}/groups?limit=${pageSize}&offset=${offset}`,
         z.array(groupSummarySchema).max(pageSize),
+        {
+          sessionId,
+          operationClass: pageNumber === 0 ? 'GROUP_READ_BULK' : 'PAGINATED_READ_PAGE',
+          holderType: 'GATEWAY_SYNC',
+        }
       );
       for (const group of page) {
         if (groupIds.has(group.id)) {
@@ -273,6 +385,8 @@ export class OpenWAClient implements OnModuleDestroy {
     return this.request('get_group',
       `/api/sessions/${encodeURIComponent(sessionId)}/groups/${encodeURIComponent(groupId)}`,
       groupSchema,
+      undefined,
+      { sessionId, operationClass: 'GROUP_READ_TARGETED', holderType: 'GROUP_REFRESH' },
     );
   }
 
@@ -282,10 +396,15 @@ export class OpenWAClient implements OnModuleDestroy {
     const contactIds = new Set<string>();
     for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
       const offset = pageNumber * pageSize;
-      const page = await this.request(
-        'list_contacts',
+      const page = await this.requestWhenSafetyReady(
+        'list_contacts_page',
         `/api/sessions/${encodeURIComponent(sessionId)}/contacts?limit=${pageSize}&offset=${offset}`,
         z.array(contactSchema).max(pageSize),
+        {
+          sessionId,
+          operationClass: pageNumber === 0 ? 'CONTACT_READ' : 'PAGINATED_READ_PAGE',
+          holderType: 'CONTACT_SYNC',
+        },
       );
       for (const contact of page) {
         if (contactIds.has(contact.id)) throw new OpenWAResponseValidationError('list_contacts', 1);
@@ -302,6 +421,8 @@ export class OpenWAClient implements OnModuleDestroy {
       'list_webhooks',
       `/api/sessions/${encodeURIComponent(sessionId)}/webhooks`,
       z.array(webhookSchema).max(10_000),
+      undefined,
+      { sessionId, operationClass: 'WEBHOOK_CONTROL', holderType: 'WEBHOOK_RECONCILIATION' },
     );
   }
 
@@ -313,15 +434,16 @@ export class OpenWAClient implements OnModuleDestroy {
     retryCount: number;
   }): Promise<OpenWAWebhook> {
     return this.request('register_webhook', `/api/sessions/${encodeURIComponent(input.sessionId)}/webhooks`, webhookSchema, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        url: input.url,
-        events: input.events,
-        secret: input.secret,
-        retryCount: input.retryCount,
-      }),
-    });
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          url: input.url,
+          events: input.events,
+          secret: input.secret,
+          retryCount: input.retryCount,
+        }),
+      },
+      { sessionId: input.sessionId, operationClass: 'WEBHOOK_CONTROL', holderType: 'WEBHOOK_RECONCILIATION' });
   }
 
   updateWebhook(input: {
@@ -348,6 +470,11 @@ export class OpenWAClient implements OnModuleDestroy {
           retryCount: input.retryCount,
         }),
       },
+      {
+        sessionId: input.sessionId,
+        operationClass: 'WEBHOOK_CONTROL',
+        holderType: 'WEBHOOK_RECONCILIATION',
+      },
     );
   }
 
@@ -357,10 +484,92 @@ export class OpenWAClient implements OnModuleDestroy {
       `/api/sessions/${encodeURIComponent(sessionId)}/webhooks/${encodeURIComponent(webhookId)}`,
       z.undefined(),
       { method: 'DELETE' },
+      { sessionId, operationClass: 'WEBHOOK_CONTROL', holderType: 'WEBHOOK_RECONCILIATION' },
     );
   }
 
-  async sendText(sessionId: string, chatId: string, text: string): Promise<OpenWASendTextResult> {
+  reconcileWebhookRegistration(input: {
+    sessionId: string;
+    url: string;
+    events: string[];
+    secret: string;
+    retryCount: number;
+  }): Promise<OpenWAWebhookReconciliationResult> {
+    const maximumDuplicateDeletes = 4;
+    const normalizedUrl = new URL(input.url).toString();
+    return this.withSafetyWorkflow(
+      'reconcile_webhook_registration',
+      {
+        sessionId: input.sessionId,
+        operationClass: 'WEBHOOK_CONTROL',
+        holderType: 'WEBHOOK_RECONCILIATION',
+        upstreamCost: 2 + maximumDuplicateDeletes,
+      },
+      async () => {
+        const registrations = await this.request(
+          'list_webhooks',
+          `/api/sessions/${encodeURIComponent(input.sessionId)}/webhooks`,
+          z.array(webhookSchema).max(10_000),
+        );
+        const managed = registrations
+          .filter(registration => new URL(registration.url).toString() === normalizedUrl)
+          .sort((left, right) => left.id.localeCompare(right.id));
+        if (managed.length === 0) {
+          await this.request(
+            'register_webhook',
+            `/api/sessions/${encodeURIComponent(input.sessionId)}/webhooks`,
+            webhookSchema,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                url: normalizedUrl,
+                events: input.events,
+                secret: input.secret,
+                retryCount: input.retryCount,
+              }),
+            },
+          );
+          return { created: 1, updated: 0, deleted: 0 };
+        }
+        const retained = managed[0]!;
+        await this.request(
+          'update_webhook',
+          `/api/sessions/${encodeURIComponent(input.sessionId)}/webhooks/${encodeURIComponent(retained.id)}`,
+          webhookSchema,
+          {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              url: normalizedUrl,
+              events: input.events,
+              secret: input.secret,
+              active: true,
+              retryCount: input.retryCount,
+            }),
+          },
+        );
+        const duplicates = managed.slice(1, maximumDuplicateDeletes + 1);
+        for (const duplicate of duplicates) {
+          await this.request(
+            'delete_webhook',
+            `/api/sessions/${encodeURIComponent(input.sessionId)}/webhooks/${encodeURIComponent(duplicate.id)}`,
+            z.undefined(),
+            { method: 'DELETE' },
+          );
+        }
+        return { created: 0, updated: 1, deleted: duplicates.length };
+      },
+    );
+  }
+
+  async sendText(
+    permit: CommittedOpenWAMessagePermit,
+    sessionId: string,
+    chatId: string,
+    text: string,
+  ): Promise<OpenWASendTextResult> {
+    this.assertMessagePermit(permit, sessionId, 'MESSAGE_SEND_TEXT');
     return this.request('send_text', `/api/sessions/${encodeURIComponent(sessionId)}/messages/send-text`, sendMessageResultSchema, {
       method: 'POST',
       headers: {
@@ -370,13 +579,14 @@ export class OpenWAClient implements OnModuleDestroy {
     });
   }
 
-  async sendImage(input: {
+  async sendImage(permit: CommittedOpenWAMessagePermit, input: {
     sessionId: string;
     chatId: string;
     base64: string;
     mimetype: string;
     caption: string;
   }): Promise<OpenWASendImageResult> {
+    this.assertMessagePermit(permit, input.sessionId, 'MESSAGE_SEND_IMAGE');
     return this.request(
       'send_image',
       `/api/sessions/${encodeURIComponent(input.sessionId)}/messages/send-image`,
@@ -393,34 +603,17 @@ export class OpenWAClient implements OnModuleDestroy {
       },
     );
   }
-}
 
-function rateLimitDelayMs(headers: Headers, attempt: number): number {
-  const exhaustedResets = ['short', 'medium', 'long']
-    .filter(tier => headers.get(`x-ratelimit-remaining-${tier}`) === '0')
-    .map(tier => Number(headers.get(`x-ratelimit-reset-${tier}`)))
-    .filter(value => Number.isFinite(value) && value >= 0);
-  if (exhaustedResets.length > 0) {
-    return Math.min(60_000, Math.max(250, Math.ceil(Math.max(...exhaustedResets) * 1000)));
+  private assertMessagePermit(
+    permit: CommittedOpenWAMessagePermit,
+    sessionId: string,
+    operationClass: 'MESSAGE_SEND_TEXT' | 'MESSAGE_SEND_IMAGE',
+  ): void {
+    if (permit.sessionId !== sessionId
+      || permit.operationClass !== operationClass
+      || !(permit.upstreamStartedAt instanceof Date)
+      || permit.upstreamAttemptNumber < 1) {
+      throw new Error('OpenWA message send requires a matching committed safety permit');
+    }
   }
-  const retryAfterMs = parseRetryAfterMs(headers);
-  if (retryAfterMs !== undefined) return retryAfterMs;
-  return jitteredBackoffMs(attempt, 60_000);
 }
-
-function parseRetryAfterMs(headers: Headers): number | undefined {
-  const value = headers.get('retry-after');
-  if (value === null) return undefined;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return Math.min(60_000, Math.max(250, Math.ceil(seconds * 1000)));
-  }
-  const at = Date.parse(value);
-  if (!Number.isFinite(at)) return undefined;
-  return Math.min(60_000, Math.max(250, at - Date.now()));
-}
-
-const jitteredBackoffMs = (attempt: number, maximum: number): number => {
-  const backoff = Math.min(maximum, 250 * 2 ** attempt);
-  return Math.ceil(backoff * (0.75 + Math.random() * 0.5));
-};

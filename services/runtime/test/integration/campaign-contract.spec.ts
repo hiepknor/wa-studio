@@ -1042,7 +1042,7 @@ describe('campaign draft contract HTTP API', () => {
     expect(dryRun.response.status).toBe(200);
     expect(live.response.status).toBe(200);
     expect(dryRun.body).toMatchObject({
-      status: 'WARN', policyVersion: 3, executionMode: 'DRY_RUN', campaignRevision: 1,
+      status: 'WARN', policyVersion: 4, executionMode: 'DRY_RUN', campaignRevision: 1,
       targetsRevision: 1, totalTargets: 3, allowedTargets: 1, deniedTargets: 1, unknownTargets: 1,
     });
     expect(live.body.status).toBe('BLOCK');
@@ -1468,20 +1468,22 @@ describe('campaign draft contract HTTP API', () => {
 
   it('reports aggregate Campaign/LIVE lifecycle drift without exposing identifiers', async () => {
     const insertCampaign = async (name: string, status: string) => {
+      const sessionId = randomUUID();
+      await seedSendableGroup(pool, sessionId);
       const result = await pool.query<{ id: string }>(
         `INSERT INTO campaigns (session_id, name, payload, status)
          VALUES ($1, $2, '{"type":"TEXT","text":"hello"}', $3::campaign_status) RETURNING id`,
-        [INTEGRATION_SESSION_ID, name, status],
+        [sessionId, name, status],
       );
-      return result.rows[0]!.id;
+      return { id: result.rows[0]!.id, sessionId };
     };
-    const insertLive = (campaignId: string, key: string, status: string) => pool.query(
+    const insertLive = (campaign: { id: string; sessionId: string }, key: string, status: string) => pool.query(
       `INSERT INTO campaign_runs
          (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
           payload_snapshot, scheduled_at, status)
        VALUES ($1, $2, (SELECT name FROM campaigns WHERE id = $1),
          $3, 'LIVE', '{"type":"TEXT","text":"hello"}', now(), $4::campaign_run_status)`,
-      [campaignId, INTEGRATION_SESSION_ID, key, status],
+      [campaign.id, campaign.sessionId, key, status],
     );
     await insertLive(await insertCampaign('Draft drift', 'DRAFT'), 'drift-draft', 'PREPARING');
     await insertCampaign('Active drift', 'ACTIVE');
@@ -1495,6 +1497,62 @@ describe('campaign draft contract HTTP API', () => {
       archivedWithNonTerminalLive: 1,
       multipleLive: 0,
     });
+  });
+
+  it('keeps cancellation fenced in CANCELLING until an already-started send resolves', async () => {
+    const campaign = await pool.query<{ id: string }>(
+      `INSERT INTO campaigns (session_id, name, payload, status)
+       VALUES ($1, 'Cancellation fence', '{"type":"TEXT","text":"hello"}', 'ACTIVE') RETURNING id`,
+      [INTEGRATION_SESSION_ID],
+    );
+    const run = await pool.query<{ id: string }>(
+      `INSERT INTO campaign_runs
+         (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
+          payload_snapshot, scheduled_at, status, started_at)
+       VALUES ($1, $2, 'Cancellation fence', 'cancellation-fence', 'LIVE',
+         '{"type":"TEXT","text":"hello"}', now(), 'RUNNING', now()) RETURNING id`,
+      [campaign.rows[0]!.id, INTEGRATION_SESSION_ID],
+    );
+    await pool.query(
+      `INSERT INTO campaign_run_targets
+         (run_id, session_id, group_id, group_name, capability, capability_reason,
+          capability_revision, capability_checked_at)
+       VALUES ($1, $2, $3, 'Integration group', 'ALLOWED', 'SEND_ALLOWED', 1, now())`,
+      [run.rows[0]!.id, INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    );
+    const job = await pool.query<{ id: string }>(
+      `INSERT INTO message_jobs
+         (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id,
+          payload, scheduled_at, status, dry_run, claim_count, attempt_count,
+          current_upstream_started_at, processing_started_at, lease_expires_at)
+       VALUES ($1, $2, $3, $4, $5, '{"type":"TEXT","text":"hello"}', now(),
+         'PROCESSING', false, 1, 1, now(), now(), now() + interval '2 minutes') RETURNING id`,
+      [`campaign-run:${run.rows[0]!.id}`, INTEGRATION_GROUP_ID, 'a'.repeat(64),
+        INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    );
+    await pool.query(
+      `INSERT INTO campaign_deliveries (run_id, group_id, message_job_id, status)
+       VALUES ($1, $2, $3, 'PROCESSING')`,
+      [run.rows[0]!.id, INTEGRATION_GROUP_ID, job.rows[0]!.id],
+    );
+
+    const cancelled = await runAction(run.rows[0]!.id, 'cancel');
+    expect(cancelled.response.status).toBe(200);
+    expect(cancelled.body).toMatchObject({ status: 'CANCELLING' });
+    expect((await pool.query(
+      'SELECT status, cancellation_requested_at FROM message_jobs WHERE id = $1', [job.rows[0]!.id],
+    )).rows[0]).toMatchObject({ status: 'PROCESSING', cancellation_requested_at: expect.any(Date) });
+
+    await pool.query(
+      `UPDATE message_jobs SET status = 'ACCEPTED', lease_expires_at = NULL, updated_at = now()
+       WHERE id = $1`,
+      [job.rows[0]!.id],
+    );
+    await runRepository.reconcileDeliveries();
+    expect(await runRepository.finalizeRuns(10)).toBe(1);
+    expect((await pool.query(
+      'SELECT status, completed_at FROM campaign_runs WHERE id = $1', [run.rows[0]!.id],
+    )).rows[0]).toMatchObject({ status: 'CANCELLED', completed_at: expect.any(Date) });
   });
 
   it('rejects illegal persisted Run, Delivery, and Message Job state transitions', async () => {

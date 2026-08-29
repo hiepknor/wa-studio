@@ -19,6 +19,7 @@ export enum CampaignPreflightCheckCode {
   SESSION_SENDABLE = 'SESSION_SENDABLE',
   GROUP_CAPABILITY = 'GROUP_CAPABILITY',
   LIVE_SEND_ALLOWED = 'LIVE_SEND_ALLOWED',
+  SAFETY_READY = 'SAFETY_READY',
 }
 
 export enum CampaignTargetIssueReason {

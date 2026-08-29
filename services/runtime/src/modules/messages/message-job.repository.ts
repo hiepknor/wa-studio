@@ -22,7 +22,11 @@ interface MessageJobRow {
   scheduled_at: Date;
   status: MessageJobStatus;
   dry_run: boolean;
+  claim_count: number;
   attempt_count: number;
+  current_upstream_started_at: Date | null;
+  safety_policy_version: number | null;
+  cancellation_requested_at: Date | null;
   openwa_message_id: string | null;
   last_error: string | null;
   created_at: Date;
@@ -38,7 +42,11 @@ const map = (row: MessageJobRow): MessageJob => ({
   scheduledAt: row.scheduled_at,
   status: row.status,
   dryRun: row.dry_run,
+  claimCount: row.claim_count,
   attemptCount: row.attempt_count,
+  currentUpstreamStartedAt: row.current_upstream_started_at,
+  safetyPolicyVersion: row.safety_policy_version,
+  cancellationRequestedAt: row.cancellation_requested_at,
   openwaMessageId: row.openwa_message_id,
   lastError: row.last_error,
   createdAt: row.created_at,
@@ -122,10 +130,15 @@ export class MessageJobRepository {
   async claimDue(limit: number): Promise<MessageJob[]> {
     return this.database.transaction(async client => {
       const result = await client.query<MessageJobRow>(
-        `SELECT * FROM message_jobs
-         WHERE status = 'SCHEDULED' AND scheduled_at <= now()
-         ORDER BY scheduled_at
-         FOR UPDATE SKIP LOCKED
+        `SELECT jobs.* FROM message_jobs jobs
+         WHERE jobs.status = 'SCHEDULED' AND jobs.scheduled_at <= now()
+           AND NOT EXISTS (
+             SELECT 1 FROM campaign_deliveries deliveries
+             JOIN campaign_runs runs ON runs.id = deliveries.run_id
+             WHERE deliveries.message_job_id = jobs.id AND runs.status <> 'RUNNING'
+           )
+         ORDER BY jobs.scheduled_at, jobs.created_at, jobs.id
+         FOR UPDATE OF jobs SKIP LOCKED
          LIMIT $1`,
         [limit],
       );
@@ -142,9 +155,14 @@ export class MessageJobRepository {
   async markProcessing(id: string): Promise<MessageJob | null> {
     const result = await this.database.query<MessageJobRow>(
       `UPDATE message_jobs
-       SET status = 'PROCESSING', attempt_count = attempt_count + 1,
+       SET status = 'PROCESSING', claim_count = claim_count + 1,
          processing_started_at = now(), lease_expires_at = now() + interval '2 minutes', updated_at = now()
-       WHERE id = $1 AND status = 'QUEUED'
+       WHERE id = $1 AND status = 'QUEUED' AND cancellation_requested_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM campaign_deliveries deliveries
+           JOIN campaign_runs runs ON runs.id = deliveries.run_id
+           WHERE deliveries.message_job_id = message_jobs.id AND runs.status <> 'RUNNING'
+         )
        RETURNING *`,
       [id],
     );
@@ -179,22 +197,44 @@ export class MessageJobRepository {
     error: string,
     delayMs: number,
   ): Promise<boolean> {
-    const updated = await client.query<MessageJobRow>(
+    const owned = await client.query<{
+      attempt_count: number;
+      current_upstream_started_at: Date | null;
+      safety_policy_version: number | null;
+    }>(
+      `SELECT attempt_count, current_upstream_started_at, safety_policy_version
+       FROM message_jobs WHERE id = $1 AND status = 'PROCESSING' FOR UPDATE`,
+      [id],
+    );
+    const before = owned.rows[0];
+    if (!before) return false;
+    const updated = await client.query(
       `UPDATE message_jobs SET status = 'SCHEDULED', scheduled_at = now() + $3 * interval '1 millisecond',
-         last_error = $2, lease_expires_at = NULL, updated_at = now()
+         last_error = $2, lease_expires_at = NULL, current_upstream_started_at = NULL,
+         safety_lease_token = NULL, updated_at = now()
        WHERE id = $1 AND status = 'PROCESSING'
-       RETURNING attempt_count`,
+       RETURNING id`,
       [id, error, delayMs],
     );
-    const attempt = updated.rows[0]?.attempt_count;
-    if (attempt === undefined) return false;
+    if (updated.rowCount !== 1) return false;
     await client.query(
-      `INSERT INTO message_attempts (message_job_id, attempt_number, outcome, error)
-       VALUES ($1, $2, 'RETRY', $3)
+      `INSERT INTO message_attempts
+         (message_job_id, attempt_number, outcome, error, upstream_started_at, safety_policy_version)
+       VALUES ($1, $2, 'RETRY', $3, $4, $5)
        ON CONFLICT (message_job_id, attempt_number) DO NOTHING`,
-      [id, attempt, error],
+      [id, before.attempt_count, error, before.current_upstream_started_at, before.safety_policy_version],
     );
     return true;
+  }
+
+  async deferProcessing(id: string, error: string, notBefore: Date): Promise<boolean> {
+    const result = await this.database.query(
+      `UPDATE message_jobs SET status = 'SCHEDULED', scheduled_at = $3, last_error = $2,
+         lease_expires_at = NULL, safety_lease_token = NULL, updated_at = now()
+       WHERE id = $1 AND status = 'PROCESSING' AND current_upstream_started_at IS NULL`,
+      [id, error, notBefore],
+    );
+    return result.rowCount === 1;
   }
 
   async recoverStaleQueued(): Promise<number> {
@@ -207,16 +247,26 @@ export class MessageJobRepository {
   }
 
   async markExpiredProcessingUnknown(): Promise<number> {
+    await this.database.query(
+      `UPDATE message_jobs SET status = 'SCHEDULED', scheduled_at = now(),
+         last_error = 'Recovered processing job before upstream start',
+         lease_expires_at = NULL, safety_lease_token = NULL, updated_at = now()
+       WHERE status = 'PROCESSING' AND lease_expires_at < now()
+         AND current_upstream_started_at IS NULL`,
+    );
     const result = await this.database.query<{ count: string }>(
       `WITH expired AS (
          UPDATE message_jobs SET status = 'UNKNOWN',
            last_error = 'Processing lease expired; delivery outcome is unknown',
-           lease_expires_at = NULL, updated_at = now()
+           lease_expires_at = NULL, safety_lease_token = NULL, updated_at = now()
          WHERE status = 'PROCESSING' AND lease_expires_at < now()
-         RETURNING id, attempt_count
+           AND current_upstream_started_at IS NOT NULL
+         RETURNING id, attempt_count, current_upstream_started_at, safety_policy_version
        ), attempts AS (
-         INSERT INTO message_attempts (message_job_id, attempt_number, outcome, error)
-         SELECT id, attempt_count, 'UNKNOWN', 'Processing lease expired; delivery outcome is unknown'
+         INSERT INTO message_attempts
+           (message_job_id, attempt_number, outcome, error, upstream_started_at, safety_policy_version)
+         SELECT id, attempt_count, 'UNKNOWN', 'Processing lease expired; delivery outcome is unknown',
+           current_upstream_started_at, safety_policy_version
          FROM expired ON CONFLICT (message_job_id, attempt_number) DO NOTHING
          RETURNING 1
        )
@@ -236,16 +286,19 @@ export class MessageJobRepository {
        SET status = $2, openwa_message_id = COALESCE($3, openwa_message_id), last_error = $4,
          lease_expires_at = NULL, updated_at = now()
        WHERE id = $1 AND status = 'PROCESSING'
-       RETURNING attempt_count`,
+       RETURNING attempt_count, current_upstream_started_at, safety_policy_version`,
       [id, status, options.openwaMessageId ?? null, options.error ?? null],
     );
     const attempt = updated.rows[0]?.attempt_count;
     if (attempt !== undefined) {
       await client.query(
-        `INSERT INTO message_attempts (message_job_id, attempt_number, outcome, response, error)
-         VALUES ($1, $2, $3, $4::jsonb, $5)
+        `INSERT INTO message_attempts
+           (message_job_id, attempt_number, outcome, response, error, upstream_started_at, safety_policy_version)
+         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
          ON CONFLICT (message_job_id, attempt_number) DO NOTHING`,
-        [id, attempt, status, JSON.stringify(options.response ?? null), options.error ?? null],
+        [id, attempt, status, JSON.stringify(options.response ?? null), options.error ?? null,
+          updated.rows[0]?.current_upstream_started_at ?? null,
+          updated.rows[0]?.safety_policy_version ?? null],
       );
     }
   }

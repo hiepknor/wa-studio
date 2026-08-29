@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { DatabaseService } from '../../src/core/database/database.service';
 import { runtimeConfig } from '../../src/core/config/runtime-config';
 import { OpenWAClient } from '../../src/integrations/openwa/openwa.client';
+import { OpenWASafetyGovernorService } from '../../src/integrations/openwa/safety/openwa-safety-governor.service';
+import { OpenWASafetyRepository } from '../../src/integrations/openwa/safety/openwa-safety.repository';
 import { GatewayRepository } from '../../src/modules/gateway/gateway.repository';
 import { ContactRepository } from '../../src/modules/contacts/contact.repository';
 import { SessionScopeService } from '../../src/modules/gateway/session-scope.service';
@@ -27,7 +29,7 @@ interface FakeOpenWAStats {
 }
 
 describe('live outbound load', () => {
-  it('sends 500 distinct jobs exactly once and serializes one session across worker replicas', async () => {
+  it('admits only the safe paced slice of a 500-job burst across worker replicas', async () => {
     Logger.overrideLogger([]);
     const pool = integrationPool();
     const databases = [new DatabaseService(), new DatabaseService()];
@@ -79,6 +81,8 @@ describe('live outbound load', () => {
             new OutboundSessionLeaseRepository(database),
             processorMessages,
           ),
+          undefined, undefined, undefined, undefined, undefined,
+          new OpenWASafetyGovernorService(new OpenWASafetyRepository(database)),
         );
       });
       let next = 0;
@@ -93,21 +97,29 @@ describe('live outbound load', () => {
       const durationMs = Date.now() - startedAt;
 
       const stats = await fakeOpenWAStats();
-      const durable = await pool.query<{ accepted: string; attempts: string; distinct_jobs: string }>(
+      const durable = await pool.query<{
+        accepted: string;
+        scheduled: string;
+        attempts: string;
+        distinct_jobs: string;
+      }>(
         `SELECT
            count(*) FILTER (WHERE mj.status = 'ACCEPTED')::text AS accepted,
+           count(*) FILTER (WHERE mj.status = 'SCHEDULED')::text AS scheduled,
            count(ma.id)::text AS attempts,
            count(DISTINCT ma.message_job_id)::text AS distinct_jobs
          FROM message_jobs mj LEFT JOIN message_attempts ma ON ma.message_job_id = mj.id
          WHERE mj.idempotency_scope = 'live-load'`,
       );
       expect(stats).toEqual({
-        sendCalls: 500,
+        sendCalls: 1,
         activeSends: 0,
         maximumConcurrentSends: 1,
         duplicateRecipients: 0,
       });
-      expect(durable.rows[0]).toEqual({ accepted: '500', attempts: '500', distinct_jobs: '500' });
+      expect(durable.rows[0]).toEqual({
+        accepted: '1', scheduled: '499', attempts: '1', distinct_jobs: '1',
+      });
       expect(durationMs).toBeLessThan(30_000);
     } finally {
       await Promise.all(databases.map(database => database.onApplicationShutdown()));

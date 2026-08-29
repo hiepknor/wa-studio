@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OpenWAClient } from '../../src/integrations/openwa/openwa.client';
+import { OpenWASafetyDeferredError } from '../../src/integrations/openwa/safety/openwa-safety.types';
 import type { GatewayRepository } from '../../src/modules/gateway/gateway.repository';
 import type { GatewaySyncItemRepository } from '../../src/modules/gateway/gateway-sync-item.repository';
 import { GatewaySyncService } from '../../src/modules/gateway/gateway-sync.service';
@@ -41,5 +42,33 @@ describe('GatewaySyncService item ownership', () => {
     expect(repository.upsertGroupDetails).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(items.renewLease).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers safety-governed reads without consuming the item failure budget', async () => {
+    const notBefore = new Date(Date.now() + 30_000);
+    const repository = { upsertGroupDetails: vi.fn() } as unknown as GatewayRepository;
+    const items = {
+      claim: vi.fn().mockResolvedValue({
+        id: 'item-1', syncRunId: 'run-1', sessionId: 'session-1', groupId: 'group-1',
+        syncEpoch: '1', leaseToken: 'lease-1', attemptNumber: 1,
+        observedSummaryFingerprint: 'fingerprint',
+      }),
+      defer: vi.fn().mockResolvedValue(true),
+      fail: vi.fn(),
+    } as unknown as GatewaySyncItemRepository;
+    const openwa = {
+      getGroup: vi.fn().mockRejectedValue(
+        new OpenWASafetyDeferredError(notBefore, 'SESSION_PACING'),
+      ),
+    } as unknown as OpenWAClient;
+
+    await expect(new GatewaySyncService(
+      repository, items, openwa, {} as never, {} as never,
+    ).reconcileGroup('item-1')).resolves.toEqual({ skipped: true });
+
+    expect(items.defer).toHaveBeenCalledWith(
+      'item-1', 'lease-1', notBefore, expect.stringContaining('SESSION_PACING'),
+    );
+    expect(items.fail).not.toHaveBeenCalled();
   });
 });

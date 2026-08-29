@@ -15,11 +15,13 @@ describe('SessionService', () => {
     vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   });
 
-  it('refreshes allowlisted sessions before returning the durable read model', async () => {
+  it('bootstraps allowlisted sessions only when the durable read model is empty', async () => {
     const session = { id: allowedSessionId };
     const repository = {
       upsertSession: vi.fn().mockResolvedValue(session),
-      listSessions: vi.fn().mockResolvedValue([session]),
+      listSessions: vi.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([session]),
     };
     const openwa = {
       listSessions: vi.fn().mockResolvedValue([session, { id: 'not-allowed' }]),
@@ -33,9 +35,10 @@ describe('SessionService', () => {
 
     expect(repository.upsertSession).toHaveBeenCalledOnce();
     expect(repository.upsertSession).toHaveBeenCalledWith(session);
+    expect(openwa.listSessions).toHaveBeenCalledOnce();
   });
 
-  it('keeps the local workspace attachable when OpenWA is unavailable', async () => {
+  it('serves the local workspace without touching OpenWA when a snapshot exists', async () => {
     const snapshot = [{ id: allowedSessionId, name: 'Cached session' }];
     const repository = {
       upsertSession: vi.fn(),
@@ -52,6 +55,7 @@ describe('SessionService', () => {
     ).list()).resolves.toEqual({ data: snapshot });
 
     expect(repository.upsertSession).not.toHaveBeenCalled();
+    expect(openwa.listSessions).not.toHaveBeenCalled();
     expect(repository.listSessions).toHaveBeenCalledWith([allowedSessionId]);
   });
 });

@@ -345,6 +345,29 @@ export class GatewaySyncItemRepository {
     });
   }
 
+  async defer(
+    id: string,
+    leaseToken: string,
+    notBefore: Date,
+    reason: string,
+  ): Promise<boolean> {
+    return this.database.transaction(async client => {
+      const result = await client.query<{ sync_run_id: string; session_id: string }>(
+        `UPDATE gateway_sync_items SET status = 'RETRY',
+           attempt_count = GREATEST(0, attempt_count - 1), next_attempt_at = GREATEST(now(), $3),
+           error = $4, lease_token = NULL, lease_expires_at = NULL, updated_at = now()
+         WHERE id = $1 AND status = 'RUNNING' AND lease_token = $2 AND lease_expires_at > now()
+         RETURNING sync_run_id, session_id`,
+        [id, leaseToken, notBefore, reason],
+      );
+      const row = result.rows[0];
+      if (!row) return false;
+      await this.rateLimits.release(client, row.session_id, leaseToken);
+      await this.refreshParent(client, row.sync_run_id);
+      return true;
+    });
+  }
+
   async recoverExpired(): Promise<number> {
     return this.database.transaction(async client => {
       const result = await client.query<{ sync_run_id: string }>(

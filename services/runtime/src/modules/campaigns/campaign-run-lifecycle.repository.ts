@@ -91,6 +91,48 @@ export class CampaignRunLifecycleRepository {
 
   async finalize(limit: number): Promise<number> {
     return this.database.transaction(async client => {
+      const cancelled = await client.query<{
+        id: string;
+        campaign_id: string;
+        execution_mode: CampaignExecutionMode;
+      }>(
+        `WITH finalizable AS (
+           SELECT cr.id FROM campaign_runs cr
+           WHERE cr.status = 'CANCELLING'
+             AND NOT EXISTS (
+               SELECT 1 FROM campaign_deliveries cd
+               JOIN message_jobs mj ON mj.id = cd.message_job_id
+               WHERE cd.run_id = cr.id AND mj.status = 'PROCESSING'
+             )
+           ORDER BY cr.updated_at, cr.id
+           FOR UPDATE SKIP LOCKED
+           LIMIT $1
+         )
+         UPDATE campaign_runs cr SET status = 'CANCELLED', status_reason = 'CANCELLED_BY_OPERATOR',
+           completed_at = now(), updated_at = now()
+         FROM finalizable WHERE cr.id = finalizable.id
+         RETURNING cr.id, cr.campaign_id, cr.execution_mode`,
+        [limit],
+      );
+      const cancelledLiveCampaignIds = cancelled.rows
+        .filter(row => row.execution_mode === 'LIVE')
+        .map(row => row.campaign_id);
+      if (cancelledLiveCampaignIds.length) {
+        await client.query(
+          `UPDATE campaigns SET status = 'ARCHIVED', updated_at = now()
+           WHERE id = ANY($1::uuid[]) AND status IN ('ACTIVE','PAUSED')`,
+          [cancelledLiveCampaignIds],
+        );
+      }
+      for (const run of cancelled.rows) {
+        await appendCampaignRunActivity(client, {
+          runId: run.id,
+          eventType: 'campaign_run.cancelled',
+          severity: 'WARNING',
+          origin: 'RUNTIME',
+          metadata: { reason: 'CANCELLED_BY_OPERATOR' },
+        });
+      }
       const result = await client.query<{
         id: string;
         status: 'COMPLETED' | 'PARTIAL_FAILED';
@@ -152,7 +194,7 @@ export class CampaignRunLifecycleRepository {
             : undefined,
         });
       }
-      return result.rowCount ?? 0;
+      return (cancelled.rowCount ?? 0) + (result.rowCount ?? 0);
     });
   }
 
@@ -174,6 +216,25 @@ export class CampaignRunLifecycleRepository {
       );
       const transition = updated.rows[0];
       if (!transition) return null;
+      await client.query(
+        `WITH candidates AS (
+           SELECT mj.id, mj.safety_lease_token
+           FROM message_jobs mj
+           WHERE mj.id IN (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)
+             AND (mj.status = 'QUEUED'
+               OR (mj.status = 'PROCESSING' AND mj.current_upstream_started_at IS NULL))
+           FOR UPDATE
+         ), reset AS (
+           UPDATE message_jobs mj SET status = 'SCHEDULED', scheduled_at = now(),
+             last_error = 'Campaign run paused before upstream start', lease_expires_at = NULL,
+             safety_lease_token = NULL, updated_at = now()
+           FROM candidates WHERE mj.id = candidates.id
+           RETURNING candidates.safety_lease_token
+         )
+         DELETE FROM openwa_safety_leases leases
+         WHERE leases.lease_token IN (SELECT safety_lease_token FROM reset WHERE safety_lease_token IS NOT NULL)`,
+        [id],
+      );
       if (transition.execution_mode === 'LIVE') {
         await client.query(
           `UPDATE campaigns SET status = 'PAUSED', updated_at = now()
@@ -263,7 +324,8 @@ export class CampaignRunLifecycleRepository {
       await client.query(
         `UPDATE campaign_run_targets crt SET
            capability = g.send_capability, capability_reason = g.send_capability_reason,
-           capability_revision = g.capability_revision, capability_checked_at = g.capability_checked_at
+           capability_revision = g.capability_revision, capability_checked_at = g.capability_checked_at,
+           participants_count_snapshot = g.participants_count
          FROM gateway_groups g
          WHERE crt.run_id = $1 AND g.session_id = crt.session_id AND g.id = crt.group_id
            AND NOT EXISTS (
@@ -330,9 +392,36 @@ export class CampaignRunLifecycleRepository {
          ON CONFLICT (run_id, group_id) DO NOTHING`, [id],
       );
       await client.query(
-        `UPDATE message_jobs SET status = 'CANCELLED', updated_at = now()
+        `UPDATE campaign_runs SET status = 'CANCELLING', status_reason = 'CANCEL_REQUESTED',
+           completed_at = NULL, updated_at = now() WHERE id = $1`,
+        [id],
+      );
+      await client.query(
+        `UPDATE message_jobs SET cancellation_requested_at = now(), updated_at = now()
          WHERE id IN (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)
-           AND status IN ('SCHEDULED','QUEUED')`, [id],
+           AND status IN ('SCHEDULED','QUEUED','PROCESSING')`,
+        [id],
+      );
+      await client.query(
+        `WITH candidates AS (
+           SELECT mj.id, mj.safety_lease_token
+           FROM message_jobs mj
+           WHERE mj.id IN (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)
+             AND (mj.status IN ('SCHEDULED','QUEUED')
+               OR (mj.status = 'PROCESSING' AND mj.current_upstream_started_at IS NULL))
+           FOR UPDATE
+         ), cancelled AS (
+           UPDATE message_jobs mj SET status = 'CANCELLED', lease_expires_at = NULL,
+             safety_lease_token = NULL, last_error = 'Campaign run cancelled before upstream start',
+             updated_at = now()
+           FROM candidates WHERE mj.id = candidates.id
+           RETURNING candidates.safety_lease_token
+         )
+         DELETE FROM openwa_safety_leases leases
+         WHERE leases.lease_token IN (
+           SELECT safety_lease_token FROM cancelled WHERE safety_lease_token IS NOT NULL
+         )`,
+        [id],
       );
       await client.query(
         `UPDATE campaign_deliveries cd SET status = 'CANCELLED',
@@ -343,23 +432,36 @@ export class CampaignRunLifecycleRepository {
            )
          )`, [id],
       );
-      await client.query(
-        `UPDATE campaign_runs SET status = 'CANCELLED', status_reason = 'CANCELLED_BY_OPERATOR',
-           completed_at = now(), updated_at = now() WHERE id = $1`, [id],
+      const inFlight = await client.query(
+        `SELECT 1 FROM campaign_deliveries cd
+         JOIN message_jobs mj ON mj.id = cd.message_job_id
+         WHERE cd.run_id = $1 AND mj.status = 'PROCESSING'
+         LIMIT 1`,
+        [id],
       );
+      const finalStatus = inFlight.rowCount ? 'CANCELLING' : 'CANCELLED';
+      if (finalStatus === 'CANCELLED') {
+        await client.query(
+          `UPDATE campaign_runs SET status = 'CANCELLED', status_reason = 'CANCELLED_BY_OPERATOR',
+             completed_at = now(), updated_at = now() WHERE id = $1`,
+          [id],
+        );
+      }
       if (run.execution_mode === 'LIVE') {
         await client.query(
-          `UPDATE campaigns SET status = 'ARCHIVED', updated_at = now()
+          `UPDATE campaigns SET status = $2::campaign_status, updated_at = now()
            WHERE id = $1 AND status IN ('ACTIVE','PAUSED')`,
-          [run.campaign_id],
+          [run.campaign_id, finalStatus === 'CANCELLED' ? 'ARCHIVED' : 'PAUSED'],
         );
       }
       await appendCampaignRunActivity(client, {
         runId: id,
-        eventType: 'campaign_run.cancelled',
+        eventType: finalStatus === 'CANCELLED'
+          ? 'campaign_run.cancelled'
+          : 'campaign_run.cancellation_requested',
         severity: 'WARNING',
         origin: 'STUDIO',
-        metadata: { reason: 'CANCELLED_BY_OPERATOR' },
+        metadata: { reason: finalStatus === 'CANCELLED' ? 'CANCELLED_BY_OPERATOR' : 'IN_FLIGHT_SEND' },
         dedupeKey: `campaign-run:${id}:cancel:${request.idempotencyKey}`,
       });
       const receipt = await this.recordSuccess(client, id, run.session_id, request);

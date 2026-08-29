@@ -19,6 +19,7 @@ import { EventInboxConsumerModule } from '../modules/webhooks/event-inbox-consum
 import { ActivityModule } from '../modules/activity/activity.module';
 import { MediaAssetsModule } from '../modules/media-assets/media-assets.module';
 import { StateRevisionsModule } from '../modules/state-revisions/state-revisions.module';
+import { OpenWASafetyModule } from '../modules/openwa-safety/openwa-safety.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { StateRevisionsModule } from '../modules/state-revisions/state-revisions
     QueueModule,
     RuntimeObservabilityModule,
     OpenWAModule,
+    OpenWASafetyModule,
     GatewayModule,
     GroupListsModule,
     CampaignsModule,

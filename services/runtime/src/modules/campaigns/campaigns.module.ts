@@ -12,9 +12,10 @@ import { CampaignPreflightService } from './campaign-preflight.service';
 import { CampaignRunRepository } from './campaign-run.repository';
 import { CampaignRunService } from './campaign-run.service';
 import { CampaignRunProcessorService } from './campaign-run-processor.service';
+import { OpenWAModule } from '../../integrations/openwa/openwa.module';
 
 @Module({
-  imports: [GatewayModule, GroupListsModule, MediaAssetsModule, MessagesModule],
+  imports: [GatewayModule, GroupListsModule, MediaAssetsModule, MessagesModule, OpenWAModule],
   controllers: [CampaignController, CampaignRunController],
   providers: [CampaignRepository, CampaignService, CampaignLivePreflightTokenService, CampaignPreflightService, CampaignRunRepository, CampaignRunService, CampaignRunProcessorService],
   exports: [CampaignRepository, CampaignService, CampaignRunRepository, CampaignRunService, CampaignRunProcessorService],

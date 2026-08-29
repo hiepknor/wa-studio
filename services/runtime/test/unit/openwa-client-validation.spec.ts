@@ -6,6 +6,7 @@ import {
   OpenWAResponseValidationError,
 } from '../../src/integrations/openwa/openwa.client';
 import { OutboundResponseTooLargeError } from '../../src/core/http/bounded-response';
+import type { CommittedOpenWAMessagePermit } from '../../src/integrations/openwa/safety/openwa-safety.types';
 
 vi.mock('../../src/core/config/runtime-config', () => ({
   runtimeConfig: () => ({
@@ -151,6 +152,38 @@ describe('OpenWAClient response validation', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('moves later group pages onto the shared pagination lane', async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) => ({
+      id: `group-${index}`,
+      name: `Group ${index}`,
+    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(firstPage))
+      .mockResolvedValueOnce(jsonResponse([{ id: 'group-1000', name: 'Last group' }]));
+    const safety = {
+      reserveOperation: vi.fn().mockImplementation(async (input: { operationClass: string }) => ({
+        outcome: 'GRANTED',
+        permit: {
+          permitToken: '11111111-1111-4111-8111-111111111111',
+          upstreamId: 'openwa', sessionId: 'session-1',
+          operationClass: input.operationClass, policyProfile: 'CANARY', policyVersion: 4,
+          reservedAt: new Date(),
+        },
+      })),
+      recordOutcome: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new OpenWAClient(undefined, undefined, safety as never).listGroups('session-1'))
+      .resolves.toHaveLength(1001);
+
+    expect(safety.reserveOperation.mock.calls.map(([input]) => input.operationClass)).toEqual([
+      'GROUP_READ_BULK',
+      'PAGINATED_READ_PAGE',
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects an oversized page before accumulating it', async () => {
     const page = Array.from({ length: 1001 }, (_, index) => ({ id: `group-${index}`, name: `Group ${index}` }));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(page)));
@@ -180,29 +213,17 @@ describe('OpenWAClient response validation', () => {
     await expect(duplicate()).rejects.toBeInstanceOf(OpenWAResponseValidationError);
   });
 
-  it('retries rate-limited GET requests using gateway retry metadata', async () => {
-    vi.useFakeTimers();
+  it('leaves rate-limited GET requests to the durable safety retry owner', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ message: 'rate limited' }, 429))
-      .mockResolvedValueOnce(jsonResponse({ message: 'rate limited' }, 429))
-      .mockResolvedValueOnce(jsonResponse({
-        id: 'session-1', name: 'Session', status: 'ready', engineLoaded: true,
-        restriction: null, createdAt: '2026-08-12T00:00:00Z', updatedAt: '2026-08-12T00:00:00Z',
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: 'rate limited' }), {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'retry-after-long': '7' },
       }));
     vi.stubGlobal('fetch', fetchMock);
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
 
-    const request = new OpenWAClient().getSession('session-1');
-    await vi.advanceTimersByTimeAsync(249);
+    await expect(new OpenWAClient().getSession('session-1'))
+      .rejects.toMatchObject({ status: 429, retryAfterMs: 7_000 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(499);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1);
-
-    await expect(request).resolves.toMatchObject({ id: 'session-1', status: 'ready' });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('leaves group-detail server failures to the durable reconciliation retry owner', async () => {
@@ -241,7 +262,13 @@ describe('OpenWAClient response validation', () => {
       mimetype: 'image/png', caption: 'Release',
     };
 
-    await expect(openwa.sendImage(common))
+    const permit = {
+      sessionId: common.sessionId,
+      operationClass: 'MESSAGE_SEND_IMAGE',
+      upstreamStartedAt: new Date(),
+      upstreamAttemptNumber: 1,
+    } as unknown as CommittedOpenWAMessagePermit;
+    await expect(openwa.sendImage(permit, common))
       .resolves.toEqual({ messageId: 'image-id', timestamp: 1 });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, new URL(
@@ -281,5 +308,47 @@ describe('OpenWAClient response validation', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(3, new URL(
       '/api/sessions/session-1/webhooks/webhook-1', 'http://openwa.test',
     ), expect.objectContaining({ method: 'DELETE' }));
+  });
+
+  it('reconciles a webhook workflow under one conservatively costed safety permit', async () => {
+    const webhook = {
+      id: 'webhook-1', sessionId: 'session-1', url: 'https://runtime.test/api/v1/webhooks/openwa',
+      events: ['message.received'], active: true, retryCount: 3,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(webhook));
+    const safety = {
+      reserveOperation: vi.fn().mockResolvedValue({
+        outcome: 'GRANTED',
+        permit: {
+          permitToken: '11111111-1111-4111-8111-111111111111',
+          upstreamId: 'openwa', sessionId: 'session-1',
+          operationClass: 'WEBHOOK_CONTROL', policyProfile: 'CANARY', policyVersion: 4,
+          reservedAt: new Date(),
+        },
+      }),
+      recordOutcome: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new OpenWAClient(undefined, undefined, safety as never).reconcileWebhookRegistration({
+      sessionId: 'session-1', url: webhook.url, events: webhook.events,
+      secret: 'secret', retryCount: 3,
+    })).resolves.toEqual({ created: 1, updated: 0, deleted: 0 });
+
+    expect(safety.reserveOperation).toHaveBeenCalledOnce();
+    expect(safety.reserveOperation).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      operationClass: 'WEBHOOK_CONTROL',
+      holderType: 'WEBHOOK_RECONCILIATION',
+      upstreamCost: 6,
+    }));
+    expect(safety.recordOutcome).toHaveBeenCalledOnce();
+    expect(safety.recordOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({ operationClass: 'WEBHOOK_CONTROL' }),
+      { kind: 'SUCCESS' },
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

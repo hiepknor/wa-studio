@@ -143,4 +143,35 @@ export class ContactSnapshotLifecycleRepository {
       await client.query(failureSql, values);
     });
   }
+
+  async defer(
+    sessionId: string,
+    generation: number,
+    leaseToken: string,
+    notBefore: Date,
+    code: string,
+  ): Promise<void> {
+    const deferralSql = `WITH evidence_cleanup AS (
+         DELETE FROM contact_identity_evidence WHERE session_id = $1 AND sync_generation = $2
+       )
+       UPDATE contact_sync_state SET last_error_code = $4,
+         attempt_count = GREATEST(0, attempt_count - 1), next_attempt_at = GREATEST(now(), $5),
+         lease_token = NULL, lease_expires_at = NULL, updated_at = now()
+       WHERE session_id = $1 AND sync_generation = $2 AND lease_token = $3`;
+    const values = [sessionId, generation, leaseToken, code, notBefore];
+    if (!this.snapshotStagingEnabled) {
+      await this.database.query(deferralSql, values);
+      return;
+    }
+    await this.database.transaction(async client => {
+      await client.query(
+        `UPDATE contact_snapshot_generations
+         SET state = 'FAILED', failed_at = now(), error_code = $4, updated_at = now()
+         WHERE session_id = $1 AND generation = $2 AND lease_token = $3
+           AND state = 'RECEIVING'`,
+        values,
+      );
+      await client.query(deferralSql, values);
+    });
+  }
 }

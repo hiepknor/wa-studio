@@ -1,6 +1,152 @@
 {
   "openapi": "3.0.0",
   "paths": {
+    "/api/v1/openwa-safety/sessions/{sessionId}": {
+      "get": {
+        "operationId": "OpenWASafetyController_snapshot",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenWASafetyScopeDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read the durable OpenWA safety state for one session",
+        "tags": [
+          "openwa-safety"
+        ]
+      }
+    },
+    "/api/v1/openwa-safety/sessions/{sessionId}/control": {
+      "post": {
+        "operationId": "OpenWASafetyController_control",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenWASafetyControlDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenWASafetyScopeDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Manually block or resume OpenWA operations for one session",
+        "tags": [
+          "openwa-safety"
+        ]
+      }
+    },
+    "/api/v1/openwa-safety/sessions/{sessionId}/profile": {
+      "put": {
+        "operationId": "OpenWASafetyController_profile",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenWASafetyProfileChangeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenWASafetyScopeDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Change the enforced OpenWA safety profile for one session",
+        "tags": [
+          "openwa-safety"
+        ]
+      }
+    },
     "/api/v1/sessions": {
       "get": {
         "operationId": "SessionController_list",
@@ -2474,6 +2620,7 @@
                   "SCHEDULED",
                   "RUNNING",
                   "PAUSED",
+                  "CANCELLING",
                   "COMPLETED",
                   "PARTIAL_FAILED",
                   "CANCELLED",
@@ -4115,6 +4262,139 @@
       }
     },
     "schemas": {
+      "OpenWASafetyScopeDto": {
+        "type": "object",
+        "properties": {
+          "scopeType": {
+            "type": "string",
+            "enum": [
+              "WORKSPACE",
+              "UPSTREAM",
+              "SESSION"
+            ]
+          },
+          "effectiveScopeType": {
+            "type": "string",
+            "enum": [
+              "WORKSPACE",
+              "UPSTREAM",
+              "SESSION"
+            ]
+          },
+          "circuitState": {
+            "type": "string",
+            "enum": [
+              "CLOSED",
+              "OPEN",
+              "HALF_OPEN",
+              "MANUAL_BLOCKED"
+            ]
+          },
+          "rateMode": {
+            "type": "string",
+            "enum": [
+              "NORMAL",
+              "THROTTLED"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "THROTTLED",
+              "COOLDOWN",
+              "RECOVERY",
+              "BLOCKED"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "cooldownUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "CANARY",
+              "STANDARD"
+            ]
+          },
+          "policyVersion": {
+            "type": "number"
+          },
+          "revision": {
+            "type": "number"
+          },
+          "lastSuccessAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastFailureAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scopeType",
+          "effectiveScopeType",
+          "circuitState",
+          "rateMode",
+          "status",
+          "reason",
+          "cooldownUntil",
+          "profile",
+          "policyVersion",
+          "revision",
+          "lastSuccessAt",
+          "lastFailureAt",
+          "updatedAt"
+        ]
+      },
+      "OpenWASafetyControlDto": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "BLOCK",
+              "RESUME"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "OpenWASafetyProfileChangeDto": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "enum": [
+              "CANARY",
+              "STANDARD"
+            ]
+          }
+        },
+        "required": [
+          "profile"
+        ]
+      },
       "RuntimeErrorDto": {
         "type": "object",
         "properties": {
@@ -5562,7 +5842,8 @@
               "TARGETS_VALID",
               "SESSION_SENDABLE",
               "GROUP_CAPABILITY",
-              "LIVE_SEND_ALLOWED"
+              "LIVE_SEND_ALLOWED",
+              "SAFETY_READY"
             ]
           },
           "status": {
@@ -5824,6 +6105,7 @@
               "SCHEDULED",
               "RUNNING",
               "PAUSED",
+              "CANCELLING",
               "COMPLETED",
               "PARTIAL_FAILED",
               "CANCELLED",
@@ -6004,6 +6286,7 @@
               "SCHEDULED",
               "RUNNING",
               "PAUSED",
+              "CANCELLING",
               "COMPLETED",
               "PARTIAL_FAILED",
               "CANCELLED",

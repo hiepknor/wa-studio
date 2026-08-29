@@ -15,6 +15,8 @@ export class SessionService {
   ) {}
 
   async list() {
+    const snapshot = await this.repository.listSessions(this.config.OPENWA_ALLOWED_SESSION_IDS);
+    if (snapshot.length) return { data: snapshot };
     let upstream;
     try {
       upstream = await this.openwa.listSessions();
@@ -32,13 +34,13 @@ export class SessionService {
 
   async get(id: string) {
     if (!this.config.OPENWA_ALLOWED_SESSION_IDS.includes(id)) throw new NotFoundException('Session not found');
+    const snapshot = await this.repository.findSession(id);
+    if (snapshot) return snapshot;
     try {
       return await this.repository.upsertSession(await this.openwa.getSession(id));
     } catch {
       // The durable read model remains available during a transient gateway outage.
     }
-    const session = await this.repository.findSession(id);
-    if (!session) throw new NotFoundException('Session not found');
-    return session;
+    throw new NotFoundException('Session not found');
   }
 }

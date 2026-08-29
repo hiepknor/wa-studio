@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OpenWAClient, OpenWAResponseValidationError } from '../../integrations/openwa/openwa.client';
+import { openWASafetyDeferralAt } from '../../integrations/openwa/safety/openwa-safety.types';
 import { ContactRepository } from './contact.repository';
 import { ContactSnapshotConflictError } from './contact-snapshot.errors';
 
@@ -48,6 +49,18 @@ export class ContactSyncService {
       });
       return true;
     } catch (error) {
+      const safetyNotBefore = openWASafetyDeferralAt(error);
+      if (safetyNotBefore) {
+        await this.repository.deferObservedSnapshot(
+          sessionId, generation, leaseToken, safetyNotBefore, 'OPENWA_SAFETY_DEFERRED',
+        ).catch(() => undefined);
+        this.logger.log({
+          event: 'contacts.snapshot.deferred',
+          notBefore: safetyNotBefore.toISOString(),
+          durationMs: Date.now() - startedAt,
+        });
+        return false;
+      }
       const code = error instanceof OpenWAResponseValidationError || error instanceof ContactSnapshotConflictError
         ? 'INVALID_RESPONSE'
         : 'UPSTREAM_ERROR';

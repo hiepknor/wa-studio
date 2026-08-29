@@ -128,7 +128,7 @@ describe('Runtime metrics cardinality and collection', () => {
     const [firstOutput, secondOutput] = await Promise.all([first, second]);
 
     expect(firstOutput).toBe(secondOutput);
-    expect(database.query).toHaveBeenCalledTimes(1);
+    expect(database.query).toHaveBeenCalledTimes(4);
     expect(queues.readiness).toHaveBeenCalledTimes(1);
     expect(queues.runtimeProcessHealth).not.toHaveBeenCalled();
     expect(firstOutput).toContain('wa_runtime_dependency_up{dependency="queue"} 0');

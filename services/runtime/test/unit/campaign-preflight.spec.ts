@@ -21,11 +21,11 @@ const ready = { status: 'ready', engineLoaded: true, restricted: false };
 const revisions = { campaignRevision: 7, targetsRevision: 4 };
 
 describe('evaluateCampaignPreflight', () => {
-  it('publishes policy version 3 for media-aware capability semantics', () => {
+  it('publishes policy version 4 for media-aware safety semantics', () => {
     expect(evaluateCampaignPreflight({
       executionMode: CampaignExecutionMode.DRY_RUN,
       text: 'hello', targets: [target('ALLOWED')], session: ready, liveSendsEnabled: false, ...revisions,
-    }).policyVersion).toBe(3);
+    }).policyVersion).toBe(4);
   });
 
   it('blocks media content when its immutable asset is unavailable', () => {
@@ -97,6 +97,18 @@ describe('evaluateCampaignPreflight', () => {
     ]);
   });
 
+  it('blocks a LIVE launch while the session safety governor is not ready', () => {
+    const report = evaluateCampaignPreflight({
+      executionMode: CampaignExecutionMode.LIVE,
+      text: 'hello', targets: [target('ALLOWED')], session: ready, liveSendsEnabled: true,
+      safetyStatus: 'COOLDOWN', ...revisions,
+    });
+    expect(report.status).toBe('BLOCK');
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      code: 'SAFETY_READY', status: 'BLOCK',
+    }));
+  });
+
   it('applies BLOCK over WARN over PASS precedence using stable check codes', () => {
     const warn = evaluateCampaignPreflight({
       executionMode: CampaignExecutionMode.DRY_RUN,
@@ -104,7 +116,8 @@ describe('evaluateCampaignPreflight', () => {
     });
     expect(warn.status).toBe('WARN');
     expect(warn.checks.map(check => check.code)).toEqual([
-      'CONTENT_VALID', 'TARGETS_VALID', 'SESSION_SENDABLE', 'GROUP_CAPABILITY', 'LIVE_SEND_ALLOWED',
+      'CONTENT_VALID', 'SAFETY_READY', 'TARGETS_VALID', 'SESSION_SENDABLE',
+      'GROUP_CAPABILITY', 'LIVE_SEND_ALLOWED',
     ]);
 
     const block = evaluateCampaignPreflight({

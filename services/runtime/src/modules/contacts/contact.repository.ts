@@ -495,6 +495,16 @@ export class ContactRepository {
     return this.snapshotLifecycle.fail(sessionId, generation, leaseToken, code);
   }
 
+  async deferObservedSnapshot(
+    sessionId: string,
+    generation: number,
+    leaseToken: string,
+    notBefore: Date,
+    code: string,
+  ): Promise<void> {
+    return this.snapshotLifecycle.defer(sessionId, generation, leaseToken, notBefore, code);
+  }
+
   async observeMessageSender(
     sessionId: string,
     rawIdentity: string,

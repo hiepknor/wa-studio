@@ -159,6 +159,18 @@ export class CampaignRunRepository {
       if (existingLive.rowCount) {
         return { ...empty, campaignFound: true, campaignNotLaunchable: true };
       }
+      if (input.executionMode === 'LIVE') {
+        const activeSessionRun = await client.query(
+          `SELECT 1 FROM campaign_runs
+           WHERE session_id = $1 AND execution_mode = 'LIVE'
+             AND status IN ('PREPARING','BLOCKED','SCHEDULED','RUNNING','PAUSED','CANCELLING')
+           LIMIT 1`,
+          [campaign.session_id],
+        );
+        if (activeSessionRun.rowCount) {
+          return { ...empty, campaignFound: true, campaignNotLaunchable: true };
+        }
+      }
 
       const currentCampaignRevision = Number(campaign.revision);
       const currentTargetsRevision = Number(campaign.targets_revision);
@@ -220,9 +232,10 @@ export class CampaignRunRepository {
       await client.query(
         `INSERT INTO campaign_run_targets
            (run_id, session_id, group_id, group_name, capability, capability_reason,
-            capability_revision, capability_checked_at)
+            capability_revision, capability_checked_at, participants_count_snapshot)
          SELECT $1, ct.session_id, ct.group_id, g.name, g.send_capability,
-           g.send_capability_reason, g.capability_revision, g.capability_checked_at
+           g.send_capability_reason, g.capability_revision, g.capability_checked_at,
+           g.participants_count
          FROM campaign_targets ct
          JOIN gateway_groups g ON g.session_id = ct.session_id AND g.id = ct.group_id
          WHERE ct.campaign_id = $2 AND ct.enabled`,
@@ -497,7 +510,8 @@ export class CampaignRunRepository {
       await client.query(
         `UPDATE campaign_run_targets crt SET
            capability = g.send_capability, capability_reason = g.send_capability_reason,
-           capability_revision = g.capability_revision, capability_checked_at = g.capability_checked_at
+           capability_revision = g.capability_revision, capability_checked_at = g.capability_checked_at,
+           participants_count_snapshot = g.participants_count
          FROM gateway_groups g
          WHERE crt.run_id = $1 AND g.session_id = crt.session_id AND g.id = crt.group_id`,
         [runId],

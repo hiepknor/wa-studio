@@ -47,6 +47,10 @@ export class RuntimeMetricsService {
   private readonly databasePoolWaitingRequests: Gauge;
   private readonly snapshotFailures: Counter<'dependency'>;
   private readonly scrapeDuration: Histogram<'result'>;
+  private readonly openWASafetyScopes: Gauge<'circuit_state' | 'rate_mode'>;
+  private readonly openWASafetyLeases: Gauge<'lane'>;
+  private readonly openWADeferredJobs: Gauge;
+  private readonly openWAUnknownJobs: Gauge;
   private activeScrape: Promise<string> | undefined;
 
   constructor(
@@ -123,6 +127,28 @@ export class RuntimeMetricsService {
       buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
       registers: [this.registry],
     });
+    this.openWASafetyScopes = new Gauge({
+      name: 'wa_runtime_openwa_safety_scopes',
+      help: 'Durable OpenWA safety scopes by circuit and adaptive-rate state.',
+      labelNames: ['circuit_state', 'rate_mode'] as const,
+      registers: [this.registry],
+    });
+    this.openWASafetyLeases = new Gauge({
+      name: 'wa_runtime_openwa_safety_leases',
+      help: 'Unexpired OpenWA safety leases by bounded lane.',
+      labelNames: ['lane'] as const,
+      registers: [this.registry],
+    });
+    this.openWADeferredJobs = new Gauge({
+      name: 'wa_runtime_openwa_safety_deferred_message_jobs',
+      help: 'Message jobs currently deferred by an OpenWA safety fence or budget.',
+      registers: [this.registry],
+    });
+    this.openWAUnknownJobs = new Gauge({
+      name: 'wa_runtime_openwa_unknown_message_jobs',
+      help: 'Message jobs with an ambiguous post-dispatch outcome.',
+      registers: [this.registry],
+    });
 
     this.dependencyUp.set({ dependency: 'postgres' }, 0);
     this.dependencyUp.set({ dependency: 'queue' }, 0);
@@ -131,6 +157,8 @@ export class RuntimeMetricsService {
     this.databasePoolConnections.set({ state: 'idle' }, 0);
     this.databasePoolConnections.set({ state: 'total' }, 0);
     this.databasePoolWaitingRequests.set(0);
+    this.openWADeferredJobs.set(0);
+    this.openWAUnknownJobs.set(0);
   }
 
   get contentType(): string {
@@ -170,11 +198,12 @@ export class RuntimeMetricsService {
   private async performScrape(): Promise<string> {
     const started = performance.now();
     this.snapshotDatabasePool();
-    const [postgres, queue] = await Promise.all([
+    const [postgres, queue, openWASafety] = await Promise.all([
       this.probePostgres(),
       this.probeQueue(),
+      this.snapshotOpenWASafety(),
     ]);
-    const result = postgres && queue ? 'complete' : 'degraded';
+    const result = postgres && queue && openWASafety ? 'complete' : 'degraded';
     try {
       return await this.registry.metrics();
     } finally {
@@ -225,6 +254,46 @@ export class RuntimeMetricsService {
       this.backgroundProcessUp.set({ process: 'worker' }, 0);
       this.backgroundProcessUp.set({ process: 'scheduler' }, 0);
       this.snapshotFailures.inc({ dependency: 'queue' });
+      return false;
+    }
+  }
+
+  private async snapshotOpenWASafety(): Promise<boolean> {
+    try {
+      const scopes = await this.database.query<{
+        circuit_state: string;
+        rate_mode: string;
+        count: string;
+      }>(
+        `SELECT circuit_state::text, rate_mode::text, count(*)::text AS count
+         FROM openwa_safety_scopes GROUP BY circuit_state, rate_mode`,
+      );
+      const leases = await this.database.query<{ lane: string; count: string }>(
+        `SELECT lane, count(*)::text AS count FROM openwa_safety_leases
+         WHERE lease_expires_at > now() GROUP BY lane`,
+      );
+      const jobs = await this.database.query<{ deferred: string; unknown: string }>(
+        `SELECT
+           count(*) FILTER (WHERE status = 'SCHEDULED'
+             AND last_error LIKE ANY(ARRAY['Safety deferred:%','Safety blocked:%',
+               'Final send fence rejected%']))::text AS deferred,
+           count(*) FILTER (WHERE status = 'UNKNOWN')::text AS unknown
+         FROM message_jobs`,
+      );
+      this.openWASafetyScopes.reset();
+      for (const scope of scopes.rows) {
+        this.openWASafetyScopes.set({
+          circuit_state: scope.circuit_state,
+          rate_mode: scope.rate_mode,
+        }, Number(scope.count));
+      }
+      this.openWASafetyLeases.reset();
+      for (const lease of leases.rows) this.openWASafetyLeases.set({ lane: lease.lane }, Number(lease.count));
+      this.openWADeferredJobs.set(Number(jobs.rows[0]?.deferred ?? 0));
+      this.openWAUnknownJobs.set(Number(jobs.rows[0]?.unknown ?? 0));
+      return true;
+    } catch {
+      this.snapshotFailures.inc({ dependency: 'openwa_safety' });
       return false;
     }
   }

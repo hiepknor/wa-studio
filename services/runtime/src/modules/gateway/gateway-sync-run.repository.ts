@@ -343,4 +343,20 @@ export class GatewaySyncRunRepository {
       return result.rows[0]?.status ?? 'LOST_OWNERSHIP';
     });
   }
+
+  async deferAttempt(
+    id: string,
+    leaseToken: string,
+    notBefore: Date,
+    reason: string,
+  ): Promise<boolean> {
+    const result = await this.database.query(
+      `UPDATE sync_runs SET status = 'PENDING', phase = 'DISCOVERING', sync_epoch = NULL,
+         attempt_count = GREATEST(0, attempt_count - 1), next_attempt_at = GREATEST(now(), $3),
+         error = $4, lease_token = NULL, lease_expires_at = NULL, updated_at = now()
+       WHERE id = $1 AND status = 'RUNNING' AND lease_token = $2 AND lease_expires_at > now()`,
+      [id, leaseToken, notBefore, reason],
+    );
+    return result.rowCount === 1;
+  }
 }

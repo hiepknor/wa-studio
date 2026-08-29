@@ -6,6 +6,7 @@ import { DatabaseService } from '../../core/database/database.service';
 
 export interface RetentionResult {
   mutationReceipts: number;
+  safetyOutcomeReceipts: number;
   groupReconciliationOperations: number;
   activityEvents: number;
   campaignRuns: number;
@@ -39,7 +40,8 @@ export class DataRetentionTick {
   async run(): Promise<void> {
     const started = performance.now();
     const result = await this.cleanup();
-    const deleted = result.mutationReceipts + result.groupReconciliationOperations
+    const deleted = result.mutationReceipts + result.safetyOutcomeReceipts
+      + result.groupReconciliationOperations
       + result.activityEvents + result.campaignRuns + result.messageJobs + result.inboundMessages + result.runtimeEvents
       + result.webhookEvents + result.syncRuns + result.contactObservations + result.mediaUploads + result.mediaAssets;
     this.logger.log({
@@ -65,6 +67,7 @@ export class DataRetentionTick {
     const deadline = performance.now() + (options.timeBudgetMs ?? this.config.RUNTIME_RETENTION_TIME_BUDGET_MS);
     const total: RetentionResult = {
       mutationReceipts: 0,
+      safetyOutcomeReceipts: 0,
       groupReconciliationOperations: 0,
       activityEvents: 0,
       campaignRuns: 0, messageJobs: 0, inboundMessages: 0, runtimeEvents: 0, webhookEvents: 0, syncRuns: 0,
@@ -81,6 +84,11 @@ export class DataRetentionTick {
       }
       const current = await this.database.transaction(async client => ({
         mutationReceipts: await this.deleteMutationReceipts(client, operationalCutoff, limit),
+        safetyOutcomeReceipts: await this.deleteSafetyOutcomeReceipts(
+          client,
+          operationalCutoff,
+          limit,
+        ),
         groupReconciliationOperations: await this.deleteGroupReconciliationOperations(
           client,
           operationalCutoff,
@@ -103,6 +111,7 @@ export class DataRetentionTick {
       }));
       total.batches += 1;
       total.mutationReceipts += current.mutationReceipts;
+      total.safetyOutcomeReceipts += current.safetyOutcomeReceipts;
       total.groupReconciliationOperations += current.groupReconciliationOperations;
       total.activityEvents += current.activityEvents;
       total.campaignRuns += current.campaignRuns;
@@ -135,6 +144,23 @@ export class DataRetentionTick {
        DELETE FROM runtime_mutation_receipts receipt USING candidates
        WHERE receipt.operation_type = candidates.operation_type
          AND receipt.idempotency_key = candidates.idempotency_key`,
+      [cutoff, limit],
+    ));
+  }
+
+  private async deleteSafetyOutcomeReceipts(
+    client: PoolClient,
+    cutoff: Date,
+    limit: number,
+  ): Promise<number> {
+    return this.count(await client.query(
+      `WITH candidates AS (
+         SELECT permit_token FROM openwa_safety_outcome_receipts
+         WHERE recorded_at < $1 ORDER BY recorded_at, permit_token
+         LIMIT $2 FOR UPDATE SKIP LOCKED
+       )
+       DELETE FROM openwa_safety_outcome_receipts receipt USING candidates
+       WHERE receipt.permit_token = candidates.permit_token`,
       [cutoff, limit],
     ));
   }

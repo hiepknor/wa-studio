@@ -4,6 +4,57 @@
  */
 
 export interface paths {
+    "/api/v1/openwa-safety/sessions/{sessionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the durable OpenWA safety state for one session */
+        get: operations["OpenWASafetyController_snapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/openwa-safety/sessions/{sessionId}/control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Manually block or resume OpenWA operations for one session */
+        post: operations["OpenWASafetyController_control"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/openwa-safety/sessions/{sessionId}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change the enforced OpenWA safety profile for one session */
+        put: operations["OpenWASafetyController_profile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions": {
         parameters: {
             query?: never;
@@ -699,6 +750,40 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        OpenWASafetyScopeDto: {
+            /** @enum {string} */
+            scopeType: "WORKSPACE" | "UPSTREAM" | "SESSION";
+            /** @enum {string} */
+            effectiveScopeType: "WORKSPACE" | "UPSTREAM" | "SESSION";
+            /** @enum {string} */
+            circuitState: "CLOSED" | "OPEN" | "HALF_OPEN" | "MANUAL_BLOCKED";
+            /** @enum {string} */
+            rateMode: "NORMAL" | "THROTTLED";
+            /** @enum {string} */
+            status: "READY" | "THROTTLED" | "COOLDOWN" | "RECOVERY" | "BLOCKED";
+            reason: string | null;
+            /** Format: date-time */
+            cooldownUntil: string | null;
+            /** @enum {string} */
+            profile: "CANARY" | "STANDARD";
+            policyVersion: number;
+            revision: number;
+            /** Format: date-time */
+            lastSuccessAt: string | null;
+            /** Format: date-time */
+            lastFailureAt: string | null;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        OpenWASafetyControlDto: {
+            /** @enum {string} */
+            action: "BLOCK" | "RESUME";
+            reason?: string;
+        };
+        OpenWASafetyProfileChangeDto: {
+            /** @enum {string} */
+            profile: "CANARY" | "STANDARD";
+        };
         RuntimeErrorDto: {
             /** @example CAMPAIGN_NOT_FOUND */
             code: string;
@@ -1165,7 +1250,7 @@ export interface components {
         };
         CampaignPreflightCheckDto: {
             /** @enum {string} */
-            code: "CONTENT_VALID" | "MEDIA_READY" | "TARGETS_VALID" | "SESSION_SENDABLE" | "GROUP_CAPABILITY" | "LIVE_SEND_ALLOWED";
+            code: "CONTENT_VALID" | "MEDIA_READY" | "TARGETS_VALID" | "SESSION_SENDABLE" | "GROUP_CAPABILITY" | "LIVE_SEND_ALLOWED" | "SAFETY_READY";
             /** @enum {string} */
             status: "PASS" | "WARN" | "BLOCK";
             message: string;
@@ -1241,7 +1326,7 @@ export interface components {
             /** @enum {string} */
             executionMode: "DRY_RUN" | "LIVE";
             /** @enum {string} */
-            status: "PREPARING" | "BLOCKED" | "SCHEDULED" | "RUNNING" | "PAUSED" | "COMPLETED" | "PARTIAL_FAILED" | "CANCELLED" | "FAILED";
+            status: "PREPARING" | "BLOCKED" | "SCHEDULED" | "RUNNING" | "PAUSED" | "CANCELLING" | "COMPLETED" | "PARTIAL_FAILED" | "CANCELLED" | "FAILED";
             statusReason: string | null;
             /**
              * @deprecated
@@ -1286,7 +1371,7 @@ export interface components {
             /** @enum {string} */
             executionMode: "DRY_RUN" | "LIVE";
             /** @enum {string} */
-            status: "PREPARING" | "BLOCKED" | "SCHEDULED" | "RUNNING" | "PAUSED" | "COMPLETED" | "PARTIAL_FAILED" | "CANCELLED" | "FAILED";
+            status: "PREPARING" | "BLOCKED" | "SCHEDULED" | "RUNNING" | "PAUSED" | "CANCELLING" | "COMPLETED" | "PARTIAL_FAILED" | "CANCELLED" | "FAILED";
             statusReason: string | null;
             totalTargets: number;
             progress: components["schemas"]["CampaignRunProgressDto"];
@@ -1566,6 +1651,81 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    OpenWASafetyController_snapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenWASafetyScopeDto"];
+                };
+            };
+        };
+    };
+    OpenWASafetyController_control: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenWASafetyControlDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenWASafetyScopeDto"];
+                };
+            };
+        };
+    };
+    OpenWASafetyController_profile: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenWASafetyProfileChangeDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenWASafetyScopeDto"];
+                };
+            };
+        };
+    };
     SessionController_list: {
         parameters: {
             query?: never;
@@ -3028,7 +3188,7 @@ export interface operations {
                 sessionId: string;
                 /** @description Trimmed case-insensitive literal substring search on campaign snapshot name, or exact campaign/run UUID. */
                 query?: string;
-                status?: ("PREPARING" | "BLOCKED" | "SCHEDULED" | "RUNNING" | "PAUSED" | "COMPLETED" | "PARTIAL_FAILED" | "CANCELLED" | "FAILED")[];
+                status?: ("PREPARING" | "BLOCKED" | "SCHEDULED" | "RUNNING" | "PAUSED" | "CANCELLING" | "COMPLETED" | "PARTIAL_FAILED" | "CANCELLED" | "FAILED")[];
                 executionMode?: ("DRY_RUN" | "LIVE")[];
                 /** @description Inclusive lower bound on run creation time. */
                 from?: string;

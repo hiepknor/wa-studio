@@ -37,7 +37,7 @@ describe('campaign OpenAPI contract', () => {
       liveLaunchTokenExpiresAt: expect.objectContaining({ format: 'date-time', nullable: true }),
     }));
     expect(contract.components.schemas.CampaignPreflightCheckDto?.properties?.code?.enum).toEqual([
-      'CONTENT_VALID', 'MEDIA_READY', 'TARGETS_VALID', 'SESSION_SENDABLE', 'GROUP_CAPABILITY', 'LIVE_SEND_ALLOWED',
+      'CONTENT_VALID', 'MEDIA_READY', 'TARGETS_VALID', 'SESSION_SENDABLE', 'GROUP_CAPABILITY', 'LIVE_SEND_ALLOWED', 'SAFETY_READY',
     ]);
     expect(contract.components.schemas.CampaignTargetIssueDto?.properties?.reason?.enum).toEqual([
       'TARGET_CAPABILITY_DENIED', 'TARGET_CAPABILITY_UNKNOWN', 'TARGET_CAPABILITY_STALE',

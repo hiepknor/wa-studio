@@ -8,6 +8,7 @@ import { CampaignLivePreflightTokenService } from './campaign-live-preflight-tok
 import { GatewayRepository } from '../gateway/gateway.repository';
 import { CampaignContentType, type CampaignContentDto } from '../../contracts/campaigns/campaign-content.dto';
 import { MediaAssetService } from '../media-assets/media-asset.service';
+import { OpenWASafetyGovernorService } from '../../integrations/openwa/safety/openwa-safety-governor.service';
 
 @Injectable()
 export class CampaignPreflightService {
@@ -15,6 +16,7 @@ export class CampaignPreflightService {
     private readonly gateway: GatewayRepository,
     private readonly liveTokens: CampaignLivePreflightTokenService,
     private readonly media: MediaAssetService,
+    private readonly safety: OpenWASafetyGovernorService,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
   ) {}
 
@@ -37,6 +39,7 @@ export class CampaignPreflightService {
     const mediaReady = input.content.type === CampaignContentType.TEXT
       ? true
       : await this.media.matchesSnapshot(input.content, input.sessionId);
+    const safety = await this.safety.sessionSnapshot(input.sessionId);
     return evaluateCampaignPreflight({
       executionMode: input.executionMode,
       content: input.content,
@@ -44,6 +47,7 @@ export class CampaignPreflightService {
       targets: input.targets,
       session,
       liveSendsEnabled: this.config.ALLOW_LIVE_SENDS,
+      safetyStatus: safety.status,
       campaignRevision: input.campaignRevision,
       targetsRevision: input.targetsRevision,
     });

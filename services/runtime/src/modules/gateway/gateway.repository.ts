@@ -316,4 +316,13 @@ export class GatewayRepository {
     return this.syncRuns.failAttempt(id, leaseToken, groups, members, error);
   }
 
+  async deferSyncRunAttempt(
+    id: string,
+    leaseToken: string,
+    notBefore: Date,
+    reason: string,
+  ): Promise<boolean> {
+    return this.syncRuns.deferAttempt(id, leaseToken, notBefore, reason);
+  }
+
 }

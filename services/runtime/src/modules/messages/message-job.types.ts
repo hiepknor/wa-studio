@@ -25,7 +25,11 @@ export interface MessageJob {
   scheduledAt: Date;
   status: MessageJobStatus;
   dryRun: boolean;
+  claimCount: number;
   attemptCount: number;
+  currentUpstreamStartedAt: Date | null;
+  safetyPolicyVersion: number | null;
+  cancellationRequestedAt: Date | null;
   openwaMessageId: string | null;
   lastError: string | null;
   createdAt: Date;

@@ -94,11 +94,18 @@ describe('data retention', () => {
               ($1,'session.health_changed','SESSION','SUCCESS','GATEWAY','SESSION',$1,'Current session',now(),now())`,
       [INTEGRATION_SESSION_ID, old],
     );
+    await pool.query(
+      `INSERT INTO openwa_safety_outcome_receipts
+         (permit_token, upstream_id, session_id, operation_class, outcome_kind,
+          policy_version, recorded_at)
+       VALUES ($1, $2, $3, 'SESSION_READ', 'SUCCESS', 4, $4)`,
+      [randomUUID(), 'a'.repeat(64), INTEGRATION_SESSION_ID, old],
+    );
 
     const result = await new DataRetentionTick(database).cleanup();
 
     expect(result).toEqual({
-      mutationReceipts: 0, groupReconciliationOperations: 0,
+      mutationReceipts: 0, safetyOutcomeReceipts: 1, groupReconciliationOperations: 0,
       activityEvents: 1, campaignRuns: 1, messageJobs: 1, inboundMessages: 0,
       runtimeEvents: 1, webhookEvents: 1, syncRuns: 1,
       contactObservations: 0,

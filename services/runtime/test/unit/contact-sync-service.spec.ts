@@ -4,6 +4,7 @@ import type { OpenWAClient } from '../../src/integrations/openwa/openwa.client';
 import type { ContactRepository } from '../../src/modules/contacts/contact.repository';
 import { ContactSyncService } from '../../src/modules/contacts/contact-sync.service';
 import { ContactSnapshotConflictError } from '../../src/modules/contacts/contact-snapshot.errors';
+import { OpenWASafetyDeferredError } from '../../src/integrations/openwa/safety/openwa-safety.types';
 
 describe('ContactSyncService', () => {
   beforeEach(() => {
@@ -76,5 +77,26 @@ describe('ContactSyncService', () => {
     expect(repository.failObservedSnapshot).toHaveBeenCalledWith(
       'session-1', 5, 'lease-5', 'INVALID_RESPONSE',
     );
+  });
+
+  it('durably defers a safety-governed snapshot without recording an upstream failure', async () => {
+    const notBefore = new Date(Date.now() + 45_000);
+    const openwa = {
+      async *listContactPages() {
+        throw new OpenWASafetyDeferredError(notBefore, 'CONTACT_READ_BUDGET');
+      },
+    } as unknown as OpenWAClient;
+    const repository = {
+      beginObservedSnapshot: vi.fn().mockResolvedValue({ generation: 6, leaseToken: 'lease-6' }),
+      deferObservedSnapshot: vi.fn().mockResolvedValue(undefined),
+      failObservedSnapshot: vi.fn(),
+    } as unknown as ContactRepository;
+
+    await expect(new ContactSyncService(repository, openwa).reconcileObservedContacts('session-1'))
+      .resolves.toBe(false);
+    expect(repository.deferObservedSnapshot).toHaveBeenCalledWith(
+      'session-1', 6, 'lease-6', notBefore, 'OPENWA_SAFETY_DEFERRED',
+    );
+    expect(repository.failObservedSnapshot).not.toHaveBeenCalled();
   });
 });
