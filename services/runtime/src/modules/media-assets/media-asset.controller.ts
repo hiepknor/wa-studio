@@ -22,6 +22,7 @@ import {
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiResponse,
   ApiSecurity,
   ApiTags,
@@ -109,6 +110,25 @@ export class MediaAssetController {
   @ApiNoContentResponse()
   async cancelUpload(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.media.cancelUpload(id);
+  }
+
+  @Get(':id/content')
+  @ApiOperation({ summary: 'Read verified Campaign image content' })
+  @ApiProduces('image/jpeg', 'image/png', 'image/webp')
+  @ApiOkResponse({ schema: { type: 'string', format: 'binary' } })
+  async readContent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    const asset = await this.media.readContent(id);
+    response.set({
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'Content-Length': String(asset.content.byteLength),
+      'Content-Type': asset.mimeType,
+      ETag: `"sha256-${asset.sha256}"`,
+      'X-Content-Type-Options': 'nosniff',
+    });
+    response.end(asset.content);
   }
 
   @Get(':id')

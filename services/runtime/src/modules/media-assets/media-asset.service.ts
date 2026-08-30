@@ -183,6 +183,14 @@ export class MediaAssetService {
     return asset!;
   }
 
+  async readContent(id: string): Promise<StoredMediaAsset> {
+    const asset = await this.repository.readAsset(id);
+    if (!asset) this.notFound('MEDIA_ASSET_NOT_FOUND', 'Media asset not found');
+    this.sessions.assertVisible(asset!.sessionId);
+    this.assertStoredDigest(asset!);
+    return asset!;
+  }
+
   async resolveForCampaign(id: string, sessionId: string, kind: MediaAssetKind) {
     const asset = await this.repository.findAsset(id);
     if (!asset) this.notFound('MEDIA_ASSET_NOT_FOUND', 'Media asset not found');
@@ -202,10 +210,7 @@ export class MediaAssetService {
     if (!asset || asset.sessionId !== sessionId) {
       this.notFound('MEDIA_ASSET_NOT_FOUND', 'Media asset not found');
     }
-    if (MediaAssetRepository.digest(asset!.content) !== asset!.sha256) {
-      throw new MediaAssetError(HttpStatus.UNPROCESSABLE_ENTITY, 'MEDIA_DIGEST_MISMATCH',
-        'Stored image no longer matches its verified digest');
-    }
+    this.assertStoredDigest(asset!);
     return asset!;
   }
 
@@ -263,6 +268,13 @@ export class MediaAssetService {
         && content.subarray(8, 12).toString('ascii') === 'WEBP';
     }
     return false;
+  }
+
+  private assertStoredDigest(asset: StoredMediaAsset): void {
+    if (MediaAssetRepository.digest(asset.content) !== asset.sha256) {
+      throw new MediaAssetError(HttpStatus.UNPROCESSABLE_ENTITY, 'MEDIA_DIGEST_MISMATCH',
+        'Stored image no longer matches its verified digest');
+    }
   }
 
   private notFound(code: 'MEDIA_UPLOAD_NOT_FOUND' | 'MEDIA_ASSET_NOT_FOUND', message: string): never {

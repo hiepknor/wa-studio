@@ -228,6 +228,15 @@ describe('campaign draft contract HTTP API', () => {
       method: 'POST',
     })).response.status).toBe(200);
 
+    const contentResponse = await fetch(
+      `${baseUrl}/media-assets/${completed.body.id as string}/content`,
+      { headers: auth },
+    );
+    expect(contentResponse.status).toBe(200);
+    expect(contentResponse.headers.get('content-type')).toBe('image/png');
+    expect(contentResponse.headers.get('cache-control')).toContain('immutable');
+    expect(Buffer.from(await contentResponse.arrayBuffer())).toEqual(media);
+
     const created = await createCampaign({
       text: undefined,
       content: {

@@ -761,6 +761,24 @@ export class RuntimeApi {
     return result.data;
   }
 
+  async getCampaignMediaContent(
+    assetId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<Blob> {
+    const result = await this.client.GET("/api/v1/media-assets/{id}/content", {
+      ...options,
+      params: { path: { id: assetId } },
+      parseAs: "blob",
+    });
+    if (!result.response.ok || !(result.data instanceof Blob)) {
+      throw new RuntimeRequestError(
+        `Could not load campaign image (HTTP ${result.response.status}).`,
+        { status: result.response.status },
+      );
+    }
+    return result.data;
+  }
+
   async createCampaignMediaUpload(
     input: RuntimeCreateMediaUpload,
     idempotencyKey: string,

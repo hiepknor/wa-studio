@@ -74,6 +74,22 @@ describe("managed Runtime native transport", () => {
       .rejects.toThrow("response exceeds 8 MiB");
   });
 
+  it("reconstructs binary Runtime responses returned as base64 across IPC", async () => {
+    invoke.mockResolvedValue({
+      status: 200,
+      headers: { "content-type": "image/jpeg" },
+      body: "/9j/",
+      bodyEncoding: "base64",
+    });
+
+    const response = await managedRuntimeFetch(
+      "http://127.0.0.1:34100/api/v1/media-assets/asset-1/content",
+    );
+
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([0xff, 0xd8, 0xff]);
+  });
+
   it("returns promptly when the webview caller aborts", async () => {
     invoke.mockReturnValue(new Promise(() => undefined));
     const controller = new AbortController();

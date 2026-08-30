@@ -6398,6 +6398,7 @@ name = "wa-studio"
 version = "0.2.0"
 dependencies = [
  "age",
+ "base64 0.22.1",
  "dirs",
  "fs2",
  "keyring",

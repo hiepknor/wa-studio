@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, time::Duration};
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use reqwest::{
     blocking::Client,
     header::{HeaderName, HeaderValue},
@@ -30,6 +31,7 @@ pub struct ManagedRuntimeResponse {
     status: u16,
     headers: BTreeMap<String, String>,
     body: String,
+    body_encoding: &'static str,
 }
 
 #[tauri::command]
@@ -102,8 +104,7 @@ fn request_inner(
     if bytes.len() > MAX_RESPONSE_BODY_BYTES {
         return Err("Managed Runtime response exceeds 8 MiB.".to_string());
     }
-    let body = String::from_utf8(bytes.to_vec())
-        .map_err(|_| "Managed Runtime returned a non-UTF-8 response.".to_string())?;
+    let (body, body_encoding) = encode_response_body(&bytes, content_type.as_deref())?;
     let mut headers = BTreeMap::new();
     if let Some(content_type) = content_type {
         headers.insert("content-type".to_string(), content_type);
@@ -112,7 +113,32 @@ fn request_inner(
         status,
         headers,
         body,
+        body_encoding,
     })
+}
+
+fn encode_response_body(
+    bytes: &[u8],
+    content_type: Option<&str>,
+) -> Result<(String, &'static str), String> {
+    if bytes.is_empty() || content_type.is_some_and(is_text_content_type) {
+        return String::from_utf8(bytes.to_vec())
+            .map(|body| (body, "utf8"))
+            .map_err(|_| "Managed Runtime returned invalid UTF-8 text.".to_string());
+    }
+    Ok((BASE64.encode(bytes), "base64"))
+}
+
+fn is_text_content_type(value: &str) -> bool {
+    let mime_type = value
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    mime_type.starts_with("text/")
+        || mime_type == "application/json"
+        || mime_type.ends_with("+json")
 }
 
 fn validated_method(value: &str) -> Result<Method, String> {
@@ -152,7 +178,7 @@ fn validated_target(base_url: &str, path: &str) -> Result<Url, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{validated_method, validated_target};
+    use super::{encode_response_body, validated_method, validated_target};
 
     #[test]
     fn restricts_native_transport_to_runtime_api_v1() {
@@ -170,5 +196,15 @@ mod tests {
         assert!(validated_target("http://127.0.0.1:34100", "//example.com/api/v1/groups").is_err());
         assert!(validated_target("https://runtime.example.com", "/api/v1/groups").is_err());
         assert!(validated_method("CONNECT").is_err());
+    }
+
+    #[test]
+    fn preserves_text_and_base64_encodes_binary_responses() {
+        let text = encode_response_body(br#"{"ok":true}"#, Some("application/json; charset=utf-8"))
+            .unwrap();
+        assert_eq!(text, (r#"{"ok":true}"#.to_string(), "utf8"));
+
+        let binary = encode_response_body(&[0xff, 0xd8, 0xff], Some("image/jpeg")).unwrap();
+        assert_eq!(binary, ("/9j/".to_string(), "base64"));
     }
 }

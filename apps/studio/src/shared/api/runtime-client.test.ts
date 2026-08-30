@@ -173,6 +173,25 @@ describe("RuntimeApi", () => {
     expect(transportSignal?.aborted).toBe(true);
   });
 
+  it("returns persisted campaign image bytes as a Blob", async () => {
+    const image = new Uint8Array([0xff, 0xd8, 0xff]);
+    const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(image, {
+      headers: { "content-type": "image/jpeg" },
+    }));
+    const api = new RuntimeApi(
+      { baseUrl: "http://127.0.0.1:3100", apiKey: "0123456789abcdef0123456789abcdef" },
+      runtimeFetch,
+    );
+
+    const blob = await api.getCampaignMediaContent("asset-id");
+
+    expect(blob.type).toBe("image/jpeg");
+    expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([...image]);
+    expect((runtimeFetch.mock.calls[0][0] as Request).url).toBe(
+      "http://127.0.0.1:3100/api/v1/media-assets/asset-id/content",
+    );
+  });
+
   it("omits new campaign search/filter parameters by default", async () => {
     const runtimeFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       data: [], meta: { total: 0, limit: 50, offset: 0 },

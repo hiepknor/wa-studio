@@ -20,6 +20,7 @@ const config = () => parseRuntimeConfig({
 describe('MediaAssetService live-read integrity', () => {
   const sessionId = '00000000-0000-4000-8000-000000000001';
   const image = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const assertVisible = vi.fn();
 
   const service = (content: Buffer, sha256: string) => new MediaAssetService({
     readAsset: vi.fn().mockResolvedValue({
@@ -33,7 +34,15 @@ describe('MediaAssetService live-read integrity', () => {
       content,
       createdAt: new Date(),
     }),
-  } as unknown as MediaAssetRepository, {} as SessionScopeService, config());
+  } as unknown as MediaAssetRepository, { assertVisible } as unknown as SessionScopeService, config());
+
+  it('returns verified bytes for a visible asset preview', async () => {
+    const sha256 = createHash('sha256').update(image).digest('hex');
+    await expect(service(image, sha256).readContent(
+      '22222222-2222-4222-8222-222222222222',
+    )).resolves.toMatchObject({ sha256, content: image });
+    expect(assertVisible).toHaveBeenCalledWith(sessionId);
+  });
 
   it('returns bytes only when they still match the verified digest', async () => {
     const sha256 = createHash('sha256').update(image).digest('hex');

@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 age = "0.12.1"
+base64 = "0.22"
 fs2 = "0.4.3"
 dirs = "6.0.0"
 keyring = "4.1.6"
