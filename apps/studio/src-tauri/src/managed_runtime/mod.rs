@@ -1493,13 +1493,16 @@ fn spawn_runtime(
             "Could not deliver Runtime desktop generation {generation} configuration: {error}"
         ));
     }
-    if let Err(error) = app
+    let terminated = match app
         .state::<ManagedRuntimeState>()
         .push_process(generation, child)
     {
-        envelope.remove();
-        return Err(error);
-    }
+        Ok(terminated) => terminated,
+        Err(error) => {
+            envelope.remove();
+            return Err(error);
+        }
+    };
 
     let app = app.clone();
     let restart_launch = launch.clone();
@@ -1515,6 +1518,7 @@ fn spawn_runtime(
                     );
                 }
                 CommandEvent::Terminated(payload) => {
+                    terminated.store(true, std::sync::atomic::Ordering::Release);
                     handle_runtime_termination(
                         &app,
                         generation,

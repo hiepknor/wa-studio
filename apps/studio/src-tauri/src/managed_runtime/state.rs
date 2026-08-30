@@ -9,7 +9,7 @@ use std::{
 };
 
 #[cfg(unix)]
-use std::thread;
+use std::{io, thread};
 
 use tauri_plugin_shell::process::CommandChild;
 
@@ -25,7 +25,12 @@ pub struct RuntimeTransportCredentials {
 }
 
 const AUTO_RESTART_WINDOW: Duration = Duration::from_secs(5 * 60);
+#[cfg(unix)]
 const RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(45);
+#[cfg(unix)]
+const RUNTIME_FORCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(unix)]
+const RUNTIME_PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const AUTO_RESTART_DELAYS: [Duration; 3] = [
     Duration::from_secs(1),
     Duration::from_secs(2),
@@ -34,7 +39,9 @@ const AUTO_RESTART_DELAYS: [Duration; 3] = [
 
 struct RuntimeProcess {
     generation: u64,
-    child: CommandChild,
+    pid: u32,
+    child: Option<CommandChild>,
+    terminated: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -249,7 +256,11 @@ impl ManagedRuntimeState {
             .map_err(|_| "Managed PostgreSQL state lock is poisoned.".to_string())
     }
 
-    pub fn push_process(&self, generation: u64, process: CommandChild) -> Result<(), String> {
+    pub fn push_process(
+        &self,
+        generation: u64,
+        process: CommandChild,
+    ) -> Result<Arc<AtomicBool>, String> {
         let mut slot = self
             .process
             .lock()
@@ -262,11 +273,14 @@ impl ManagedRuntimeState {
             let _ = process.kill();
             return Err("Managed Runtime process is already running.".to_string());
         }
+        let terminated = Arc::new(AtomicBool::new(false));
         *slot = Some(RuntimeProcess {
             generation,
-            child: process,
+            pid: process.pid(),
+            child: Some(process),
+            terminated: terminated.clone(),
         });
-        Ok(())
+        Ok(terminated)
     }
 
     pub fn process_generation_is_current(&self, generation: u64) -> Result<bool, String> {
@@ -558,16 +572,10 @@ impl ManagedRuntimeState {
             .shutdown_gate
             .lock()
             .map_err(|_| "Managed Runtime shutdown lock is poisoned.".to_string())?;
-        let runtime_result = self.stop_processes_inner();
-        let postgres_result = self.stop_postgres_inner();
-        match (runtime_result, postgres_result) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(runtime_error), Ok(())) => Err(runtime_error),
-            (Ok(()), Err(postgres_error)) => Err(postgres_error),
-            (Err(runtime_error), Err(postgres_error)) => Err(format!(
-                "{runtime_error} Managed PostgreSQL shutdown also failed: {postgres_error}"
-            )),
-        }
+        shutdown_in_dependency_order(
+            || self.stop_processes_inner(),
+            || self.stop_postgres_inner(),
+        )
     }
 
     pub fn stop_processes(&self) -> Result<(), String> {
@@ -585,25 +593,66 @@ impl ManagedRuntimeState {
             .lock()
             .map_err(|_| "Managed Runtime process lock is poisoned.".to_string())?
             .take();
+        let Some(mut process) = process else {
+            return Ok(());
+        };
 
         #[cfg(unix)]
-        if let Some(process) = process.as_ref() {
-            let pid = process.child.pid();
-            // SAFETY: `pid` comes from a live child created by the shell plugin.
-            let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-            let deadline = Instant::now() + RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT;
-            while Instant::now() < deadline {
-                if !process_is_running(pid) {
-                    break;
+        {
+            let pid = process.pid;
+            let terminated = process.terminated.clone();
+            let stop_result = stop_process_with_fallback(
+                poll_attempts(RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT),
+                poll_attempts(RUNTIME_FORCE_SHUTDOWN_TIMEOUT),
+                |signal| match signal {
+                    ProcessStopSignal::Terminate => send_process_signal(pid, signal),
+                    ProcessStopSignal::Kill => match process.child.take() {
+                        Some(child) => child
+                            .kill()
+                            .map_err(|error| format!("Could not signal child process: {error}")),
+                        None => send_process_signal(pid, signal),
+                    },
+                },
+                || !terminated.load(Ordering::Acquire),
+                || thread::sleep(RUNTIME_PROCESS_POLL_INTERVAL),
+            );
+            if let Err(error) = stop_result {
+                if terminated.load(Ordering::Acquire) {
+                    return Ok(());
                 }
-                thread::sleep(Duration::from_millis(100));
+                return Err(self.retain_process_after_stop_failure(process, error));
             }
+            Ok(())
         }
 
-        if let Some(process) = process {
-            let _ = process.child.kill();
+        #[cfg(not(unix))]
+        {
+            process
+                .child
+                .take()
+                .ok_or_else(|| "Managed Runtime process handle is unavailable.".to_string())?
+                .kill()
+                .map_err(|error| format!("Could not force stop managed Runtime: {error}"))
         }
-        Ok(())
+    }
+
+    fn retain_process_after_stop_failure(
+        &self,
+        process: RuntimeProcess,
+        stop_error: String,
+    ) -> String {
+        match self.process.lock() {
+            Ok(mut slot) if slot.is_none() => {
+                *slot = Some(process);
+                stop_error
+            }
+            Ok(_) => format!(
+                "{stop_error} Managed Runtime process ownership changed before its handle could be restored."
+            ),
+            Err(_) => format!(
+                "{stop_error} Managed Runtime process handle could not be restored because its state lock is poisoned."
+            ),
+        }
     }
 }
 
@@ -633,20 +682,175 @@ impl Drop for ManagedRuntimeMaintenanceGuard<'_> {
     }
 }
 
+fn shutdown_in_dependency_order(
+    stop_runtime: impl FnOnce() -> Result<(), String>,
+    stop_postgres: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    stop_runtime()?;
+    stop_postgres()
+}
+
 #[cfg(unix)]
-fn process_is_running(pid: u32) -> bool {
-    // SAFETY: signal 0 performs an existence/permission check and does not mutate the process.
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProcessStopSignal {
+    Terminate,
+    Kill,
+}
+
+#[cfg(unix)]
+fn poll_attempts(timeout: Duration) -> usize {
+    (timeout.as_millis() / RUNTIME_PROCESS_POLL_INTERVAL.as_millis()).max(1) as usize
+}
+
+#[cfg(unix)]
+fn send_process_signal(pid: u32, signal: ProcessStopSignal) -> Result<(), String> {
+    let signal = match signal {
+        ProcessStopSignal::Terminate => libc::SIGTERM,
+        ProcessStopSignal::Kill => libc::SIGKILL,
+    };
+    // SAFETY: `pid` comes from a child created by the shell plugin and the signal is fixed above.
+    if unsafe { libc::kill(pid as i32, signal) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error().to_string())
+    }
+}
+
+#[cfg(unix)]
+fn stop_process_with_fallback(
+    graceful_attempts: usize,
+    force_attempts: usize,
+    mut send_signal: impl FnMut(ProcessStopSignal) -> Result<(), String>,
+    mut is_running: impl FnMut() -> bool,
+    mut wait: impl FnMut(),
+) -> Result<(), String> {
+    if !is_running() {
+        return Ok(());
+    }
+    if let Err(error) = send_signal(ProcessStopSignal::Terminate) {
+        if is_running() {
+            return Err(format!(
+                "Could not request managed Runtime shutdown: {error}"
+            ));
+        }
+        return Ok(());
+    }
+    if wait_for_process_exit(graceful_attempts, &mut is_running, &mut wait) {
+        return Ok(());
+    }
+    if let Err(error) = send_signal(ProcessStopSignal::Kill) {
+        if is_running() {
+            return Err(format!("Could not force stop managed Runtime: {error}"));
+        }
+        return Ok(());
+    }
+    if wait_for_process_exit(force_attempts, &mut is_running, &mut wait) {
+        Ok(())
+    } else {
+        Err("Managed Runtime remained active after forced shutdown.".to_string())
+    }
+}
+
+#[cfg(unix)]
+fn wait_for_process_exit(
+    attempts: usize,
+    is_running: &mut impl FnMut() -> bool,
+    wait: &mut impl FnMut(),
+) -> bool {
+    for _ in 0..attempts {
+        if !is_running() {
+            return true;
+        }
+        wait();
+    }
+    !is_running()
 }
 
 #[cfg(test)]
 mod tests {
     use std::{
+        cell::RefCell,
         sync::atomic::Ordering,
         time::{Duration, Instant},
     };
 
-    use super::{ManagedRuntimeState, RestartBudget};
+    use super::{shutdown_in_dependency_order, ManagedRuntimeState, RestartBudget};
+
+    #[cfg(unix)]
+    use super::{stop_process_with_fallback, ProcessStopSignal};
+
+    #[test]
+    fn keeps_postgres_running_when_runtime_shutdown_fails() {
+        let mut postgres_stopped = false;
+
+        let result = shutdown_in_dependency_order(
+            || Err("Runtime is still active.".to_string()),
+            || {
+                postgres_stopped = true;
+                Ok(())
+            },
+        );
+
+        assert_eq!(result.unwrap_err(), "Runtime is still active.");
+        assert!(!postgres_stopped);
+    }
+
+    #[test]
+    fn stops_postgres_only_after_runtime_shutdown_succeeds() {
+        let order = RefCell::new(Vec::new());
+
+        shutdown_in_dependency_order(
+            || {
+                order.borrow_mut().push("runtime");
+                Ok(())
+            },
+            || {
+                order.borrow_mut().push("postgres");
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(*order.borrow(), ["runtime", "postgres"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn escalates_an_unresponsive_runtime_to_forced_shutdown() {
+        let mut signals = Vec::new();
+        let mut checks = 0;
+
+        stop_process_with_fallback(
+            2,
+            2,
+            |signal| {
+                signals.push(signal);
+                Ok(())
+            },
+            || {
+                checks += 1;
+                checks < 5
+            },
+            || {},
+        )
+        .unwrap();
+
+        assert_eq!(
+            signals,
+            [ProcessStopSignal::Terminate, ProcessStopSignal::Kill]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fails_closed_when_forced_shutdown_does_not_stop_runtime() {
+        let result = stop_process_with_fallback(1, 1, |_| Ok(()), || true, || {});
+
+        assert_eq!(
+            result.unwrap_err(),
+            "Managed Runtime remained active after forced shutdown."
+        );
+    }
 
     #[test]
     fn serializes_destructive_maintenance_operations() {
