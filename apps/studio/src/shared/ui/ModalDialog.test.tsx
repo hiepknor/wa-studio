@@ -147,4 +147,17 @@ describe("ModalDialog", () => {
     await user.click(screen.getByRole("button", { name: "Open workflow" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Body action" })).toHaveFocus());
   });
+
+  it("does not steal focus already moved inside the dialog", async () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Open workflow" }));
+    const bodyAction = screen.getByRole("button", { name: "Body action" });
+    bodyAction.focus();
+
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
+
+    expect(bodyAction).toHaveFocus();
+  });
 });

@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { TablePagination } from "@/shared/ui/TablePagination";
 import {
   GroupSelectionTable,
   type GroupSelectionTableProps,
+  type GroupSelectionTableView,
 } from "./GroupSelectionTable";
 import {
   GroupSelectionToolbar,
@@ -24,7 +25,7 @@ interface GroupSelectionPanelProps {
     total: number;
   };
   summary?: ReactNode;
-  table: GroupSelectionTableProps;
+  table: Omit<GroupSelectionTableProps, "onViewChange" | "view">;
   title: string;
   titleId: string;
   toolbar: GroupSelectionToolbarProps;
@@ -44,6 +45,7 @@ export function GroupSelectionPanel({
   toolbar,
 }: GroupSelectionPanelProps) {
   const Heading = headingLevel;
+  const [tableView, setTableView] = useState<GroupSelectionTableView>("results");
   return (
     <section aria-labelledby={titleId} className="group-selection-section">
       <div className="group-selection-heading">
@@ -54,9 +56,9 @@ export function GroupSelectionPanel({
       <div className="group-selection-data">
         <GroupSelectionToolbar {...toolbar} />
         {afterToolbar}
-        <GroupSelectionTable {...table} />
-        {pageNote && <p className="group-selection-page-note">{pageNote}</p>}
-        <TablePagination {...pagination} />
+        <GroupSelectionTable {...table} onViewChange={setTableView} view={tableView} />
+        {tableView === "results" && pageNote && <p className="group-selection-page-note">{pageNote}</p>}
+        {tableView === "results" && <TablePagination {...pagination} />}
       </div>
     </section>
   );

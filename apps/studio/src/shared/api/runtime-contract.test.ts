@@ -14,6 +14,7 @@ type GroupListMembershipDto = components["schemas"]["GroupListMembershipDto"];
 type ContractGroupListDto = components["schemas"]["SavedGroupListDto"];
 type ReplaceGroupListGroupsDto = components["schemas"]["ReplaceGroupListGroupsDto"];
 type CampaignTargetListDto = components["schemas"]["CampaignTargetListDto"];
+type CampaignTargetDto = components["schemas"]["CampaignTargetDto"];
 type ApplyGroupListTargetsDto = components["schemas"]["ApplyGroupListTargetsDto"];
 type CreateCampaignRunDto = components["schemas"]["CreateCampaignRunDto"];
 type CampaignRunDto = components["schemas"]["CampaignRunDto"];
@@ -51,7 +52,7 @@ describe("authoritative WA Runtime contract", () => {
     );
     const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(checksum)
-      .toBe("2cb6c00b805d48723d542c3448acc12e26a77080a4cccb6314c5cf553fffac2c");
+      .toBe("8dd5d61f04c9f29f543607c62f528e2fbc61c32a28654642b5973c8a435f64f1");
   });
 
   it("requires operation keys for replay-safe Runtime mutations", () => {
@@ -157,11 +158,13 @@ describe("authoritative WA Runtime contract", () => {
       appliedAt: "2026-08-15T00:00:00.000Z",
     };
     const targets = { source: null } as CampaignTargetListDto;
+    const target = { participantsCount: 42 } as CampaignTargetDto;
     expect(list.membershipRevision).toBe(4);
     expect(replacement.expectedMembershipRevision).toBe(4);
     expect(apply.expectedTargetsRevision).toBe(8);
     expect(source.groupListNameSnapshot).toBe("Launch groups");
     expect(targets.source).toBeNull();
+    expect(target.participantsCount).toBe(42);
   });
 
   it("generates launch revision preconditions and immutable run target provenance", () => {

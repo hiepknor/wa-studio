@@ -8,6 +8,7 @@ const target = (status: 'ALLOWED' | 'DENIED' | 'UNKNOWN'): CampaignTargetDto => 
   groupId: `${status.toLowerCase()}@g.us`,
   groupName: status,
   enabled: true,
+  participantsCount: null,
   sendCapability: {
     status,
     reason: status === 'ALLOWED' ? 'SEND_ALLOWED' : 'TEST_REASON',

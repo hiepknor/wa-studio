@@ -2,6 +2,7 @@ import type { RuntimeGroup } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { Checkbox } from "@/shared/ui/Checkbox";
+import { dataTablePageSelectionState } from "@/shared/ui/data-table-selection";
 import { DateTime } from "@/shared/ui/DateTime";
 import { GroupCapabilityStatus } from "./GroupCapabilityStatus";
 
@@ -45,9 +46,10 @@ export function GroupsTable({
   selectedIds,
   selectionDisabled = false,
 }: GroupsTableProps) {
-  const allPageSelected = pageIds.length > 0
-    && pageIds.every((id) => selectedIds.has(id));
-  const somePageSelected = pageIds.some((id) => selectedIds.has(id));
+  const { allPageSelected, somePageSelected } = dataTablePageSelectionState(
+    pageIds,
+    selectedIds,
+  );
 
   function renderRow(row: GroupsTableRow) {
     const selected = selectedIds.has(row.id);
@@ -57,7 +59,7 @@ export function GroupsTable({
         data-selected={selected || undefined}
         key={row.id}
       >
-        <td className="groups-selection-cell">
+        <td className="data-selection-cell">
           <Checkbox
             aria-label={`Select ${row.name}`}
             checked={selected}
@@ -82,12 +84,10 @@ export function GroupsTable({
         <td className="data-cell-action">
           <Button
             aria-label={`View ${row.name}`}
+            icon="chevron-right"
             onClick={(event) => onView(row, event.currentTarget)}
-            size="sm"
             variant="ghost"
-          >
-            View
-          </Button>
+          />
         </td>
       </tr>
     );
@@ -119,7 +119,7 @@ export function GroupsTable({
         </colgroup>
         <thead>
           <tr>
-            <th className="groups-selection-cell" scope="col">
+            <th className="data-selection-cell" scope="col">
               <Checkbox
                 aria-checked={somePageSelected && !allPageSelected ? "mixed" : allPageSelected}
                 aria-label="Select all groups on this page"
@@ -135,7 +135,7 @@ export function GroupsTable({
             <th className="data-column-number" scope="col">Participants</th>
             <th scope="col">Send capability</th>
             <th className="data-column-time" scope="col">Record synced</th>
-            <th aria-label="Actions" scope="col" />
+            <th aria-label="Actions" className="data-column-actions" scope="col" />
           </tr>
         </thead>
         {empty ? (

@@ -45,7 +45,7 @@ describe("group selection snapshots", () => {
       });
   });
 
-  it("keeps current-page server order stable and only pins retained groups outside the page", () => {
+  it("keeps current-page server order stable and identifies retained groups outside the page", () => {
     const order = groupSelectionRowOrder(
       ["selected-on-page@g.us", "selected-outside@g.us", "selected-on-page@g.us"],
       ["first@g.us", "selected-on-page@g.us", "last@g.us"],
@@ -57,6 +57,6 @@ describe("group selection snapshots", () => {
       "selected-on-page@g.us",
       "last@g.us",
     ]);
-    expect(order.pinnedIds).toEqual(new Set(["selected-outside@g.us"]));
+    expect(order.outsidePageIds).toEqual(new Set(["selected-outside@g.us"]));
   });
 });

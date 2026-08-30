@@ -1202,6 +1202,7 @@ export interface components {
             groupId: string;
             groupName: string;
             enabled: boolean;
+            participantsCount: number | null;
             sendCapability: components["schemas"]["GroupSendCapabilityDto"];
         };
         CampaignTargetSourceDto: {

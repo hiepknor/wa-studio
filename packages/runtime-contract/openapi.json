@@ -5692,6 +5692,10 @@
           "enabled": {
             "type": "boolean"
           },
+          "participantsCount": {
+            "type": "number",
+            "nullable": true
+          },
           "sendCapability": {
             "$ref": "#/components/schemas/GroupSendCapabilityDto"
           }
@@ -5700,6 +5704,7 @@
           "groupId",
           "groupName",
           "enabled",
+          "participantsCount",
           "sendCapability"
         ]
       },

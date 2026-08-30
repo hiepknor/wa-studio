@@ -56,6 +56,7 @@ interface TargetRow {
   group_id: string;
   group_name: string;
   enabled: boolean;
+  participants_count: number | null;
   send_capability: GroupSendCapabilityStatus;
   send_capability_reason: string;
   capability_checked_at: Date | null;
@@ -91,6 +92,7 @@ const mapTarget = (row: TargetRow): CampaignTargetDto => ({
   groupId: row.group_id,
   groupName: row.group_name,
   enabled: row.enabled,
+  participantsCount: row.participants_count,
   sendCapability: {
     status: row.send_capability,
     reason: row.send_capability_reason,
@@ -571,7 +573,7 @@ export class CampaignRepository {
 
   private async listTargetsWithClient(client: PoolClient, campaignId: string): Promise<CampaignTargetDto[]> {
     const result = await client.query<TargetRow>(
-      `SELECT ct.group_id, g.name AS group_name, ct.enabled, g.send_capability,
+      `SELECT ct.group_id, g.name AS group_name, ct.enabled, g.participants_count, g.send_capability,
          g.send_capability_reason, g.capability_checked_at, g.capability_invalidated_at,
          g.capability_revision
        FROM campaign_targets ct

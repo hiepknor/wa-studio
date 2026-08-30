@@ -750,9 +750,9 @@ describe('campaign draft contract HTTP API', () => {
     const id = campaign.body.id as string;
     await pool.query(
       `INSERT INTO gateway_groups
-         (session_id, id, name, is_active, send_capability, send_capability_reason)
-       VALUES ($1, 'denied@g.us', 'Zulu denied', false, 'DENIED', 'GROUP_READ_ONLY'),
-              ($1, 'unknown@g.us', 'Alpha unknown', true, 'UNKNOWN', 'METADATA_INCOMPLETE')`,
+         (session_id, id, name, participants_count, is_active, send_capability, send_capability_reason)
+       VALUES ($1, 'denied@g.us', 'Zulu denied', 50, false, 'DENIED', 'GROUP_READ_ONLY'),
+              ($1, 'unknown@g.us', 'Alpha unknown', NULL, true, 'UNKNOWN', 'METADATA_INCOMPLETE')`,
       [INTEGRATION_SESSION_ID],
     );
     const replaced = await jsonRequest(`/campaigns/${id}/targets`, {
@@ -763,8 +763,13 @@ describe('campaign draft contract HTTP API', () => {
       'Alpha unknown', 'Integration group', 'Zulu denied',
     ]);
     expect(replaced.body.data.every((target: Record<string, unknown>) =>
-      'groupId' in target && 'groupName' in target && 'enabled' in target && 'sendCapability' in target,
+      'groupId' in target && 'groupName' in target && 'enabled' in target
+        && 'participantsCount' in target && 'sendCapability' in target,
     )).toBe(true);
+    expect(replaced.body.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ groupId: 'denied@g.us', participantsCount: 50 }),
+      expect.objectContaining({ groupId: 'unknown@g.us', participantsCount: null }),
+    ]));
 
     const before = await pool.query<{ group_id: string }>(
       'SELECT group_id FROM campaign_targets WHERE campaign_id = $1 ORDER BY group_id', [id],

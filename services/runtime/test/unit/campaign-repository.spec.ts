@@ -24,6 +24,7 @@ describe('CampaignRepository target snapshots', () => {
       group_id: 'group@g.us',
       group_name: 'Group',
       enabled: true,
+      participants_count: 42,
       send_capability: 'ALLOWED',
       send_capability_reason: 'SEND_ALLOWED',
       capability_checked_at: new Date(),
@@ -47,7 +48,7 @@ describe('CampaignRepository target snapshots', () => {
     expect(query.mock.calls[0]?.[0]).toBe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
     expect(snapshot).toMatchObject({
       campaign: { targetsRevision: 7 },
-      targets: [{ groupId: 'group@g.us' }],
+      targets: [{ groupId: 'group@g.us', participantsCount: 42 }],
       source: null,
     });
   });

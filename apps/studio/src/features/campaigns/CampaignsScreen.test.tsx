@@ -41,6 +41,7 @@ const campaign: RuntimeCampaign = {
 
 const deniedTarget: RuntimeCampaignTarget = {
   groupId: "denied@g.us", groupName: "Denied room", enabled: false,
+  participantsCount: 27,
   sendCapability: { status: "DENIED", reason: "not_admin", checkedAt: null, invalidatedAt: null, revision: 2 },
 };
 
@@ -179,10 +180,9 @@ describe("CampaignsScreen", () => {
     expect(await screen.findByText(campaign.id)).toBeInTheDocument();
     await openCampaign(user);
 
-    expect(screen.getByRole("region", { name: "Persisted details" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Content & schedule" })).toBeInTheDocument();
     expect(screen.getByText("Campaign r3 · All changes saved")).toBeInTheDocument();
     expect(screen.getByText("Saved")).toBeInTheDocument();
-    expect(screen.getByText("7 chars")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Campaign name" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Message text" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset to saved" })).toBeDisabled();
@@ -195,7 +195,8 @@ describe("CampaignsScreen", () => {
     expect(screen.getByText("Campaign r3 · All changes saved")).toBeInTheDocument();
     const schedule = screen.getByRole("radiogroup", { name: "Schedule" });
     expect(screen.getByRole("heading", { name: "Delivery timing" })).toBeInTheDocument();
-    expect(screen.getByText("Runtime managed")).toBeInTheDocument();
+    expect(screen.getByText("Choose when Runtime may begin this campaign.")).toBeInTheDocument();
+    expect(screen.queryByText("Runtime managed")).not.toBeInTheDocument();
     await user.click(within(schedule).getByRole("radio", { name: "Once" }));
     expect(screen.getByLabelText("Run at")).toBeInTheDocument();
     await user.click(within(schedule).getByRole("radio", { name: "Immediate" }));
@@ -208,7 +209,7 @@ describe("CampaignsScreen", () => {
     const dialogBody = workspace.querySelector<HTMLElement>(".modal-dialog-body");
     expect(dialogBody).not.toBeNull();
     dialogBody!.scrollTop = 120;
-    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await user.click(screen.getByRole("tab", { name: "Targets" }));
     expect(dialogBody).toHaveProperty("scrollTop", 0);
     expect(screen.getByText("1 saved target · No unsaved changes")).toBeInTheDocument();
     const targetOverview = screen.getByRole("region", { name: "Custom selection" });
@@ -380,7 +381,7 @@ describe("CampaignsScreen", () => {
       new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     ], mediaContent.filename, { type: mediaContent.mimeType });
     await user.upload(screen.getByLabelText("Choose an image"), file);
-    expect(await screen.findAllByText(mediaContent.filename)).toHaveLength(2);
+    expect(await screen.findByText(mediaContent.filename)).toBeVisible();
     await user.type(screen.getByRole("textbox", { name: "Caption · Optional" }), mediaContent.caption);
     await user.click(screen.getByRole("button", { name: "Create draft" }));
     await screen.findByText("Campaign draft created");
@@ -527,23 +528,29 @@ describe("CampaignsScreen", () => {
       .mockRejectedValueOnce(new RuntimeRequestError("opaque", { code: "CAMPAIGN_TARGET_SESSION_MISMATCH", status: 422 }))
       .mockResolvedValueOnce({ data: [{
         groupId: unknownGroup.id, groupName: "Canonical unknown", enabled: false,
+        participantsCount: unknownGroup.participantsCount,
         sendCapability: unknownGroup.sendCapability,
       }], targetsRevision: 5, source: null })
       .mockResolvedValueOnce({ data: [], targetsRevision: 6, source: null });
     renderCampaigns({ replaceCampaignTargets });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await user.click(screen.getByRole("tab", { name: "Targets" }));
+    expect(await screen.findByText("1 outside current view")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show selected" }));
     await screen.findByRole("checkbox", { name: "Select Denied room" });
     expect(screen.getByRole("columnheader", { name: "Participants" })).toBeInTheDocument();
     const deniedRow = screen.getByRole("checkbox", { name: "Select Denied room" }).closest("tr");
     expect(deniedRow).not.toBeNull();
-    expect(within(deniedRow!).getByTitle("Participant count is unavailable in the saved target snapshot.")).toHaveTextContent("—");
+    expect(within(deniedRow!).getByText("27")).toBeInTheDocument();
+    expect(within(deniedRow!).queryByTitle("Participant count is unavailable in the saved target snapshot.")).not.toBeInTheDocument();
     expect(screen.getAllByText("Inactive").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "Show results" }));
     expect(screen.getByLabelText("Unknown, current")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "Select Unknown room" }));
     await user.click(screen.getByRole("button", { name: "Save target set" }));
     expect(await screen.findByText("Every target must belong to the campaign session.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show selected" }));
     expect(screen.getByText("Denied room")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Select Denied room" })).toBeChecked();
 
@@ -553,7 +560,9 @@ describe("CampaignsScreen", () => {
 
     await user.click(screen.getByRole("checkbox", { name: "Select Canonical unknown" }));
     await user.click(screen.getByRole("button", { name: "Save target set" }));
-    await waitFor(() => expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).not.toBeChecked());
+    await waitFor(() => expect(screen.getByText("No groups selected.")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Show results" }));
+    expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).not.toBeChecked();
     expect(replaceCampaignTargets).toHaveBeenLastCalledWith(campaign.id, [], 5);
   });
 
@@ -562,29 +571,40 @@ describe("CampaignsScreen", () => {
     renderCampaigns();
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: /Targets/ }));
-    const unknownCheckbox = await screen.findByRole("checkbox", { name: "Select Unknown room" });
+    await user.click(screen.getByRole("tab", { name: "Targets" }));
+    await screen.findByRole("checkbox", { name: "Select Unknown room" });
     const targetTable = screen.getByRole("table", { name: "Groups available to the campaign target selection" });
     expect(within(targetTable).getByRole("columnheader", { name: "Participants" })).toBeInTheDocument();
     expect(within(targetTable).getByText("3")).toBeInTheDocument();
     expect(screen.queryByText("Saved targets")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /All groups|Selection/ })).not.toBeInTheDocument();
-    expect(within(targetTable).getByRole("rowheader", { name: "Saved or selected outside current results 1" })).toBeInTheDocument();
-    expect(within(targetTable).getByRole("rowheader", { name: "Current results 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("rowheader")).not.toBeInTheDocument();
+    expect(screen.getByText("1 outside current view")).toBeInTheDocument();
+    expect(screen.queryByText("Denied room")).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "Show selected" }));
+    const deniedReviewCheckbox = screen.getByRole("checkbox", { name: "Select Denied room" });
+    expect(deniedReviewCheckbox).toBeChecked();
+    await user.click(deniedReviewCheckbox);
+    expect(deniedReviewCheckbox).not.toBeChecked();
+    expect(screen.getByText("Pending removal")).toBeInTheDocument();
+    expect(screen.getByText("+0 added · −1 pending removal")).toBeInTheDocument();
+    await user.click(deniedReviewCheckbox);
+    await user.click(screen.getByRole("button", { name: "Show results" }));
+
+    const currentUnknownCheckbox = screen.getByRole("checkbox", { name: "Select Unknown room" });
     const selectAll = screen.getByRole("checkbox", { name: "Select all groups on this page" });
     expect(selectAll).not.toBeChecked();
     expect(selectAll).toHaveProperty("indeterminate", false);
     await user.click(selectAll);
-    expect(unknownCheckbox).toBeChecked();
-    const deniedCheckbox = screen.getByRole("checkbox", { name: "Select Denied room" });
-    expect(deniedCheckbox).toBeChecked();
+    expect(currentUnknownCheckbox).toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "Select Denied room" })).not.toBeInTheDocument();
     await user.click(selectAll);
-    expect(unknownCheckbox).not.toBeChecked();
-    expect(deniedCheckbox).toBeChecked();
-    await user.click(unknownCheckbox);
+    expect(currentUnknownCheckbox).not.toBeChecked();
+    await user.click(currentUnknownCheckbox);
 
     expect(screen.getByText("1 saved → 2 staged · +1 / −0")).toBeInTheDocument();
+    expect(screen.getByText("1 outside current view")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show selected" }));
     expect(screen.getByText("Denied room")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Select Denied room" })).toBeChecked();
     expect(screen.getAllByRole("table", { name: "Groups available to the campaign target selection" })).toHaveLength(1);
@@ -599,7 +619,7 @@ describe("CampaignsScreen", () => {
     renderCampaigns({ listGroups });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await user.click(screen.getByRole("tab", { name: "Targets" }));
 
     const unknownCheckbox = await screen.findByRole("checkbox", { name: "Select Unknown room" });
     await user.click(unknownCheckbox);
@@ -612,13 +632,21 @@ describe("CampaignsScreen", () => {
       sessionId: session.id, limit: 20, offset: 20,
     }, READ_OPTIONS);
     expect(await screen.findByText("Second page group")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Select Unknown room" })).not.toBeInTheDocument();
+    expect(screen.getByText("2 outside current view")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show selected" }));
     expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Show results" }));
     const selectPage = screen.getByRole("checkbox", { name: "Select all groups on this page" });
     expect(selectPage).not.toBeChecked();
     await user.click(selectPage);
     expect(screen.getByRole("checkbox", { name: "Select Second page group" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "Select Unknown room" })).not.toBeInTheDocument();
+    expect(screen.getByText("2 outside current view")).toBeInTheDocument();
     expect(within(targetSection!).getByText("Page 2 of 2")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show selected" }));
+    expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select Second page group" })).toBeChecked();
   });
 
   it("uses the shared filter interaction for capability, freshness, participants, and inactive groups", async () => {
@@ -629,7 +657,7 @@ describe("CampaignsScreen", () => {
     renderCampaigns({ listGroups });
     await connect(user);
     await openCampaign(user);
-    await user.click(screen.getByRole("tab", { name: /Targets/ }));
+    await user.click(screen.getByRole("tab", { name: "Targets" }));
     await waitFor(() => expect(listGroups).toHaveBeenCalledTimes(1));
 
     const targetSection = screen.getByRole("heading", { name: "Target groups" }).closest("section");
@@ -662,7 +690,8 @@ describe("CampaignsScreen", () => {
     expect(within(panel).queryByRole("button", { name: "Apply range" })).not.toBeInTheDocument();
     expect(within(targetSection!).getByRole("button", { name: "Filters · 4" })).toBeInTheDocument();
     expect(within(panel).getByRole("button", { name: "Remove ≥ 50 participants filter" })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "Select Denied room" })).toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "Select Denied room" })).not.toBeInTheDocument();
+    expect(screen.getByText("1 outside current view")).toBeInTheDocument();
 
     await user.click(within(panel).getByRole("button", { name: "Clear all" }));
     await waitFor(() => expect(listGroups).toHaveBeenLastCalledWith({
@@ -1393,7 +1422,7 @@ describe("CampaignsScreen", () => {
       appliedAt: "2026-08-15T01:00:00.000Z",
     };
     const applyGroupListToCampaignTargets = vi.fn().mockResolvedValue({
-      data: [deniedTarget, { groupId: unknownGroup.id, groupName: unknownGroup.name, enabled: true, sendCapability: unknownGroup.sendCapability }],
+      data: [deniedTarget, { groupId: unknownGroup.id, groupName: unknownGroup.name, enabled: true, participantsCount: unknownGroup.participantsCount, sendCapability: unknownGroup.sendCapability }],
       targetsRevision: 5,
       source,
     });
@@ -1634,7 +1663,7 @@ describe("CampaignsScreen", () => {
       appliedAt: "2026-08-15T01:00:00.000Z",
     };
     const replaceCampaignTargets = vi.fn().mockResolvedValue({
-      data: [deniedTarget, { groupId: unknownGroup.id, groupName: unknownGroup.name, enabled: true, sendCapability: unknownGroup.sendCapability }],
+      data: [deniedTarget, { groupId: unknownGroup.id, groupName: unknownGroup.name, enabled: true, participantsCount: unknownGroup.participantsCount, sendCapability: unknownGroup.sendCapability }],
       targetsRevision: 5,
       source: null,
     });

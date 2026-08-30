@@ -17,6 +17,7 @@ import {
   unknownMutationOutcomeMessage,
 } from "@/shared/api/runtime-mutation";
 import { userFacingErrorMessage } from "@/shared/errors/error-message";
+import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
@@ -30,11 +31,8 @@ import { TablePagination } from "@/shared/ui/TablePagination";
 import { useToast } from "@/shared/ui/Toast";
 import {
   WorkspaceDrawer,
-  WorkspaceDisclosurePanel,
   WorkspaceEmptyState,
-  WorkspacePanel,
   WorkspaceSectionHeader,
-  WorkspaceSummaryCard,
 } from "@/shared/ui/WorkspaceDrawer";
 import { useSessionSync } from "@/shared/hooks/useSessionSync";
 import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
@@ -1607,9 +1605,10 @@ export function GroupsScreen() {
         />
 
         <WorkspaceDrawer
+          contentKey={`${selectedGroup?.id ?? "none"}:${inspectorTab}`}
           description={
             detail
-              ? `${detail.isActive ? "Active" : "Inactive"} · ${detail.participantsCount ?? syncedMemberTotal ?? "Unknown"} participants`
+              ? `${detail.participantsCount ?? syncedMemberTotal ?? "Unknown"} participants`
               : undefined
           }
           eyebrow="Group inspector"
@@ -1622,10 +1621,6 @@ export function GroupsScreen() {
               tabs={[
                 { id: "overview", label: "Overview" },
                 {
-                  meta:
-                    syncedMemberTotal ??
-                    detail.participantsCount ??
-                    undefined,
                   id: "members",
                   label: "Members",
                   warning:
@@ -1658,33 +1653,43 @@ export function GroupsScreen() {
               {inspectorTab === "overview" && (
                 <div
                   aria-labelledby="group-inspector-overview-tab"
-                  className="groups-tab-panel stack stack-lg"
+                  className="groups-inspector-overview groups-tab-panel"
                   id="group-inspector-overview-panel"
                   role="tabpanel"
                 >
-                  <WorkspaceSectionHeader
-                    description="Review synchronized identity, messaging capability, and group configuration."
-                    kicker="Overview"
-                    title="Group profile"
-                  />
-                  <WorkspaceSummaryCard
-                    className="groups-identity-card"
-                    description={detail.description || "No group description."}
-                    label="Synchronized group"
-                    metrics={[
-                      { label: "Participants", value: detail.participantsCount ?? syncedMemberTotal ?? "—" },
-                      { label: "Access", value: accessLabel(detail.isAdmin) },
-                      {
-                        label: "Synced",
-                        value: <DateTime value={detail.syncedAt} />,
-                      },
-                    ]}
-                    status={<Badge tone={detail.isActive ? "success" : "neutral"} variant="status">{detail.isActive ? "Active" : "Inactive"}</Badge>}
-                    title={detail.name}
-                    titleId="group-identity-title"
+                  <section
+                    aria-labelledby="group-identity-title"
+                    className="groups-inspector-section groups-profile"
                   >
-                    <footer className="workspace-summary-footer groups-identity-footer">
-                      <span>Group ID · <code>{detail.id}</code></span>
+                    <header className="groups-inspector-section-header">
+                      <div>
+                        <span>Profile</span>
+                        <h3 id="group-identity-title">Group details</h3>
+                        <p>{detail.description || "No group description."}</p>
+                      </div>
+                      <Badge tone={detail.isActive ? "success" : "neutral"} variant="status">
+                        {detail.isActive ? "Active" : "Inactive"}
+                      </Badge>
+                    </header>
+                    <dl className="groups-inspector-metrics">
+                      <div>
+                        <dt>Participants</dt>
+                        <dd>{detail.participantsCount ?? syncedMemberTotal ?? "—"}</dd>
+                      </div>
+                      <div>
+                        <dt>Session access</dt>
+                        <dd>{accessLabel(detail.isAdmin)}</dd>
+                      </div>
+                      <div>
+                        <dt>Record synced</dt>
+                        <dd><DateTime value={detail.syncedAt} /></dd>
+                      </div>
+                    </dl>
+                    <div className="groups-identity-row">
+                      <div>
+                        <span>Group ID</span>
+                        <code title={detail.id}>{detail.id}</code>
+                      </div>
                       <Button
                         aria-label={
                           copyState === "copied"
@@ -1698,27 +1703,34 @@ export function GroupsScreen() {
                       >
                         {copyState === "copied" ? "Copied" : "Copy"}
                       </Button>
-                    </footer>
+                    </div>
                     {copyState === "failed" && (
                       <span className="groups-copy-error" role="alert">
                         Could not copy the group ID.
                       </span>
                     )}
-                  </WorkspaceSummaryCard>
+                  </section>
 
-                  <WorkspacePanel
-                    action={<GroupCapabilityStatus
-                      capability={detail.sendCapability}
-                      includeFreshness={false}
-                    />}
-                    className="groups-capability"
-                    description={<span className="groups-capability-description"><span>{capabilityReasonCopy(detail.sendCapability.reason)}</span><code>{detail.sendCapability.reason}</code></span>}
-                    title="Send readiness"
-                    titleId="group-capability-title"
-                    tone="accent"
+                  <section
+                    aria-labelledby="group-capability-title"
+                    className="groups-capability groups-inspector-section"
                   >
+                    <header className="groups-inspector-section-header">
+                      <div>
+                        <span>Messaging</span>
+                        <h3 id="group-capability-title">Send readiness</h3>
+                        <p className="groups-capability-description">
+                          <span>{capabilityReasonCopy(detail.sendCapability.reason)}</span>
+                          <code>{detail.sendCapability.reason}</code>
+                        </p>
+                      </div>
+                      <GroupCapabilityStatus
+                        capability={detail.sendCapability}
+                        includeFreshness={false}
+                      />
+                    </header>
                     <div className="groups-capability-body stack stack-md">
-                      <dl className="groups-capability-meta">
+                      <dl className="groups-capability-meta groups-inspector-metrics">
                         <div>
                           <dt>Checked</dt>
                           <dd><DateTime value={detail.sendCapability.checkedAt} /></dd>
@@ -1789,19 +1801,20 @@ export function GroupsScreen() {
                           </InlineAlert>
                         )}
                     </div>
-                  </WorkspacePanel>
+                  </section>
 
-                  <WorkspacePanel
-                    description="Runtime flags that govern access, posting, and settings changes."
-                    flush
-                    title="Group configuration"
-                    titleId="group-configuration-title"
+                  <section
+                    aria-labelledby="group-configuration-title"
+                    className="groups-inspector-section"
                   >
-                    <dl className="groups-facts groups-facts-contained">
+                    <header className="groups-inspector-section-header">
                       <div>
-                        <dt>Session access</dt>
-                        <dd>{accessLabel(detail.isAdmin)}</dd>
+                        <span>Policy</span>
+                        <h3 id="group-configuration-title">Group configuration</h3>
+                        <p>Runtime flags that govern access, posting, and settings changes.</p>
                       </div>
+                    </header>
+                    <dl className="groups-facts groups-facts-grid">
                       <div>
                         <dt>Posting</dt>
                         <dd>
@@ -1827,16 +1840,21 @@ export function GroupsScreen() {
                         </dd>
                       </div>
                     </dl>
-                  </WorkspacePanel>
+                  </section>
 
-                  <WorkspaceDisclosurePanel
-                    description="Synchronization history and Runtime identifiers."
-                    flush
+                  <details
+                    className="groups-inspector-disclosure groups-inspector-section"
                     key={detail.id}
-                    title="Sync & technical metadata"
-                    titleId="group-technical-metadata-title"
                   >
-                    <dl className="groups-facts groups-facts-contained">
+                    <summary className="groups-inspector-section-header">
+                      <div>
+                        <span>Technical</span>
+                        <h3 id="group-technical-metadata-title">Sync &amp; identifiers</h3>
+                        <p>Synchronization history and Runtime identifiers.</p>
+                      </div>
+                      <AppIcon className="groups-inspector-disclosure-indicator" name="chevron-right" size="sm" />
+                    </summary>
+                    <dl className="groups-facts groups-technical-facts">
                       <div>
                         <dt>Record synced</dt>
                         <dd><DateTime value={detail.syncedAt} /></dd>
@@ -1872,7 +1890,7 @@ export function GroupsScreen() {
                         <dd>{detail.sessionId}</dd>
                       </div>
                     </dl>
-                  </WorkspaceDisclosurePanel>
+                  </details>
                 </div>
               )}
 
@@ -1916,6 +1934,7 @@ export function GroupsScreen() {
                     onChange={setMemberFilter}
                     placeholder="Search all synced members"
                     value={memberFilter}
+                    variant="toolbar"
                   />
                   {membersError && (
                     <InlineAlert

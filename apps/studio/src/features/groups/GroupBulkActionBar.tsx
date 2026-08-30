@@ -36,9 +36,10 @@ export function GroupBulkActionBar({
   return (
     <section
       aria-label="Selected groups actions"
-      className="group-bulk-action-bar"
+      className="data-selection-bar group-bulk-action-bar"
+      data-active="true"
     >
-      <div aria-live="polite" className="group-bulk-action-summary">
+      <div aria-live="polite" className="data-selection-summary group-bulk-action-summary">
         <strong>{selectedCount.toLocaleString()} selected</strong>
         <span>
           {mode === "remove"
@@ -48,7 +49,7 @@ export function GroupBulkActionBar({
               : "Choose a saved-list destination"}
         </span>
       </div>
-      <div className="group-bulk-action-controls">
+      <div className="data-selection-actions group-bulk-action-controls">
         <Button disabled={disabled} onClick={onClear} size="sm" variant="ghost">
           Clear
         </Button>

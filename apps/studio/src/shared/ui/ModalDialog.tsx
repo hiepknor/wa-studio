@@ -71,6 +71,12 @@ export function ModalDialog({
     if (!layer) return;
     const releaseIsolation = acquireModalIsolation(layer, returnFocusRef.current);
     const frame = window.requestAnimationFrame(() => {
+      const activeElement = document.activeElement;
+      const focusIsUntouched = activeElement === returnFocusRef.current
+        || activeElement === document.body
+        || activeElement === document.documentElement
+        || activeElement === surfaceRef.current;
+      if (!focusIsUntouched) return;
       (initialFocusRef?.current ?? closeRef.current)?.focus();
     });
 

@@ -145,6 +145,7 @@ export const mapPreflightTarget = (row: PreflightTargetRow): CampaignTargetDto =
   groupId: row.group_id,
   groupName: row.group_name,
   enabled: true,
+  participantsCount: null,
   sendCapability: {
     status: row.send_capability,
     reason: row.send_capability_reason,

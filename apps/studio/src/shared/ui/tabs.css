@@ -1,27 +1,35 @@
 .tabs {
+  min-width: 0;
   min-height: var(--control-height);
   display: flex;
-  align-items: stretch;
-  gap: var(--space-pane);
-  border-bottom: 1px solid var(--border);
+  align-items: center;
+  gap: var(--space-hair);
+  border: 0;
 }
 .tabs-trigger {
   position: relative;
   min-width: 0;
+  min-height: var(--control-height);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 var(--space-2);
+  justify-content: center;
+  gap: var(--space-tight);
+  padding: 0 var(--control-padding-inline);
   border: 0;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: var(--dim);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
   font-size: var(--type-body);
   font-weight: var(--weight-regular);
+  line-height: var(--control-line-height);
   cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
-.tabs-trigger:hover { background: var(--surface-hover); color: var(--text-primary); }
+.tabs-trigger:hover:not(:disabled) { background: var(--surface-hover); color: var(--text-primary); }
 .tabs-trigger:disabled { color: var(--text-disabled); cursor: not-allowed; }
-.tabs-trigger:disabled:hover { color: var(--text-disabled); }
 .tabs-trigger[aria-selected="true"] {
   background: var(--surface-selected);
   color: var(--text-primary);
@@ -38,54 +46,10 @@
 .tabs-warning {
   width: 5px;
   height: 5px;
+  flex: 0 0 5px;
   border-radius: 50%;
   background: var(--warning);
   box-shadow: none;
-}
-
-.tabs-steps {
-  min-height: 50px;
-  display: grid;
-  grid-auto-columns: minmax(0, 1fr);
-  grid-auto-flow: column;
-  gap: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-control);
-}
-.tabs-steps .tabs-trigger {
-  min-height: 48px;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 0 11px;
-  text-align: left;
-}
-.tabs-steps .tabs-trigger + .tabs-trigger { border-left: 1px solid var(--border); }
-.tabs-steps .tabs-trigger[aria-selected="true"] {
-  background: var(--surface-selected);
-  color: var(--text-primary);
-}
-.tabs-step-index {
-  width: 20px;
-  height: 20px;
-  display: grid;
-  flex: 0 0 20px;
-  place-items: center;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--type-micro);
-}
-.tabs-steps .tabs-trigger[aria-selected="true"] .tabs-step-index {
-  border-color: var(--text-secondary);
-  background: var(--accent);
-  color: var(--text-primary);
-}
-.tabs-steps .tabs-trigger:disabled .tabs-step-index {
-  border-color: var(--border-subtle);
-  color: var(--text-disabled);
 }
 .tabs-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -94,19 +58,11 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0;
-  border-bottom: 0;
+  gap: var(--space-hair);
 }
 
 .tabs-vertical .tabs-trigger {
   width: 100%;
-  min-height: var(--control-height);
   justify-content: flex-start;
-  padding: var(--space-compact) var(--space-2);
   text-align: left;
 }
-
-.tabs-vertical .tabs-trigger[aria-selected="true"] {
-  background: transparent;
-}
-.tabs-vertical .tabs-trigger[aria-selected="true"]:hover { background: var(--surface-subtle); }

@@ -588,6 +588,23 @@ tbody tr[data-selected="true"] { background: var(--surface-selected); }
   line-height: var(--leading-ui);
 }
 .data-cell-status { white-space: nowrap; }
+.data-selection-cell { width: 44px; padding-right: 0 !important; text-align: center; }
+.data-selection-cell > .checkbox { margin-inline: auto; }
+.data-selection-bar {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 7px 10px 7px 12px;
+  border-bottom: var(--border-width) solid var(--border-strong);
+  background: var(--surface-subtle);
+}
+.data-selection-bar[data-active="true"] { background: var(--surface-selected); }
+.data-selection-summary { min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); }
+.data-selection-summary strong { flex: 0 0 auto; color: var(--text-primary); font-family: var(--font-mono); font-size: var(--type-caption); font-weight: var(--weight-medium); }
+.data-selection-summary span { overflow: hidden; color: var(--text-tertiary); font-size: var(--type-label); text-overflow: ellipsis; white-space: nowrap; }
+.data-selection-actions { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-2); }
 .data-cell-time {
   overflow: hidden;
   text-overflow: ellipsis;

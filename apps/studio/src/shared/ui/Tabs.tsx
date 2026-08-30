@@ -6,13 +6,11 @@ export interface TabItem<T extends string> {
   id: T;
   label: string;
   meta?: ReactNode;
-  step?: number;
   warning?: boolean;
 }
 
 interface TabsProps<T extends string> {
   activeTab: T;
-  appearance?: "line" | "steps";
   ariaLabel: string;
   idPrefix: string;
   onChange: (tab: T) => void;
@@ -22,7 +20,6 @@ interface TabsProps<T extends string> {
 
 export function Tabs<T extends string>({
   activeTab,
-  appearance = "line",
   ariaLabel,
   idPrefix,
   onChange,
@@ -63,13 +60,12 @@ export function Tabs<T extends string>({
     <div
       aria-label={ariaLabel}
       aria-orientation={orientation}
-      className={`tabs tabs-${appearance} tabs-${orientation}`}
+      className={`tabs tabs-${orientation}`}
       role="tablist"
     >
       {tabs.map((tab, index) => (
         <button
           aria-controls={`${idPrefix}-${tab.id}-panel`}
-          aria-current={appearance === "steps" && activeTab === tab.id ? "step" : undefined}
           aria-selected={activeTab === tab.id}
           className="tabs-trigger"
           disabled={tab.disabled}
@@ -81,9 +77,6 @@ export function Tabs<T extends string>({
           tabIndex={activeTab === tab.id && !tab.disabled ? 0 : -1}
           type="button"
         >
-          {appearance === "steps" && tab.step !== undefined && (
-            <span aria-hidden="true" className="tabs-step-index">{tab.step}</span>
-          )}
           <span className="tabs-label">{tab.label}</span>
           {tab.meta !== undefined && (
             <span className="tabs-meta">{tab.meta}</span>

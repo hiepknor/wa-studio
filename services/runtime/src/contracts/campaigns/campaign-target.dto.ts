@@ -35,6 +35,9 @@ export class CampaignTargetDto {
   @ApiProperty()
   enabled!: boolean;
 
+  @ApiProperty({ type: Number, nullable: true })
+  participantsCount!: number | null;
+
   @ApiProperty({ type: GroupSendCapabilityDto })
   sendCapability!: GroupSendCapabilityDto;
 }

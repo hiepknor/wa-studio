@@ -1,6 +1,8 @@
 import type { RuntimeGroupListGroup } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
+import { Button } from "@/shared/ui/Button";
 import { Checkbox } from "@/shared/ui/Checkbox";
+import { dataTablePageSelectionState } from "@/shared/ui/data-table-selection";
 import { GroupCapabilityStatus } from "../GroupCapabilityStatus";
 import "./group-selection.css";
 
@@ -8,6 +10,8 @@ export interface GroupSelectionRow extends Pick<
   RuntimeGroupListGroup,
   "groupId" | "groupName" | "isActive" | "participantsCount" | "sendCapability"
 > {}
+
+export type GroupSelectionTableView = "results" | "selection";
 
 export interface GroupSelectionTableProps {
   caption?: string;
@@ -17,12 +21,14 @@ export interface GroupSelectionTableProps {
   loadingMessage?: string;
   onToggle: (groupId: string) => void;
   onTogglePage: () => void;
+  onViewChange: (view: GroupSelectionTableView) => void;
+  outsideResultIds?: ReadonlySet<string>;
   pageIds: string[];
-  pinnedIds?: ReadonlySet<string>;
-  pinnedLabel?: string;
   rows: GroupSelectionRow[];
+  savedIds?: ReadonlySet<string>;
   selectedIds: ReadonlySet<string>;
   unknownParticipantsTitle?: string;
+  view: GroupSelectionTableView;
 }
 
 function participantCount(value: number | null): string {
@@ -37,26 +43,39 @@ export function GroupSelectionTable({
   loadingMessage = "Loading groups…",
   onToggle,
   onTogglePage,
+  onViewChange,
+  outsideResultIds = new Set<string>(),
   pageIds,
-  pinnedIds = new Set<string>(),
-  pinnedLabel = "Saved or selected outside current results",
   rows,
+  savedIds = new Set<string>(),
   selectedIds,
   unknownParticipantsTitle = "Participant count is unavailable.",
+  view,
 }: GroupSelectionTableProps) {
-  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
-  const somePageSelected = pageIds.some((id) => selectedIds.has(id));
-  const pinnedRows = rows.filter((row) => pinnedIds.has(row.groupId));
-  const resultRows = rows.filter((row) => !pinnedIds.has(row.groupId));
+  const { allPageSelected, somePageSelected } = dataTablePageSelectionState(
+    pageIds,
+    selectedIds,
+  );
+  const resultRows = rows.filter((row) => !outsideResultIds.has(row.groupId));
+  const selectionRows = rows.filter((row) => (
+    selectedIds.has(row.groupId) || savedIds.has(row.groupId)
+  ));
+  const visibleRows = view === "selection" ? selectionRows : resultRows;
+  const outsideSelectionCount = [...selectedIds]
+    .filter((groupId) => outsideResultIds.has(groupId)).length;
+  const addedCount = [...selectedIds].filter((groupId) => !savedIds.has(groupId)).length;
+  const removedCount = [...savedIds].filter((groupId) => !selectedIds.has(groupId)).length;
   const columnCount = 4;
   function renderRow(row: GroupSelectionRow) {
     const selected = selectedIds.has(row.groupId);
+    const added = view === "selection" && selected && !savedIds.has(row.groupId);
+    const removed = view === "selection" && !selected && savedIds.has(row.groupId);
     return (
       <tr
         data-selected={selected || undefined}
         key={row.groupId}
       >
-        <td className="group-selection-check">
+        <td className="data-selection-cell">
           <Checkbox
             aria-label={`Select ${row.groupName}`}
             checked={selected}
@@ -64,37 +83,66 @@ export function GroupSelectionTable({
             onChange={() => onToggle(row.groupId)}
           />
         </td>
-        <td className="group-selection-group">
+        <td className="data-cell-primary group-selection-group">
           <div>
-            <strong>{row.groupName}</strong>
+            <strong className="data-primary-text" title={row.groupName}>{row.groupName}</strong>
             {!row.isActive && <Badge tone="neutral" variant="status">Inactive</Badge>}
+            {added && <Badge tone="success" variant="status">Added</Badge>}
+            {removed && <Badge tone="danger" variant="status">Pending removal</Badge>}
           </div>
-          <small>{row.groupId}</small>
+          <small className="data-identifier" title={row.groupId}>{row.groupId}</small>
         </td>
         <td
-          className="group-selection-participants"
+          className="data-cell-number group-selection-participants"
           title={row.participantsCount === null ? unknownParticipantsTitle : undefined}
         >
           {participantCount(row.participantsCount)}
         </td>
-        <td className="group-selection-capability">
+        <td className="data-cell-status group-selection-capability">
           <GroupCapabilityStatus capability={row.sendCapability} includeFreshness={false} />
         </td>
       </tr>
     );
   }
   return (
-    <div aria-busy={loading || undefined} className="group-selection-table">
-      <table>
-        <caption>{caption}</caption>
-        <thead><tr><th className="group-selection-check" scope="col"><Checkbox aria-checked={somePageSelected && !allPageSelected ? "mixed" : allPageSelected} aria-label="Select all groups on this page" checked={allPageSelected} disabled={disabled || !pageIds.length || loading} onChange={onTogglePage} ref={(node) => { if (node) node.indeterminate = somePageSelected && !allPageSelected; }} title="Select all groups on this page" /></th><th scope="col">Group</th><th className="group-selection-participants" scope="col">Participants</th><th className="group-selection-capability" scope="col">Capability</th></tr></thead>
-        {loading && !rows.length ? <tbody><tr><td className="group-selection-table-empty" colSpan={columnCount}>{loadingMessage}</td></tr></tbody>
-          : !rows.length ? <tbody><tr><td className="group-selection-table-empty" colSpan={columnCount}>{emptyMessage}</td></tr></tbody>
-          : <>
-            {pinnedRows.length > 0 && <tbody aria-label={pinnedLabel}><tr className="group-selection-divider"><th colSpan={columnCount} scope="rowgroup">{pinnedLabel} <span>{pinnedRows.length}</span></th></tr>{pinnedRows.map(renderRow)}</tbody>}
-            {resultRows.length > 0 && <tbody aria-label="Current results">{pinnedRows.length > 0 && <tr className="group-selection-divider"><th colSpan={columnCount} scope="rowgroup">Current results <span>{resultRows.length}</span></th></tr>}{resultRows.map(renderRow)}</tbody>}
-          </>}
-      </table>
-    </div>
+    <>
+      <section
+        aria-label="Target selection view"
+        className="data-selection-bar"
+        data-active={selectedIds.size > 0 || undefined}
+      >
+        <div aria-live="polite" className="data-selection-summary">
+          <strong>{selectedIds.size.toLocaleString()} selected</strong>
+          <span>{view === "selection"
+            ? addedCount || removedCount
+              ? `+${addedCount} added · −${removedCount} pending removal`
+              : "Saved selection"
+            : outsideSelectionCount
+              ? `${outsideSelectionCount.toLocaleString()} outside current view`
+              : selectedIds.size
+                ? "All selected groups are in the current view"
+                : "Select groups from the current results"}</span>
+        </div>
+        <div className="data-selection-actions">
+          <Button
+            disabled={view === "results" && selectionRows.length === 0}
+            onClick={() => onViewChange(view === "results" ? "selection" : "results")}
+            size="sm"
+            variant="ghost"
+          >
+            {view === "results" ? "Show selected" : "Show results"}
+          </Button>
+        </div>
+      </section>
+      <div aria-busy={view === "results" && loading || undefined} className="data-table-scroll group-selection-table">
+        <table className="data-table">
+          <caption>{caption}</caption>
+          <thead><tr><th aria-label="Selection" className="data-selection-cell" scope="col">{view === "results" && <Checkbox aria-checked={somePageSelected && !allPageSelected ? "mixed" : allPageSelected} aria-label="Select all groups on this page" checked={allPageSelected} disabled={disabled || !pageIds.length || loading} onChange={onTogglePage} ref={(node) => { if (node) node.indeterminate = somePageSelected && !allPageSelected; }} title="Select all groups on this page" />}</th><th scope="col">Group</th><th className="data-column-number group-selection-participants" scope="col">Participants</th><th className="group-selection-capability" scope="col">Send capability</th></tr></thead>
+          {view === "results" && loading && !visibleRows.length ? <tbody><tr><td className="data-table-empty group-selection-table-empty" colSpan={columnCount}>{loadingMessage}</td></tr></tbody>
+            : !visibleRows.length ? <tbody><tr><td className="data-table-empty group-selection-table-empty" colSpan={columnCount}>{view === "selection" ? "No groups selected." : emptyMessage}</td></tr></tbody>
+              : <tbody aria-label={view === "selection" ? "Selected groups" : "Current results"}>{visibleRows.map(renderRow)}</tbody>}
+        </table>
+      </div>
+    </>
   );
 }

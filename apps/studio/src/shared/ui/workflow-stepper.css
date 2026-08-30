@@ -1,0 +1,110 @@
+.workflow-stepper {
+  min-width: 0;
+  min-height: 50px;
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  border: var(--border-width) solid var(--control-border-default);
+  border-radius: var(--radius-control);
+  background: var(--control-surface-default);
+}
+
+.workflow-stepper-trigger {
+  min-width: 0;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: var(--type-body);
+  line-height: var(--control-line-height);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.workflow-stepper-trigger:first-child {
+  border-radius: calc(var(--radius-control) - var(--border-width)) 0 0 calc(var(--radius-control) - var(--border-width));
+}
+
+.workflow-stepper-trigger:last-child {
+  border-radius: 0 calc(var(--radius-control) - var(--border-width)) calc(var(--radius-control) - var(--border-width)) 0;
+}
+
+.workflow-stepper-trigger + .workflow-stepper-trigger {
+  border-left: var(--border-width) solid var(--border-subtle);
+}
+
+.workflow-stepper-trigger:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
+.workflow-stepper-trigger[aria-selected="true"] {
+  background: var(--surface-selected);
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.workflow-stepper-trigger:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.workflow-stepper-index {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  flex: 0 0 20px;
+  place-items: center;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--type-micro);
+}
+
+.workflow-stepper-trigger[aria-selected="true"] .workflow-stepper-index {
+  border-color: var(--text-secondary);
+  background: var(--accent);
+  color: var(--text-primary);
+}
+
+.workflow-stepper-trigger:disabled .workflow-stepper-index {
+  border-color: var(--border-subtle);
+  color: var(--text-disabled);
+}
+
+.workflow-stepper-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-stepper-meta {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--type-micro);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-label);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.workflow-stepper-warning {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--warning);
+}

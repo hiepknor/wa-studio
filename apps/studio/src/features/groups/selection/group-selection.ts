@@ -16,7 +16,7 @@ export interface GroupSelectionDiff {
 }
 
 export interface GroupSelectionRowOrder {
-  pinnedIds: Set<string>;
+  outsidePageIds: Set<string>;
   rowIds: string[];
 }
 
@@ -26,10 +26,10 @@ export function groupSelectionRowOrder(
 ): GroupSelectionRowOrder {
   const pageIds = [...new Set(currentPageIds)];
   const pageSet = new Set(pageIds);
-  const pinned = [...new Set(retainedIds)].filter((id) => !pageSet.has(id));
+  const outsidePageIds = [...new Set(retainedIds)].filter((id) => !pageSet.has(id));
   return {
-    pinnedIds: new Set(pinned),
-    rowIds: [...pinned, ...pageIds],
+    outsidePageIds: new Set(outsidePageIds),
+    rowIds: [...outsidePageIds, ...pageIds],
   };
 }
 

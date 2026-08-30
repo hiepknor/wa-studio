@@ -7,7 +7,7 @@
   position: sticky;
   z-index: 3;
   top: 0;
-  padding: 14px 16px;
+  padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--border);
   background: var(--surface-chrome);
 }

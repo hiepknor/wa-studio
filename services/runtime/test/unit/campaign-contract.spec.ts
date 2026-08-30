@@ -43,8 +43,10 @@ describe('campaign OpenAPI contract', () => {
       'TARGET_CAPABILITY_DENIED', 'TARGET_CAPABILITY_UNKNOWN', 'TARGET_CAPABILITY_STALE',
     ]);
     expect(contract.components.schemas.CampaignTargetDto?.required).toEqual([
-      'groupId', 'groupName', 'enabled', 'sendCapability',
+      'groupId', 'groupName', 'enabled', 'participantsCount', 'sendCapability',
     ]);
+    expect(contract.components.schemas.CampaignTargetDto?.properties?.participantsCount)
+      .toMatchObject({ type: 'number', nullable: true });
     expect(contract.components.schemas.CampaignTargetListDto?.required).toEqual([
       'data', 'targetsRevision', 'source',
     ]);

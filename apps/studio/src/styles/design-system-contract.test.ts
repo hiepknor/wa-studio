@@ -35,6 +35,11 @@ const confirmationDialogSource = readFileSync(
 );
 const modalIsolationSource = readFileSync("src/shared/ui/modal-isolation.ts", "utf8");
 const tabsCss = readFileSync("src/shared/ui/tabs.css", "utf8");
+const tabsSource = readFileSync("src/shared/ui/Tabs.tsx", "utf8");
+const workflowStepperSource = readFileSync(
+  "src/shared/ui/WorkflowStepper.tsx",
+  "utf8",
+);
 const checkboxCss = readFileSync("src/shared/ui/checkbox.css", "utf8");
 const checkboxSource = readFileSync("src/shared/ui/Checkbox.tsx", "utf8");
 const focusModalitySource = readFileSync("src/app/installFocusModality.ts", "utf8");
@@ -52,11 +57,12 @@ const groupSelectionToolbarSource = readFileSync(
   "src/features/groups/selection/GroupSelectionToolbar.tsx",
   "utf8",
 );
-const groupsCss = readFileSync("src/features/groups/groups.css", "utf8");
-const groupSelectionCss = readFileSync(
-  "src/features/groups/selection/group-selection.css",
+const groupSelectionTableSource = readFileSync(
+  "src/features/groups/selection/GroupSelectionTable.tsx",
   "utf8",
 );
+const groupsTableSource = readFileSync("src/features/groups/GroupsTable.tsx", "utf8");
+const groupsCss = readFileSync("src/features/groups/groups.css", "utf8");
 const campaignsCss = readFileSync("src/features/campaigns/campaigns.css", "utf8");
 const dataFilterToolbarCss = readFileSync("src/shared/ui/data-filter-toolbar.css", "utf8");
 const dataFilterToolbarSource = readFileSync("src/shared/ui/DataFilterToolbar.tsx", "utf8");
@@ -404,12 +410,43 @@ describe("WARP design-system contract", () => {
     expect(groupsCss).toContain(
       '.group-scope-option[aria-selected="true"] { background: var(--surface-selected);',
     );
-    expect(groupSelectionCss).toContain(
-      'tbody tr[data-selected="true"] { background: var(--surface-selected);',
-    );
+    expect(groupSelectionTableSource).toContain('className="data-table"');
+    expect(groupSelectionTableSource).toContain("data-selected={selected || undefined}");
     expect(segmentedControlCss).toContain(
       '.segmented-control-option:has(.segmented-control-input:checked) {\n  background: var(--surface-selected);',
     );
+  });
+
+  it("shares one paged group-selection contract across directory tables", () => {
+    expect(groupsTableSource).toContain("dataTablePageSelectionState(");
+    expect(groupSelectionTableSource).toContain("dataTablePageSelectionState(");
+    expect(groupsTableSource).toContain('className="data-selection-cell"');
+    expect(groupSelectionTableSource).toContain('className="data-selection-cell"');
+    expect(groupSelectionTableSource).toContain('className="data-selection-bar"');
+    expect(groupSelectionTableSource).toContain('"Show selected"');
+    expect(groupSelectionTableSource).not.toContain("Saved or selected outside current results");
+    expect(groupSelectionTableSource).not.toContain("group-selection-divider");
+    expect(appCss).toContain(".data-selection-cell { width: 44px;");
+    expect(appCss).toContain(".data-selection-bar {");
+  });
+
+  it("keeps one tab anatomy and separates sequential workflow navigation", () => {
+    expect(tabsSource).not.toContain("appearance");
+    expect(tabsSource).not.toContain("step?:");
+    expect(tabsCss).toContain("min-height: var(--control-height)");
+    expect(tabsCss).toContain("border-radius: var(--radius-control)");
+    expect(tabsCss).not.toContain("border-bottom");
+    expect(settingsCss).not.toContain(".settings-navigation .tabs-trigger");
+    expect(workflowStepperSource).toContain('className="workflow-stepper"');
+    expect(workflowStepperSource).toContain('aria-current={activeStep === step.id ? "step" : undefined}');
+  });
+
+  it("keeps the Campaign Workspace hierarchy flat and operational", () => {
+    expect(campaignsCss).toContain(".campaign-workspace-section {");
+    expect(campaignsCss).toContain("border-top: var(--border-width) solid var(--divider)");
+    expect(campaignsCss).not.toContain(".campaign-editor-panel");
+    expect(campaignsCss).not.toContain(".campaign-snapshot-panel");
+    expect(campaignsCss).not.toContain(".campaign-target-overview-icon");
   });
 
   it("assigns selector geometry by option cardinality and consequence", () => {
