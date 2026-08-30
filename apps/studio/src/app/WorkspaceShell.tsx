@@ -9,11 +9,6 @@ import {
   findWorkspacePage,
   type WorkspacePageId,
 } from "./workspace-pages";
-import { SessionsScreen } from "@/features/sessions/SessionsScreen";
-import { GroupsWorkspace } from "@/features/groups/GroupsWorkspace";
-import { CampaignsScreen } from "@/features/campaigns/CampaignsScreen";
-import { RunsScreen } from "@/features/runs/RunsScreen";
-import { ActivityScreen } from "@/features/activity/ActivityScreen";
 import {
   getManagedRuntimeProvisioningProfile,
   type ManagedRuntimePhase,
@@ -36,6 +31,26 @@ import {
 const SettingsScreen = lazy(async () => {
   const module = await import("@/features/settings/SettingsScreen");
   return { default: module.SettingsScreen };
+});
+const SessionsScreen = lazy(async () => {
+  const module = await import("@/features/sessions/SessionsScreen");
+  return { default: module.SessionsScreen };
+});
+const GroupsWorkspace = lazy(async () => {
+  const module = await import("@/features/groups/GroupsWorkspace");
+  return { default: module.GroupsWorkspace };
+});
+const CampaignsScreen = lazy(async () => {
+  const module = await import("@/features/campaigns/CampaignsScreen");
+  return { default: module.CampaignsScreen };
+});
+const RunsScreen = lazy(async () => {
+  const module = await import("@/features/runs/RunsScreen");
+  return { default: module.RunsScreen };
+});
+const ActivityScreen = lazy(async () => {
+  const module = await import("@/features/activity/ActivityScreen");
+  return { default: module.ActivityScreen };
 });
 
 const PAGE_ICONS: Record<WorkspacePageId, AppIconName> = {
@@ -127,18 +142,7 @@ function renderPage(
     case "sessions":
       return <SessionsScreen onOpenGroups={() => navigate({ page: "groups" })} />;
     case "settings":
-      return (
-        <Suspense
-          fallback={(
-            <div aria-live="polite" className="workspace-page-loading" role="status">
-              <AppIcon className="ui-icon-spin" name="refresh" size="sm" />
-              <span>Loading Settings…</span>
-            </div>
-          )}
-        >
-          <SettingsScreen />
-        </Suspense>
-      );
+      return <SettingsScreen />;
     case "runs":
       return (
         <RunsScreen
@@ -370,7 +374,16 @@ export function WorkspaceShell({
 
           <div className="workspace-body">
             <section aria-labelledby={`${activePage}-title`} className="workspace-content">
-              {renderPage(location, navigate)}
+              <Suspense
+                fallback={(
+                  <div aria-live="polite" className="workspace-page-loading" role="status">
+                    <AppIcon className="ui-icon-spin" name="refresh" size="sm" />
+                    <span>Loading {activePageLabel}…</span>
+                  </div>
+                )}
+              >
+                {renderPage(location, navigate)}
+              </Suspense>
             </section>
           </div>
 
