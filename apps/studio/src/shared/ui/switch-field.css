@@ -72,13 +72,13 @@
 
 .switch-field-copy strong {
   color: var(--text-primary);
-  font-size: var(--type-body);
+  font-size: var(--text-body-size);
   font-weight: var(--weight-medium);
 }
 
 .switch-field-copy small {
   color: var(--text-tertiary);
-  font-size: var(--type-body);
+  font-size: var(--text-body-size);
   line-height: var(--leading-ui);
 }
 

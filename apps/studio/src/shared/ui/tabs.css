@@ -20,7 +20,7 @@
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-body);
-  font-size: var(--type-body);
+  font-size: var(--text-control-size);
   font-weight: var(--weight-regular);
   line-height: var(--control-line-height);
   cursor: pointer;
@@ -38,7 +38,7 @@
 .tabs-meta {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
-  font-size: var(--type-micro);
+  font-size: var(--text-overline-size);
   font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;

@@ -29,7 +29,7 @@
 .settings-card-label {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
-  font-size: var(--type-micro);
+  font-size: var(--text-overline-size);
   font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-editorial);
   text-transform: uppercase;
@@ -55,7 +55,7 @@
 .settings-section-copy h2 {
   margin: var(--space-hair) 0 0;
   color: var(--text-primary);
-  font-size: var(--type-body);
+  font-size: var(--text-section-title-size);
   font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-body);
 }
@@ -63,7 +63,7 @@
   max-width: var(--copy-line-settings);
   margin: var(--space-hair) 0 0;
   color: var(--text-tertiary);
-  font-size: var(--type-caption);
+  font-size: var(--text-supporting-size);
   line-height: var(--leading-ui);
 }
 .settings-section-action { flex: 0 0 auto; }
@@ -90,21 +90,21 @@
 .settings-row-copy small { display: block; }
 .settings-row-copy strong {
   color: var(--text-primary);
-  font-size: var(--type-body);
+  font-size: var(--text-data-primary-size);
   font-weight: var(--weight-medium);
 }
 .settings-row-copy small {
   max-width: var(--copy-line-settings);
   margin-top: var(--space-hair);
   color: var(--text-tertiary);
-  font-size: var(--type-caption);
+  font-size: var(--text-supporting-size);
   line-height: var(--leading-ui);
 }
 .settings-row-action { min-width: 0; color: var(--text-secondary); }
 .settings-row-value {
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: var(--type-caption);
+  font-size: var(--text-technical-size);
   font-variant-numeric: tabular-nums;
 }
 
@@ -128,7 +128,7 @@
 .settings-connection-summary .settings-row-copy small {
   overflow: hidden;
   font-family: var(--font-mono);
-  font-size: var(--type-micro);
+  font-size: var(--text-technical-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -169,13 +169,13 @@
 }
 .settings-action-copy strong {
   color: var(--text-secondary);
-  font-size: var(--type-label);
+  font-size: var(--text-supporting-size);
   font-weight: var(--weight-medium);
 }
 .settings-action-copy span,
 .settings-action-hint {
   color: var(--text-tertiary);
-  font-size: var(--type-micro);
+  font-size: var(--text-supporting-size);
   line-height: var(--leading-ui);
 }
 
@@ -206,8 +206,8 @@
 .settings-operation-row-copy strong,
 .settings-operation-row-copy small { display: block; }
 .settings-operation-row-copy { min-width: 0; }
-.settings-operation-row-copy strong { color: var(--text-primary); font-size: var(--type-body); font-weight: var(--weight-medium); }
-.settings-operation-row-copy small { max-width: var(--copy-line-settings); margin-top: var(--space-hair); color: var(--text-tertiary); font-size: var(--type-caption); line-height: var(--leading-ui); }
+.settings-operation-row-copy strong { color: var(--text-primary); font-size: var(--text-data-primary-size); font-weight: var(--weight-medium); }
+.settings-operation-row-copy small { max-width: var(--copy-line-settings); margin-top: var(--space-hair); color: var(--text-tertiary); font-size: var(--text-supporting-size); line-height: var(--leading-ui); }
 .settings-operation-row:disabled .settings-operation-row-copy strong,
 .settings-operation-row:disabled .settings-operation-row-copy small { color: inherit; }
 
@@ -222,8 +222,8 @@
   justify-content: space-between;
   gap: var(--space-panel);
 }
-.settings-recovery-flow-heading h3 { margin: 0; font-size: var(--type-body); font-weight: var(--weight-medium); }
-.settings-recovery-flow-heading p { max-width: var(--copy-line-settings); margin: var(--space-hair) 0 0; color: var(--text-tertiary); font-size: var(--type-caption); line-height: var(--leading-ui); }
+.settings-recovery-flow-heading h3 { margin: 0; font-size: var(--text-section-title-size); font-weight: var(--weight-medium); }
+.settings-recovery-flow-heading p { max-width: var(--copy-line-settings); margin: var(--space-hair) 0 0; color: var(--text-tertiary); font-size: var(--text-supporting-size); line-height: var(--leading-ui); }
 .settings-recovery-single-field { max-width: 31rem; }
 
 .settings-update-layout { display: block; }
@@ -237,7 +237,7 @@
 }
 .settings-release-notes span {
   color: var(--text-tertiary);
-  font-size: var(--type-micro);
+  font-size: var(--text-overline-size);
   font-weight: var(--weight-medium);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
@@ -246,7 +246,7 @@
   max-width: var(--copy-line-settings);
   margin: 0;
   color: var(--text-secondary);
-  font-size: var(--type-caption);
+  font-size: var(--text-supporting-size);
   line-height: var(--leading-ui);
   white-space: pre-wrap;
 }

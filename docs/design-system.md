@@ -42,10 +42,10 @@ Tokens have three layers:
 - **Semantic:** surfaces, text roles, dividers, feedback tones, and interactive state roles.
 - **Component:** control, badge, selector, table, shell, overlay, and product-layout geometry.
 
-Only `src/styles/tokens.css` may define raw colors. Foundation colors are private to that file;
-shared UI and features consume semantic or component roles only. Shared UI must consume radius and
-motion tokens. One-pixel accessibility techniques and intrinsic artwork dimensions are documented
-exceptions to the general geometry rule.
+Only `src/styles/tokens.css` may define raw colors or expose the raw type scale. Foundation colors
+and `--type-*` sizes are private to that file; shared UI and features consume semantic or component
+roles only. Shared UI must consume radius and motion tokens. One-pixel accessibility techniques and
+intrinsic artwork dimensions are documented exceptions to the general geometry rule.
 
 ### Radius roles
 
@@ -89,20 +89,37 @@ not introduce another surface merely to create spacing.
 
 ## Typography roles
 
-- `title`: page and primary workspace title only.
-- `emphasis`: dialog and section titles.
-- `body`: normal controls and content.
-- `ui`: dense supporting content.
-- `caption`: descriptions and secondary metadata.
-- `label`: compact control metadata.
-- `micro`: table headers, policy codes, and tertiary technical labels.
+The raw `--type-*` scale is a private foundation. Product CSS selects a semantic role based on the
+meaning of the region, never by choosing a visually convenient size.
+
+| Semantic role | Size | Use |
+| --- | ---: | --- |
+| `page-title` | 20px | Page and primary workspace title only |
+| `overlay-title` | 15px | Dialog, workspace, and inspector identity |
+| `section-title` | 14px | Local section and disclosure heading |
+| `body` | 14px | Normal prose and content |
+| `control` | 14px | Standard field, button, tab, and selector label |
+| `control-compact` | 12px | Intentionally compact control only |
+| `data-primary` | 14px | Primary row or object name |
+| `data-value` | 13px | Dense operational value |
+| `supporting` | 12px | Description, help, warning explanation, and secondary copy |
+| `technical` | 11px | Identifier, timestamp, version, URL, policy code, and revision |
+| `compact` | 11px | Badge and compact metadata label |
+| `overline` | 10px | Short uppercase eyebrow and table header only |
+| `metric` | 15px | Comparable summary metric |
+
+`setup` at 36px is reserved for the connection/onboarding statement and is not a normal product
+heading. Roles may currently resolve to the same raw size; keeping their names separate lets the
+hierarchy evolve without feature-level rewrites.
 
 The shipped type system is deterministic: Inter is the self-hosted display/body family and Geist
 Mono is the self-hosted technical family. System-installed fonts are never placed ahead of those
 families because visual baselines must render identically on every supported Mac.
 
-Uppercase tracking is limited to short labels. Paragraphs, actions, and status explanations remain
-sentence case. Mono is never used to make ordinary prose appear technical.
+Uppercase tracking is limited to short overlines and column labels. Paragraphs, actions, empty
+states, warnings, and status explanations remain sentence case and never use `overline`. Mono is
+reserved for the `technical` role or values whose exact shape is operationally meaningful; it is
+never used to make ordinary prose appear technical.
 
 ## Primitive contract
 
@@ -136,6 +153,21 @@ The approved reusable patterns are:
 
 Patterns own layout and responsive behavior. Features supply copy, data, commands, and state.
 
+### Inspector drawer behavior
+
+Inspectors use one stable information architecture at every window size: identity and status,
+optional local navigation, prioritized sections, progressive disclosure, then a fixed action area
+only when the object has available commands. Compact, standard, and wide are semantic content
+sizes—not hard-coded feature widths. Their rendered width is fluid within a reviewed minimum and
+maximum.
+
+The shell chooses presentation from measured workspace geometry. It docks only when the navigation
+rail, inspector, and at least 760px of primary work area all fit. Otherwise it becomes a modal
+overlay and isolates the background. Large displays therefore add useful inspector width without
+leaving an unusably narrow table behind; narrow displays preserve the same content and actions in
+an overlay. Feature CSS may adapt internal domain grids with inspector container queries, but may
+not branch on the application viewport or restyle drawer chrome.
+
 ## Accessibility contract
 
 - All interaction remains operable by keyboard.
@@ -154,10 +186,11 @@ Feature rollout starts only after all of the following are true:
 - every primitive is represented in the gallery state matrix;
 - reference compositions cover a data table, settings form, workflow dialog, inspector, and feedback
   flow;
-- deterministic product fixtures cover Connection, Groups, and Campaign Workspace using production
-  components with only the Runtime API boundary replaced;
+- deterministic product fixtures cover Connection, Groups, Campaign Workspace, and the Activity,
+  Group, and Run inspectors using production components with only the Runtime API boundary replaced;
 - semantic, keyboard, focus, contrast, reduced-motion, and visual regression checks pass;
-- accepted baselines exist at 960 x 560, 1100 x 720, and 1500 x 850;
+- accepted application baselines exist at 960 x 560, 1100 x 720, and 1500 x 850; inspector mode
+  baselines additionally cover overlay at 1100px, docked at 1440px, and expanded docked at 1920px;
 - the migration guide documents component mapping and allowed exceptions;
 - the v1 component API is frozen before feature migration begins.
 

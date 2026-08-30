@@ -8,7 +8,16 @@ import {
   DrawerHost,
   DrawerProvider,
 } from "./Drawer";
-import { DRAWER_DOCK_MIN_WIDTH } from "./drawer-config";
+import {
+  DRAWER_MAIN_MIN_WIDTH,
+  DRAWER_SIZE_CONFIG,
+  resolveDrawerLayout,
+} from "./drawer-config";
+
+const STANDARD_DOCK_MIN_WIDTH =
+  DRAWER_MAIN_MIN_WIDTH + DRAWER_SIZE_CONFIG.standard.minWidth;
+const WIDE_DOCK_MIN_WIDTH =
+  DRAWER_MAIN_MIN_WIDTH + DRAWER_SIZE_CONFIG.wide.minWidth;
 
 function DrawerHarness({ title = "Release room" }: { title?: string }) {
   const [open, setOpen] = useState(false);
@@ -26,6 +35,7 @@ function DrawerHarness({ title = "Release room" }: { title?: string }) {
         onClose={() => setOpen(false)}
         open={open}
         returnFocusRef={triggerRef}
+        subheader={<nav aria-label="Drawer sections">Drawer navigation</nav>}
         title={title}
       >
         <button type="button">Body action</button>
@@ -91,6 +101,12 @@ describe("Drawer", () => {
     expect(screen.getByTestId("drawer-frame")).toHaveAttribute("data-drawer-mode", "overlay");
     expect(dialog.closest(".drawer-layer")).toHaveAttribute("data-mode", "overlay");
     expect(dialog).toHaveAccessibleDescription("2 members");
+    const subheader = dialog.querySelector(".drawer-subheader");
+    const body = dialog.querySelector(".drawer-body");
+    const navigation = screen.getByRole("navigation", { name: "Drawer sections" });
+    expect(subheader).toContainElement(navigation);
+    expect(body).not.toContainElement(navigation);
+    expect(subheader?.nextElementSibling).toBe(body);
     expect(screen.getByRole("heading", { name: "Release room" })).toHaveAttribute(
       "title",
       "Release room",
@@ -119,13 +135,13 @@ describe("Drawer", () => {
     expect(await screen.findByRole("dialog", { name: "Release room" })).toBeInTheDocument();
 
     act(() => {
-      setViewportWidth(DRAWER_DOCK_MIN_WIDTH - 1);
+      setViewportWidth(STANDARD_DOCK_MIN_WIDTH - 1);
       window.dispatchEvent(new Event("resize"));
     });
     expect(screen.getByRole("dialog", { name: "Release room" })).toBeInTheDocument();
 
     act(() => {
-      setViewportWidth(DRAWER_DOCK_MIN_WIDTH);
+      setViewportWidth(STANDARD_DOCK_MIN_WIDTH);
       window.dispatchEvent(new Event("resize"));
     });
 
@@ -136,7 +152,7 @@ describe("Drawer", () => {
   });
 
   it("returns an open docked drawer to overlay mode when the viewport narrows", async () => {
-    setViewportWidth(DRAWER_DOCK_MIN_WIDTH);
+    setViewportWidth(STANDARD_DOCK_MIN_WIDTH);
     const user = userEvent.setup();
     render(<DrawerHarness />);
 
@@ -157,7 +173,7 @@ describe("Drawer", () => {
   });
 
   it("moves focus into a docked drawer and closes it with Escape from the workspace", async () => {
-    setViewportWidth(DRAWER_DOCK_MIN_WIDTH);
+    setViewportWidth(STANDARD_DOCK_MIN_WIDTH);
     const user = userEvent.setup();
     render(<DrawerHarness />);
 
@@ -188,7 +204,7 @@ describe("Drawer", () => {
   });
 
   it("restores docked focus to the most recent trigger", async () => {
-    setViewportWidth(DRAWER_DOCK_MIN_WIDTH);
+    setViewportWidth(WIDE_DOCK_MIN_WIDTH);
     const user = userEvent.setup();
     render(<RetargetableDrawerHarness />);
 
@@ -205,5 +221,23 @@ describe("Drawer", () => {
 
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
     expect(secondTrigger).toHaveFocus();
+  });
+
+  it("resolves fluid drawer widths without shrinking the main workspace", () => {
+    expect(resolveDrawerLayout({
+      frameWidth: 1100,
+      railWidth: 176,
+      size: "compact",
+    })).toEqual({ mode: "overlay", width: 360 });
+    expect(resolveDrawerLayout({
+      frameWidth: 1360,
+      railWidth: 176,
+      size: "standard",
+    })).toEqual({ mode: "docked", width: 408 });
+    expect(resolveDrawerLayout({
+      frameWidth: 1920,
+      railWidth: 176,
+      size: "wide",
+    })).toEqual({ mode: "docked", width: 691 });
   });
 });

@@ -18,6 +18,11 @@ Feature CSS may own product-specific grids, column widths, scroll boundaries, an
 arrangement. It may not own a recurring control, focus ring, feedback tone, typography scale,
 radius, or animation duration.
 
+The raw `--type-*` scale is foundation-only. Shared UI and feature CSS select the documented
+`--text-*-size` semantic role for the region; they do not consume raw sizes or add a one-off font
+size. Typography changes are made by role in `tokens.css`, then verified in the gallery specimen and
+product fixtures before rollout.
+
 ## Rollout status
 
 The v1 rollout completed on 2026-08-30 after the frozen gallery and quality gates passed. Shell and
@@ -26,8 +31,9 @@ the same canonical token graph and shared control/composition contracts. Main ta
 `DataTableFrame`; recurring filters and row actions use shared primitives; operational metrics and
 key/value metadata use valid shared semantics.
 
-The supported `Workspace*` compatibility compositions remain intentionally in v1 for established
-inspectors and workflow dialogs. They consume the same token, focus, motion, and accessibility
+Activity, Group, and Run inspectors use the shared `InspectorDrawer` anatomy and semantic size
+contract. The supported `Workspace*` compatibility compositions remain intentionally in v1 for
+other established compositions. They consume the same token, focus, motion, and accessibility
 contracts and are not visual forks. Removal is deferred to a versioned v2 change, not performed as
 incidental feature cleanup.
 
@@ -47,7 +53,7 @@ incidental feature cleanup.
 | Table wrapper and custom pager | `DataTableFrame` + `TablePagination` |
 | Summary card grid | `SurfacePanel` + `MetricGrid` |
 | Policy or diagnostic rows | `SurfacePanel` + `EvidenceList` |
-| Inspector drawer | `Drawer`; compatibility workspace compositions may remain temporarily |
+| Inspector drawer | `InspectorDrawer` + `InspectorSection` / `InspectorDisclosure` |
 | Large editor drawer | `WorkspaceDialog` |
 | Consequential confirmation | `ConfirmationDialog` |
 | Custom modal | `ModalDialog` |
@@ -66,6 +72,11 @@ incidental feature cleanup.
    timestamps while preserving polling and cache ownership.
 6. **Repository cleanup.** Remove zero-use compatibility CSS/components, then re-run the complete
    contract and visual audit.
+
+Inspector acceptance is container-aware: verify Activity at 1100px overlay, Group at 1440px docked,
+and Run at 1920px expanded docked in addition to the normal application viewports. The primary work
+area must remain at least 760px when docked, focus must return to the exact invoking control, and
+only the inspector body may own vertical scrolling.
 
 One rollout unit is one screen or one independently testable workspace. Do not mix domain refactors
 with a visual migration commit.

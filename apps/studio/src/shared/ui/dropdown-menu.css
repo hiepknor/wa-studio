@@ -77,7 +77,7 @@
 
 .menu-item-label {
   color: var(--text-primary);
-  font-size: var(--type-ui);
+  font-size: var(--text-data-value-size);
   font-weight: var(--weight-medium);
   line-height: var(--control-line-height);
 }
@@ -85,7 +85,7 @@
 .menu-item-description {
   max-width: 32ch;
   color: var(--text-tertiary);
-  font-size: var(--type-label);
+  font-size: var(--text-supporting-size);
   font-weight: var(--weight-regular);
   line-height: var(--leading-ui);
   white-space: normal;

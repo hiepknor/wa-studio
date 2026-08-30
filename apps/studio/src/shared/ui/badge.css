@@ -16,7 +16,7 @@
   background: var(--badge-surface);
   color: var(--badge-text);
   font-family: var(--font-body);
-  font-size: var(--type-label);
+  font-size: var(--text-compact-size);
   font-weight: var(--weight-regular);
   letter-spacing: var(--tracking-ui);
   line-height: var(--leading-tight-ui);

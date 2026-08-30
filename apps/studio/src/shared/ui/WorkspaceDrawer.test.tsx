@@ -36,6 +36,9 @@ describe("WorkspaceDrawer", () => {
     expect(dialog).toHaveClass("workspace-drawer");
     expect(screen.getByRole("navigation", { name: "Editor steps" }))
       .toBeInTheDocument();
+    const navigation = screen.getByRole("navigation", { name: "Editor steps" });
+    expect(navigation.closest(".drawer-subheader")).not.toBeNull();
+    expect(dialog.querySelector(".drawer-body")).not.toContainElement(navigation);
     expect(screen.getByRole("heading", { name: "Details" })).toBeInTheDocument();
     expect(screen.getByText("No unsaved changes")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();

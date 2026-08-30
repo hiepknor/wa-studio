@@ -7,8 +7,10 @@ export interface TablePaginationProps {
   limit: number;
   label?: ReactNode;
   loading?: boolean;
+  nextButtonAriaLabel?: string;
   offset: number;
   onOffsetChange: (offset: number) => void;
+  previousButtonAriaLabel?: string;
   total: number;
 }
 
@@ -16,8 +18,10 @@ export function TablePagination({
   limit,
   label,
   loading = false,
+  nextButtonAriaLabel,
   offset,
   onOffsetChange,
+  previousButtonAriaLabel,
   total,
 }: TablePaginationProps) {
   const pageCount = total === 0 ? 0 : Math.ceil(total / limit);
@@ -31,8 +35,22 @@ export function TablePagination({
     <div className="table-pagination">
       <span>{label ?? defaultLabel}</span>
       <div>
-        <Button disabled={loading || offset <= 0} onClick={() => onOffsetChange(Math.max(0, offset - limit))} size="sm">Previous</Button>
-        <Button disabled={loading || offset + limit >= total} onClick={() => onOffsetChange(offset + limit)} size="sm">Next</Button>
+        <Button
+          aria-label={previousButtonAriaLabel}
+          disabled={loading || offset <= 0}
+          onClick={() => onOffsetChange(Math.max(0, offset - limit))}
+          size="sm"
+        >
+          Previous
+        </Button>
+        <Button
+          aria-label={nextButtonAriaLabel}
+          disabled={loading || offset + limit >= total}
+          onClick={() => onOffsetChange(offset + limit)}
+          size="sm"
+        >
+          Next
+        </Button>
       </div>
     </div>
   );

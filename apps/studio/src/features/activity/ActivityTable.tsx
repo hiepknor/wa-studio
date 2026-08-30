@@ -15,7 +15,7 @@ interface ActivityTableProps {
   emptyMessage: string;
   events: readonly RuntimeActivityEvent[];
   loading: boolean;
-  onInspect: (event: RuntimeActivityEvent) => void;
+  onInspect: (event: RuntimeActivityEvent, trigger: HTMLButtonElement) => void;
 }
 
 export function ActivityTable({
@@ -63,7 +63,7 @@ export function ActivityTable({
             <tr data-selected={event.id === activeEventId || undefined} key={event.id}>
               <td className="data-cell-primary">
                 <div className="stack stack-xs">
-                  <DataTablePrimaryAction onClick={() => onInspect(event)}>{activityTitle(event)}</DataTablePrimaryAction>
+                  <DataTablePrimaryAction onClick={(clickEvent) => onInspect(event, clickEvent.currentTarget)}>{activityTitle(event)}</DataTablePrimaryAction>
                   <span className="data-identifier">{event.eventType} · v{event.eventVersion}</span>
                 </div>
               </td>
@@ -74,7 +74,7 @@ export function ActivityTable({
               <td className="data-cell-status"><Badge tone={activityTone(event.severity)} variant="status">{activitySeverityLabel(event.severity)}</Badge></td>
               <td className="data-cell-time"><DateTime relativeStyle="compact" value={event.occurredAt} variant="relative" /></td>
               <td className="data-cell-action data-cell-action-icon focus-overflow-owner">
-                <Button aria-label={`Inspect ${activityTitle(event)}`} icon="chevron-right" onClick={() => onInspect(event)} variant="ghost" />
+                <Button aria-label={`Inspect ${activityTitle(event)}`} icon="chevron-right" onClick={(clickEvent) => onInspect(event, clickEvent.currentTarget)} variant="ghost" />
               </td>
             </tr>
           ))}

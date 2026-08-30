@@ -101,6 +101,22 @@
   --type-emphasis: 15px;
   --type-title: 20px;
   --type-setup: 36px;
+
+  /* Semantic typography roles. Product CSS consumes these instead of the raw scale. */
+  --text-setup-size: var(--type-setup);
+  --text-page-title-size: var(--type-title);
+  --text-overlay-title-size: var(--type-emphasis);
+  --text-section-title-size: var(--type-body);
+  --text-body-size: var(--type-body);
+  --text-control-size: var(--type-body);
+  --text-control-compact-size: var(--type-caption);
+  --text-data-primary-size: var(--type-body);
+  --text-data-value-size: var(--type-ui);
+  --text-supporting-size: var(--type-caption);
+  --text-technical-size: var(--type-label);
+  --text-compact-size: var(--type-label);
+  --text-overline-size: var(--type-micro);
+  --text-metric-size: var(--type-emphasis);
   --weight-regular: 400;
   --weight-medium: 500;
   --leading-solid: 1;
@@ -176,8 +192,13 @@
   --setup-status-min-height: 62px;
   --rail-width: 176px;
   --rail-width-collapsed: 52px;
-  --drawer-width-default: 360px;
-  --drawer-width-compact: 320px;
+  --drawer-width-compact-min: 360px;
+  --drawer-width-compact-max: 440px;
+  --drawer-width-standard-min: 400px;
+  --drawer-width-standard-max: 560px;
+  --drawer-width-wide-min: 480px;
+  --drawer-width-wide-max: 720px;
+  --drawer-active-width: var(--drawer-width-standard-min);
   --session-switcher-width: 154px;
   --session-selector-panel-width: 360px;
   --session-selector-list-height: 244px;

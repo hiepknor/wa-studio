@@ -8,7 +8,7 @@
   border-radius: var(--radius-control);
   background: var(--surface-active);
   color: var(--text-secondary);
-  font-size: var(--type-micro);
+  font-size: var(--text-compact-size);
   white-space: nowrap;
   transition:
     border-color var(--motion-fast) var(--ease-standard),

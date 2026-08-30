@@ -25,8 +25,8 @@
   box-shadow: var(--shadow-overlay);
 }
 .confirmation-dialog-content { padding: var(--space-5); }
-.confirmation-dialog h2 { margin: 0; color: var(--text-primary); font-size: var(--type-emphasis); }
-.confirmation-dialog-body { margin-top: var(--space-2); color: var(--text-tertiary); font-size: var(--type-ui); line-height: var(--leading-ui); }
+.confirmation-dialog h2 { margin: 0; color: var(--text-primary); font-size: var(--text-overlay-title-size); }
+.confirmation-dialog-body { margin-top: var(--space-2); color: var(--text-tertiary); font-size: var(--text-data-value-size); line-height: var(--leading-ui); }
 .confirmation-dialog-body > p { margin: 0; }
 .confirmation-dialog-body > * + * { margin-top: var(--space-3); }
 .confirmation-dialog-error { margin-top: var(--space-3); }

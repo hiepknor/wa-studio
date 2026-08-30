@@ -10,7 +10,7 @@
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: var(--type-label);
+  font-size: var(--text-compact-size);
 }
 
 .filter-option:hover:not(.is-disabled) {

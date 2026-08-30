@@ -17,7 +17,7 @@ interface RunsTableProps {
   emptyAction?: ReactNode;
   emptyMessage: string;
   loading: boolean;
-  onInspect: (run: RuntimeCampaignRunSummary) => void;
+  onInspect: (run: RuntimeCampaignRunSummary, trigger: HTMLButtonElement) => void;
   runs: readonly RuntimeCampaignRunSummary[];
   selectedRunId: string | null;
   updating?: boolean;
@@ -83,7 +83,7 @@ export function RunsTable({
               <tr data-selected={run.id === selectedRunId || undefined} key={run.id}>
                 <td className="data-cell-primary">
                   <div className="stack stack-xs">
-                    <DataTablePrimaryAction onClick={() => onInspect(run)}>{run.campaignNameSnapshot}</DataTablePrimaryAction>
+                    <DataTablePrimaryAction onClick={(event) => onInspect(run, event.currentTarget)}>{run.campaignNameSnapshot}</DataTablePrimaryAction>
                     <span className="data-identifier">Run {shortId(run.id)} · Campaign {shortId(run.campaignId)}</span>
                   </div>
                 </td>
@@ -100,7 +100,7 @@ export function RunsTable({
                 <td className="data-cell-value runs-mode-col priority-low">{run.executionMode === "LIVE" ? "Live" : "Dry run"}</td>
                 <td className="data-cell-time"><DateTime relativeStyle="compact" value={run.updatedAt} variant="relative" /></td>
                 <td className="data-cell-action data-cell-action-icon focus-overflow-owner">
-                  <Button aria-label={`Inspect run ${shortId(run.id)}`} icon="chevron-right" onClick={() => onInspect(run)} variant="ghost" />
+                  <Button aria-label={`Inspect run ${shortId(run.id)}`} icon="chevron-right" onClick={(event) => onInspect(run, event.currentTarget)} variant="ghost" />
                 </td>
               </tr>
             );

@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type HTMLAttributes,
   type Key,
   type KeyboardEvent,
@@ -16,14 +17,19 @@ import {
 import { createPortal } from "react-dom";
 
 import { Button } from "./Button";
-import { DRAWER_DOCK_MIN_WIDTH } from "./drawer-config";
+import {
+  resolveDrawerLayout,
+  type DrawerMode,
+  type DrawerSize,
+} from "./drawer-config";
 import "./drawer.css";
 
-type DrawerMode = "docked" | "overlay";
+type DrawerSizeProp = DrawerSize | "default";
 
 interface DrawerHostContextValue {
   host: HTMLElement | null;
   mode: DrawerMode;
+  registerDrawer: (size: DrawerSize | null) => void;
   registerHost: (host: HTMLElement | null) => void;
 }
 
@@ -33,42 +39,69 @@ export interface DrawerProviderProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
 }
 
-export function DrawerProvider({ children, className = "", ...props }: DrawerProviderProps) {
+type DrawerFrameStyle = CSSProperties & { "--drawer-active-width"?: string };
+
+export function DrawerProvider({
+  children,
+  className = "",
+  style,
+  ...props
+}: DrawerProviderProps) {
   const [host, registerHost] = useState<HTMLElement | null>(null);
-  const [mode, setMode] = useState<DrawerMode>(() =>
-    typeof window !== "undefined" && window.innerWidth >= DRAWER_DOCK_MIN_WIDTH
-      ? "docked"
-      : "overlay",
+  const [activeSize, registerDrawer] = useState<DrawerSize | null>(null);
+  const [frameWidth, setFrameWidth] = useState(() =>
+    typeof window === "undefined" ? 0 : window.innerWidth,
   );
+  const [railWidth, setRailWidth] = useState(0);
+  const frameRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
-    const mediaQuery = typeof window.matchMedia === "function"
-      ? window.matchMedia(`(min-width: ${DRAWER_DOCK_MIN_WIDTH}px)`)
-      : null;
+    const frame = frameRef.current;
+    if (!frame) return;
+    const frameElement: HTMLDivElement = frame;
+    const rail = frameElement.querySelector<HTMLElement>(".workspace-sidebar");
 
-    function updateFromViewport() {
-      setMode(window.innerWidth >= DRAWER_DOCK_MIN_WIDTH ? "docked" : "overlay");
+    function updateGeometry() {
+      const nextFrameWidth = frameElement.clientWidth || window.innerWidth;
+      const nextRailWidth = rail?.getBoundingClientRect().width || rail?.clientWidth || 0;
+      setFrameWidth(nextFrameWidth);
+      setRailWidth(nextRailWidth);
     }
 
-    function updateFromMedia(event: MediaQueryListEvent) {
-      setMode(event.matches ? "docked" : "overlay");
-    }
-
-    updateFromViewport();
-    window.addEventListener("resize", updateFromViewport);
-    mediaQuery?.addEventListener("change", updateFromMedia);
+    updateGeometry();
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(updateGeometry);
+    observer?.observe(frameElement);
+    if (rail) observer?.observe(rail);
+    window.addEventListener("resize", updateGeometry);
     return () => {
-      window.removeEventListener("resize", updateFromViewport);
-      mediaQuery?.removeEventListener("change", updateFromMedia);
+      observer?.disconnect();
+      window.removeEventListener("resize", updateGeometry);
     };
   }, []);
 
+  const layout = resolveDrawerLayout({
+    frameWidth,
+    railWidth,
+    size: activeSize ?? "standard",
+  });
+  const frameStyle: DrawerFrameStyle = {
+    ...style,
+    "--drawer-active-width": `${layout.width}px`,
+  };
+
   return (
-    <DrawerHostContext.Provider value={{ host, mode, registerHost }}>
+    <DrawerHostContext.Provider
+      value={{ host, mode: layout.mode, registerDrawer, registerHost }}
+    >
       <div
         {...props}
         className={`drawer-frame ${className}`.trim()}
-        data-drawer-mode={mode}
+        data-drawer-mode={activeSize ? layout.mode : undefined}
+        data-drawer-size={activeSize ?? undefined}
+        ref={frameRef}
+        style={frameStyle}
       >
         {children}
       </div>
@@ -103,7 +136,8 @@ export interface DrawerProps {
   onClose: () => void;
   open: boolean;
   returnFocusRef?: RefObject<HTMLElement | null>;
-  size?: "default" | "wide";
+  size?: DrawerSizeProp;
+  subheader?: ReactNode;
   title: ReactNode;
 }
 
@@ -126,21 +160,29 @@ export function Drawer({
   onClose,
   open,
   returnFocusRef,
-  size = "default",
+  size = "standard",
+  subheader,
   title,
 }: DrawerProps) {
   const context = useContext(DrawerHostContext);
   if (!context) throw new Error("Drawer must be rendered inside DrawerProvider");
 
-  const { host, mode } = context;
+  const { host, mode, registerDrawer } = context;
+  const resolvedSize: DrawerSize = size === "default" ? "standard" : size;
   const titleId = useId();
   const descriptionId = useId();
-  const surfaceRef = useRef<HTMLElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnTargetRef = useRef<HTMLElement | null>(null);
   const restoreFocusPendingRef = useRef(false);
   const [present, setPresent] = useState(open);
+
+  useLayoutEffect(() => {
+    if (!present) return;
+    registerDrawer(resolvedSize);
+    return () => registerDrawer(null);
+  }, [present, registerDrawer, resolvedSize]);
 
   const restoreFocus = useCallback(() => {
     if (!restoreFocusPendingRef.current) return;
@@ -257,11 +299,12 @@ export function Drawer({
           onPointerDown={onClose}
         />
       )}
-      <aside
+      <div
         aria-describedby={description ? descriptionId : undefined}
         aria-labelledby={titleId}
         aria-modal={mode === "overlay" ? true : undefined}
-        className={`drawer-surface drawer-surface-${size} ${className}`.trim()}
+        className={`drawer-surface drawer-surface-${resolvedSize} ${className}`.trim()}
+        data-size={resolvedSize}
         onKeyDown={handleKeyDown}
         ref={surfaceRef}
         role={mode === "overlay" ? "dialog" : "complementary"}
@@ -277,7 +320,7 @@ export function Drawer({
             >
               {title}
             </h2>
-            {description && <span className="drawer-description" id={descriptionId}>{description}</span>}
+            {description && <div className="drawer-description" id={descriptionId}>{description}</div>}
           </div>
           <Button
             aria-label="Close drawer"
@@ -289,9 +332,10 @@ export function Drawer({
             variant="ghost"
           />
         </header>
+        <div className="drawer-subheader">{subheader}</div>
         <div className="drawer-body" ref={bodyRef}>{children}</div>
-        {footer && <footer className="drawer-footer">{footer}</footer>}
-      </aside>
+        {footer && <div className="drawer-footer">{footer}</div>}
+      </div>
     </div>,
     host,
   );

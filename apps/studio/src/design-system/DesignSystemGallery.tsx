@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { AppIcon } from "../shared/ui/AppIcon";
 import { Badge } from "../shared/ui/Badge";
@@ -29,10 +29,15 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "../shared/ui/DropdownMenu";
-import { Drawer, DrawerHost, DrawerProvider } from "../shared/ui/Drawer";
+import { DrawerHost, DrawerProvider } from "../shared/ui/Drawer";
 import { FilterOption } from "../shared/ui/FilterOption";
 import { FilterChip } from "../shared/ui/FilterChip";
 import { InlineAlert } from "../shared/ui/InlineAlert";
+import {
+  InspectorDisclosure,
+  InspectorDrawer,
+  InspectorSection,
+} from "../shared/ui/InspectorDrawer";
 import { ModalDialog } from "../shared/ui/ModalDialog";
 import { PageHeader } from "../shared/ui/PageHeader";
 import { SearchField } from "../shared/ui/SearchField";
@@ -108,19 +113,49 @@ function StateBoundary({ children, component }: {
 
 function GalleryDrawerDemo() {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <DrawerProvider className="ds-gallery-drawer-frame">
-      <Button onClick={() => setOpen(true)}>Open drawer</Button>
+      <Button onClick={() => setOpen(true)} ref={triggerRef}>Open drawer</Button>
       <DrawerHost />
-      <Drawer
-        description="Contextual details retain the current workspace."
-        footer={<Button onClick={() => setOpen(false)}>Done</Button>}
+      <InspectorDrawer
+        footer={(
+          <ActionFooter
+            actions={<Button onClick={() => setOpen(false)}>Done</Button>}
+            description="Actions remain visible while evidence scrolls."
+            title="Runtime authoritative"
+          />
+        )}
+        kicker="Runtime evidence"
+        meta={["Run 12345678", "Dry run"]}
         onClose={() => setOpen(false)}
         open={open}
-        title="Runtime evidence"
+        returnFocusRef={triggerRef}
+        size="standard"
+        status={<Badge tone="info" variant="status">Running</Badge>}
+        title="Product release"
       >
-        <p>Drawer content uses one body scroll owner and a stable footer.</p>
-      </Drawer>
+        <InspectorSection
+          description="The primary facts stay scannable at compact and expanded widths."
+          eyebrow="Overview"
+          title="Run summary"
+          titleId="gallery-inspector-summary-title"
+        >
+          <MetricGrid ariaLabel="Run summary" items={[
+            { label: "Targets", value: "71" },
+            { label: "Advanced", tone: "success", value: "64" },
+          ]} />
+        </InspectorSection>
+        <InspectorDisclosure
+          title="Technical evidence"
+          titleId="gallery-inspector-evidence-title"
+        >
+          <DescriptionList ariaLabel="Technical evidence" items={[
+            { id: "policy", label: "Policy", value: "safety-v4", valueClassName: "data-identifier" },
+            { id: "revision", label: "Revision", value: "r3", valueClassName: "data-identifier" },
+          ]} />
+        </InspectorDisclosure>
+      </InspectorDrawer>
     </DrawerProvider>
   );
 }
@@ -193,13 +228,24 @@ export function DesignSystemGallery() {
               ].map(([label, value]) => <div className={`ds-swatch ds-swatch-${value}`} key={value}><span>{label}</span></div>)}
             </div>
           </Specimen>
-          <Specimen description="Body copy stays human; technical evidence uses mono." title="Typography roles">
+          <Specimen description="Each product region consumes a semantic role; raw scale tokens stay private to the foundation." title="Typography roles">
             <div className="ds-type-scale">
-              <h2>Operational workspace title</h2>
-              <p>Human-readable supporting copy stays calm and legible.</p>
-              <strong>Medium emphasis for actions and key values</strong>
-              <code>30 Aug 2026 · POLICY_READY · 70cf89e8</code>
-              <small>UPPERCASE MICRO LABEL</small>
+              {[
+                ["Page title · 20", "page-title", "Operational workspace"],
+                ["Overlay title · 15", "overlay-title", "North America operations"],
+                ["Section title · 14", "section-title", "Runtime target assessment"],
+                ["Primary data · 14", "data-primary", "Release coordinators"],
+                ["Dense value · 13", "data-value", "575 synchronized groups"],
+                ["Supporting copy · 12", "supporting", "Human-readable guidance stays calm and legible."],
+                ["Technical metadata · 11", "technical", "30 Aug 2026 · POLICY_READY · 70cf89e8"],
+                ["Compact label · 11", "compact", "Allowed"],
+                ["Overline · 10", "overline", "SAVED SNAPSHOT"],
+              ].map(([label, role, sample]) => (
+                <div className="ds-type-role" data-role={role} key={role}>
+                  <span>{label}</span>
+                  <strong>{sample}</strong>
+                </div>
+              ))}
             </div>
           </Specimen>
           <Specimen description="Product identity, icon grammar, status reinforcement, and timestamps use shipped primitives." title="Product marks and metadata">
@@ -328,7 +374,9 @@ export function DesignSystemGallery() {
             <StateBoundary component="ModalDialog"><Button onClick={() => setModalOpen(true)}>Open modal</Button></StateBoundary>
             <StateBoundary component="ConfirmationDialog"><Button onClick={() => setConfirmationOpen(true)}>Open confirmation</Button></StateBoundary>
             <StateBoundary component="WorkspaceDialog"><Button onClick={() => setWorkspaceOpen(true)}>Open workspace</Button></StateBoundary>
-            <StateBoundary component="Drawer"><GalleryDrawerDemo /></StateBoundary>
+            <StateBoundary component="Drawer">
+              <StateBoundary component="InspectorDrawer"><GalleryDrawerDemo /></StateBoundary>
+            </StateBoundary>
             <StateBoundary component="TablePagination"><TablePagination limit={20} offset={0} onOffsetChange={() => undefined} total={71} /></StateBoundary>
           </div>
         </div>

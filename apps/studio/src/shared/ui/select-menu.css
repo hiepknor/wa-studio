@@ -66,8 +66,8 @@
 .select-menu-option:disabled { cursor: not-allowed; opacity: .42; }
 .select-menu-option-marker { width: 15px; flex: 0 0 15px; display: grid; place-items: center; color: var(--text-primary); }
 .select-menu-option-copy { min-width: 0; display: flex; flex-direction: column; gap: var(--space-hair); }
-.select-menu-option-copy > span { font-size: var(--type-label); font-weight: var(--weight-medium); }
-.select-menu-option-copy small { color: var(--text-tertiary); font-size: var(--type-label); font-weight: var(--weight-regular); line-height: var(--leading-ui); }
+.select-menu-option-copy > span { font-size: var(--text-data-value-size); font-weight: var(--weight-medium); }
+.select-menu-option-copy small { color: var(--text-tertiary); font-size: var(--text-supporting-size); font-weight: var(--weight-regular); line-height: var(--leading-ui); }
 
 @keyframes select-menu-enter {
   from { opacity: 0; transform: translateY(-3px) scale(.99); }

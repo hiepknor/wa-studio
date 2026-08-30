@@ -74,7 +74,7 @@ body:has(.workspace) .toast-viewport {
 .toast-title {
   overflow-wrap: anywhere;
   color: var(--text-primary);
-  font-size: var(--type-ui);
+  font-size: var(--text-data-value-size);
   font-weight: var(--weight-medium);
   line-height: var(--leading-tight-ui);
 }
@@ -84,7 +84,7 @@ body:has(.workspace) .toast-viewport {
   overflow: hidden;
   overflow-wrap: anywhere;
   color: var(--text-tertiary);
-  font-size: var(--type-caption);
+  font-size: var(--text-supporting-size);
   line-height: var(--leading-ui);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;

@@ -46,6 +46,10 @@ const inlineAlertCss = readFileSync("src/shared/ui/inline-alert.css", "utf8");
 const inlineAlertSource = readFileSync("src/shared/ui/InlineAlert.tsx", "utf8");
 const modalDialogCss = readFileSync("src/shared/ui/modal-dialog.css", "utf8");
 const modalDialogSource = readFileSync("src/shared/ui/ModalDialog.tsx", "utf8");
+const drawerSource = readFileSync("src/shared/ui/Drawer.tsx", "utf8");
+const drawerConfigSource = readFileSync("src/shared/ui/drawer-config.ts", "utf8");
+const inspectorDrawerSource = readFileSync("src/shared/ui/InspectorDrawer.tsx", "utf8");
+const inspectorDrawerCss = readFileSync("src/shared/ui/inspector-drawer.css", "utf8");
 const confirmationDialogSource = readFileSync(
   "src/shared/ui/ConfirmationDialog.tsx",
   "utf8",
@@ -135,10 +139,16 @@ describe("WA Design System contract", () => {
     expect(designSystemDoc).toContain("inspired by Warp Terminal");
     expect(designSystemDoc).toContain("Feature rollout starts only after");
     expect(designSystemDoc).toContain("960 x 560, 1100 x 720, and 1500 x 850");
-    expect(designSystemDoc).toContain("deterministic product fixtures cover Connection, Groups, and Campaign Workspace");
+    expect(designSystemDoc).toContain("deterministic product fixtures cover Connection, Groups, Campaign Workspace, and the Activity");
+    expect(designSystemDoc).toContain("overlay at 1100px, docked at 1440px, and expanded docked at 1920px");
+    expect(designSystemDoc).toContain("The raw `--type-*` scale is a private foundation");
+    expect(designSystemDoc).toContain("`technical` | 11px");
+    expect(designSystemDoc).toContain("`overline` | 10px");
     expect(componentCatalogDoc).toContain("API freeze rule");
+    expect(componentCatalogDoc).toContain("Raw `--type-*` foundation sizes are private");
     expect(componentCatalogDoc).toContain("Compatibility surfaces");
     expect(migrationGuideDoc).toContain("Rollout order");
+    expect(migrationGuideDoc).toContain("Shared UI and feature CSS select the documented");
     expect(migrationGuideDoc).toContain("Definition of done");
     expect(migrationGuideDoc).toContain("apps/studio/product-fixtures.html");
   });
@@ -147,10 +157,45 @@ describe("WA Design System contract", () => {
     expect(publicUiSource).toContain("WA Design System v1 public contract index");
     expect(publicUiSource).toContain('export { DataTable');
     expect(publicUiSource).toContain('export { DataFilterToolbar }');
+    expect(publicUiSource).toContain("InspectorDisclosure,");
+    expect(publicUiSource).toContain("InspectorDrawer,");
+    expect(publicUiSource).toContain("InspectorSection,");
     expect(publicUiSource).not.toMatch(
       /(?:FieldFrame|anchored-popup|modal-isolation|focus-delegate|focus-overflow)/,
     );
     expect(componentCatalogDoc).toContain("src/shared/ui/index.ts");
+  });
+
+  it("locks one container-aware inspector drawer contract", () => {
+    expect(componentCatalogDoc).toContain("New product inspectors use `InspectorDrawer`");
+    expect(migrationGuideDoc).toContain("Activity at 1100px overlay, Group at 1440px docked");
+    expect(drawerConfigSource).toContain("export const DRAWER_MAIN_MIN_WIDTH = 760");
+    expect(drawerConfigSource).toContain('compact: { minWidth: 360, maxWidth: 440, preferredRatio: 0.26 }');
+    expect(drawerConfigSource).toContain('standard: { minWidth: 400, maxWidth: 560, preferredRatio: 0.3 }');
+    expect(drawerConfigSource).toContain('wide: { minWidth: 480, maxWidth: 720, preferredRatio: 0.36 }');
+    expect(drawerSource).toContain('data-drawer-mode={activeSize ? layout.mode : undefined}');
+    expect(drawerSource).toContain('data-drawer-size={activeSize ?? undefined}');
+    expect(drawerSource).toContain('className="drawer-subheader"');
+    expect(inspectorDrawerSource).toContain('className={`inspector-drawer ${className}`.trim()}');
+    expect(inspectorDrawerSource).toContain('className="inspector-drawer-navigation"');
+    expect(inspectorDrawerSource).toContain('className={`inspector-drawer-content ${contentClassName}`.trim()}');
+    expect(inspectorDrawerCss).toContain("container-name: inspector-drawer workspace-drawer");
+    expect(inspectorDrawerCss).toContain("container-type: inline-size");
+    expect(inspectorDrawerSource).toContain("subheader={navigation && (");
+    expect(inspectorDrawerCss).toContain("@container inspector-drawer (max-width: 380px)");
+    expect(inspectorDrawerCss).not.toContain("position: sticky");
+
+    for (const path of filesWithSuffix("src/features", ".tsx").filter((path) => (
+      !path.endsWith(".test.tsx")
+    ))) {
+      const source = readFileSync(path, "utf8");
+      expect(source, `${path} must compose inspectors through InspectorDrawer`)
+        .not.toMatch(/<(?:Drawer|WorkspaceDrawer)\b/);
+    }
+    for (const path of cssFiles("src/features")) {
+      expect(readFileSync(path, "utf8"), `${path} must not restyle drawer chrome`)
+        .not.toMatch(/\.drawer-[a-z0-9-]+/i);
+    }
   });
 
   it("keeps the token graph closed", () => {
@@ -176,8 +221,12 @@ describe("WA Design System contract", () => {
     expect(tokensCss).toContain("--table-row-height: 48px");
     expect(tokensCss).toContain("--table-cell-padding-inline: var(--space-4)");
     expect(tokensCss).toContain("--table-selection-width: 48px");
-    expect(tokensCss).toContain("--drawer-width-default: 360px");
-    expect(tokensCss).toContain("--drawer-width-compact: 320px");
+    expect(tokensCss).toContain("--drawer-width-compact-min: 360px");
+    expect(tokensCss).toContain("--drawer-width-compact-max: 440px");
+    expect(tokensCss).toContain("--drawer-width-standard-min: 400px");
+    expect(tokensCss).toContain("--drawer-width-standard-max: 560px");
+    expect(tokensCss).toContain("--drawer-width-wide-min: 480px");
+    expect(tokensCss).toContain("--drawer-width-wide-max: 720px");
     expect(tokensCss).toContain("--rail-width: 176px");
     expect(tokensCss).toContain("--rail-width-collapsed: 52px");
     expect(tokensCss).toContain("--session-selector-panel-width: 360px");
@@ -204,6 +253,24 @@ describe("WA Design System contract", () => {
     expect(tokensCss).toContain("--type-emphasis: 15px");
     expect(tokensCss).toContain("--type-title: 20px");
     expect(tokensCss).toContain("--type-setup: 36px");
+    for (const [role, foundation] of [
+      ["setup", "setup"],
+      ["page-title", "title"],
+      ["overlay-title", "emphasis"],
+      ["section-title", "body"],
+      ["body", "body"],
+      ["control", "body"],
+      ["control-compact", "caption"],
+      ["data-primary", "body"],
+      ["data-value", "ui"],
+      ["supporting", "caption"],
+      ["technical", "label"],
+      ["compact", "label"],
+      ["overline", "micro"],
+      ["metric", "emphasis"],
+    ] as const) {
+      expect(tokensCss).toContain(`--text-${role}-size: var(--type-${foundation})`);
+    }
     expect(tokensCss).toContain("--weight-regular: 400");
     expect(tokensCss).toContain("--weight-medium: 500");
     expect(tokensCss).toContain("--leading-solid: 1");
@@ -235,37 +302,42 @@ describe("WA Design System contract", () => {
         .not.toMatch(/letter-spacing:\s*-?(?:\d|\.\d)/i);
       expect(css, `${path} must not use retired font-size aliases`)
         .not.toMatch(/var\(--font-size-(?:xs|sm)\)/i);
+      expect(css, `${path} must consume semantic typography roles instead of the raw scale`)
+        .not.toMatch(/var\(--type-(?:micro|label|caption|ui|body|emphasis|title|setup)\)/i);
     }
   });
 
   it("maps core text roles to the product typography contract", () => {
-    expect(appCss).toContain("font: var(--weight-regular) var(--type-body)/var(--leading-ui) var(--font-body)");
+    expect(appCss).toContain("font: var(--weight-regular) var(--text-body-size)/var(--leading-ui) var(--font-body)");
     expect(appCss).toContain("h1, h2, h3, h4, h5, h6 { font-weight: var(--weight-regular); }");
     expect(appCss).toContain("strong, b { font-weight: var(--weight-medium); }");
-    expect(appCss).toContain("font-size: var(--type-body);\n  text-align: left;\n  white-space: nowrap;");
+    expect(appCss).toContain("font-size: var(--text-body-size);\n  text-align: left;\n  white-space: nowrap;");
     expect(dataTableCss).toContain(".ui-data-table {");
-    expect(dataTableCss).toContain("font-size: var(--type-body);");
+    expect(dataTableCss).toContain("font-size: var(--text-data-value-size);");
+    expect(dataTableCss).toContain("font-size: var(--text-data-primary-size);");
+    expect(dataTableCss).toContain("font-size: var(--text-technical-size);");
     expect(dataTableCss).toContain(".ui-data-table .data-column-time,");
     expect(dataTableCss).toContain(".ui-data-table .data-cell-value,");
     expect(dataTableCss).toContain("font-weight: var(--weight-regular);");
     expect(dataTableCss).toContain("letter-spacing: var(--tracking-label);");
     expect(dataTableCss).toContain("text-transform: uppercase;");
 
-    expect(buttonCss).toContain("font-size: var(--type-body)");
+    expect(buttonCss).toContain("font-size: var(--text-control-size)");
     expect(buttonCss).toContain("font-weight: var(--weight-medium)");
     expect(buttonCss).toContain("line-height: var(--leading-ui)");
     expect(buttonCss).toContain("letter-spacing: var(--tracking-ui)");
-    expect(textFieldCss).toContain("--field-control-font-size: var(--type-body)");
+    expect(textFieldCss).toContain("--field-control-font-size: var(--text-control-size)");
     expect(textFieldCss).toContain("line-height: var(--control-line-height)");
     expect(searchFieldCss).not.toContain("font-size:");
+    expect(searchFieldCss).toContain(".search-field-toolbar { width: clamp(280px, 34vw, 420px); max-width: 100%; }");
     expect(selectMenuCss).toContain("line-height: var(--control-line-height)");
-    expect(tabsCss).toContain("font-size: var(--type-body)");
+    expect(tabsCss).toContain("font-size: var(--text-control-size)");
     expect(tabsCss).toContain("font-weight: var(--weight-regular)");
-    expect(badgeCss).toContain("font-size: var(--type-label)");
+    expect(badgeCss).toContain("font-size: var(--text-compact-size)");
     expect(badgeCss).toContain("font-weight: var(--weight-regular)");
     expect(badgeCss).toContain("line-height: var(--leading-tight-ui)");
     expect(badgeCss).toContain("letter-spacing: var(--tracking-ui)");
-    expect(modalDialogCss).toContain("font-size: var(--type-emphasis); font-weight: var(--weight-regular); letter-spacing: var(--tracking-title)");
+    expect(modalDialogCss).toContain("font-size: var(--text-overlay-title-size); font-weight: var(--weight-regular); letter-spacing: var(--tracking-title)");
   });
 
   it("locks the WARP button anatomy and state hierarchy", () => {
@@ -293,7 +365,7 @@ describe("WA Design System contract", () => {
     expect(buttonCss).toContain("color: var(--text-primary)");
     expect(buttonCss).toContain(".button-danger { border-color: var(--state-danger-border); background: transparent; color: var(--state-danger); }");
     expect(buttonCss).toContain("opacity: var(--disabled-opacity)");
-    expect(buttonCss).toContain(".button-sm { --button-height: var(--control-compact); padding-inline: var(--space-2); font-size: var(--type-caption); }");
+    expect(buttonCss).toContain(".button-sm { --button-height: var(--control-compact); padding-inline: var(--space-2); font-size: var(--text-control-compact-size); }");
     expect(buttonCss).toContain(".button-lg { --button-height: var(--control-large); padding-inline: var(--space-4); }");
     expect(buttonCss).toContain(".button-icon-only");
     expect(buttonSource).toContain("size={size}");
@@ -344,8 +416,8 @@ describe("WA Design System contract", () => {
     expect(dropdownMenuCss).toContain("min-height: var(--control-height)");
     expect(dropdownMenuCss).toContain("min-height: var(--row-height-relaxed)");
     expect(dropdownMenuCss).toContain("grid-template-columns: 18px minmax(0, 1fr)");
-    expect(dropdownMenuCss).toContain("font-size: var(--type-ui)");
-    expect(dropdownMenuCss).toContain("font-size: var(--type-label)");
+    expect(dropdownMenuCss).toContain("font-size: var(--text-data-value-size)");
+    expect(dropdownMenuCss).toContain("font-size: var(--text-supporting-size)");
     expect(dropdownMenuCss).toContain("background: var(--state-danger-surface)");
     expect(dropdownMenuSource).toContain('className="menu-item-icon-slot"');
     expect(dropdownMenuSource).toContain('data-tone={danger ? "danger" : "neutral"}');
@@ -690,7 +762,8 @@ describe("WA Design System contract", () => {
     expect(dataFilterToolbarCss)
       .toContain("grid-template-columns: minmax(0, 1fr) auto");
     expect(dataFilterToolbarCss).toContain(".data-filter-controls { min-width: 0;");
-    expect(dataFilterToolbarCss).toContain("justify-self: start");
+    expect(dataFilterToolbarCss).toContain("justify-self: stretch");
+    expect(dataFilterToolbarCss).toContain(".data-filter-controls > .search-field { width: auto; flex: 1 1 180px; }");
     expect(dataFilterToolbarCss).toContain(".data-filter-result-summary { justify-self: end;");
     expect(dataFilterToolbarSource).toMatch(/ref=\{filterTriggerRef\}\s+size="md"/);
     expect(dataFilterToolbarSource).not.toContain("panelMode");

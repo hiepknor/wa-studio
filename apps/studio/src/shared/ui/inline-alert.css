@@ -9,7 +9,7 @@
   border-radius: var(--radius-panel);
   background: var(--surface-subtle);
   color: var(--text-secondary);
-  font-size: var(--type-body);
+  font-size: var(--text-data-value-size);
 }
 .inline-alert[data-has-indicator] { grid-template-columns: auto minmax(0, 1fr); }
 .inline-alert[data-has-action] { grid-template-columns: minmax(0, 1fr) auto; }

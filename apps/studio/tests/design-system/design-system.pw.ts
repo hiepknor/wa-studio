@@ -15,7 +15,7 @@ async function openGallery(page: Page, width = 1500, height = 850) {
 
 async function openProductFixture(
   page: Page,
-  view: "campaigns" | "connection" | "groups",
+  view: "activity" | "campaigns" | "connection" | "groups" | "runs",
   width: number,
   height: number,
 ) {
@@ -76,6 +76,59 @@ test("@a11y representative product screens have no axe violations", async ({ pag
   await expect(page.getByRole("heading", { name: "Campaigns" })).toBeVisible();
   await page.getByRole("button", { exact: true, name: "August product release" }).click();
   await expect(page.getByRole("heading", { name: "Content & schedule" })).toBeVisible();
+  await expectNoAccessibilityViolations(page);
+});
+
+test("@a11y business inspectors have no axe violations in responsive modes", async ({ page }) => {
+  await openProductFixture(page, "activity", 1100, 720);
+  await page.getByRole("button", { exact: true, name: "Campaign run completed" }).click();
+  await expect(page.getByRole("dialog", { name: "Campaign run completed" })).toBeVisible();
+  await expectNoAccessibilityViolations(page);
+
+  await openProductFixture(page, "groups", 1440, 850);
+  await page.getByRole("button", { name: "View North America operations" }).click();
+  const groupInspector = page.getByRole("complementary", { name: "North America operations" });
+  await expect(groupInspector.getByRole("heading", { name: "Group details" })).toBeVisible();
+  await expectNoAccessibilityViolations(page);
+  await groupInspector.getByRole("tab", { name: "Members" }).click();
+  await expect(groupInspector.getByRole("table", { name: "Synchronized members" })).toBeVisible();
+  await expectNoAccessibilityViolations(page);
+
+  await openProductFixture(page, "runs", 1920, 1080);
+  await page.getByRole("button", { name: "August product release" }).click();
+  const runInspector = page.getByRole("complementary", { name: "August product release" });
+  await expect(runInspector.getByRole("heading", { name: "Run summary" })).toBeVisible();
+  await expectNoAccessibilityViolations(page);
+});
+
+test("minimum-window inspector keeps navigation outside content scrolling", async ({ page }) => {
+  await openProductFixture(page, "groups", 960, 560);
+  await page.getByRole("button", { name: /North America operations/ }).last().click();
+
+  const inspector = page.getByRole("dialog", { name: "North America operations" });
+  const body = inspector.locator(".drawer-body");
+  const subheader = inspector.locator(".drawer-subheader");
+  await expect(inspector.getByRole("heading", { name: "Group details" })).toBeVisible();
+  await expect(subheader.getByRole("tablist")).toBeVisible();
+  expect(await body.getByRole("tablist").count()).toBe(0);
+
+  const inspectorBox = await inspector.boundingBox();
+  const subheaderBox = await subheader.boundingBox();
+  const bodyBox = await body.boundingBox();
+  expect(inspectorBox?.width).toBe(400);
+  expect((subheaderBox?.y ?? 0) + (subheaderBox?.height ?? 0))
+    .toBeLessThanOrEqual(bodyBox?.y ?? 0);
+
+  await inspector.getByRole("tab", { name: "Members" }).click();
+  await expect(inspector.getByRole("table", { name: "Synchronized members" })).toBeVisible();
+  await body.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  expect(await body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+  await inspector.getByRole("tab", { name: "Overview" }).click();
+  await expect(inspector.getByRole("heading", { name: "Group details" })).toBeVisible();
+  expect(await body.evaluate((element) => element.scrollTop)).toBe(0);
+  expect(await body.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .toBeLessThanOrEqual(0);
   await expectNoAccessibilityViolations(page);
 });
 
@@ -162,4 +215,48 @@ test("@visual menu hierarchy", async ({ page }) => {
   await openGallery(page, 1100, 720);
   await page.getByRole("button", { name: "Actions" }).click();
   await expect(page.getByRole("menu")).toHaveScreenshot("menu.png");
+});
+
+test("@visual Activity inspector overlays at 1100px", async ({ page }) => {
+  await openProductFixture(page, "activity", 1100, 720);
+  await page.getByRole("button", { exact: true, name: "Campaign run completed" }).click();
+  await expect(page.getByRole("dialog", { name: "Campaign run completed" })).toBeVisible();
+  await expect(page.locator(".workspace")).toHaveScreenshot(
+    "product-activity-inspector-1100x720.png",
+  );
+});
+
+test("@visual Group inspector docks at 1440px", async ({ page }) => {
+  await openProductFixture(page, "groups", 1440, 850);
+  await page.getByRole("button", { name: "View North America operations" }).click();
+  const inspector = page.getByRole("complementary", { name: "North America operations" });
+  await expect(inspector.getByRole("heading", { name: "Group details" })).toBeVisible();
+  const groupToolbar = page.locator(".data-filter-toolbar").first();
+  const filterBox = await groupToolbar.getByRole("button", { exact: true, name: "Filters" }).boundingBox();
+  const resultBox = await groupToolbar.locator(".data-filter-result-summary").boundingBox();
+  expect(filterBox).not.toBeNull();
+  expect(resultBox).not.toBeNull();
+  expect((filterBox?.x ?? 0) + (filterBox?.width ?? 0)).toBeLessThanOrEqual(resultBox?.x ?? 0);
+  await expect(page.locator(".workspace")).toHaveScreenshot(
+    "product-group-inspector-1440x850.png",
+  );
+  await inspector.getByRole("tab", { name: "Members" }).click();
+  await expect(inspector.getByText("Mai Nguyen")).toBeVisible();
+  const horizontalOverflow = await inspector.locator(".drawer-body").evaluate(
+    (body) => body.scrollWidth - body.clientWidth,
+  );
+  expect(horizontalOverflow).toBeLessThanOrEqual(0);
+  await expect(page.locator(".workspace")).toHaveScreenshot(
+    "product-group-members-inspector-1440x850.png",
+  );
+});
+
+test("@visual Run inspector expands at 1920px", async ({ page }) => {
+  await openProductFixture(page, "runs", 1920, 1080);
+  await page.getByRole("button", { name: "August product release" }).click();
+  const inspector = page.getByRole("complementary", { name: "August product release" });
+  await expect(inspector.getByRole("heading", { name: "Run summary" })).toBeVisible();
+  await expect(page.locator(".workspace")).toHaveScreenshot(
+    "product-run-inspector-1920x1080.png",
+  );
 });

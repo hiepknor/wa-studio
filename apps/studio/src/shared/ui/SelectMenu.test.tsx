@@ -39,8 +39,8 @@ describe("SelectMenu", () => {
     expect(tokensCss).toContain("--field-height-md: 42px");
     expect(tokensCss).toContain("--type-label: 11px");
     expect(tokensCss).toContain("--type-ui: 13px");
-    expect(textFieldCss).toContain("--field-control-font-size: var(--type-label)");
-    expect(textFieldCss).toContain("--field-control-font-size: var(--type-body)");
+    expect(textFieldCss).toContain("--field-control-font-size: var(--text-control-compact-size)");
+    expect(textFieldCss).toContain("--field-control-font-size: var(--text-control-size)");
     expect(textFieldCss).toContain("--field-control-height: var(--field-height-xs)");
     expect(textFieldCss).toContain("--field-control-height: var(--field-height-sm)");
     expect(textFieldCss).toContain("--field-control-height: var(--field-height-md)");

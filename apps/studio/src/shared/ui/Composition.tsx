@@ -90,13 +90,20 @@ export interface MetricGridProps {
   ariaLabel: string;
   className?: string;
   items: readonly MetricGridItem[];
+  variant?: "metrics" | "details";
 }
 
-export function MetricGrid({ ariaLabel, className = "", items }: MetricGridProps) {
+export function MetricGrid({
+  ariaLabel,
+  className = "",
+  items,
+  variant = "metrics",
+}: MetricGridProps) {
   return (
     <div
       aria-label={ariaLabel}
       className={`ui-metric-grid ${className}`.trim()}
+      data-variant={variant}
       role="group"
     >
       {items.map((item, index) => (
@@ -212,14 +219,21 @@ export interface EmptyStateProps {
   children: ReactNode;
   compact?: boolean;
   icon: AppIconName;
+  loading?: boolean;
   title: ReactNode;
 }
 
-export function EmptyState({ children, compact = false, icon, title }: EmptyStateProps) {
+export function EmptyState({
+  children,
+  compact = false,
+  icon,
+  loading = false,
+  title,
+}: EmptyStateProps) {
   return (
     <div className="ui-empty-state" data-compact={compact || undefined}>
       <span aria-hidden="true" className="ui-empty-state-icon">
-        <AppIcon name={icon} size="lg" />
+        <AppIcon className={loading ? "ui-icon-spin" : undefined} name={icon} size="lg" />
       </span>
       <strong>{title}</strong>
       <p>{children}</p>

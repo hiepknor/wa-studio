@@ -27,14 +27,17 @@ describe("TablePagination", () => {
       <TablePagination
         label="75 durable runs"
         limit={50}
+        nextButtonAriaLabel="Next run page"
         offset={0}
         onOffsetChange={onOffsetChange}
+        previousButtonAriaLabel="Previous run page"
         total={75}
       />,
     );
 
     expect(screen.getByText("75 durable runs")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByRole("button", { name: "Previous run page" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Next run page" }));
     expect(onOffsetChange).toHaveBeenCalledWith(50);
   });
 });

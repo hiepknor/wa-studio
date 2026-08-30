@@ -6,6 +6,10 @@ and accessibility fixes during rollout, but its current meaning and interaction 
 Feature modules may import a stable component module directly to preserve CSS splitting, but they do
 not import implementation helpers or fork component anatomy.
 
+All catalog components consume the semantic `--text-*-size` roles documented in
+[`design-system.md`](./design-system.md). Raw `--type-*` foundation sizes are private to
+`tokens.css`; product components may not select them directly.
+
 ## Stable foundations
 
 | Component | Contract |
@@ -53,7 +57,7 @@ details. Feature code must not style or reproduce them directly.
 | `DropdownMenu` / `OverflowMenu` | Short contextual action sets with keyboard navigation. |
 | `ModalDialog` | Bounded task or information layer. |
 | `ConfirmationDialog` | Explicit destructive or consequential confirmation. |
-| `Drawer` | Contextual inspection that may dock on wide windows; it is not a multi-step workspace. |
+| `Drawer` | Focus, dismissal, portal, overlay/docked mode, and fluid compact/standard/wide sizing for contextual inspection. It is not a multi-step workspace. |
 | `WorkspaceDialog` | Large multi-step or editing workspace with one scroll owner and a fixed action footer. |
 
 ## Stable compositions
@@ -70,6 +74,7 @@ details. Feature code must not style or reproduce them directly.
 | `EvidenceList` | Status, title, explanation, and technical evidence code. |
 | `EmptyState` | Scoped empty result or first-use state; action remains supplied by the feature. |
 | `ActionFooter` | Sticky or fixed workflow summary and action group. |
+| `InspectorDrawer`, `InspectorSection`, `InspectorDisclosure` | Business-inspector anatomy: identity and status header, optional fixed local navigation outside the one body scroll owner, progressive disclosure, and an optional fixed action footer. |
 
 Standalone data tables use one 8px outlined frame around toolbar, rows, and footer. Every filter
 toolbar and row-selection action bar uses an 8px vertical and 16px horizontal inset; feature styles
@@ -84,6 +89,9 @@ parent.
 inspector and workflow surfaces. They are not the default for new work and must not be duplicated
 under another name. Their replacement or removal is a v2 decision after repository usage reaches
 zero.
+
+New product inspectors use `InspectorDrawer`; `WorkspaceDrawer` remains an API-compatible v1
+surface only. Features do not assemble raw `Drawer` chrome or target `.drawer-*` selectors.
 
 ## Internal utilities
 

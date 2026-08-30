@@ -42,6 +42,7 @@ describe("WA Design System composition patterns", () => {
 
     const metrics = screen.getByRole("group", { name: "Target readiness" });
     expect(metrics).toHaveClass("ui-metric-grid", "target-metrics");
+    expect(metrics).toHaveAttribute("data-variant", "metrics");
     expect(screen.getByText("71").parentElement).toHaveAttribute("data-tone", "success");
     expect(screen.getByRole("group", { name: "Run details" })).toHaveTextContent("Run IDrun-01");
   });

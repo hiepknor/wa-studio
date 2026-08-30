@@ -17,24 +17,33 @@ import {
   unknownMutationOutcomeMessage,
 } from "@/shared/api/runtime-mutation";
 import { userFacingErrorMessage } from "@/shared/errors/error-message";
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
-import { DataTableFrame, DescriptionList, MetricGrid } from "@/shared/ui/Composition";
+import {
+  DataTableFrame,
+  DescriptionList,
+  EmptyState,
+  MetricGrid,
+} from "@/shared/ui/Composition";
 import { DateTime } from "@/shared/ui/DateTime";
+import {
+  DataTable,
+  DataTableEmptyCell,
+  DataTableScroll,
+} from "@/shared/ui/DataTable";
 import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
+import {
+  InspectorDisclosure,
+  InspectorDrawer,
+  InspectorSection,
+} from "@/shared/ui/InspectorDrawer";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SearchField } from "@/shared/ui/SearchField";
 import { Tabs } from "@/shared/ui/Tabs";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import { useToast } from "@/shared/ui/Toast";
-import {
-  WorkspaceDrawer,
-  WorkspaceEmptyState,
-  WorkspaceSectionHeader,
-} from "@/shared/ui/WorkspaceDrawer";
 import { useSessionSync } from "@/shared/hooks/useSessionSync";
 import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
 import {
@@ -555,6 +564,7 @@ export function GroupsScreen() {
     setFiltersOpen(false);
     setListLoadReason(null);
     setSelectedGroup(null);
+    detailTriggerRef.current = null;
     setDetail(null);
     setDetailLoading(false);
     setDetailError(null);
@@ -787,6 +797,7 @@ export function GroupsScreen() {
     membersRevision.current += 1;
     cancelCapabilityRefresh();
     setSelectedGroup(null);
+    detailTriggerRef.current = null;
     setDetail(null);
     setDetailLoading(false);
     setDetailError(null);
@@ -1234,9 +1245,6 @@ export function GroupsScreen() {
     memberPageOffset + (memberPage?.data.length ?? 0),
     memberTotal,
   );
-  const canGoToPreviousMembers = memberOffset > 0 && !membersLoading;
-  const canGoToNextMembers =
-    memberOffset + MEMBER_PAGE_SIZE < memberTotal && !membersLoading;
   const detailCapabilityIsStale = detail
     ? groupCapabilityIsStale(detail.sendCapability)
     : false;
@@ -1605,14 +1613,12 @@ export function GroupsScreen() {
           title="Delete group list?"
         />
 
-        <WorkspaceDrawer
+        <InspectorDrawer
           contentKey={`${selectedGroup?.id ?? "none"}:${inspectorTab}`}
-          description={
-            detail
-              ? `${detail.participantsCount ?? syncedMemberTotal ?? "Unknown"} participants`
-              : undefined
-          }
-          eyebrow="Group inspector"
+          kicker="Group"
+          meta={detail ? [
+            `${detail.participantsCount ?? syncedMemberTotal ?? "Unknown"} participants`,
+          ] : []}
           navigation={detail && (
             <Tabs
               activeTab={inspectorTab}
@@ -1637,12 +1643,18 @@ export function GroupsScreen() {
             selectedGroup && selectedGroup.sessionId === selectedSessionId,
           )}
           returnFocusRef={detailTriggerRef}
+          size="standard"
+          status={detail ? (
+            <Badge tone={detail.isActive ? "success" : "neutral"} variant="status">
+              {detail.isActive ? "Active" : "Inactive"}
+            </Badge>
+          ) : undefined}
           title={detail?.name ?? selectedGroup?.name ?? "Group inspector"}
         >
           {detailLoading && (
-            <WorkspaceEmptyState compact icon="refresh" loading title="Loading group details">
+            <EmptyState compact icon="refresh" loading title="Loading group details">
               Runtime is returning the latest synchronized group profile.
-            </WorkspaceEmptyState>
+            </EmptyState>
           )}
           {detailError && (
             <InlineAlert title="Could not load group details">
@@ -1650,7 +1662,7 @@ export function GroupsScreen() {
             </InlineAlert>
           )}
           {detail && (
-            <div className="groups-inspector stack stack-lg">
+            <div className="groups-inspector">
               {inspectorTab === "overview" && (
                 <div
                   aria-labelledby="group-inspector-overview-tab"
@@ -1658,30 +1670,19 @@ export function GroupsScreen() {
                   id="group-inspector-overview-panel"
                   role="tabpanel"
                 >
-                  <section
-                    aria-labelledby="group-identity-title"
-                    className="groups-inspector-section groups-profile"
+                  <InspectorSection
+                    className="groups-profile"
+                    description={detail.description || "No group description."}
+                    eyebrow="Profile"
+                    title="Group details"
+                    titleId="group-identity-title"
                   >
-                    <header className="groups-inspector-section-header">
-                      <div>
-                        <span>Profile</span>
-                        <h3 id="group-identity-title">Group details</h3>
-                        <p>{detail.description || "No group description."}</p>
-                      </div>
-                      <Badge tone={detail.isActive ? "success" : "neutral"} variant="status">
-                        {detail.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </header>
                     <MetricGrid ariaLabel="Group profile metrics" className="groups-inspector-metrics" items={[
-                      { label: "Participants", value: detail.participantsCount ?? syncedMemberTotal ?? "—" },
                       { label: "Session access", value: accessLabel(detail.isAdmin) },
                       { label: "Record synced", value: <DateTime value={detail.syncedAt} /> },
-                    ]} />
+                    ]} variant="details" />
                     <div className="groups-identity-row">
-                      <div>
-                        <span>Group ID</span>
-                        <code title={detail.id}>{detail.id}</code>
-                      </div>
+                      <span>Group ID</span>
                       <Button
                         aria-label={
                           copyState === "copied"
@@ -1695,37 +1696,34 @@ export function GroupsScreen() {
                       >
                         {copyState === "copied" ? "Copied" : "Copy"}
                       </Button>
+                      <code title={detail.id}>{detail.id}</code>
                     </div>
                     {copyState === "failed" && (
                       <span className="groups-copy-error" role="alert">
                         Could not copy the group ID.
                       </span>
                     )}
-                  </section>
+                  </InspectorSection>
 
-                  <section
-                    aria-labelledby="group-capability-title"
-                    className="groups-capability groups-inspector-section"
+                  <InspectorSection
+                    action={<GroupCapabilityStatus
+                      capability={detail.sendCapability}
+                      includeFreshness={false}
+                    />}
+                    className="groups-capability"
+                    description={<span className="groups-capability-description">
+                      <span>{capabilityReasonCopy(detail.sendCapability.reason)}</span>
+                      <code>{detail.sendCapability.reason}</code>
+                    </span>}
+                    eyebrow="Messaging"
+                    title="Send readiness"
+                    titleId="group-capability-title"
                   >
-                    <header className="groups-inspector-section-header">
-                      <div>
-                        <span>Messaging</span>
-                        <h3 id="group-capability-title">Send readiness</h3>
-                        <p className="groups-capability-description">
-                          <span>{capabilityReasonCopy(detail.sendCapability.reason)}</span>
-                          <code>{detail.sendCapability.reason}</code>
-                        </p>
-                      </div>
-                      <GroupCapabilityStatus
-                        capability={detail.sendCapability}
-                        includeFreshness={false}
-                      />
-                    </header>
                     <div className="groups-capability-body stack stack-md">
                       <MetricGrid ariaLabel="Send capability metrics" className="groups-capability-meta groups-inspector-metrics" items={[
                         { label: "Checked", value: <DateTime value={detail.sendCapability.checkedAt} /> },
                         { label: "Freshness", value: <Badge tone={detailCapabilityIsStale ? "warning" : "success"} variant="status">{detailCapabilityIsStale ? "Stale" : "Current"}</Badge> },
-                      ]} />
+                      ]} variant="details" />
                       <Button
                         disabled={manualCapabilityOperationActive}
                         icon="refresh"
@@ -1780,39 +1778,29 @@ export function GroupsScreen() {
                           </InlineAlert>
                         )}
                     </div>
-                  </section>
+                  </InspectorSection>
 
-                  <section
-                    aria-labelledby="group-configuration-title"
-                    className="groups-inspector-section"
+                  <InspectorSection
+                    description="Runtime flags that govern access, posting, and settings changes."
+                    eyebrow="Policy"
+                    title="Group configuration"
+                    titleId="group-configuration-title"
                   >
-                    <header className="groups-inspector-section-header">
-                      <div>
-                        <span>Policy</span>
-                        <h3 id="group-configuration-title">Group configuration</h3>
-                        <p>Runtime flags that govern access, posting, and settings changes.</p>
-                      </div>
-                    </header>
-                    <MetricGrid ariaLabel="Group configuration" className="groups-facts groups-facts-grid" items={[
+                    <MetricGrid ariaLabel="Group configuration" className="groups-inspector-metrics groups-policy-metrics" items={[
                       { label: "Posting", value: booleanLabel(detail.isAnnounce, "Admins only", "All members") },
                       { label: "Read only", value: booleanLabel(detail.isReadOnly, "Yes", "No") },
                       { label: "Settings", value: booleanLabel(detail.settingsLocked, "Locked", "Unlocked") },
-                    ]} />
-                  </section>
+                    ]} variant="details" />
+                  </InspectorSection>
 
-                  <details
-                    className="groups-inspector-disclosure groups-inspector-section"
+                  <InspectorDisclosure
+                    className="groups-technical-disclosure"
+                    description="Synchronization history and Runtime identifiers."
                     key={detail.id}
+                    title="Sync & identifiers"
+                    titleId="group-technical-metadata-title"
                   >
-                    <summary className="groups-inspector-section-header">
-                      <div>
-                        <span>Technical</span>
-                        <h3 id="group-technical-metadata-title">Sync &amp; identifiers</h3>
-                        <p>Synchronization history and Runtime identifiers.</p>
-                      </div>
-                      <AppIcon className="groups-inspector-disclosure-indicator" name="chevron-right" size="sm" />
-                    </summary>
-                    <DescriptionList ariaLabel="Sync and identifiers" className="groups-facts groups-technical-facts" items={[
+                    <DescriptionList ariaLabel="Sync and identifiers" className="groups-technical-facts" items={[
                       { id: "record-synced", label: "Record synced", value: <DateTime value={detail.syncedAt} /> },
                       { id: "details-synced", label: "Details synced", value: <DateTime value={detail.detailsSyncedAt} /> },
                       { id: "capability-revision", label: "Capability revision", value: detail.sendCapability.revision },
@@ -1821,7 +1809,7 @@ export function GroupsScreen() {
                       ...(detail.linkedParentId ? [{ id: "linked-parent", label: "Linked parent", value: detail.linkedParentId }] : []),
                       { id: "session-id", label: "Session ID", value: detail.sessionId },
                     ]} />
-                  </details>
+                  </InspectorDisclosure>
                 </div>
               )}
 
@@ -1832,7 +1820,7 @@ export function GroupsScreen() {
                   id="group-inspector-members-panel"
                   role="tabpanel"
                 >
-                  <WorkspaceSectionHeader
+                  <InspectorSection
                     action={<span className="groups-member-count">
                       {memberQuery
                         ? `${memberTotal} matches`
@@ -1843,10 +1831,10 @@ export function GroupsScreen() {
                           : (syncedMemberTotal ?? "—")}
                     </span>}
                     description="Search the synchronized member directory and review access roles."
-                    kicker="Directory"
+                    eyebrow="Directory"
                     title="Members"
                     titleId="group-members-title"
-                  />
+                  >
                   {syncedMemberTotal !== null &&
                     detail.participantsCount !== null &&
                     detail.participantsCount !== syncedMemberTotal && (
@@ -1858,15 +1846,6 @@ export function GroupsScreen() {
                         available for {detail.participantsCount} participants.
                       </InlineAlert>
                     )}
-                  <SearchField
-                    id="member-filter"
-                    label="Search synchronized members"
-                    loading={membersLoading}
-                    onChange={setMemberFilter}
-                    placeholder="Search all synced members"
-                    value={memberFilter}
-                    variant="toolbar"
-                  />
                   {membersError && (
                     <InlineAlert
                       action={
@@ -1891,93 +1870,135 @@ export function GroupsScreen() {
                       {membersError}
                     </InlineAlert>
                   )}
-                  {!memberPage && membersLoading ? (
-                    <WorkspaceEmptyState compact icon="refresh" loading title="Loading members">
-                      Runtime is returning synchronized member records.
-                    </WorkspaceEmptyState>
-                  ) : !memberPage && membersError ? null : memberPage?.data
-                      .length === 0 && memberQuery ? (
-                    <WorkspaceEmptyState compact icon="groups" title="No matching members">
-                      No synchronized members match this search.
-                    </WorkspaceEmptyState>
-                  ) : memberPage?.data.length === 0 ? (
-                    <WorkspaceEmptyState compact icon="groups" title="No member records">
-                      No member details available.
-                    </WorkspaceEmptyState>
-                  ) : (
-                    <ul aria-busy={membersLoading || undefined}>
-                      {(memberPage?.data ?? []).map((member) => {
-                        const identity = memberIdentityPresentation(member);
-                        return (
-                          <li key={member.participantId}>
-                            <span className="stack stack-xs">
-                              <strong>{memberDisplayName(member)}</strong>
-                              <code>{identity.label}</code>
-                              {identity.resolvedPhoneNumber &&
-                                identity.participantId && (
-                                  <code className="groups-member-id">
-                                    {identity.participantId}
-                                  </code>
-                                )}
-                            </span>
-                            <Badge
-                              tone={
-                                member.isAdmin || member.isSuperAdmin
-                                  ? "info"
-                                  : "neutral"
-                              }
-                            >
-                              {member.isSuperAdmin
-                                ? "Owner"
-                                : member.isAdmin
-                                  ? "Admin"
-                                  : "Member"}
-                            </Badge>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                  {memberPage && memberTotal > 0 && (
-                    <div className="groups-member-pagination">
-                      <span>
-                        {memberFirstItem}–{memberLastItem} of {memberTotal}
-                      </span>
-                      <div>
-                        <Button
-                          aria-label="Previous member page"
-                          disabled={!canGoToPreviousMembers}
-                          onClick={() => {
-                            membersRevision.current += 1;
-                            memberRequestKeyRef.current = "";
-                            setMemberOffset(
-                              Math.max(0, memberOffset - MEMBER_PAGE_SIZE),
-                            );
-                          }}
-                          size="sm"
-                        >
-                          Previous
-                        </Button>
-                        <Button
-                          aria-label="Next member page"
-                          disabled={!canGoToNextMembers}
-                          onClick={() => {
-                            membersRevision.current += 1;
-                            memberRequestKeyRef.current = "";
-                            setMemberOffset(memberOffset + MEMBER_PAGE_SIZE);
-                          }}
-                          size="sm"
-                        >
-                          Next
-                        </Button>
-                      </div>
-                    </div>
-                  )}
+                  <DataTableFrame
+                    className="groups-members-table"
+                    footer={memberPage && memberTotal > 0 ? (
+                      <TablePagination
+                        label={`${memberFirstItem}–${memberLastItem} of ${memberTotal}`}
+                        limit={MEMBER_PAGE_SIZE}
+                        loading={membersLoading}
+                        nextButtonAriaLabel="Next member page"
+                        offset={memberOffset}
+                        onOffsetChange={(nextOffset) => {
+                          membersRevision.current += 1;
+                          memberRequestKeyRef.current = "";
+                          setMemberOffset(nextOffset);
+                        }}
+                        previousButtonAriaLabel="Previous member page"
+                        total={memberTotal}
+                      />
+                    ) : undefined}
+                    label="Synchronized member directory"
+                    scroll={false}
+                    toolbar={(
+                      <SearchField
+                        id="member-filter"
+                        label="Search synchronized members"
+                        loading={membersLoading}
+                        onChange={setMemberFilter}
+                        placeholder="Search all synced members"
+                        value={memberFilter}
+                        variant="toolbar"
+                      />
+                    )}
+                  >
+                    <DataTableScroll
+                      busy={membersLoading}
+                      updating={membersLoading && Boolean(memberPage?.data.length)}
+                    >
+                      <DataTable caption="Synchronized members">
+                        <colgroup>
+                          <col />
+                          <col className="groups-member-role-column" />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th scope="col">Member</th>
+                            <th className="groups-member-role-cell" scope="col">Role</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {!memberPage && membersLoading ? (
+                            <tr><DataTableEmptyCell colSpan={2}>
+                              <EmptyState compact icon="refresh" loading title="Loading members">
+                                Runtime is returning synchronized member records.
+                              </EmptyState>
+                            </DataTableEmptyCell></tr>
+                          ) : !memberPage && membersError ? (
+                            <tr><DataTableEmptyCell colSpan={2}>
+                              <EmptyState compact icon="groups" title="Members unavailable">
+                                Retry after Runtime becomes available.
+                              </EmptyState>
+                            </DataTableEmptyCell></tr>
+                          ) : memberPage?.data.length === 0 && memberQuery ? (
+                            <tr><DataTableEmptyCell colSpan={2}>
+                              <EmptyState compact icon="groups" title="No matching members">
+                                No synchronized members match this search.
+                              </EmptyState>
+                            </DataTableEmptyCell></tr>
+                          ) : memberPage?.data.length === 0 ? (
+                            <tr><DataTableEmptyCell colSpan={2}>
+                              <EmptyState compact icon="groups" title="No member records">
+                                No member details available.
+                              </EmptyState>
+                            </DataTableEmptyCell></tr>
+                          ) : (
+                            (memberPage?.data ?? []).map((member) => {
+                              const identity = memberIdentityPresentation(member);
+                              const showsRawIdentity = Boolean(
+                                identity.resolvedPhoneNumber &&
+                                identity.participantId &&
+                                identity.participantId !== identity.label,
+                              );
+                              return (
+                                <tr key={member.participantId}>
+                                  <td className="data-cell-primary groups-member-identity">
+                                    <div className="stack stack-xs">
+                                      <strong className="data-primary-text">
+                                        {memberDisplayName(member)}
+                                      </strong>
+                                      <span className="groups-member-identifiers">
+                                        <code>{identity.label}</code>
+                                        {showsRawIdentity && (
+                                          <>
+                                            <span aria-hidden="true">·</span>
+                                            <code className="groups-member-id">
+                                              {identity.participantId}
+                                            </code>
+                                          </>
+                                        )}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="groups-member-role-cell">
+                                    <Badge
+                                      tone={
+                                        member.isAdmin || member.isSuperAdmin
+                                          ? "info"
+                                          : "neutral"
+                                      }
+                                    >
+                                      {member.isSuperAdmin
+                                        ? "Owner"
+                                        : member.isAdmin
+                                          ? "Admin"
+                                          : "Member"}
+                                    </Badge>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </DataTable>
+                    </DataTableScroll>
+                  </DataTableFrame>
+                  </InspectorSection>
                 </section>
               )}
             </div>
           )}
-        </WorkspaceDrawer>
+        </InspectorDrawer>
       </>
     </div>
   );

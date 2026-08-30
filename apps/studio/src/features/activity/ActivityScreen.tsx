@@ -9,9 +9,13 @@ import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { DataTableFrame, DescriptionList } from "@/shared/ui/Composition";
 import { DateTime } from "@/shared/ui/DateTime";
+import {
+  InspectorDisclosure,
+  InspectorDrawer,
+  InspectorSection,
+} from "@/shared/ui/InspectorDrawer";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
-import { WorkspaceDrawer } from "@/shared/ui/WorkspaceDrawer";
 import {
   ActivityToolbar,
   initialActivityListState,
@@ -52,6 +56,7 @@ export function ActivityScreen({
   const [error, setError] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(initialEventId);
   const requestRef = useRef(0);
+  const detailTriggerRef = useRef<HTMLButtonElement>(null);
   const activeReadRef = useRef<"append" | "background" | "foreground" | null>(null);
   const loadedOlderRef = useRef(loadedOlder);
   const observedActivityRevisionRef = useRef(activityResourceRevision);
@@ -175,7 +180,8 @@ export function ActivityScreen({
     if (initialEventId) setSelectedEventId(initialEventId);
   }, [initialEventId]);
 
-  function selectEvent(event: RuntimeActivityEvent) {
+  function selectEvent(event: RuntimeActivityEvent, trigger: HTMLButtonElement) {
+    detailTriggerRef.current = trigger;
     setSelectedEventId(event.id);
     onEventSelectionChange?.(event.id);
   }
@@ -183,6 +189,7 @@ export function ActivityScreen({
   function closeInspector() {
     setSelectedEventId(null);
     onEventSelectionChange?.(null);
+    detailTriggerRef.current = null;
   }
 
   const hasCriteria = Boolean(state.query || state.categories.length || state.severities.length);
@@ -211,47 +218,126 @@ export function ActivityScreen({
       />
       <div className="activity-load-more"><span>{retentionDays ? `Activity is retained for ${retentionDays} days.` : "Retention is Runtime controlled."}</span>{nextCursor && <Button disabled={loadingOlder} loading={loadingOlder} onClick={() => void load({ append: true, cursor: nextCursor })}>Load older</Button>}</div>
     </DataTableFrame>
-    <WorkspaceDrawer
+    <InspectorDrawer
       contentKey={selectedEventId ?? "none"}
-      description={selectedEvent ? activityCategoryLabel(selectedEvent.category) : "Operational event"}
-      eyebrow={selectedEvent ? <DateTime value={selectedEvent.occurredAt} /> : "Activity inspector"}
-      footer={selectedEvent?.related.runId && onOpenRun ? <div className="activity-inspector-footer"><span>Related durable execution</span><Button onClick={() => onOpenRun(selectedEvent.related.runId!)} variant="primary">Open run</Button></div> : undefined}
+      kicker="Activity event"
+      meta={selectedEvent ? [
+        activityCategoryLabel(selectedEvent.category),
+        <DateTime key="occurred" value={selectedEvent.occurredAt} />,
+      ] : []}
       onClose={closeInspector}
       open={Boolean(selectedEvent)}
+      returnFocusRef={detailTriggerRef}
+      size="compact"
+      status={selectedEvent ? (
+        <Badge tone={activityTone(selectedEvent.severity)} variant="status">
+          {activitySeverityLabel(selectedEvent.severity)}
+        </Badge>
+      ) : undefined}
       title={selectedEvent ? activityTitle(selectedEvent) : "Activity inspector"}
     >
-      {selectedEvent && <ActivityInspector event={selectedEvent} />}
-    </WorkspaceDrawer>
+      {selectedEvent && <ActivityInspector event={selectedEvent} onOpenRun={onOpenRun} />}
+    </InspectorDrawer>
   </div>;
 }
 
-function ActivityInspector({ event }: { event: RuntimeActivityEvent }) {
+function ActivityInspector({
+  event,
+  onOpenRun,
+}: {
+  event: RuntimeActivityEvent;
+  onOpenRun?: (runId: string) => void;
+}) {
   const metadata = Object.entries(event.metadata);
-  return <div className="activity-inspector stack stack-lg">
-    <section className="activity-inspector-section"><div className="activity-inspector-badges"><Badge tone="neutral">{activityCategoryLabel(event.category)}</Badge><Badge tone={activityTone(event.severity)} variant="status">{activitySeverityLabel(event.severity)}</Badge></div><p>{event.subject.labelSnapshot}</p></section>
-    <section className="activity-inspector-section"><h3>Event</h3><DescriptionList
-      ariaLabel="Event details"
-      className="activity-detail-list"
-      items={[
-        { id: "type", label: "Type", value: event.eventType, valueClassName: "ui-technical-text" },
-        { id: "occurred", label: "Occurred", value: <DateTime value={event.occurredAt} /> },
-        { id: "origin", label: "Origin", value: event.origin.charAt(0) + event.origin.slice(1).toLocaleLowerCase() },
-        { id: "event-id", label: "Event ID", value: event.id, valueClassName: "ui-technical-text" },
-        { id: "correlation", label: "Correlation", value: event.correlationId ?? "Not available", valueClassName: "ui-technical-text" },
-      ]}
-    /></section>
-    <section className="activity-inspector-section"><h3>Subject</h3><DescriptionList
-      ariaLabel="Event subject"
-      className="activity-detail-list"
-      items={[
-        { id: "type", label: "Type", value: event.subject.type },
-        { id: "id", label: "ID", value: event.subject.id, valueClassName: "ui-technical-text" },
-        ...(event.related.campaignId ? [{ id: "campaign", label: "Campaign", value: event.related.campaignId, valueClassName: "ui-technical-text" }] : []),
-        ...(event.related.runId ? [{ id: "run", label: "Run", value: event.related.runId, valueClassName: "ui-technical-text" }] : []),
-        ...(event.related.syncRunId ? [{ id: "sync-run", label: "Sync run", value: event.related.syncRunId, valueClassName: "ui-technical-text" }] : []),
-        ...(event.related.groupId ? [{ id: "group", label: "Group", value: event.related.groupId, valueClassName: "ui-technical-text" }] : []),
-      ]}
-    /></section>
-    {metadata.length > 0 && <section className="activity-inspector-section"><h3>Allowlisted metadata</h3><DescriptionList ariaLabel="Allowlisted metadata" className="activity-detail-list" items={metadata.map(([key, value]) => ({ id: key, label: key, value: typeof value === "object" ? JSON.stringify(value) : String(value) }))} /></section>}
+  const related = [
+    event.related.campaignId && { id: event.related.campaignId, label: "Campaign", type: "campaign" },
+    event.related.runId && { id: event.related.runId, label: "Run", type: "run" },
+    event.related.syncRunId && { id: event.related.syncRunId, label: "Sync run", type: "sync-run" },
+    event.related.groupId && { id: event.related.groupId, label: "Group", type: "group" },
+  ].filter((item): item is { id: string; label: string; type: string } => Boolean(item));
+
+  return <div className="activity-inspector">
+    <InspectorSection
+      description={event.subject.type}
+      eyebrow="Subject"
+      title={event.subject.labelSnapshot}
+      titleId="activity-subject-title"
+    >
+      <DescriptionList
+        ariaLabel="Event subject"
+        className="activity-detail-list"
+        items={[{ id: "subject-id", label: "Subject ID", value: event.subject.id, valueClassName: "ui-technical-text" }]}
+      />
+    </InspectorSection>
+    <InspectorSection
+      eyebrow="Evidence"
+      title="Event details"
+      titleId="activity-event-details-title"
+    >
+      <DescriptionList
+        ariaLabel="Event details"
+        className="activity-detail-list"
+        items={[
+          { id: "type", label: "Type", value: event.eventType, valueClassName: "ui-technical-text" },
+          { id: "occurred", label: "Occurred", value: <DateTime value={event.occurredAt} /> },
+          { id: "origin", label: "Origin", value: event.origin.charAt(0) + event.origin.slice(1).toLocaleLowerCase() },
+        ]}
+      />
+    </InspectorSection>
+    {related.length > 0 && (
+      <InspectorSection
+        eyebrow="Context"
+        title="Related resources"
+        titleId="activity-related-title"
+      >
+        <ul aria-label="Related resources" className="activity-related-list">
+          {related.map((item) => (
+            <li key={item.type}>
+              <span>
+                <strong>{item.label}</strong>
+                <code title={item.id}>{item.id}</code>
+              </span>
+              {item.type === "run" && onOpenRun && (
+                <Button onClick={() => onOpenRun(item.id)} size="sm" variant="secondary">
+                  Open run
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </InspectorSection>
+    )}
+    <InspectorDisclosure
+      description="Event and correlation identifiers."
+      title="Technical identifiers"
+      titleId="activity-technical-title"
+    >
+      <DescriptionList
+        ariaLabel="Technical event identifiers"
+        className="activity-detail-list"
+        items={[
+          { id: "event-id", label: "Event ID", value: event.id, valueClassName: "ui-technical-text" },
+          { id: "correlation", label: "Correlation", value: event.correlationId ?? "Not available", valueClassName: "ui-technical-text" },
+        ]}
+      />
+    </InspectorDisclosure>
+    {metadata.length > 0 && (
+      <InspectorDisclosure
+        description="Retained non-sensitive operational context."
+        title="Allowlisted metadata"
+        titleId="activity-metadata-title"
+      >
+        <DescriptionList
+          ariaLabel="Allowlisted metadata"
+          className="activity-detail-list"
+          items={metadata.map(([key, value]) => ({
+            id: key,
+            label: key,
+            value: typeof value === "object" ? JSON.stringify(value) : String(value),
+            valueClassName: "ui-technical-text",
+          }))}
+        />
+      </InspectorDisclosure>
+    )}
   </div>;
 }

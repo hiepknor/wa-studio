@@ -5,7 +5,7 @@ import { Drawer } from "./Drawer";
 import "./workspace-drawer.css";
 
 export interface WorkspaceDrawerProps
-  extends Omit<ComponentProps<typeof Drawer>, "children" | "className" | "footer"> {
+  extends Omit<ComponentProps<typeof Drawer>, "children" | "className" | "footer" | "subheader"> {
   children: ReactNode;
   className?: string;
   contentClassName?: string;
@@ -28,12 +28,12 @@ export function WorkspaceDrawer({
       {...props}
       className={`workspace-drawer ${className}`.trim()}
       footer={footer}
+      subheader={navigation && (
+        <div className="workspace-drawer-navigation">{navigation}</div>
+      )}
     >
       <div className="workspace-drawer-layout">
         {notice && <div className="workspace-drawer-notice">{notice}</div>}
-        {navigation && (
-          <div className="workspace-drawer-navigation">{navigation}</div>
-        )}
         <div
           className={`workspace-drawer-content ${contentClassName}`.trim()}
         >

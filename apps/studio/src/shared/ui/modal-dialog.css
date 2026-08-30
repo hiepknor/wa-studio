@@ -45,9 +45,9 @@
 }
 .modal-dialog-heading { min-width: 0; }
 .modal-dialog-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-tight); }
-.modal-dialog-eyebrow { color: var(--text-tertiary); font-size: var(--type-micro); font-weight: var(--weight-medium); letter-spacing: var(--tracking-label); text-transform: uppercase; }
-.modal-dialog-title { margin: var(--space-1) 0 0; color: var(--text-primary); font-size: var(--type-emphasis); font-weight: var(--weight-regular); letter-spacing: var(--tracking-title); }
-.modal-dialog-description { margin: var(--space-tight) 0 0; color: var(--text-tertiary); font-size: var(--type-caption); line-height: var(--leading-ui); }
+.modal-dialog-eyebrow { color: var(--text-tertiary); font-size: var(--text-overline-size); font-weight: var(--weight-medium); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.modal-dialog-title { margin: var(--space-1) 0 0; color: var(--text-primary); font-size: var(--text-overlay-title-size); font-weight: var(--weight-regular); letter-spacing: var(--tracking-title); }
+.modal-dialog-description { margin: var(--space-tight) 0 0; color: var(--text-tertiary); font-size: var(--text-supporting-size); line-height: var(--leading-ui); }
 .modal-dialog-body { min-height: 0; overflow-y: auto; padding: var(--space-pane) var(--space-5) var(--space-5); }
 .modal-dialog-footer {
   display: flex;

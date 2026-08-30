@@ -51,13 +51,13 @@
   background: var(--control-surface-default);
   color: var(--text-primary);
   font-family: var(--font-body);
-  font-size: var(--type-label);
+  font-size: var(--text-control-size);
 }
 .search-select-search input:hover { border-color: var(--control-border-hover); background: var(--control-surface-hover); }
 .search-select-search input::placeholder { color: var(--text-tertiary); }
 .search-select-listbox { min-height: 0; overflow-y: auto; }
 .search-select-group + .search-select-group { margin-top: var(--space-hair); padding-top: var(--space-hair); border-top: var(--border-width) solid var(--border-subtle); }
-.search-select-group-label { min-height: 24px; display: flex; align-items: center; padding: 0 var(--space-2); color: var(--text-tertiary); font-size: var(--type-micro); font-weight: var(--weight-medium); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.search-select-group-label { min-height: 24px; display: flex; align-items: center; padding: 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-overline-size); font-weight: var(--weight-medium); letter-spacing: var(--tracking-label); text-transform: uppercase; }
 .search-select-option {
   width: 100%;
   min-height: var(--popup-option-height);
@@ -71,11 +71,11 @@
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-body);
-  font-size: var(--type-label);
+  font-size: var(--text-data-value-size);
   text-align: left;
 }
 .search-select-option:hover:not(:disabled) { background: var(--surface-hover); color: var(--text-primary); }
 .search-select-option[aria-selected="true"] { background: var(--surface-selected); color: var(--text-primary); font-weight: var(--weight-medium); }
 .search-select-option:disabled { cursor: not-allowed; opacity: var(--disabled-opacity); }
 .search-select-option-marker { width: 15px; display: grid; place-items: center; }
-.search-select-empty { min-height: 72px; display: grid; place-items: center; margin: 0; padding: var(--space-3); color: var(--text-tertiary); font-size: var(--type-label); text-align: center; }
+.search-select-empty { min-height: 72px; display: grid; place-items: center; margin: 0; padding: var(--space-3); color: var(--text-tertiary); font-size: var(--text-supporting-size); text-align: center; }

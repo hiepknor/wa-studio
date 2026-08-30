@@ -26,6 +26,7 @@ export const DESIGN_SYSTEM_STATE_MATRIX = {
   ModalDialog: ["closed", "open", "focus-trap", "return-focus"],
   ConfirmationDialog: ["closed", "open", "busy", "error"],
   Drawer: ["closed", "overlay", "docked", "return-focus"],
+  InspectorDrawer: ["compact", "standard", "wide", "sections", "disclosure", "fixed-footer"],
   WorkspaceDialog: ["closed", "open", "navigation", "fixed-footer"],
   PageHeader: ["title", "description", "actions"],
   SectionHeader: ["title", "description", "action", "divider"],

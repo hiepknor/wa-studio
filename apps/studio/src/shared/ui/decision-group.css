@@ -55,6 +55,6 @@
 .decision-group-option[data-selected="true"] .decision-group-indicator { border-color: var(--border-strong); background: var(--surface-active); color: var(--text-primary); }
 .decision-group-copy { min-width: 0; display: flex; grid-area: copy; flex-direction: column; gap: var(--space-hair); }
 .decision-group-title { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-.decision-group-title strong { font-size: var(--type-label); font-weight: var(--weight-medium); }
-.decision-group-copy small { color: var(--text-tertiary); font-size: var(--type-micro); line-height: var(--leading-ui); }
+.decision-group-title strong { font-size: var(--text-body-size); font-weight: var(--weight-medium); }
+.decision-group-copy small { color: var(--text-tertiary); font-size: var(--text-supporting-size); line-height: var(--leading-ui); }
 .decision-group-option[data-selected="true"] .decision-group-copy small { color: var(--text-secondary); }

@@ -7,17 +7,21 @@ import {
 import { WorkspaceShell } from "@/app/WorkspaceShell";
 import { ConnectionScreen } from "@/features/connection/ConnectionScreen";
 import type {
+  RuntimeActivityEvent,
   RuntimeApi,
   RuntimeCampaign,
+  RuntimeCampaignRun,
+  RuntimeCampaignRunSummary,
   RuntimeCampaignTarget,
   RuntimeGroup,
   RuntimeGroupList,
+  RuntimeGroupMember,
   RuntimeSession,
 } from "@/shared/api/runtime-client";
 import type { ManagedRuntimeSnapshot } from "@/shared/native/managed-runtime";
 import { ToastProvider } from "@/shared/ui/Toast";
 
-type ProductFixtureView = "campaigns" | "connection" | "groups";
+type ProductFixtureView = "activity" | "campaigns" | "connection" | "groups" | "runs";
 
 const SESSION: RuntimeSession = {
   connectedAt: "2026-08-30T09:00:00.000Z",
@@ -70,6 +74,21 @@ const GROUPS: RuntimeGroup[] = GROUP_NAMES.map((name, index) => ({
   syncedAt: "2026-08-30T17:30:00.000Z",
 }));
 
+const GROUP_MEMBERS: RuntimeGroupMember[] = Array.from({ length: 8 }, (_, index) => {
+  const phone = `8490000000${index}`;
+  return {
+    displayName: index < 2 ? ["Mai Nguyen", "Release operator"][index] : null,
+    displayNameSource: index < 2 ? "OPENWA_CONTACT_NAME" : null,
+    identityType: "PHONE_JID",
+    isAdmin: index < 4,
+    isSuperAdmin: index === 0,
+    participantId: `${phone}@c.us`,
+    phoneNumber: phone,
+    projectionRevision: 10,
+    resolvedPhoneNumber: phone,
+  };
+});
+
 const SAVED_LIST: RuntimeGroupList = {
   archivedAt: null,
   createdAt: "2026-08-20T08:00:00.000Z",
@@ -107,6 +126,73 @@ const CAMPAIGN_TARGETS: RuntimeCampaignTarget[] = GROUPS.slice(0, 3).map((group)
   sendCapability: group.sendCapability,
 }));
 
+const RUN_PROGRESS = {
+  accepted: 2,
+  blocked: 1,
+  cancelled: 0,
+  delivered: 18,
+  dryRunCompleted: 0,
+  failed: 1,
+  materialized: 0,
+  pending: 4,
+  processing: 3,
+  read: 24,
+  sent: 18,
+  total: 71,
+  unknown: 0,
+};
+
+const RUN_SUMMARY: RuntimeCampaignRunSummary = {
+  campaignId: CAMPAIGN.id,
+  campaignNameSnapshot: CAMPAIGN.name,
+  completedAt: null,
+  createdAt: "2026-08-30T17:21:00.000Z",
+  executionMode: "LIVE",
+  id: "22222222-2222-4222-8222-222222222222",
+  progress: RUN_PROGRESS,
+  scheduledAt: "2026-08-30T17:21:00.000Z",
+  sessionId: SESSION.id,
+  startedAt: "2026-08-30T17:21:01.000Z",
+  status: "RUNNING",
+  statusReason: null,
+  totalTargets: 71,
+  updatedAt: "2026-08-30T17:30:00.000Z",
+};
+
+const RUN: RuntimeCampaignRun = {
+  ...RUN_SUMMARY,
+  campaignRevision: CAMPAIGN.revision,
+  content: { text: "The August release is ready for review.", type: "TEXT" },
+  preflight: null,
+  targetSource: null,
+  targetsRevision: CAMPAIGN.targetsRevision,
+  text: "The August release is ready for review.",
+};
+
+const ACTIVITY_EVENT: RuntimeActivityEvent = {
+  category: "RUN",
+  correlationId: "request-fixture-42",
+  eventType: "campaign_run.completed",
+  eventVersion: 1,
+  id: "33333333-3333-4333-8333-333333333333",
+  metadata: { executionMode: "LIVE", status: "COMPLETED" },
+  occurredAt: "2026-08-30T17:30:00.000Z",
+  origin: "RUNTIME",
+  related: {
+    campaignId: CAMPAIGN.id,
+    groupId: null,
+    runId: RUN.id,
+    syncRunId: null,
+  },
+  sessionId: SESSION.id,
+  severity: "SUCCESS",
+  subject: {
+    id: RUN.id,
+    labelSnapshot: CAMPAIGN.name,
+    type: "CAMPAIGN_RUN",
+  },
+};
+
 const UNAVAILABLE_RUNTIME: ManagedRuntimeSnapshot = {
   availability: "offline",
   capabilities: {
@@ -126,6 +212,11 @@ const UNAVAILABLE_RUNTIME: ManagedRuntimeSnapshot = {
 function createFixtureApi(): RuntimeApi {
   return {
     getCampaign: async () => CAMPAIGN,
+    getCampaignRun: async () => RUN,
+    getCurrentGroupCapabilityRefresh: async () => null,
+    getGroup: async (_sessionId: string, groupId: string) => (
+      GROUPS.find((group) => group.id === groupId) ?? GROUPS[0]
+    ),
     getGroupListMembership: async () => ({
       data: GROUPS.slice(0, 3).map((group) => ({
         groupId: group.id,
@@ -143,6 +234,20 @@ function createFixtureApi(): RuntimeApi {
       status: "operational",
     }),
     listCampaignRuns: async () => ({ data: [], meta: { limit: 20, offset: 0, total: 0 } }),
+    listCampaignDeliveries: async () => ({
+      data: GROUPS.slice(0, 6).map((group, index) => ({
+        createdAt: RUN.createdAt,
+        failureReason: index === 3 ? "GROUP_UNAVAILABLE" : null,
+        groupId: group.id,
+        groupName: group.name,
+        id: `44444444-4444-4444-8444-44444444444${index}`,
+        messageJobId: index === 3 ? null : `55555555-5555-4555-8555-55555555555${index}`,
+        runId: RUN.id,
+        status: index === 3 ? "FAILED" : index < 2 ? "READ" : "SENT",
+        updatedAt: RUN.updatedAt,
+      })),
+      meta: { limit: 20, offset: 0, total: 6 },
+    }),
     listCampaignTargets: async () => ({
       data: CAMPAIGN_TARGETS,
       source: null,
@@ -159,6 +264,23 @@ function createFixtureApi(): RuntimeApi {
     listGroups: async () => ({
       data: GROUPS,
       meta: { limit: 20, offset: 0, total: GROUPS.length },
+    }),
+    listGroupMembers: async () => ({
+      data: GROUP_MEMBERS,
+      meta: {
+        datasetRevision: 10,
+        limit: 25,
+        offset: 0,
+        total: GROUP_MEMBERS.length,
+      },
+    }),
+    listActivity: async () => ({
+      data: [ACTIVITY_EVENT],
+      meta: { limit: 50, nextCursor: null, retentionDays: 90 },
+    }),
+    listRuns: async () => ({
+      data: [RUN_SUMMARY],
+      meta: { limit: 50, offset: 0, total: 1 },
     }),
     listSessions: async () => [SESSION],
   } as unknown as RuntimeApi;
@@ -188,7 +310,9 @@ function ConnectedFixture({ view }: { view: Exclude<ProductFixtureView, "connect
 
 function requestedView(): ProductFixtureView {
   const view = new URLSearchParams(window.location.search).get("view");
-  return view === "campaigns" || view === "groups" ? view : "connection";
+  return ["activity", "campaigns", "groups", "runs"].includes(view ?? "")
+    ? view as Exclude<ProductFixtureView, "connection">
+    : "connection";
 }
 
 export function ProductScreenFixtures() {

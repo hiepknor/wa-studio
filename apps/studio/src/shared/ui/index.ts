@@ -65,6 +65,7 @@ export { DecisionGroup } from "./DecisionGroup";
 export type { DecisionGroupOption, DecisionGroupProps } from "./DecisionGroup";
 export { Drawer, DrawerHost, DrawerProvider } from "./Drawer";
 export type { DrawerProps, DrawerProviderProps } from "./Drawer";
+export type { DrawerMode, DrawerSize } from "./drawer-config";
 export {
   DropdownMenu,
   DropdownMenuItem,
@@ -81,6 +82,16 @@ export { FilterOption } from "./FilterOption";
 export type { FilterOptionProps } from "./FilterOption";
 export { InlineAlert } from "./InlineAlert";
 export type { InlineAlertProps } from "./InlineAlert";
+export {
+  InspectorDisclosure,
+  InspectorDrawer,
+  InspectorSection,
+} from "./InspectorDrawer";
+export type {
+  InspectorDisclosureProps,
+  InspectorDrawerProps,
+  InspectorSectionProps,
+} from "./InspectorDrawer";
 export { ModalDialog } from "./ModalDialog";
 export type { ModalDialogProps } from "./ModalDialog";
 export { OverflowMenu } from "./OverflowMenu";

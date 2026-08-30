@@ -22,16 +22,26 @@ import {
 import { reconciledPageOffset } from "@/shared/server-state/server-page";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
-import { DataTableFrame, DescriptionList, MetricGrid } from "@/shared/ui/Composition";
+import {
+  ActionFooter,
+  DataTableFrame,
+  DescriptionList,
+  EmptyState,
+  MetricGrid,
+} from "@/shared/ui/Composition";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
+import {
+  InspectorDisclosure,
+  InspectorDrawer,
+  InspectorSection,
+} from "@/shared/ui/InspectorDrawer";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SearchField } from "@/shared/ui/SearchField";
 import { SearchSelect } from "@/shared/ui/SearchSelect";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import { Tabs } from "@/shared/ui/Tabs";
-import { WorkspaceDrawer } from "@/shared/ui/WorkspaceDrawer";
 import { RunsListToolbar } from "./RunsListToolbar";
 import { RunsTable } from "./RunsTable";
 import {
@@ -108,6 +118,7 @@ export function RunsScreen({
   const detailRequestRef = useRef(0);
   const deliveryRequestRef = useRef(0);
   const mutationRequestRef = useRef(0);
+  const detailTriggerRef = useRef<HTMLButtonElement>(null);
   const mutationIdempotencyRef = useRef<{
     action: RunAction;
     key: string;
@@ -361,7 +372,8 @@ export function RunsScreen({
     void loadDeliveries(true);
   }, [deliveriesResourceRevision, loadDeliveries]);
 
-  function selectRun(item: RuntimeCampaignRunSummary) {
+  function selectRun(item: RuntimeCampaignRunSummary, trigger: HTMLButtonElement) {
+    detailTriggerRef.current = trigger;
     mutationOperation.cancel();
     runDetailRead.cancel();
     deliveriesRead.cancel();
@@ -399,6 +411,7 @@ export function RunsScreen({
     setMutation(null);
     setCancelConfirmationOpen(false);
     onRunSelectionChange?.(null);
+    detailTriggerRef.current = null;
   }
 
   function requestRunCancellation() {
@@ -515,17 +528,23 @@ export function RunsScreen({
         <TablePagination limit={limit} loading={listLoading || listRefreshing} offset={offset} onOffsetChange={(nextOffset) => setListState((current) => ({ ...current, offset: nextOffset }))} total={total} />
       </DataTableFrame>
 
-      <WorkspaceDrawer
+      <InspectorDrawer
         contentKey={`${selectedRunId ?? "none"}:${inspectorTab}`}
-        description={currentRun ? `Campaign ${currentRun.campaignNameSnapshot}` : "Durable campaign execution"}
-        eyebrow={currentRun ? `Run ${shortId(currentRun.id)}` : "Run inspector"}
-        footer={run && <RunActions mutation={mutation} onAction={(action) => action === "cancel" ? requestRunCancellation() : void changeRunState(action)} run={run} />}
-        navigation={<Tabs activeTab={inspectorTab} ariaLabel="Run inspector sections" idPrefix="run-inspector" onChange={setInspectorTab} tabs={[{ id: "overview", label: "Overview" }, { id: "deliveries", label: "Deliveries", meta: currentRun?.totalTargets }]} />}
+        kicker="Campaign run"
+        footer={run && runHasActions(run) ? <RunActions mutation={mutation} onAction={(action) => action === "cancel" ? requestRunCancellation() : void changeRunState(action)} run={run} /> : undefined}
+        meta={currentRun ? [
+          `Run ${shortId(currentRun.id)}`,
+          currentRun.executionMode === "LIVE" ? "Live" : "Dry run",
+        ] : []}
+        navigation={<Tabs activeTab={inspectorTab} ariaLabel="Run inspector sections" idPrefix="run-inspector" onChange={setInspectorTab} tabs={[{ id: "overview", label: "Overview" }, { id: "deliveries", label: "Deliveries" }]} />}
         onClose={closeInspector}
         open={Boolean(selectedRunId)}
+        returnFocusRef={detailTriggerRef}
+        size="wide"
+        status={currentRun ? <Badge tone={runTone(currentRun.status)} variant="status">{runStatusLabel(currentRun.status)}</Badge> : undefined}
         title={currentRun?.campaignNameSnapshot ?? "Run inspector"}
       >
-        {runLoading && !run && <p className="workspace-loading">Loading run details…</p>}
+        {runLoading && !run && <EmptyState compact icon="refresh" loading title="Loading run details">Runtime is returning the durable execution state.</EmptyState>}
         {runError && !cancelConfirmationOpen && <InlineAlert action={selectedRunId ? <Button onClick={() => void loadRun(selectedRunId)} size="sm">Retry</Button> : undefined} title="Run needs attention">{runError}</InlineAlert>}
         {run && inspectorTab === "overview" && <RunOverview run={run} />}
         {selectedRunId && inspectorTab === "deliveries" && (
@@ -541,7 +560,7 @@ export function RunsScreen({
             error={deliveriesError}
           />
         )}
-      </WorkspaceDrawer>
+      </InspectorDrawer>
 
       <ConfirmationDialog
         body="WA Runtime will stop creating pending work for this run and cancel deliveries that have not started. Already processing sends may still finish."
@@ -562,6 +581,9 @@ export function RunsScreen({
 function RunOverview({ run }: { run: RuntimeCampaignRun }) {
   const resolved = resolvedTargets(run);
   const progress = run.progress;
+  const successful = run.executionMode === "LIVE"
+    ? progress.accepted + progress.sent + progress.delivered + progress.read
+    : progress.dryRunCompleted;
   const progressRows = [
     ["Pending", progress.pending], ["Materialized", progress.materialized],
     ["Processing", progress.processing], ["Dry run complete", progress.dryRunCompleted],
@@ -570,47 +592,78 @@ function RunOverview({ run }: { run: RuntimeCampaignRun }) {
     ["Failed", progress.failed], ["Unknown", progress.unknown],
     ["Blocked", progress.blocked], ["Cancelled", progress.cancelled],
   ] as const;
-  return <div aria-labelledby="run-inspector-overview-tab" className="runs-inspector stack stack-lg" id="run-inspector-overview-panel" role="tabpanel">
-    <section className="runs-inspector-section">
-      <div className="runs-inspector-status"><Badge tone={runTone(run.status)} variant="status">{runStatusLabel(run.status)}</Badge><Badge tone="neutral">{run.executionMode === "LIVE" ? "Live" : "Dry run"}</Badge></div>
-      {run.statusReason && <p>{run.statusReason.replace(/_/g, " ").toLocaleLowerCase()}</p>}
-      <div className="runs-progress-summary"><progress max={Math.max(1, run.totalTargets)} value={resolved} /><strong>{resolved} of {run.totalTargets} targets resolved</strong></div>
+  const statusReason = run.statusReason?.replace(/_/g, " ").toLocaleLowerCase();
+  return <div aria-labelledby="run-inspector-overview-tab" className="runs-inspector" id="run-inspector-overview-panel" role="tabpanel">
+    <InspectorSection
+      description={statusReason ?? "Runtime-authoritative progress for this durable execution."}
+      eyebrow="Execution"
+      title="Run summary"
+      titleId="run-execution-summary-title"
+    >
+      <div className="runs-progress-summary"><progress aria-label={`${resolved} of ${run.totalTargets} targets resolved`} max={Math.max(1, run.totalTargets)} value={resolved} /><strong>{resolved} of {run.totalTargets} targets resolved</strong></div>
+      <MetricGrid
+        ariaLabel="Key run progress"
+        className="runs-key-metrics"
+        items={[
+          { label: "Resolved", value: `${resolved}/${run.totalTargets}` },
+          { label: run.executionMode === "LIVE" ? "Advanced" : "Simulated", value: successful },
+          { label: "Failed", tone: progress.failed > 0 ? "danger" : "default", value: progress.failed },
+          { label: "Blocked", tone: progress.blocked > 0 ? "warning" : "default", value: progress.blocked },
+        ]}
+      />
+    </InspectorSection>
+    <div className="runs-inspector-detail-grid">
+      <InspectorSection eyebrow="Timing" title="Lifecycle" titleId="run-lifecycle-title">
+        <DescriptionList
+          ariaLabel="Run lifecycle"
+          className="runs-detail-list"
+          items={[
+            { id: "created", label: "Created", value: <DateTime value={run.createdAt} /> },
+            { id: "scheduled", label: "Scheduled", value: <DateTime value={run.scheduledAt} /> },
+            { id: "started", label: "Started", value: <DateTime fallback="Not started" value={run.startedAt} /> },
+            { id: "completed", label: "Completed", value: <DateTime fallback="Not completed" value={run.completedAt} /> },
+            { id: "updated", label: "Last change", value: <DateTime value={run.updatedAt} /> },
+          ]}
+        />
+      </InspectorSection>
+      <InspectorSection eyebrow="Snapshot" title="Immutable launch" titleId="run-launch-snapshot-title">
+        <DescriptionList
+          ariaLabel="Immutable launch snapshot"
+          className="runs-detail-list"
+          items={[
+            { id: "run-id", label: "Run ID", value: run.id, valueClassName: "ui-technical-text" },
+            { id: "campaign-id", label: "Campaign ID", value: run.campaignId, valueClassName: "ui-technical-text" },
+            { id: "campaign-revision", label: "Campaign revision", value: `r${run.campaignRevision}` },
+            { id: "target-revision", label: "Target revision", value: `r${run.targetsRevision}` },
+            { id: "audience-source", label: "Audience source", value: run.targetSource ? `${run.targetSource.groupListNameSnapshot} · membership r${run.targetSource.membershipRevision}` : "Custom selection" },
+          ]}
+        />
+      </InspectorSection>
+    </div>
+    <InspectorDisclosure
+      className="runs-progress-disclosure"
+      description="Every current delivery state reported by Runtime."
+      title="Delivery state breakdown"
+      titleId="run-progress-breakdown-title"
+    >
       <MetricGrid
         ariaLabel="Run delivery progress"
         className="runs-progress-grid"
         items={progressRows.map(([label, value]) => ({ label, value }))}
       />
-    </section>
-    <section className="runs-inspector-section"><h3>Lifecycle</h3><DescriptionList
-      ariaLabel="Run lifecycle"
-      className="runs-detail-list"
-      items={[
-        { id: "created", label: "Created", value: <DateTime value={run.createdAt} /> },
-        { id: "scheduled", label: "Scheduled", value: <DateTime value={run.scheduledAt} /> },
-        { id: "started", label: "Started", value: <DateTime fallback="Not started" value={run.startedAt} /> },
-        { id: "completed", label: "Completed", value: <DateTime fallback="Not completed" value={run.completedAt} /> },
-        { id: "updated", label: "Last change", value: <DateTime value={run.updatedAt} /> },
-      ]}
-    /></section>
-    <section className="runs-inspector-section"><h3>Immutable launch snapshot</h3><DescriptionList
-      ariaLabel="Immutable launch snapshot"
-      className="runs-detail-list"
-      items={[
-        { id: "run-id", label: "Run ID", value: run.id, valueClassName: "ui-technical-text" },
-        { id: "campaign-id", label: "Campaign ID", value: run.campaignId, valueClassName: "ui-technical-text" },
-        { id: "campaign-revision", label: "Campaign revision", value: `r${run.campaignRevision}` },
-        { id: "target-revision", label: "Target revision", value: `r${run.targetsRevision}` },
-        { id: "audience-source", label: "Audience source", value: run.targetSource ? `${run.targetSource.groupListNameSnapshot} · membership r${run.targetSource.membershipRevision}` : "Custom selection" },
-      ]}
-    /></section>
+    </InspectorDisclosure>
     <RunMessageSnapshot run={run} />
   </div>;
 }
 
 function RunMessageSnapshot({ run }: { run: RuntimeCampaignRun }) {
   const content = run.content ?? { type: "TEXT" as const, text: run.text };
-  return <details className="runs-message-snapshot">
-    <summary>Message snapshot</summary>
+  return <InspectorDisclosure
+    className="runs-message-snapshot"
+    description="Immutable content copied into this run."
+    title="Message snapshot"
+    titleId="run-message-snapshot-title"
+  >
     {content.type === "TEXT" ? <p>{content.text}</p> : <>
       <DescriptionList
         ariaLabel="Message metadata"
@@ -624,7 +677,7 @@ function RunMessageSnapshot({ run }: { run: RuntimeCampaignRun }) {
       />
       <p>{content.caption || "No caption"}</p>
     </>}
-  </details>;
+  </InspectorDisclosure>;
 }
 
 function formatRunBytes(bytes: number): string {
@@ -633,20 +686,25 @@ function formatRunBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/u, "")} MB`;
 }
 
+function runHasActions(run: RuntimeCampaignRun): boolean {
+  const terminal = RUN_TERMINAL_STATUSES.has(run.status);
+  return !terminal && run.status !== "CANCELLING";
+}
+
 function RunActions({ mutation, onAction, run }: {
   mutation: RunAction | null;
   onAction: (action: RunAction) => void;
   run: RuntimeCampaignRun;
 }) {
-  const terminal = RUN_TERMINAL_STATUSES.has(run.status);
-  return <div className="runs-inspector-actions">
-    <span>{mutation ? `${mutation.charAt(0).toLocaleUpperCase()}${mutation.slice(1)} in progress…` : `${runStatusLabel(run.status)} · Runtime authoritative`}</span>
-    <div>
+  return <ActionFooter
+    actions={<>
       {(run.status === "RUNNING" || run.status === "SCHEDULED") && <Button disabled={Boolean(mutation)} loading={mutation === "pause"} onClick={() => onAction("pause")}>Pause</Button>}
       {(run.status === "PAUSED" || run.status === "BLOCKED") && <Button disabled={Boolean(mutation)} loading={mutation === "resume"} onClick={() => onAction("resume")} variant="primary">Resume</Button>}
-      {!terminal && run.status !== "CANCELLING" && <Button disabled={Boolean(mutation)} onClick={() => onAction("cancel")} variant="danger">Cancel</Button>}
-    </div>
-  </div>;
+      <Button disabled={Boolean(mutation)} onClick={() => onAction("cancel")} variant="danger">Cancel</Button>
+    </>}
+    description={mutation ? "Runtime is applying the requested state change." : "Actions affect pending Runtime work."}
+    title={mutation ? `${mutation.charAt(0).toLocaleUpperCase()}${mutation.slice(1)} in progress…` : `${runStatusLabel(run.status)} · Runtime authoritative`}
+  />;
 }
 
 function RunDeliveries({
@@ -671,42 +729,50 @@ function RunDeliveries({
   page: RuntimeCampaignDeliveryPage | null;
 }) {
   const total = page?.meta.total ?? 0;
-  return <div aria-labelledby="run-inspector-deliveries-tab" className="run-deliveries stack stack-md" id="run-inspector-deliveries-panel" role="tabpanel">
-    <div className="run-deliveries-toolbar">
-      <SearchField label="Search deliveries" loading={loading} onChange={onQueryChange} placeholder="Search group name or ID" value={inputQuery} variant="toolbar" />
-      <SearchSelect
-        id="run-delivery-status"
-        label="Delivery status"
-        labelHidden
-        onChange={onFilterChange}
-        options={[
-          { label: "All statuses", value: "ALL" },
-          ...DELIVERY_STATUSES.map((status) => ({
-            group: deliveryStatusGroup(status),
-            keywords: status,
-            label: runStatusLabel(status),
-            value: status,
-          })),
-        ]}
-        searchLabel="Search delivery statuses"
-        searchPlaceholder="Search statuses"
-        value={deliveryFilter}
-      />
-    </div>
-    {error && <InlineAlert action={<Button onClick={onRetry} size="sm">Retry</Button>} title="Could not load deliveries">{error}</InlineAlert>}
-    <div
-      aria-busy={loading}
-      aria-label="Per-group deliveries for this run"
-      aria-live={page?.data.length ? undefined : "polite"}
-      className="run-delivery-list"
-      data-updating={(loading && Boolean(page?.data.length)) || undefined}
-      role={page?.data.length ? "list" : "status"}
+  return <div aria-labelledby="run-inspector-deliveries-tab" className="run-deliveries" id="run-inspector-deliveries-panel" role="tabpanel">
+    <InspectorSection
+      action={<span className="run-deliveries-count">{total.toLocaleString()} total</span>}
+      description="Inspect the current Runtime state for every target group."
+      eyebrow="Targets"
+      title="Per-group deliveries"
+      titleId="run-deliveries-title"
     >
-      {!page && loading ? <div className="run-delivery-state">Loading deliveries…</div>
-        : error && !page?.data.length ? <div className="run-delivery-state">Deliveries are unavailable.</div>
-          : !page?.data.length ? <div className="run-delivery-state">{inputQuery || deliveryFilter !== "ALL" ? "No deliveries match these criteria." : "No deliveries have been materialized yet."}</div>
-            : page.data.map((delivery) => <div className="run-delivery-block" key={delivery.id} role="listitem"><span><strong title={delivery.groupName}>{delivery.groupName}</strong><small className="ui-technical-text" title={delivery.groupId}>{delivery.groupId}</small>{delivery.failureReason && <small className="runs-delivery-failure" title={delivery.failureReason}>{delivery.failureReason}</small>}</span><Badge tone={deliveryTone(delivery.status)} variant="status">{runStatusLabel(delivery.status)}</Badge></div>)}
-    </div>
-    {total > 0 && <TablePagination label={`${total} ${total === 1 ? "delivery" : "deliveries"}`} limit={page?.meta.limit ?? 20} loading={loading} offset={page?.meta.offset ?? 0} onOffsetChange={onOffsetChange} total={total} />}
+      <div className="run-deliveries-toolbar">
+        <SearchField label="Search deliveries" loading={loading} onChange={onQueryChange} placeholder="Search group name or ID" value={inputQuery} variant="toolbar" />
+        <SearchSelect
+          id="run-delivery-status"
+          label="Delivery status"
+          labelHidden
+          onChange={onFilterChange}
+          options={[
+            { label: "All statuses", value: "ALL" },
+            ...DELIVERY_STATUSES.map((status) => ({
+              group: deliveryStatusGroup(status),
+              keywords: status,
+              label: runStatusLabel(status),
+              value: status,
+            })),
+          ]}
+          searchLabel="Search delivery statuses"
+          searchPlaceholder="Search statuses"
+          value={deliveryFilter}
+        />
+      </div>
+      {error && <InlineAlert action={<Button onClick={onRetry} size="sm">Retry</Button>} title="Could not load deliveries">{error}</InlineAlert>}
+      <div
+        aria-busy={loading}
+        aria-label="Per-group deliveries for this run"
+        aria-live={page?.data.length ? undefined : "polite"}
+        className="run-delivery-list"
+        data-updating={(loading && Boolean(page?.data.length)) || undefined}
+        role={page?.data.length ? "list" : "status"}
+      >
+        {!page && loading ? <EmptyState compact icon="refresh" loading title="Loading deliveries">Runtime is returning per-group delivery state.</EmptyState>
+          : error && !page?.data.length ? <EmptyState compact icon="circle-alert" title="Deliveries unavailable">Retry when Runtime is available.</EmptyState>
+            : !page?.data.length ? <EmptyState compact icon="runs" title={inputQuery || deliveryFilter !== "ALL" ? "No matching deliveries" : "No deliveries yet"}>{inputQuery || deliveryFilter !== "ALL" ? "No deliveries match these criteria." : "No deliveries have been materialized yet."}</EmptyState>
+              : page.data.map((delivery) => <div className="run-delivery-block" key={delivery.id} role="listitem"><span className="run-delivery-identity"><strong title={delivery.groupName}>{delivery.groupName}</strong><small className="ui-technical-text" title={delivery.groupId}>{delivery.groupId}</small>{delivery.failureReason && <small className="runs-delivery-failure" title={delivery.failureReason}>{delivery.failureReason}</small>}</span><Badge tone={deliveryTone(delivery.status)} variant="status">{runStatusLabel(delivery.status)}</Badge><span className="run-delivery-updated"><DateTime relativeStyle="compact" value={delivery.updatedAt} variant="relative" /></span></div>)}
+      </div>
+      {total > 0 && <TablePagination label={`${total} ${total === 1 ? "delivery" : "deliveries"}`} limit={page?.meta.limit ?? 20} loading={loading} offset={page?.meta.offset ?? 0} onOffsetChange={onOffsetChange} total={total} />}
+    </InspectorSection>
   </div>;
 }
