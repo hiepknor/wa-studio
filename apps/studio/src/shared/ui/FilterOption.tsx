@@ -15,10 +15,10 @@ export function FilterOption({
   ...props
 }: FilterOptionProps) {
   return (
-    <label className={`filter-option ${disabled ? "is-disabled" : ""} ${className}`.trim()}>
+    <label className={`filter-option focus-delegate-surface ${disabled ? "is-disabled" : ""} ${className}`.trim()}>
       <input
         {...props}
-        className="filter-option-input"
+        className="filter-option-input focus-delegate-input"
         disabled={disabled}
         type={type}
       />

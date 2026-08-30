@@ -4,9 +4,9 @@ import { AppIcon, type AppIconName } from "./AppIcon";
 import { DataTableScroll } from "./DataTable";
 import "./composition.css";
 
-type HeadingLevel = 2 | 3 | 4;
+export type HeadingLevel = 2 | 3 | 4;
 
-interface SectionHeaderProps {
+export interface SectionHeaderProps {
   action?: ReactNode;
   description?: ReactNode;
   divider?: boolean;
@@ -37,7 +37,7 @@ export function SectionHeader({
   );
 }
 
-interface SurfacePanelProps {
+export interface SurfacePanelProps {
   action?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -86,7 +86,7 @@ export interface MetricGridItem {
   value: ReactNode;
 }
 
-interface MetricGridProps {
+export interface MetricGridProps {
   ariaLabel: string;
   className?: string;
   items: readonly MetricGridItem[];
@@ -116,7 +116,7 @@ export interface DescriptionListItem {
   valueClassName?: string;
 }
 
-interface DescriptionListProps {
+export interface DescriptionListProps {
   ariaLabel: string;
   className?: string;
   items: readonly DescriptionListItem[];
@@ -151,7 +151,7 @@ export interface EvidenceListItem {
   title: ReactNode;
 }
 
-interface EvidenceListProps {
+export interface EvidenceListProps {
   ariaLabel: string;
   items: readonly EvidenceListItem[];
 }
@@ -173,7 +173,7 @@ export function EvidenceList({ ariaLabel, items }: EvidenceListProps) {
   );
 }
 
-interface DataTableFrameProps {
+export interface DataTableFrameProps {
   afterToolbar?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -208,7 +208,7 @@ export function DataTableFrame({
   );
 }
 
-interface EmptyStateProps {
+export interface EmptyStateProps {
   children: ReactNode;
   compact?: boolean;
   icon: AppIconName;
@@ -227,7 +227,7 @@ export function EmptyState({ children, compact = false, icon, title }: EmptyStat
   );
 }
 
-interface ActionFooterProps {
+export interface ActionFooterProps {
   actions: ReactNode;
   description?: ReactNode;
   leading?: ReactNode;

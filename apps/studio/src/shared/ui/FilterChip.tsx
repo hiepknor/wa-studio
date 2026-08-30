@@ -3,7 +3,7 @@ import type { ButtonHTMLAttributes } from "react";
 import { AppIcon } from "./AppIcon";
 import "./filter-chip.css";
 
-interface FilterChipProps
+export interface FilterChipProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label" | "children" | "type"> {
   label: string;
   onRemove: () => void;

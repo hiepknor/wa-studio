@@ -16,7 +16,7 @@
 .inline-alert[data-has-indicator][data-has-action] { grid-template-columns: auto minmax(0, 1fr) auto; }
 .inline-alert-copy { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-hair) var(--space-2); }
 .inline-alert-copy strong { min-width: 0; flex: 0 1 auto; overflow-wrap: anywhere; }
-.inline-alert-copy span { min-width: 0; opacity: .78; overflow-wrap: anywhere; }
+.inline-alert-copy span { min-width: 0; overflow-wrap: anywhere; }
 .inline-alert-action { flex: 0 0 auto; }
 .inline-alert[data-layout="stacked"] .inline-alert-copy { align-items: flex-start; flex-direction: column; gap: var(--space-1); }
 .inline-alert[data-variant="flush"] { border-width: 0 0 var(--border-width); border-radius: 0; }

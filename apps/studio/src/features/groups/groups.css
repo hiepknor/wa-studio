@@ -180,6 +180,8 @@
 @container groups-list (max-width: 760px) {
   .group-list-context-bar { align-items: flex-start; flex-direction: column; }
   .group-list-context-actions { width: 100%; justify-content: flex-end; }
+}
+@container groups-list (max-width: 620px) {
   .group-scope-selector { width: 100%; flex-basis: 100%; }
   .group-scope-pane { width: min(var(--group-scope-panel-width), 100%); }
 }
@@ -189,8 +191,6 @@
 .groups-column-capability { width: 140px; }
 .groups-column-synced { width: 175px; }
 .groups-column-action { width: var(--table-action-width); }
-.groups-table-scroll .data-cell-action { padding-inline: var(--space-hair); text-align: center; }
-.groups-table-scroll .data-cell-action:focus-within { overflow: visible; }
 .groups-table-scroll tr[data-selected="true"] { background: var(--surface-selected); }
 .groups-name-cell { min-width: 0; }
 .groups-name-line { min-width: 0; display: flex; align-items: center; gap: var(--space-2); }

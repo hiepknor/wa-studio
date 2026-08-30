@@ -9,5 +9,4 @@
 .sessions-column-workspace { width: var(--table-state-width); }
 .sessions-column-synced { width: var(--table-date-width); }
 .sessions-table td { overflow: hidden; }
-.sessions-table .data-cell-action { overflow: visible; }
 .sessions-table-scroll th { white-space: nowrap; }

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Button } from "./Button";
 import "./table-pagination.css";
 
-interface TablePaginationProps {
+export interface TablePaginationProps {
   limit: number;
   label?: ReactNode;
   loading?: boolean;

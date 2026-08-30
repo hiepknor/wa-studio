@@ -24,7 +24,7 @@ export interface DropdownTriggerProps {
   ref: RefObject<HTMLButtonElement | null>;
 }
 
-interface DropdownMenuProps {
+export interface DropdownMenuProps {
   ariaLabel: string;
   children: ReactNode;
   className?: string;
@@ -191,7 +191,7 @@ export function DropdownMenu({
   );
 }
 
-interface DropdownMenuItemProps {
+export interface DropdownMenuItemProps {
   children: ReactNode;
   className?: string;
   description?: ReactNode;

@@ -342,7 +342,7 @@ export function BackupRecoverySettings({
                     <span className="data-secondary-text">{backup.id}</span>
                   </td>
                   <td className="data-cell-number">{bytes(backup.sizeBytes)}</td>
-                  <td className="data-cell-action">
+                  <td className="data-cell-action focus-overflow-owner">
                     <Button
                       disabled={!runtimeReady || operationBusy}
                       onClick={() => { setError(null); setSelectedBackup(backup); }}

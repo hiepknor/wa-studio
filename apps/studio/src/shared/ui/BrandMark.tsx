@@ -1,7 +1,7 @@
 import brandMarkUrl from "@/assets/branding/wa-studio-logo.svg?no-inline";
 import "./brand-mark.css";
 
-interface BrandMarkProps {
+export interface BrandMarkProps {
   className?: string;
   size?: "sm" | "md" | "lg";
 }

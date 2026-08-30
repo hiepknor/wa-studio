@@ -10,7 +10,7 @@ import {
 } from "./date-time";
 import "./date-time.css";
 
-interface DateTimeProps extends Omit<HTMLAttributes<HTMLTimeElement>, "children"> {
+export interface DateTimeProps extends Omit<HTMLAttributes<HTMLTimeElement>, "children"> {
   fallback?: string;
   precision?: DateTimePrecision;
   relativeStyle?: RelativeDateTimeStyle;

@@ -16,6 +16,8 @@ import "./toast.css";
 export { useToast } from "./ToastContext";
 export type { ToastInput } from "./ToastContext";
 
+export type ToastProviderProps = PropsWithChildren;
+
 const MAX_VISIBLE_TOASTS = 3;
 const EXIT_DURATION = 120;
 
@@ -136,7 +138,7 @@ function ToastItem({ dismiss, toast }: ToastItemProps) {
   );
 }
 
-export function ToastProvider({ children }: PropsWithChildren) {
+export function ToastProvider({ children }: ToastProviderProps) {
   const [toasts, setToasts] = useState<ToastRecord[]>([]);
   const nextId = useRef(0);
   const nextRevision = useRef(0);

@@ -10,7 +10,7 @@ export interface WorkflowStepItem<T extends string> {
   warning?: boolean;
 }
 
-interface WorkflowStepperProps<T extends string> {
+export interface WorkflowStepperProps<T extends string> {
   activeStep: T;
   ariaLabel: string;
   idPrefix: string;

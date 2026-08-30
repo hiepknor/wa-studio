@@ -78,12 +78,19 @@ const groupSelectionTableSource = readFileSync(
   "src/features/groups/selection/GroupSelectionTable.tsx",
   "utf8",
 );
+const groupSelectionCss = readFileSync(
+  "src/features/groups/selection/group-selection.css",
+  "utf8",
+);
 const groupsTableSource = readFileSync("src/features/groups/GroupsTable.tsx", "utf8");
+const activityTableSource = readFileSync("src/features/activity/ActivityTable.tsx", "utf8");
+const runsTableSource = readFileSync("src/features/runs/RunsTable.tsx", "utf8");
 const groupsCss = readFileSync("src/features/groups/groups.css", "utf8");
 const campaignsSource = readFileSync("src/features/campaigns/CampaignsScreen.tsx", "utf8");
 const campaignsCss = readFileSync("src/features/campaigns/campaigns.css", "utf8");
 const dataFilterToolbarCss = readFileSync("src/shared/ui/data-filter-toolbar.css", "utf8");
 const dataFilterToolbarSource = readFileSync("src/shared/ui/DataFilterToolbar.tsx", "utf8");
+const publicUiSource = readFileSync("src/shared/ui/index.ts", "utf8");
 const workspaceShell = readFileSync("src/app/WorkspaceShell.tsx", "utf8");
 const searchFieldCss = readFileSync("src/shared/ui/search-field.css", "utf8");
 const searchSelectCss = readFileSync("src/shared/ui/search-select.css", "utf8");
@@ -96,6 +103,7 @@ const segmentedControlSource = readFileSync("src/shared/ui/SegmentedControl.tsx"
 const decisionGroupCss = readFileSync("src/shared/ui/decision-group.css", "utf8");
 const decisionGroupSource = readFileSync("src/shared/ui/DecisionGroup.tsx", "utf8");
 const switchCss = readFileSync("src/shared/ui/switch-field.css", "utf8");
+const switchSource = readFileSync("src/shared/ui/SwitchField.tsx", "utf8");
 const textFieldCss = readFileSync("src/shared/ui/text-field.css", "utf8");
 const settingsCss = readFileSync("src/features/settings/settings.css", "utf8");
 const settingsScreenSource = readFileSync("src/features/settings/SettingsScreen.tsx", "utf8");
@@ -127,10 +135,22 @@ describe("WA Design System contract", () => {
     expect(designSystemDoc).toContain("inspired by Warp Terminal");
     expect(designSystemDoc).toContain("Feature rollout starts only after");
     expect(designSystemDoc).toContain("960 x 560, 1100 x 720, and 1500 x 850");
+    expect(designSystemDoc).toContain("deterministic product fixtures cover Connection, Groups, and Campaign Workspace");
     expect(componentCatalogDoc).toContain("API freeze rule");
     expect(componentCatalogDoc).toContain("Compatibility surfaces");
     expect(migrationGuideDoc).toContain("Rollout order");
     expect(migrationGuideDoc).toContain("Definition of done");
+    expect(migrationGuideDoc).toContain("apps/studio/product-fixtures.html");
+  });
+
+  it("publishes one explicit UI API without exposing implementation helpers", () => {
+    expect(publicUiSource).toContain("WA Design System v1 public contract index");
+    expect(publicUiSource).toContain('export { DataTable');
+    expect(publicUiSource).toContain('export { DataFilterToolbar }');
+    expect(publicUiSource).not.toMatch(
+      /(?:FieldFrame|anchored-popup|modal-isolation|focus-delegate|focus-overflow)/,
+    );
+    expect(componentCatalogDoc).toContain("src/shared/ui/index.ts");
   });
 
   it("keeps the token graph closed", () => {
@@ -379,6 +399,7 @@ describe("WA Design System contract", () => {
     expect(inlineAlertCss).toContain(".inline-alert[data-has-action] { grid-template-columns: minmax(0, 1fr) auto; }");
     expect(inlineAlertCss).toContain(".inline-alert[data-has-indicator][data-has-action] { grid-template-columns: auto minmax(0, 1fr) auto; }");
     expect(inlineAlertCss).not.toContain("justify-content: space-between");
+    expect(inlineAlertCss).not.toMatch(/\.inline-alert-copy span\s*\{[^}]*opacity:/s);
   });
 
   it("keeps icons optically consistent across the shared size matrix", () => {
@@ -417,9 +438,14 @@ describe("WA Design System contract", () => {
     expect(focusCss).toContain(
       'html[data-focus-modality="keyboard"] .focus-owner > input:focus-visible',
     );
-    expect(focusCss).toContain(".switch-field input:focus-visible + .switch-field-control");
+    expect(focusCss).toContain(".focus-delegate-input:focus-visible");
     expect(focusCss).toContain(
-      ".filter-option:has(.filter-option-input:focus-visible)",
+      ".focus-delegate-surface:has(.focus-delegate-input:focus-visible)",
+    );
+    expect(focusCss).toContain(".focus-overflow-owner:has(:focus-visible)");
+    expect(focusCss).toContain(".focus-ring-inset {");
+    expect(focusCss).not.toMatch(
+      /\.(?:switch-field|filter-option|segmented-control|decision-group|campaign-group-list|group-list-destination|data-cell-action)/,
     );
     expect(focusCss).not.toMatch(/(?:box-shadow|background|transition)\s*:/i);
     expect(tokensCss).not.toMatch(/--(?:focus-border|focus-surface|danger-focus-border)\b/);
@@ -434,6 +460,18 @@ describe("WA Design System contract", () => {
         .not.toMatch(/var\(--focus-/);
       expect(css, `${path} must delegate outline geometry to styles/focus.css`)
         .not.toMatch(/outline(?:-offset|-color|-width|-style)?\s*:/);
+    }
+
+    for (const path of filesWithSuffix("src", ".tsx")) {
+      const source = readFileSync(path, "utf8");
+      for (const match of source.matchAll(/className="([^"]*\bdata-cell-action\b[^"]*)"/g)) {
+        expect(match[1], `${path} action cells must allow the shared focus ring to escape`)
+          .toContain("focus-overflow-owner");
+      }
+    }
+    for (const path of cssFiles("src/features")) {
+      expect(readFileSync(path, "utf8"), `${path} must use semantic focus ownership hooks`)
+        .not.toContain(":focus-within");
     }
   });
 
@@ -467,15 +505,14 @@ describe("WA Design System contract", () => {
     expect(tokensCss).toContain("--filter-indicator-size: 12px");
     expect(tokensCss).toContain("--filter-option-height: 28px");
     expect(filterOptionSource).toContain('type?: "checkbox" | "radio"');
-    expect(filterOptionSource).toContain('className="filter-option-input"');
+    expect(filterOptionSource).toContain('className="filter-option-input focus-delegate-input"');
     expect(filterOptionCss).toContain("min-height: var(--filter-option-height)");
     expect(filterOptionCss).toContain("width: var(--filter-indicator-size)");
     expect(filterOptionCss).toContain('.filter-option-input[type="checkbox"]');
     expect(filterOptionCss).toContain('.filter-option-input[type="radio"]');
     expect(filterOptionCss).toContain(".filter-option:hover:not(.is-disabled)");
     expect(filterOptionCss).toContain(".filter-option:has(.filter-option-input:checked)");
-    expect(focusCss).toContain(".filter-option-input:focus-visible");
-    expect(focusCss).toContain(".filter-option:has(.filter-option-input:focus-visible)");
+    expect(filterOptionSource).toContain("focus-delegate-surface");
     expect(dataFilterToolbarCss).toContain(".data-filter-panel-grid-2 .data-filter-panel-body");
     expect(dataFilterToolbarCss).toContain(".data-filter-range {");
     expect(participantRangeSource).toContain('className="data-filter-range"');
@@ -551,7 +588,33 @@ describe("WA Design System contract", () => {
     expect(dataTableCss).toContain("width: var(--table-selection-width);");
     expect(dataTableCss).toContain("padding-inline: var(--space-3);");
     expect(dataTableCss).toContain(".ui-data-table-selection-bar {");
+    expect(dataTableCss).toMatch(
+      /\.ui-data-table-selection-bar\s*\{[^}]*padding: var\(--table-chrome-padding-block\) var\(--table-chrome-padding-inline\);/s,
+    );
     expect(dataTableSource).toContain('aria-label={ariaLabel}');
+    expect(tokensCss).toContain("--table-chrome-padding-block: var(--space-2);");
+    expect(tokensCss).toContain("--table-chrome-padding-inline: var(--table-cell-padding-inline);");
+    expect(dataFilterToolbarCss).toContain(
+      "padding: var(--table-chrome-padding-block) var(--table-chrome-padding-inline);",
+    );
+    expect(dataFilterToolbarCss).not.toContain("min-height: var(--table-toolbar-height)");
+    expect(tokensCss).not.toContain("--table-toolbar-height");
+    expect(groupSelectionCss).not.toContain(".group-selection-data > .data-filter-toolbar");
+    expect(dataTableCss).toContain(".ui-data-table-visually-hidden {");
+    expect(dataTableCss).toContain(".ui-data-table .data-cell-action-icon {");
+    for (const source of [activityTableSource, groupsTableSource, runsTableSource]) {
+      expect(source).toContain("data-cell-action data-cell-action-icon focus-overflow-owner");
+    }
+    for (const path of cssFiles("src/features")) {
+      expect(readFileSync(path, "utf8"), `${path} must not restyle shared action cells`)
+        .not.toMatch(/\.data-cell-action(?:\b|:)[^{]*\{/);
+    }
+    for (const path of filesWithSuffix("src", ".tsx")) {
+      const source = readFileSync(path, "utf8");
+      expect(source, `${path} must give empty visual table headers real text`).not.toMatch(
+        /<th\b[^>]*aria-label=[^>]*(?:\/\>|>\s*<\/th>)/s,
+      );
+    }
   });
 
   it("keeps one tab anatomy and separates sequential workflow navigation", () => {
@@ -600,14 +663,30 @@ describe("WA Design System contract", () => {
     expect(searchSelectSource).not.toContain("clippingBoundary");
     expect(selectMenuSource).not.toContain("clippingBoundary");
     expect(anchoredPopupSource).toContain("popupClippingBoundary(root)");
-    expect(focusCss).toContain(".segmented-control-input:focus-visible");
-    expect(focusCss).toContain(".decision-group-input:focus-visible");
+    expect(segmentedControlSource).toContain("segmented-control-input focus-delegate-input");
+    expect(segmentedControlSource).toContain("segmented-control-control focus-delegate-surface");
+    expect(decisionGroupSource).toContain("decision-group-input focus-delegate-input");
+    expect(decisionGroupSource).toContain("decision-group-control focus-delegate-surface");
     expect(focusCss).toContain(".search-select-trigger");
     expect(campaignsCss).not.toContain("campaign-content-type-control");
   });
 
-  it("aligns filter controls, result counts, and table content to one inset", () => {
-    expect(dataFilterToolbarCss).toContain("padding: var(--space-compact) var(--table-cell-padding-inline);");
+  it("keeps one compact filter-toolbar inset across data tables", () => {
+    expect(tokensCss).toContain("--table-chrome-padding-block: var(--space-2);");
+    expect(tokensCss).toContain("--table-chrome-padding-inline: var(--table-cell-padding-inline);");
+    expect(dataFilterToolbarCss).toContain(
+      "padding: var(--table-chrome-padding-block) var(--table-chrome-padding-inline);",
+    );
+    expect(compositionCss).toMatch(
+      /\.ui-data-table-toolbar\s*\{[^}]*padding: var\(--table-chrome-padding-block\) var\(--table-chrome-padding-inline\);/s,
+    );
+    expect(dataFilterToolbarCss).not.toMatch(/(?:^|\n)\s*padding-(?:block|inline)\s*:/);
+    for (const path of cssFiles("src/features")) {
+      const source = readFileSync(path, "utf8");
+      expect(source, `${path} must not override DataFilterToolbar padding`).not.toMatch(
+        /data-filter-toolbar[^{}]*\{[^}]*\bpadding(?:-(?:block|inline))?\s*:/s,
+      );
+    }
     expect(dataFilterToolbarCss)
       .toContain("grid-template-columns: minmax(0, 1fr) auto");
     expect(dataFilterToolbarCss).toContain(".data-filter-controls { min-width: 0;");
@@ -615,6 +694,10 @@ describe("WA Design System contract", () => {
     expect(dataFilterToolbarCss).toContain(".data-filter-result-summary { justify-self: end;");
     expect(dataFilterToolbarSource).toMatch(/ref=\{filterTriggerRef\}\s+size="md"/);
     expect(dataFilterToolbarSource).not.toContain("panelMode");
+    expect(groupsCss).toContain("@container groups-list (max-width: 620px)");
+    expect(groupsCss).toMatch(
+      /@container groups-list \(max-width: 620px\)\s*\{[^}]*\.group-scope-selector \{ width: 100%; flex-basis: 100%; \}/s,
+    );
   });
 
   it("lets the Groups scope popover escape a short table container", () => {
@@ -654,7 +737,8 @@ describe("WA Design System contract", () => {
     expect(switchCss).toContain("top: var(--switch-thumb-padding-inset)");
     expect(switchCss).toContain("left: var(--switch-thumb-padding-inset)");
     expect(switchCss).toContain("transform: translateX(var(--switch-travel))");
-    expect(focusCss).toContain(".switch-field input:focus-visible + .switch-field-control");
+    expect(switchSource).toContain('className="focus-delegate-input"');
+    expect(switchSource).toContain("switch-field-control focus-delegate-surface");
     expect(focusCss).toContain("outline-offset: var(--focus-offset)");
   });
 

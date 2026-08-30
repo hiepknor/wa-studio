@@ -24,6 +24,18 @@
   white-space: nowrap;
 }
 
+.ui-data-table-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  white-space: nowrap;
+}
+
 .ui-data-table > thead { border: 0; }
 
 .ui-data-table > thead th {
@@ -133,6 +145,11 @@
   white-space: nowrap;
 }
 
+.ui-data-table .data-cell-action-icon {
+  padding-inline: var(--space-hair);
+  text-align: center;
+}
+
 .ui-data-table .data-cell-action > .menu { display: inline-flex; }
 .ui-data-table .data-align-end { text-align: right; }
 
@@ -156,7 +173,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-compact) var(--space-2) var(--space-3);
+  padding: var(--table-chrome-padding-block) var(--table-chrome-padding-inline);
   border-bottom: var(--border-width) solid var(--border-strong);
   background: var(--surface-subtle);
 }

@@ -89,7 +89,7 @@ export function SessionsTable({
               <td className="data-cell-time">
                 <DateTime fallback="Not synced" relativeStyle="compact" value={session.syncedAt} variant="relative" />
               </td>
-              <td className="data-cell-action">
+              <td className="data-cell-action focus-overflow-owner">
                 {!session.syncedAt && onOpenGroups ? (
                   <Button
                     onClick={() => {

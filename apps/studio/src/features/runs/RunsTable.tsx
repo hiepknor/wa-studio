@@ -60,7 +60,9 @@ export function RunsTable({
             <th scope="col">Progress</th>
             <th className="runs-mode-col priority-low" scope="col">Mode</th>
             <th className="data-column-time" scope="col">Updated</th>
-            <th aria-label="Inspect" className="data-column-actions" scope="col" />
+            <th className="data-column-actions" scope="col">
+              <span className="ui-data-table-visually-hidden">Inspect</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -97,7 +99,7 @@ export function RunsTable({
                 </td>
                 <td className="data-cell-value runs-mode-col priority-low">{run.executionMode === "LIVE" ? "Live" : "Dry run"}</td>
                 <td className="data-cell-time"><DateTime relativeStyle="compact" value={run.updatedAt} variant="relative" /></td>
-                <td className="data-cell-action">
+                <td className="data-cell-action data-cell-action-icon focus-overflow-owner">
                   <Button aria-label={`Inspect run ${shortId(run.id)}`} icon="chevron-right" onClick={() => onInspect(run)} variant="ghost" />
                 </td>
               </tr>

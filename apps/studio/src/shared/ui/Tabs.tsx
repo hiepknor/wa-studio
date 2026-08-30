@@ -9,7 +9,7 @@ export interface TabItem<T extends string> {
   warning?: boolean;
 }
 
-interface TabsProps<T extends string> {
+export interface TabsProps<T extends string> {
   activeTab: T;
   ariaLabel: string;
   idPrefix: string;

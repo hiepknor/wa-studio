@@ -4,7 +4,7 @@ import { AppIcon, type AppIconName } from "./AppIcon";
 import { Drawer } from "./Drawer";
 import "./workspace-drawer.css";
 
-interface WorkspaceDrawerProps
+export interface WorkspaceDrawerProps
   extends Omit<ComponentProps<typeof Drawer>, "children" | "className" | "footer"> {
   children: ReactNode;
   className?: string;
@@ -44,7 +44,7 @@ export function WorkspaceDrawer({
   );
 }
 
-interface WorkspaceSectionHeaderProps {
+export interface WorkspaceSectionHeaderProps {
   action?: ReactNode;
   description: ReactNode;
   kicker?: ReactNode;
@@ -77,7 +77,7 @@ export interface WorkspaceSummaryMetric {
   value: ReactNode;
 }
 
-interface WorkspaceSummaryCardProps {
+export interface WorkspaceSummaryCardProps {
   children?: ReactNode;
   className?: string;
   description?: ReactNode;
@@ -149,7 +149,7 @@ export function WorkspaceSummaryCard({
   );
 }
 
-interface WorkspacePanelProps {
+export interface WorkspacePanelProps {
   action?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -190,7 +190,7 @@ export function WorkspacePanel({
   );
 }
 
-interface WorkspaceDisclosurePanelProps {
+export interface WorkspaceDisclosurePanelProps {
   children: ReactNode;
   className?: string;
   description?: ReactNode;
@@ -225,7 +225,7 @@ export function WorkspaceDisclosurePanel({
   );
 }
 
-interface WorkspaceFooterProps {
+export interface WorkspaceFooterProps {
   actions: ReactNode;
   description: ReactNode;
   leading?: ReactNode;
@@ -250,7 +250,7 @@ export function WorkspaceFooter({
   );
 }
 
-interface WorkspaceEmptyStateProps {
+export interface WorkspaceEmptyStateProps {
   children: ReactNode;
   className?: string;
   compact?: boolean;

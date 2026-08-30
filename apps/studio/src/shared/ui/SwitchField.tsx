@@ -2,7 +2,7 @@ import { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from "rea
 
 import "./switch-field.css";
 
-interface SwitchFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
+export interface SwitchFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   description?: ReactNode;
   label: ReactNode;
 }
@@ -32,13 +32,14 @@ export const SwitchField = forwardRef<HTMLInputElement, SwitchFieldProps>(functi
         {...props}
         aria-describedby={describedBy}
         aria-labelledby={ariaLabelledBy ?? labelId}
+        className="focus-delegate-input"
         disabled={disabled}
         id={inputId}
         ref={ref}
         role="switch"
         type="checkbox"
       />
-      <span aria-hidden="true" className="switch-field-control"><span /></span>
+      <span aria-hidden="true" className="switch-field-control focus-delegate-surface"><span /></span>
       <span className="switch-field-copy">
         <strong id={labelId}>{label}</strong>
         {description && <small id={descriptionId}>{description}</small>}

@@ -41,7 +41,7 @@ export type AppIconName =
 
 export type AppIconSize = "xs" | "sm" | "md" | "lg";
 
-interface AppIconProps {
+export interface AppIconProps {
   className?: string;
   name: AppIconName;
   size?: AppIconSize;

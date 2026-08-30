@@ -174,7 +174,7 @@ describe("ActivityScreen", () => {
       "Subject",
       "Outcome",
       "Occurred",
-      "",
+      "Inspect",
     ]);
     expect(within(table).getByRole("columnheader", { name: "Occurred" })).toHaveClass("data-column-time");
     expect(within(table).getByText("Product release")).toHaveClass("activity-subject-name");

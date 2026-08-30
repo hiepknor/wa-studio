@@ -157,12 +157,13 @@
   --row-height-relaxed: 52px;
   --table-header-height: 36px;
   --table-row-height: 48px;
+  --table-chrome-padding-block: var(--space-2);
+  --table-chrome-padding-inline: var(--table-cell-padding-inline);
   --table-cell-padding-block: var(--space-tight);
   --table-cell-padding-inline: var(--space-4);
   --table-selection-width: 48px;
   --table-action-width: 48px;
   --table-empty-height: 100px;
-  --table-toolbar-height: 54px;
   --table-selection-bar-height: 50px;
   --popup-gap: 6px;
   --popup-max-height: 260px;

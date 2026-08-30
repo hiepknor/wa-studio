@@ -154,6 +154,8 @@ Feature rollout starts only after all of the following are true:
 - every primitive is represented in the gallery state matrix;
 - reference compositions cover a data table, settings form, workflow dialog, inspector, and feedback
   flow;
+- deterministic product fixtures cover Connection, Groups, and Campaign Workspace using production
+  components with only the Runtime API boundary replaced;
 - semantic, keyboard, focus, contrast, reduced-motion, and visual regression checks pass;
 - accepted baselines exist at 960 x 560, 1100 x 720, and 1500 x 850;
 - the migration guide documents component mapping and allowed exceptions;

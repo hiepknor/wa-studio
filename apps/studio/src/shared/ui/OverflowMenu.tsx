@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { DropdownMenu } from "./DropdownMenu";
 import { OverflowMenuTrigger } from "./OverflowMenuTrigger";
 
-interface OverflowMenuProps {
+export interface OverflowMenuProps {
   ariaLabel: string;
   children: ReactNode;
   triggerLabel: string;

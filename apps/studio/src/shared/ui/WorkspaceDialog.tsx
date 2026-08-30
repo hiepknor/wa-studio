@@ -4,7 +4,7 @@ import { ModalDialog } from "./ModalDialog";
 import "./workspace-drawer.css";
 import "./workspace-dialog.css";
 
-interface WorkspaceDialogProps
+export interface WorkspaceDialogProps
   extends Omit<
     ComponentProps<typeof ModalDialog>,
     "bodyClassName" | "children" | "className" | "footer" | "size"

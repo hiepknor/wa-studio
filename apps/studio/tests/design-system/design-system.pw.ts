@@ -2,11 +2,27 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 const galleryPath = "/design-system.html";
+const productFixturePath = "/product-fixtures.html";
+const referenceTime = new Date("2026-08-30T17:30:00.000Z");
 
 async function openGallery(page: Page, width = 1500, height = 850) {
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.clock.setFixedTime(referenceTime);
   await page.setViewportSize({ width, height });
   await page.goto(galleryPath);
+  await page.evaluate(() => document.fonts.ready);
+}
+
+async function openProductFixture(
+  page: Page,
+  view: "campaigns" | "connection" | "groups",
+  width: number,
+  height: number,
+) {
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.clock.setFixedTime(referenceTime);
+  await page.setViewportSize({ width, height });
+  await page.goto(`${productFixturePath}?view=${view}`);
   await page.evaluate(() => document.fonts.ready);
 }
 
@@ -46,6 +62,23 @@ test("@a11y gallery and production overlay states have no axe violations", async
   await expectNoAccessibilityViolations(page);
 });
 
+test("@a11y representative product screens have no axe violations", async ({ page }) => {
+  await openProductFixture(page, "connection", 1100, 720);
+  await expect(page.getByRole("heading", { name: "Attach an external Runtime" })).toBeVisible();
+  await expectNoAccessibilityViolations(page);
+
+  await openProductFixture(page, "groups", 1100, 720);
+  await expect(page.getByRole("heading", { name: "Groups" })).toBeVisible();
+  await expect(page.getByText("North America operations").last()).toBeVisible();
+  await expectNoAccessibilityViolations(page);
+
+  await openProductFixture(page, "campaigns", 1100, 720);
+  await expect(page.getByRole("heading", { name: "Campaigns" })).toBeVisible();
+  await page.getByRole("button", { exact: true, name: "August product release" }).click();
+  await expect(page.getByRole("heading", { name: "Content & schedule" })).toBeVisible();
+  await expectNoAccessibilityViolations(page);
+});
+
 test("@a11y reduced motion collapses transition and animation duration", async ({ page }) => {
   await openGallery(page);
   const timing = await page.getByRole("button", { name: "Primary action" }).evaluate((element) => {
@@ -69,6 +102,39 @@ for (const viewport of [
     await expect(page.locator(".ds-gallery")).toHaveScreenshot(
       `gallery-${viewport.width}x${viewport.height}.png`,
       { fullPage: true },
+    );
+  });
+}
+
+for (const viewport of [
+  { height: 560, name: "compact", width: 960 },
+  { height: 720, name: "desktop", width: 1100 },
+  { height: 850, name: "wide", width: 1500 },
+] as const) {
+  test(`@visual product connection ${viewport.name}`, async ({ page }) => {
+    await openProductFixture(page, "connection", viewport.width, viewport.height);
+    await expect(page.getByRole("heading", { name: "Attach an external Runtime" })).toBeVisible();
+    await expect(page.locator(".connection-shell")).toHaveScreenshot(
+      `product-connection-${viewport.width}x${viewport.height}.png`,
+    );
+  });
+
+  test(`@visual product Groups ${viewport.name}`, async ({ page }) => {
+    await openProductFixture(page, "groups", viewport.width, viewport.height);
+    await expect(page.getByRole("heading", { name: "Groups" })).toBeVisible();
+    await expect(page.getByText("North America operations").last()).toBeVisible();
+    await expect(page.locator(".workspace")).toHaveScreenshot(
+      `product-groups-${viewport.width}x${viewport.height}.png`,
+    );
+  });
+
+  test(`@visual product Campaign Workspace ${viewport.name}`, async ({ page }) => {
+    await openProductFixture(page, "campaigns", viewport.width, viewport.height);
+    await expect(page.getByRole("heading", { name: "Campaigns" })).toBeVisible();
+    await page.getByRole("button", { exact: true, name: "August product release" }).click();
+    await expect(page.getByRole("heading", { name: "Content & schedule" })).toBeVisible();
+    await expect(page.locator(".modal-dialog-backdrop")).toHaveScreenshot(
+      `product-campaign-workspace-${viewport.width}x${viewport.height}.png`,
     );
   });
 }

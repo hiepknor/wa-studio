@@ -8,8 +8,6 @@
 .activity-table td { overflow: hidden; }
 .activity-subject-col { overflow: hidden; }
 .activity-subject-name { display: block; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
-.activity-table .data-cell-action { padding-inline: var(--space-hair); text-align: center; }
-.activity-table .data-cell-action:focus-within { overflow: visible; }
 .activity-load-more { display: flex; min-height: var(--table-row-height); align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-tight) var(--space-compact); border-top: var(--border-width) solid var(--divider-strong); color: var(--text-tertiary); font-size: var(--type-caption); font-variant-numeric: tabular-nums; }
 .activity-inspector-section { display: grid; gap: var(--space-3); padding-top: var(--space-3); border-top: var(--border-width) solid var(--border-strong); }
 .activity-inspector-section:first-child { padding-top: 0; border-top: 0; }

@@ -231,6 +231,8 @@ describe("CampaignsScreen", () => {
     expect(screen.queryByRole("region", { name: "Apply a group list" })).not.toBeInTheDocument();
     const browseGroups = screen.getByRole("heading", { name: "Browse groups" }).closest("section");
     expect(browseGroups).not.toBeNull();
+    expect(within(browseGroups!).getByRole("region", { name: "Browse groups directory" }))
+      .toHaveAttribute("data-variant", "outlined");
     expect(within(browseGroups!).queryByRole("button", { name: "Apply group list" })).not.toBeInTheDocument();
     expect(within(targetOverview).getByRole("button", { name: "Apply group list" })).toBeInTheDocument();
 

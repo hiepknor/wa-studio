@@ -58,7 +58,6 @@ export function GroupSelectionPanel({
         className="group-selection-data"
         label={`${title} directory`}
         scroll={false}
-        variant="flush"
       >
         <GroupSelectionToolbar {...toolbar} />
         {afterToolbar}

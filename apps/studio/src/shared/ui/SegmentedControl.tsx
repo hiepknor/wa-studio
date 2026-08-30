@@ -15,7 +15,7 @@ export interface SegmentedControlOption<T extends string> {
   value: T;
 }
 
-interface SegmentedControlProps<T extends string> {
+export interface SegmentedControlProps<T extends string> {
   "aria-describedby"?: string;
   containerClassName?: string;
   disabled?: boolean;
@@ -55,7 +55,7 @@ export function SegmentedControl<T extends string>({
       <div
         aria-describedby={describedBy}
         aria-labelledby={labelId}
-        className="segmented-control-control"
+        className="segmented-control-control focus-delegate-surface"
         data-disabled={disabled || undefined}
         role="radiogroup"
       >
@@ -63,7 +63,7 @@ export function SegmentedControl<T extends string>({
           <label className="segmented-control-option" key={option.value}>
             <input
               checked={option.value === value}
-              className="segmented-control-input"
+              className="segmented-control-input focus-delegate-input"
               disabled={disabled || option.disabled}
               name={name ?? generatedId}
               onChange={() => onChange(option.value)}

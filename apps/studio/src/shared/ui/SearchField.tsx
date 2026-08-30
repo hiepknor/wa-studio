@@ -3,7 +3,7 @@ import type { KeyboardEventHandler, Ref } from "react";
 import { TextField } from "./TextField";
 import "./search-field.css";
 
-interface SearchFieldProps {
+export interface SearchFieldProps {
   id?: string;
   inputRef?: Ref<HTMLInputElement>;
   label: string;

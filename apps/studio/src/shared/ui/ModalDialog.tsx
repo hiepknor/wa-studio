@@ -21,7 +21,7 @@ const FOCUSABLE = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
-interface ModalDialogProps {
+export interface ModalDialogProps {
   bodyClassName?: string;
   children: ReactNode;
   className?: string;

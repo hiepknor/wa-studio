@@ -82,7 +82,7 @@ export function GroupsTable({
           <GroupCapabilityStatus capability={row.sendCapability} />
         </td>
         <td className="data-cell-time"><DateTime value={row.syncedAt} /></td>
-        <td className="data-cell-action">
+        <td className="data-cell-action data-cell-action-icon focus-overflow-owner">
           <Button
             aria-label={`View ${row.name}`}
             icon="chevron-right"
@@ -135,7 +135,9 @@ export function GroupsTable({
             <th className="data-column-number" scope="col">Participants</th>
             <th scope="col">Send capability</th>
             <th className="data-column-time" scope="col">Record synced</th>
-            <th aria-label="Actions" className="data-column-actions" scope="col" />
+            <th className="data-column-actions" scope="col">
+              <span className="ui-data-table-visually-hidden">Actions</span>
+            </th>
           </tr>
         </thead>
         {empty ? (

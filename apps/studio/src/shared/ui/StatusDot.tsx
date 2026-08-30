@@ -3,7 +3,7 @@ import type { HTMLAttributes } from "react";
 import type { FeedbackTone } from "./feedback-tone";
 import "./status-dot.css";
 
-interface StatusDotProps extends HTMLAttributes<HTMLSpanElement> {
+export interface StatusDotProps extends HTMLAttributes<HTMLSpanElement> {
   glow?: boolean;
   size?: "sm" | "md";
   tone?: FeedbackTone;

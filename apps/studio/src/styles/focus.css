@@ -80,35 +80,23 @@ html[data-focus-modality="keyboard"] .focus-owner > input:focus-visible {
   outline: none;
 }
 
-/* Hidden form controls delegate focus to the visible control surface. */
-html[data-focus-modality="keyboard"] .switch-field input:focus-visible,
-html[data-focus-modality="keyboard"] .filter-option-input:focus-visible,
-html[data-focus-modality="keyboard"] .segmented-control-input:focus-visible,
-html[data-focus-modality="keyboard"] .decision-group-input:focus-visible,
-html[data-focus-modality="keyboard"] .campaign-group-list-picker-input:focus-visible,
-html[data-focus-modality="keyboard"] .group-list-destination-radio:focus-visible {
+/* Hidden form controls delegate focus to a visible semantic owner. */
+html[data-focus-modality="keyboard"] .focus-delegate-input:focus-visible {
   outline: none;
 }
-html[data-focus-modality="keyboard"] .switch-field input:focus-visible + .switch-field-control,
-html[data-focus-modality="keyboard"] .filter-option:has(.filter-option-input:focus-visible) {
+html[data-focus-modality="keyboard"] .focus-delegate-input:focus-visible + .focus-delegate-surface,
+html[data-focus-modality="keyboard"] .focus-delegate-surface:has(.focus-delegate-input:focus-visible) {
   border-color: var(--focus-inner-border);
   outline: var(--focus-width) solid var(--focus-outer-color);
   outline-offset: var(--focus-offset);
 }
-html[data-focus-modality="keyboard"] .segmented-control-control:has(.segmented-control-input:focus-visible),
-html[data-focus-modality="keyboard"] .decision-group-control:has(.decision-group-input:focus-visible),
-html[data-focus-modality="keyboard"] .campaign-group-list-picker-row:has(.campaign-group-list-picker-input:focus-visible),
-html[data-focus-modality="keyboard"] .group-list-destination-option:has(.group-list-destination-radio:focus-visible) {
-  border-color: var(--focus-inner-border);
-  outline: var(--focus-width) solid var(--focus-outer-color);
-  outline-offset: var(--focus-offset);
-}
+
 /* Focus outlines must be allowed to escape clipped table action cells. */
-html[data-focus-modality="keyboard"] .data-cell-action:has(:focus-visible) {
+html[data-focus-modality="keyboard"] .focus-overflow-owner:has(:focus-visible) {
   overflow: visible;
 }
 
-/* Clipped option groups reserve exactly enough internal room for the ring. */
-.campaign-group-list-picker-results {
+/* Clipped interactive groups reserve exactly enough internal room for the ring. */
+.focus-ring-inset {
   padding: calc(var(--focus-width) + var(--focus-offset));
 }

@@ -2003,7 +2003,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         {visibleListError && <InlineAlert action={<Button onClick={() => void loadCampaigns(listStateRef.current)} size="sm">Retry</Button>} title="Could not load campaigns" variant="flush">{visibleListError}</InlineAlert>}
         <DataTableScroll busy={listPending} updating={listPending && Boolean(visiblePage?.data.length)}>
           <DataTable caption="Campaigns for the active session">
-            <thead><tr><th scope="col">Campaign</th><th scope="col">Status</th><th className="data-column-time" scope="col">Schedule</th><th className="data-column-number" scope="col">Targets</th><th aria-label="Actions" className="data-column-actions" scope="col" /></tr></thead>
+            <thead><tr><th scope="col">Campaign</th><th scope="col">Status</th><th className="data-column-time" scope="col">Schedule</th><th className="data-column-number" scope="col">Targets</th><th className="data-column-actions" scope="col"><span className="ui-data-table-visually-hidden">Actions</span></th></tr></thead>
             <tbody>
               {!selectedSessionId ? <tr><DataTableEmptyCell colSpan={5}>Select a session to view campaigns.</DataTableEmptyCell></tr>
                 : !visiblePage && listPending ? <tr><DataTableEmptyCell colSpan={5}>Loading campaigns…</DataTableEmptyCell></tr>
@@ -2014,7 +2014,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                   <td><Badge tone={statusTone(item.status)} variant="status">{statusLabel(item.status)}</Badge></td>
                   <td className="data-cell-time">{item.scheduleType === "IMMEDIATE" ? "Immediate" : <DateTime value={item.scheduledAt} />}</td>
                   <td className="data-cell-number">{item.targetCount}</td>
-                  <td className="data-cell-action"><CampaignActionsMenu campaign={item} disabledReason={campaignDeleteDisabledReason(item)} onDelete={requestCampaignDelete} onOpen={openCampaign} /></td>
+                  <td className="data-cell-action focus-overflow-owner"><CampaignActionsMenu campaign={item} disabledReason={campaignDeleteDisabledReason(item)} onDelete={requestCampaignDelete} onOpen={openCampaign} /></td>
                 </tr>)}
             </tbody>
           </DataTable>

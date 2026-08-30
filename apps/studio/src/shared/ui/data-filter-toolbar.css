@@ -1,13 +1,12 @@
 .data-filter-toolbar {
   position: relative;
   width: 100%;
-  min-height: var(--table-toolbar-height);
   display: flex;
   align-items: stretch;
   flex-direction: column;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-compact) var(--table-cell-padding-inline);
+  padding: var(--table-chrome-padding-block) var(--table-chrome-padding-inline);
   border-bottom: var(--border-width) solid var(--border-subtle);
   background: transparent;
   container: data-filter-toolbar / inline-size;

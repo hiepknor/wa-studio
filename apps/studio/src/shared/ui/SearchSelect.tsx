@@ -26,7 +26,7 @@ export interface SearchSelectOption<T extends string> {
   value: T;
 }
 
-interface SearchSelectProps<T extends string> {
+export interface SearchSelectProps<T extends string> {
   containerClassName?: string;
   description?: ReactNode;
   disabled?: boolean;

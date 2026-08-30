@@ -290,14 +290,14 @@ export function CampaignGroupListActions({
                   <Button disabled={applying} onClick={() => setSelected(null)} size="sm" variant="ghost">Clear</Button>
                 </div>
               )}
-              <div aria-label="Available group lists" className="campaign-group-list-picker-results" role="radiogroup">
+              <div aria-label="Available group lists" className="campaign-group-list-picker-results focus-ring-inset" role="radiogroup">
                 {loading && !lists.length ? (
                   <div className="campaign-group-list-picker-state"><AppIcon className="ui-icon-spin" name="refresh" size="sm" /><span>Loading group lists…</span></div>
                 ) : lists.length ? lists.map((list) => {
                   const checked = selected?.id === list.id;
                   return (
-                    <label className="campaign-group-list-picker-row" data-disabled={applying || undefined} data-selected={checked || undefined} key={list.id}>
-                      <input aria-label={list.name} checked={checked} className="campaign-group-list-picker-input" disabled={applying} name={radioName} onChange={() => changeList(list)} type="radio" value={list.id} />
+                    <label className="campaign-group-list-picker-row focus-delegate-surface" data-disabled={applying || undefined} data-selected={checked || undefined} key={list.id}>
+                      <input aria-label={list.name} checked={checked} className="campaign-group-list-picker-input focus-delegate-input" disabled={applying} name={radioName} onChange={() => changeList(list)} type="radio" value={list.id} />
                       <span className="campaign-group-list-picker-radio">{checked && <AppIcon name="check" size="xs" />}</span>
                       <span className="campaign-group-list-picker-copy"><strong>{list.name}</strong><small>{list.description || "No description"}</small></span>
                       <span className="campaign-group-list-picker-metadata"><strong>{list.groupCount.toLocaleString()} {list.groupCount === 1 ? "group" : "groups"}</strong><small>Membership r{list.membershipRevision} · Updated <DateTime value={list.updatedAt} /></small></span>

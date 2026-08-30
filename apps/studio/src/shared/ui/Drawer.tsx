@@ -29,7 +29,7 @@ interface DrawerHostContextValue {
 
 const DrawerHostContext = createContext<DrawerHostContextValue | null>(null);
 
-interface DrawerProviderProps extends HTMLAttributes<HTMLDivElement> {
+export interface DrawerProviderProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
 }
 
@@ -93,7 +93,7 @@ export function DrawerHost({ className = "", ...props }: HTMLAttributes<HTMLDivE
   );
 }
 
-interface DrawerProps {
+export interface DrawerProps {
   children: ReactNode;
   className?: string;
   contentKey?: Key;

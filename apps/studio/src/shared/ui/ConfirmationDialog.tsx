@@ -6,7 +6,7 @@ import { InlineAlert } from "./InlineAlert";
 import { acquireModalIsolation } from "./modal-isolation";
 import "./confirmation-dialog.css";
 
-interface ConfirmationDialogProps {
+export interface ConfirmationDialogProps {
   body: ReactNode;
   busy?: boolean;
   busyLabel?: string;

@@ -51,7 +51,9 @@ export function ActivityTable({
             <th className="activity-subject-col" scope="col">Subject</th>
             <th className="data-cell-status" scope="col">Outcome</th>
             <th className="data-column-time" scope="col">Occurred</th>
-            <th aria-label="Inspect" className="data-column-actions" scope="col" />
+            <th className="data-column-actions" scope="col">
+              <span className="ui-data-table-visually-hidden">Inspect</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -71,7 +73,7 @@ export function ActivityTable({
               </td>
               <td className="data-cell-status"><Badge tone={activityTone(event.severity)} variant="status">{activitySeverityLabel(event.severity)}</Badge></td>
               <td className="data-cell-time"><DateTime relativeStyle="compact" value={event.occurredAt} variant="relative" /></td>
-              <td className="data-cell-action">
+              <td className="data-cell-action data-cell-action-icon focus-overflow-owner">
                 <Button aria-label={`Inspect ${activityTitle(event)}`} icon="chevron-right" onClick={() => onInspect(event)} variant="ghost" />
               </td>
             </tr>

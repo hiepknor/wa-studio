@@ -32,6 +32,7 @@ export default defineConfig({
     locale: "en-US",
     reducedMotion: "reduce",
     screenshot: "only-on-failure",
+    timezoneId: "Asia/Ho_Chi_Minh",
     trace: "retain-on-failure",
   },
   webServer: {

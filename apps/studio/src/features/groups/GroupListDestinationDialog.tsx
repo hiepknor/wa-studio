@@ -141,7 +141,7 @@ export function GroupListDestinationDialog({
             const checked = selected?.id === list.id;
             return (
               <label
-                className="group-list-destination-option"
+                className="group-list-destination-option focus-delegate-surface"
                 data-disabled={saving || undefined}
                 data-selected={checked || undefined}
                 key={list.id}
@@ -149,7 +149,7 @@ export function GroupListDestinationDialog({
                 <input
                   aria-label={list.name}
                   checked={checked}
-                  className="group-list-destination-radio"
+                  className="group-list-destination-radio focus-delegate-input"
                   disabled={saving}
                   name={radioName}
                   onChange={() => setSelected(list)}

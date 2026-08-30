@@ -3,12 +3,6 @@
   background: transparent;
   box-shadow: none;
 }
-.group-selection-data > .data-filter-toolbar {
-  min-height: 54px;
-  padding-block: var(--space-2);
-  border-bottom: var(--border-width) solid var(--border-subtle);
-  background: transparent;
-}
 .group-selection-data > .group-selection-page-note { margin: 0; padding: var(--space-2) var(--space-3); border-top: var(--border-width) solid var(--border-subtle); }
 .group-selection-filter-panel { width: 100%; }
 .group-selection-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); }

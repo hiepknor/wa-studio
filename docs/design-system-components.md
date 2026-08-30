@@ -1,9 +1,10 @@
 # WA Design System v1 component catalog
 
-This catalog is the public UI boundary for WA Studio. A stable component may receive compatible
-additions and accessibility fixes during rollout, but its current meaning and interaction model do
-not change. Feature modules import components directly from `apps/studio/src/shared/ui` and do not
-fork their visual anatomy.
+This catalog is the public UI boundary for WA Studio. `apps/studio/src/shared/ui/index.ts` is the
+authoritative export inventory and type surface. A stable component may receive compatible additions
+and accessibility fixes during rollout, but its current meaning and interaction model do not change.
+Feature modules may import a stable component module directly to preserve CSS splitting, but they do
+not import implementation helpers or fork component anatomy.
 
 ## Stable foundations
 
@@ -63,16 +64,18 @@ details. Feature code must not style or reproduce them directly.
 | `SurfacePanel` | Independent outlined or flat content region. Avoid same-weight nested panels. |
 | `DataFilterToolbar` | Search, filters, contextual actions, and result summary in one responsive row. |
 | `DataTableFrame` | One toolbar/table/footer frame. `outlined` is the standalone default with a complete panel-radius boundary; `flush` embeds a table inside an existing panel or dialog without nested chrome. |
+| `DataTable` | Shared semantic table, scroll owner, empty state, selection bar, and updating state. Feature tables only supply columns and row content. |
 | `MetricGrid` | Small comparable operational values with valid description-list semantics. |
 | `DescriptionList` | Accessible key/value metadata whose rows retain valid description-list semantics. |
 | `EvidenceList` | Status, title, explanation, and technical evidence code. |
 | `EmptyState` | Scoped empty result or first-use state; action remains supplied by the feature. |
 | `ActionFooter` | Sticky or fixed workflow summary and action group. |
 
-Standalone data tables use one 8px outlined frame around toolbar, rows, and footer. The filter
-toolbar, header, and body cells share a 16px horizontal inset so labels and controls never touch the
-frame; selection columns use a centered 48px slot. Embedded tables use `flush` and inherit the
-boundary of their parent.
+Standalone data tables use one 8px outlined frame around toolbar, rows, and footer. Every filter
+toolbar and row-selection action bar uses an 8px vertical and 16px horizontal inset; feature styles
+must not override it. Header and body cells retain the same 16px horizontal inset, while selection
+columns use a centered 48px slot. Embedded tables use `flush` and inherit the boundary of their
+parent.
 
 ## Compatibility surfaces
 

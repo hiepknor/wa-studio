@@ -12,7 +12,7 @@ export interface DecisionGroupOption<T extends string> {
   value: T;
 }
 
-interface DecisionGroupProps<T extends string> {
+export interface DecisionGroupProps<T extends string> {
   "aria-describedby"?: string;
   containerClassName?: string;
   disabled?: boolean;
@@ -48,7 +48,7 @@ export function DecisionGroup<T extends string>({
         aria-describedby={ariaDescribedBy}
         aria-labelledby={labelId}
         aria-orientation="horizontal"
-        className="decision-group-control"
+        className="decision-group-control focus-delegate-surface"
         data-disabled={disabled || undefined}
         role="radiogroup"
       >
@@ -63,7 +63,7 @@ export function DecisionGroup<T extends string>({
             <input
               aria-label={typeof option.label === "string" ? option.label : undefined}
               checked={selected}
-              className="decision-group-input"
+              className="decision-group-input focus-delegate-input"
               disabled={disabled || option.disabled}
               name={name ?? generatedId}
               onChange={() => onChange(option.value)}

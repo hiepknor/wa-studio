@@ -4,7 +4,7 @@ import { Button } from "./Button";
 import { SearchField } from "./SearchField";
 import "./data-filter-toolbar.css";
 
-interface DataFilterToolbarProps {
+export interface DataFilterToolbarProps {
   actions?: ReactNode;
   children?: ReactNode | ((closeFilters: () => void) => ReactNode);
   filterCount: number;

@@ -2,7 +2,7 @@ import type { HTMLAttributes, ReactNode } from "react";
 
 import "./page-header.css";
 
-interface PageHeaderProps extends Omit<HTMLAttributes<HTMLDivElement>, "title"> {
+export interface PageHeaderProps extends Omit<HTMLAttributes<HTMLDivElement>, "title"> {
   actions?: ReactNode;
   description?: ReactNode;
   title: ReactNode;

@@ -4,7 +4,7 @@ import { AppIcon } from "./AppIcon";
 import type { FeedbackTone } from "./feedback-tone";
 import "./badge.css";
 
-interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
+export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   children: ReactNode;
   tone?: FeedbackTone;
   variant?: "label" | "status";

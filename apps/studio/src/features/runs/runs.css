@@ -9,8 +9,6 @@
 .runs-column-updated { width: var(--table-date-width); }
 .runs-column-action { width: var(--table-action-width); }
 .runs-table td { overflow: hidden; }
-.runs-table .data-cell-action { padding-inline: var(--space-hair); text-align: center; }
-.runs-table .data-cell-action:focus-within { overflow: visible; }
 .runs-mode-col { color: var(--text-secondary); white-space: nowrap; }
 .runs-status-reason {
   display: block;

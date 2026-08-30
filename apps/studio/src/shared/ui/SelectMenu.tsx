@@ -24,7 +24,7 @@ export interface SelectMenuOption<T extends string> {
   value: T;
 }
 
-interface SelectMenuProps<T extends string> {
+export interface SelectMenuProps<T extends string> {
   "aria-describedby"?: string;
   className?: string;
   containerClassName?: string;

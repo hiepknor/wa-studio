@@ -11,6 +11,7 @@ Runtime contracts, persistence, domain validation, or workflow authority.
 - Global motion: `apps/studio/src/styles/motion.css`
 - Stable component catalog: [`design-system-components.md`](./design-system-components.md)
 - Visual and state reference: `apps/studio/design-system.html`
+- Product-screen reference: `apps/studio/product-fixtures.html`
 - Browser gate: `npm -w @wa/studio run design-system:check`
 
 Feature CSS may own product-specific grids, column widths, scroll boundaries, and responsive
@@ -109,5 +110,7 @@ A rollout unit is complete only when:
 - No redundant feature selector remains.
 - Domain behavior and tests are unchanged or intentionally expanded.
 - Static contracts, unit tests, Axe, reduced motion, and visual baselines pass.
+- The deterministic product fixture for the rollout unit renders production components; only the
+  Runtime API boundary may be replaced by fixture data.
 - The screen works at 960 x 560, 1100 x 720, and 1500 x 850.
 - A reviewer can identify any remaining compatibility surface and its removal condition.
