@@ -1,7 +1,7 @@
 .status-dot {
   display: inline-block;
   flex: 0 0 auto;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: currentColor;
 }
 
@@ -9,8 +9,8 @@
 .status-dot-md { width: 6px; height: 6px; }
 .status-dot-glow { box-shadow: none; }
 
-.status-tone-neutral { color: var(--muted); }
-.status-tone-info { color: var(--accent-hover); }
-.status-tone-success { color: var(--ok); }
-.status-tone-warning { color: var(--warning); }
-.status-tone-danger { color: var(--danger); }
+.status-tone-neutral { color: var(--text-tertiary); }
+.status-tone-info { color: var(--state-info); }
+.status-tone-success { color: var(--state-success); }
+.status-tone-warning { color: var(--state-warning); }
+.status-tone-danger { color: var(--state-danger); }

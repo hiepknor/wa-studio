@@ -1,0 +1,10 @@
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: var(--motion-reduced) !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: var(--motion-reduced) !important;
+  }
+}

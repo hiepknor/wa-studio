@@ -4,8 +4,8 @@
   flex: 0 0 auto;
   overflow: hidden;
   place-items: center;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-control);
   background: var(--surface-control);
 }
 .brand-mark-sm { width: 24px; height: 24px; }

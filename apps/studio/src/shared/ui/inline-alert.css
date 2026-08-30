@@ -4,9 +4,9 @@
   align-items: center;
   gap: var(--space-3);
   min-height: 38px;
-  padding: 8px 11px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-panel);
   background: var(--surface-subtle);
   color: var(--text-secondary);
   font-size: var(--type-body);
@@ -14,12 +14,12 @@
 .inline-alert[data-has-indicator] { grid-template-columns: auto minmax(0, 1fr); }
 .inline-alert[data-has-action] { grid-template-columns: minmax(0, 1fr) auto; }
 .inline-alert[data-has-indicator][data-has-action] { grid-template-columns: auto minmax(0, 1fr) auto; }
-.inline-alert-copy { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.inline-alert-copy { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-hair) var(--space-2); }
 .inline-alert-copy strong { min-width: 0; flex: 0 1 auto; overflow-wrap: anywhere; }
 .inline-alert-copy span { min-width: 0; opacity: .78; overflow-wrap: anywhere; }
 .inline-alert-action { flex: 0 0 auto; }
-.inline-alert-neutral { color: var(--muted); }
-.inline-alert-danger { border-color: var(--state-danger-border); background: var(--danger-soft); color: var(--state-danger); }
+.inline-alert-neutral { color: var(--text-tertiary); }
+.inline-alert-danger { border-color: var(--state-danger-border); background: var(--state-danger-surface); color: var(--state-danger); }
 .inline-alert-info { border-color: var(--state-info-border); background: var(--state-info-surface); color: var(--state-info); }
-.inline-alert-warning { border-color: var(--state-warning-border); background: var(--warning-soft); color: var(--state-warning); }
-.inline-alert-success { border-color: var(--state-success-border); background: var(--ok-soft); color: var(--state-success); }
+.inline-alert-warning { border-color: var(--state-warning-border); background: var(--state-warning-surface); color: var(--state-warning); }
+.inline-alert-success { border-color: var(--state-success-border); background: var(--state-success-surface); color: var(--state-success); }

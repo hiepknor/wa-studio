@@ -85,6 +85,7 @@ interface WorkspaceSummaryCardProps {
   icon?: AppIconName;
   label: ReactNode;
   metrics?: WorkspaceSummaryMetric[];
+  metricsLabel?: string;
   status?: ReactNode;
   title: ReactNode;
   titleId: string;
@@ -98,6 +99,7 @@ export function WorkspaceSummaryCard({
   icon,
   label,
   metrics = [],
+  metricsLabel = "Summary metrics",
   status,
   title,
   titleId,
@@ -124,9 +126,9 @@ export function WorkspaceSummaryCard({
           {description && <p>{description}</p>}
         </div>
         {metrics.length > 0 && (
-          <dl className="workspace-summary-metrics">
+          <div aria-label={metricsLabel} className="workspace-summary-metrics" role="group">
             {metrics.map((metric, index) => (
-              <div key={index}>
+              <dl key={index}>
                 <dt>{metric.label}</dt>
                 <dd
                   title={metric.title ?? (
@@ -137,9 +139,9 @@ export function WorkspaceSummaryCard({
                 >
                   {metric.value}
                 </dd>
-              </div>
+              </dl>
             ))}
-          </dl>
+          </div>
         )}
       </header>
       {children}

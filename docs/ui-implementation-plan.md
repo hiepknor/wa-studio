@@ -1,6 +1,11 @@
 # UI implementation plan
 
-WA Studio uses product-owned semantic React controls and CSS with a Warp Terminal-inspired visual language. Graphite surfaces, compact spacing, restrained violet accents, and monospace technical data support the operations-console context without importing Warp branding or assets. Feature modules own domain language, accessibility, validation, Runtime requests, server state, and workflows.
+WA Studio uses the product-owned [WA Design System](./design-system.md), with a Warp
+Terminal-inspired visual language. Warm graphite surfaces, compact spacing, quiet interaction
+states, and monospace technical data support the operations-console context without importing Warp
+branding or assets. Feature modules own domain language, validation, Runtime requests, server state,
+and workflows; the design system owns visual hierarchy, interaction anatomy, and shared
+accessibility semantics.
 
 ## Composition rules
 
@@ -102,6 +107,11 @@ backup, restore, export, import, update, or other staging mutation was issued.
 3. Tauri development build is inspected on macOS for focus, overlays, reduced motion, compact spacing, and window resizing.
 4. Bundle-size changes are recorded when new UI dependencies or substantial styles are introduced.
 5. No feature may call OpenWA or redefine Runtime DTOs.
+
+WA Design System v1 rollout status (2026-08-30): completed across connection, shell, Sessions,
+Settings, Groups and group lists, Campaigns, Runs, and Activity. The frozen component gallery,
+canonical token contract, Axe scan, reduced-motion test, keyboard-focus checks, and Darwin visual
+baselines at 960×560, 1100×720, and 1500×850 are enforced in CI.
 
 Current Campaign Drafts, Search & Preflight baseline: 310.54 kB JavaScript (93.60 kB gzip) and 52.86 kB CSS (10.45 kB gzip), plus 106.41 kB of locally bundled variable-font subsets. The production brand mark is an inlined SVG; native bundle icons are generated from the dedicated SVG app-icon master.
 

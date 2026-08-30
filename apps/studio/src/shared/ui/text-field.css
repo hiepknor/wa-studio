@@ -1,22 +1,22 @@
 .ui-field {
   --field-control-font-size: var(--type-body);
-  --field-control-height: var(--control-height);
-  --field-control-padding-inline: 11px;
+  --field-control-height: var(--field-height-sm);
+  --field-control-padding-inline: var(--field-padding-sm);
 }
 .ui-field-xs {
   --field-control-font-size: var(--type-label);
-  --field-control-height: 28px;
-  --field-control-padding-inline: 9px;
+  --field-control-height: var(--field-height-xs);
+  --field-control-padding-inline: var(--field-padding-xs);
 }
 .ui-field-md {
-  --field-control-height: 42px;
-  --field-control-padding-inline: 12px;
+  --field-control-height: var(--field-height-md);
+  --field-control-padding-inline: var(--field-padding-md);
 }
 .text-field {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--space-tight);
 }
 .text-field-label { color: var(--text-secondary); font-size: var(--type-caption); font-weight: var(--weight-regular); letter-spacing: var(--tracking-body); }
 .text-field-label-hidden {
@@ -35,22 +35,22 @@
 .text-field-control select,
 .text-field-control textarea {
   width: 100%;
-  border: 1px solid var(--control-border-default);
-  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--control-border-default);
+  border-radius: var(--radius-control);
   background: var(--control-surface-default);
-  color: var(--foreground);
-  font-family: var(--font-ui);
+  color: var(--text-primary);
+  font-family: var(--font-body);
   font-size: var(--field-control-font-size);
   line-height: var(--control-line-height);
-  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 .text-field-control select,
 .text-field-control input { height: var(--field-control-height); padding: 0 var(--field-control-padding-inline); }
-.text-field-control textarea { width: 100%; min-height: 88px; padding: 9px var(--field-control-padding-inline); resize: vertical; }
-.text-field-control input.text-field-input-with-icon { padding-left: 34px; }
+.text-field-control textarea { width: 100%; min-height: 88px; padding: var(--space-2) var(--field-control-padding-inline); resize: vertical; }
+.text-field-control input.text-field-input-with-icon { padding-left: var(--control-height); }
 .text-field-control .text-field-input-mono { font-family: var(--font-mono); }
 .text-field-control input::placeholder,
-.text-field-control textarea::placeholder { color: var(--dim); opacity: 1; }
+.text-field-control textarea::placeholder { color: var(--text-tertiary); opacity: 1; }
 .text-field-control input:hover:not(:disabled),
 .text-field-control select:hover:not(:disabled),
 .text-field-control textarea:hover:not(:disabled) {
@@ -76,7 +76,7 @@
   position: absolute;
   z-index: 1;
   top: 50%;
-  left: 11px;
+  left: var(--space-3);
   color: var(--text-tertiary);
   pointer-events: none;
   transform: translateY(-50%);
@@ -84,5 +84,5 @@
 .text-field-control:focus-within .text-field-icon { color: var(--text-secondary); }
 .text-field-message,
 .text-field-description { min-height: 16px; font-size: var(--type-label); line-height: var(--leading-ui); overflow-wrap: anywhere; }
-.text-field-description { color: var(--dim); }
+.text-field-description { color: var(--text-tertiary); }
 .text-field-error { color: var(--state-danger); }

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 
+import { DataTableFrame } from "@/shared/ui/Composition";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import {
   GroupSelectionTable,
@@ -53,13 +54,18 @@ export function GroupSelectionPanel({
         {summary && <div className="group-selection-heading-summary">{summary}</div>}
       </div>
       {beforeToolbar}
-      <div className="group-selection-data">
+      <DataTableFrame
+        className="group-selection-data"
+        label={`${title} directory`}
+        scroll={false}
+        variant="flush"
+      >
         <GroupSelectionToolbar {...toolbar} />
         {afterToolbar}
         <GroupSelectionTable {...table} onViewChange={setTableView} view={tableView} />
         {tableView === "results" && pageNote && <p className="group-selection-page-note">{pageNote}</p>}
         {tableView === "results" && <TablePagination {...pagination} />}
-      </div>
+      </DataTableFrame>
     </section>
   );
 }

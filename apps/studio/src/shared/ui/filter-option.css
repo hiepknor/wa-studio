@@ -6,7 +6,7 @@
   gap: var(--space-tight);
   padding: 0 var(--space-2);
   border: var(--border-width) solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -37,7 +37,7 @@
   cursor: inherit;
 }
 
-.filter-option-input[type="checkbox"] { border-radius: 3px; }
+.filter-option-input[type="checkbox"] { border-radius: var(--radius-indicator); }
 .filter-option-input[type="radio"] { border-radius: var(--radius-pill); }
 
 .filter-option-input::before {

@@ -1020,12 +1020,11 @@ describe("CampaignsScreen", () => {
     expect(await screen.findByText("GROUP_CAPABILITY")).toBeInTheDocument();
     expect(screen.getByText("TARGET_CAPABILITY_DENIED")).toBeInTheDocument();
     expect(screen.getByText("Policy v6")).toBeInTheDocument();
-    const metrics = screen.getByText("Total").closest("dl");
-    expect(metrics).not.toBeNull();
-    expect(within(metrics!).getByText("9")).toBeInTheDocument();
-    expect(within(metrics!).getByText("5")).toBeInTheDocument();
-    expect(within(metrics!).getByText("3")).toBeInTheDocument();
-    expect(within(metrics!).getByText("1")).toBeInTheDocument();
+    const metrics = within(result).getByRole("group", { name: "Target readiness" });
+    expect(within(metrics).getByText("9")).toBeInTheDocument();
+    expect(within(metrics).getByText("5")).toBeInTheDocument();
+    expect(within(metrics).getByText("3")).toBeInTheDocument();
+    expect(within(metrics).getByText("1")).toBeInTheDocument();
     expect(preflightCampaign).toHaveBeenCalledWith(campaign.id, mode);
   });
 

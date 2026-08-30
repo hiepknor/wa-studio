@@ -34,13 +34,16 @@ function ControlledSelectMenu({ onChange = vi.fn() }: { onChange?: (value: strin
 describe("SelectMenu", () => {
   it("derives dropdown height from the shared field control token", () => {
     expect(tokensCss).toContain("--control-height: 34px");
+    expect(tokensCss).toContain("--field-height-xs: 28px");
+    expect(tokensCss).toContain("--field-height-sm: var(--control-height)");
+    expect(tokensCss).toContain("--field-height-md: 42px");
     expect(tokensCss).toContain("--type-label: 11px");
     expect(tokensCss).toContain("--type-ui: 13px");
     expect(textFieldCss).toContain("--field-control-font-size: var(--type-label)");
     expect(textFieldCss).toContain("--field-control-font-size: var(--type-body)");
-    expect(textFieldCss).toContain("--field-control-height: 28px");
-    expect(textFieldCss).toContain("--field-control-height: var(--control-height)");
-    expect(textFieldCss).toContain("--field-control-height: 42px");
+    expect(textFieldCss).toContain("--field-control-height: var(--field-height-xs)");
+    expect(textFieldCss).toContain("--field-control-height: var(--field-height-sm)");
+    expect(textFieldCss).toContain("--field-control-height: var(--field-height-md)");
     expect(textFieldCss).toContain("height: var(--field-control-height)");
     expect(selectMenuCss).toContain(".select-menu.ui-field { --field-control-height: var(--control-height); }");
     expect(selectMenuCss).toContain("height: var(--field-control-height)");

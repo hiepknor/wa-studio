@@ -7,7 +7,7 @@
   place-items: center;
   margin: 0;
   border: var(--border-width) solid var(--text-tertiary);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-indicator);
   appearance: none;
   background: transparent;
   cursor: pointer;

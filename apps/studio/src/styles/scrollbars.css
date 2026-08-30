@@ -12,7 +12,7 @@
   min-width: 32px;
   min-height: 32px;
   border: 3px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background-color: var(--scrollbar-thumb);
   background-clip: padding-box;
 }

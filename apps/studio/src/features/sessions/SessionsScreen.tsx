@@ -3,10 +3,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useRuntimeConnection } from "@/app/RuntimeConnectionContext";
 import { userFacingErrorMessage } from "@/shared/errors/error-message";
 import { useLatestOperation } from "@/shared/hooks/useLatestOperation";
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DataTableFrame } from "@/shared/ui/Composition";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
+import { FilterChip } from "@/shared/ui/FilterChip";
 import { FilterOption } from "@/shared/ui/FilterOption";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { formatListResultSummary } from "@/shared/ui/list-result-summary";
@@ -136,7 +137,7 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
         titleId="sessions-title"
       />
 
-      <div className="data-table-container sessions-list-panel">
+      <DataTableFrame className="data-table-container sessions-list-panel" label="Gateway sessions" scroll={false}>
         <DataFilterToolbar
           filterCount={filterCount}
           filtersOpen={filtersOpen}
@@ -175,7 +176,7 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
             </div>
             <div className="data-filter-summary"><div className="data-filter-chips">
               {!filterCount && <span className="data-filter-summary-empty">No filters applied</span>}
-              {[...statuses.map((value) => ({ key: `status-${value}`, label: statusLabel(value), remove: () => setStatuses((current) => current.filter((item) => item !== value)) })), ...engines.map((value) => ({ key: `engine-${value}`, label: value === "loaded" ? "Loaded" : "Not loaded", remove: () => setEngines((current) => current.filter((item) => item !== value)) })), ...workspaces.map((value) => ({ key: `workspace-${value}`, label: value === "selected" ? "Selected" : "Not selected", remove: () => setWorkspaces((current) => current.filter((item) => item !== value)) }))].map((chip) => <button aria-label={`Remove ${chip.label} filter`} className="data-filter-chip" key={chip.key} onClick={chip.remove} type="button"><span>{chip.label}</span><AppIcon name="close" size="xs" /></button>)}
+              {[...statuses.map((value) => ({ key: `status-${value}`, label: statusLabel(value), remove: () => setStatuses((current) => current.filter((item) => item !== value)) })), ...engines.map((value) => ({ key: `engine-${value}`, label: value === "loaded" ? "Loaded" : "Not loaded", remove: () => setEngines((current) => current.filter((item) => item !== value)) })), ...workspaces.map((value) => ({ key: `workspace-${value}`, label: value === "selected" ? "Selected" : "Not selected", remove: () => setWorkspaces((current) => current.filter((item) => item !== value)) }))].map((chip) => <FilterChip key={chip.key} label={chip.label} onRemove={chip.remove} />)}
             </div><Button disabled={!filterCount} onClick={clearFilters} size="sm" variant="ghost">Clear all</Button></div>
           </section>
         )}</DataFilterToolbar>
@@ -199,7 +200,7 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
           onOffsetChange={setOffset}
           total={filteredSessions.length}
         />
-      </div>
+      </DataTableFrame>
       <ConfirmationDialog
         body="WA Studio will detach this window from the local workspace. Runtime and active syncs continue in the background."
         confirmLabel="Disconnect"

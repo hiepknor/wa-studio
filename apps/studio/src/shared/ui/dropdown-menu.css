@@ -8,9 +8,9 @@
   min-width: 220px;
   padding: var(--space-1);
   border: var(--border-width) solid var(--border-strong);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-overlay);
   background: var(--surface-chrome);
-  box-shadow: var(--elev-flat);
+  box-shadow: var(--shadow-flat);
   animation: dropdown-enter var(--motion-fast) var(--ease-standard);
 }
 
@@ -62,7 +62,7 @@
 
 .menu-item-rich .menu-item-icon-slot {
   align-self: start;
-  margin-top: calc((var(--control-line-height) - 18px) / 2);
+  margin-top: calc((var(--control-line-height) - var(--icon-lg)) / 2);
 }
 .menu-item-icon { color: currentColor; }
 

@@ -100,6 +100,10 @@ jobs:
           toolchain: 1.97.1
           components: clippy,rustfmt
       - run: npm ci
+      - name: Install Design System browser
+        run: npx playwright install chromium
+      - name: Validate Design System accessibility and visual baselines
+        run: npm -w @wa/studio run design-system:check
       - run: npm -w @wa/studio run check:native
         env:
           GITHUB_TOKEN: ${{ github.token }}

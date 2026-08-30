@@ -52,6 +52,7 @@ describe("WorkspaceDrawer", () => {
             { label: "Saved", value: 4 },
             { label: "Revision", title: "Revision two", value: "r2" },
           ]}
+          metricsLabel="Target snapshot metrics"
           status={<Badge tone="warning">Unsaved changes</Badge>}
           title="Custom selection"
           titleId="target-summary"
@@ -69,6 +70,7 @@ describe("WorkspaceDrawer", () => {
       .toHaveAttribute("data-dirty", "true");
     expect(screen.getByText("4")).toHaveAttribute("title", "4");
     expect(screen.getByText("r2")).toHaveAttribute("title", "Revision two");
+    expect(screen.getByRole("group", { name: "Target snapshot metrics" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Configuration" })).toBeInTheDocument();
     expect(screen.getByText("Run the check to continue.")).toBeInTheDocument();
   });

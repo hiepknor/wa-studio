@@ -70,7 +70,7 @@ html[data-focus-modality="keyboard"] .checkbox:not(:checked):not(:indeterminate)
 }
 
 /* A compound search owns one outer outline; its input supplies the inner step. */
-.focus-owner { border-radius: var(--radius-sm); }
+.focus-owner { border-radius: var(--radius-control); }
 html[data-focus-modality="keyboard"] .focus-owner:has(> input:focus-visible) {
   outline: var(--focus-width) solid var(--focus-outer-color);
   outline-offset: var(--focus-offset);

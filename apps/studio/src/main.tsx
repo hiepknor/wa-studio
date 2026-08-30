@@ -4,6 +4,7 @@ import ReactDOM from "react-dom/client";
 import "./fonts.css";
 import "./styles/tokens.css";
 import "./styles/scrollbars.css";
+import "./styles/motion.css";
 import { App } from "./app/App";
 import "./styles/focus.css";
 import { installFocusModality } from "./app/installFocusModality";

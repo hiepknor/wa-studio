@@ -20,7 +20,7 @@
   border: 0;
   background: transparent;
   color: var(--text-tertiary);
-  font-family: var(--font-ui);
+  font-family: var(--font-body);
   font-size: var(--type-body);
   line-height: var(--control-line-height);
   text-align: left;
@@ -73,7 +73,7 @@
 
 .workflow-stepper-trigger[aria-selected="true"] .workflow-stepper-index {
   border-color: var(--text-secondary);
-  background: var(--accent);
+  background: var(--selection-surface);
   color: var(--text-primary);
 }
 
@@ -101,10 +101,14 @@
   white-space: nowrap;
 }
 
+.workflow-stepper-trigger[aria-selected="true"] .workflow-stepper-meta {
+  color: var(--text-secondary);
+}
+
 .workflow-stepper-warning {
   width: 5px;
   height: 5px;
   flex: 0 0 5px;
   border-radius: var(--radius-pill);
-  background: var(--warning);
+  background: var(--state-warning);
 }

@@ -4,6 +4,7 @@ import type { RuntimeCampaignRunSummary } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { DateTime } from "@/shared/ui/DateTime";
+import { DataTablePrimaryAction } from "@/shared/ui/DataTablePrimaryAction";
 import {
   resolvedTargets,
   runStatusLabel,
@@ -80,7 +81,7 @@ export function RunsTable({
               <tr data-selected={run.id === selectedRunId || undefined} key={run.id}>
                 <td className="data-cell-primary">
                   <div className="stack stack-xs">
-                    <button className="data-primary-action" onClick={() => onInspect(run)} type="button">{run.campaignNameSnapshot}</button>
+                    <DataTablePrimaryAction onClick={() => onInspect(run)}>{run.campaignNameSnapshot}</DataTablePrimaryAction>
                     <span className="data-identifier">Run {shortId(run.id)} · Campaign {shortId(run.campaignId)}</span>
                   </div>
                 </td>

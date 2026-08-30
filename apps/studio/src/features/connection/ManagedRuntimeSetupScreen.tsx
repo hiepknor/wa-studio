@@ -15,6 +15,7 @@ import {
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DescriptionList } from "@/shared/ui/Composition";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { TextField } from "@/shared/ui/TextField";
 import { ConnectionShell } from "./ConnectionShell";
@@ -225,7 +226,11 @@ export function ManagedRuntimeSetupScreen({
             <header className="connection-section-label"><span>Local workspace</span><span className="connection-step-count">{availabilityLabel(snapshot.availability)}</span></header>
             <div className="connection-card-heading"><h2>{progress[0]}</h2><p>Keep WA Studio open while setup completes.</p></div>
             <p className="managed-runtime-progress" role="status"><span aria-hidden="true" /><strong>{progress[1]}</strong></p>
-            <dl className="connection-runtime-grid"><div><dt>Data</dt><dd>PostgreSQL · local</dd></div><div><dt>Queue</dt><dd>Durable · local</dd></div><div><dt>Runtime</dt><dd>Supervised by WA Studio</dd></div></dl>
+            <DescriptionList ariaLabel="Local Runtime services" className="connection-runtime-grid" items={[
+              { id: "data", label: "Data", value: "PostgreSQL · local" },
+              { id: "queue", label: "Queue", value: "Durable · local" },
+              { id: "runtime", label: "Runtime", value: "Supervised by WA Studio" },
+            ]} />
           </section>
         )}
       </ConnectionShell>

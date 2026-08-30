@@ -2,20 +2,13 @@
   /* Product-owned WARP foundation. */
   --bg: #161412;
   --surface: #1f1d1b;
-  --surface-warm: var(--surface);
   --fg: #faf9f6;
   --fg-2: #afaeac;
-  --muted: #868584;
+  --muted: #8b8a89;
   --meta: #666469;
   --border: rgb(226 226 226 / 35%);
-  --border-soft: var(--border);
   --accent: #353534;
-  --accent-on: #afaeac;
   --accent-hover: #454545;
-  --accent-active: color-mix(in oklab, var(--accent), black 14%);
-  --success: #16a34a;
-  --warn: #eab308;
-  --danger: #dc2626;
   --font-display: "Matter Regular", "Matter", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-body: "Matter Regular", "Matter", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", "Matter Mono Regular", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
@@ -27,21 +20,27 @@
   --space-6: 24px;
   --space-8: 32px;
   --space-12: 48px;
-  --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 14px;
+  --radius-indicator: 3px;
+  --radius-control: 6px;
+  --radius-panel: 8px;
+  --radius-overlay: 12px;
   --radius-pill: 9999px;
-  --elev-flat: none;
-  --elev-ring: 0 0 0 1px var(--border);
-  --elev-raised: 0 5px 15px rgb(0 0 0 / 20%);
-  --motion-fast: 150ms;
-  --motion-base: 200ms;
+  --shadow-flat: none;
+  --shadow-overlay: 0 5px 15px rgb(0 0 0 / 20%);
+  --motion-snap: 90ms;
+  --motion-fast: 120ms;
+  --motion-base: 150ms;
+  --motion-slow: 200ms;
+  --motion-spin: 800ms;
+  --motion-reduced: 0.01ms;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-linear: linear;
 }
 
 :root {
   /* WA Studio product bindings. */
-  --background: var(--bg);
   --surface-canvas: var(--bg);
   --surface-chrome: var(--surface);
   --surface-raised: #252321;
@@ -53,6 +52,9 @@
   --surface-selected: var(--surface-active);
   --surface-disabled: color-mix(in oklab, var(--surface) 88%, var(--bg));
   --surface-scrim: color-mix(in oklab, var(--bg) 84%, transparent);
+  --action-primary-surface: var(--accent);
+  --action-primary-surface-hover: var(--accent-hover);
+  --selection-surface: var(--accent);
   --border-strong: var(--border);
   --border-subtle: color-mix(in oklab, var(--border) 56%, transparent);
   --control-surface-default: var(--surface-control);
@@ -71,9 +73,6 @@
   --text-secondary: var(--fg-2);
   --text-tertiary: var(--muted);
   --text-disabled: var(--meta);
-  --foreground: var(--text-primary);
-  --dim: var(--text-tertiary);
-  --accent-soft: color-mix(in oklab, var(--fg) 7%, transparent);
   --scrollbar-thumb: rgb(175 174 172 / 28%);
   --scrollbar-thumb-hover: rgb(175 174 172 / 44%);
   --scrollbar-thumb-active: rgb(250 249 246 / 52%);
@@ -94,14 +93,6 @@
   --state-success-border: color-mix(in oklab, var(--state-success) 45%, transparent);
   --state-warning-border: color-mix(in oklab, var(--state-warning) 45%, transparent);
   --state-danger-border: color-mix(in oklab, var(--state-danger) 45%, transparent);
-  --ok: var(--state-success);
-  --ok-soft: var(--state-success-surface);
-  --warning: var(--state-warning);
-  --warning-soft: var(--state-warning-surface);
-  --danger: var(--state-danger);
-  --danger-soft: var(--state-danger-surface);
-
-  --font-ui: var(--font-body);
   --type-micro: 10px;
   --type-label: 11px;
   --type-caption: 12px;
@@ -149,7 +140,12 @@
   --control-height: 34px;
   --control-large: 44px;
   --control-padding-inline: 10px;
-  --radius-control: var(--radius-sm);
+  --field-height-xs: 28px;
+  --field-height-sm: var(--control-height);
+  --field-height-md: 42px;
+  --field-padding-xs: var(--space-2);
+  --field-padding-sm: var(--space-3);
+  --field-padding-md: var(--space-3);
   --selector-indicator-size: 16px;
   --selector-hit-size: 34px;
   --filter-indicator-size: 12px;
@@ -161,6 +157,9 @@
   --row-height-relaxed: 52px;
   --table-header-height: 36px;
   --table-row-height: 48px;
+  --table-cell-padding-block: var(--space-tight);
+  --table-cell-padding-inline: var(--space-4);
+  --table-selection-width: 48px;
   --shell-header-height: 52px;
   --shell-footer-height: 32px;
   --connection-brand-height: 62px;
@@ -177,17 +176,14 @@
   --group-scope-trigger-width: 220px;
   --group-scope-panel-width: 360px;
   --group-scope-list-height: 244px;
-  --group-list-dialog-width: 520px;
   --connection-width: 900px;
   --connection-columns: 42% 58%;
   --title-line-length: 11ch;
   --copy-line-narrow: 38ch;
-  --group-table-selection-width: 40px;
   --app-min-width: 960px;
   --detail-label-width: 132px;
   --run-progress-width: 176px;
   --run-mode-width: 84px;
-  --activity-time-width: 108px;
   --activity-subject-width: 220px;
   --table-state-width: 148px;
   --table-date-width: 124px;

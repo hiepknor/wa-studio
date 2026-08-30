@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "design-system:dev": "vite --port 1422 --strictPort --open /design-system.html",
+    "design-system:serve": "vite --host 127.0.0.1 --port 1422 --strictPort",
+    "design-system:check": "playwright test --config playwright.design-system.config.ts",
+    "design-system:update-snapshots": "playwright test --config playwright.design-system.config.ts --grep @visual --update-snapshots",
     "build": "tsc --noEmit && vite build",
     "check": "npm run check:frontend && npm run check:native && npm run check:release",
     "check:frontend": "npm run test && npm run build",
@@ -37,6 +41,8 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",

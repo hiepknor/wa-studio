@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
+import { FilterChip } from "@/shared/ui/FilterChip";
 import {
   clearGroupFilters,
   filterValueLabel,
@@ -14,26 +14,6 @@ interface GroupFilterSummaryProps {
   setState: Dispatch<SetStateAction<GroupListState>>;
   showEmpty?: boolean;
   state: GroupListState;
-}
-
-interface FilterChipProps {
-  accessibleLabel: string;
-  label: string;
-  onRemove: () => void;
-}
-
-function FilterChip({ accessibleLabel, label, onRemove }: FilterChipProps) {
-  return (
-    <button
-      aria-label={`Remove ${accessibleLabel} filter`}
-      className="data-filter-chip"
-      onClick={onRemove}
-      type="button"
-    >
-      <span>{label}</span>
-      <AppIcon name="close" size="xs" />
-    </button>
-  );
 }
 
 export function GroupFilterSummary({
@@ -55,9 +35,9 @@ export function GroupFilterSummary({
         )}
         {state.capabilityStatuses.map((value) => (
           <FilterChip
-            accessibleLabel={`Capability: ${filterValueLabel(value)}`}
             key={value}
             label={filterValueLabel(value)}
+            removeLabel={`Remove Capability: ${filterValueLabel(value)} filter`}
             onRemove={() => setState((current) => ({
               ...current,
               capabilityStatuses: current.capabilityStatuses.filter(
@@ -69,9 +49,9 @@ export function GroupFilterSummary({
         ))}
         {state.capabilityFreshness.map((value) => (
           <FilterChip
-            accessibleLabel={`Freshness: ${filterValueLabel(value)}`}
             key={value}
             label={filterValueLabel(value)}
+            removeLabel={`Remove Freshness: ${filterValueLabel(value)} filter`}
             onRemove={() => setState((current) => ({
               ...current,
               capabilityFreshness: current.capabilityFreshness.filter(
@@ -83,8 +63,8 @@ export function GroupFilterSummary({
         ))}
         {state.minParticipants !== undefined && (
           <FilterChip
-            accessibleLabel={`Minimum participants: ${state.minParticipants}`}
             label={`≥ ${state.minParticipants} participants`}
+            removeLabel={`Remove Minimum participants: ${state.minParticipants} filter`}
             onRemove={() => setState((current) => ({
               ...current,
               minParticipants: undefined,
@@ -94,8 +74,8 @@ export function GroupFilterSummary({
         )}
         {state.maxParticipants !== undefined && (
           <FilterChip
-            accessibleLabel={`Maximum participants: ${state.maxParticipants}`}
             label={`≤ ${state.maxParticipants} participants`}
+            removeLabel={`Remove Maximum participants: ${state.maxParticipants} filter`}
             onRemove={() => setState((current) => ({
               ...current,
               maxParticipants: undefined,
@@ -105,8 +85,8 @@ export function GroupFilterSummary({
         )}
         {state.isActive !== undefined && (
           <FilterChip
-            accessibleLabel={state.isActive ? "Active groups" : "Inactive groups"}
             label={state.isActive ? "Active groups" : "Inactive groups"}
+            removeLabel={`Remove ${state.isActive ? "Active groups" : "Inactive groups"} filter`}
             onRemove={() => setState((current) => ({
               ...current,
               isActive: undefined,

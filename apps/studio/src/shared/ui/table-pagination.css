@@ -3,11 +3,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border-subtle);
-  color: var(--dim);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--table-cell-padding-inline);
+  border-top: var(--border-width) solid var(--border-subtle);
+  color: var(--text-tertiary);
   font-size: var(--type-caption);
   font-variant-numeric: tabular-nums;
 }
-.table-pagination > div { display: flex; gap: 6px; }
+.table-pagination > div { display: flex; gap: var(--space-tight); }

@@ -2,13 +2,13 @@
   position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface);
+  gap: var(--space-3);
+  padding: var(--space-panel);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface-chrome);
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 
 .switch-field:hover {
@@ -31,10 +31,10 @@
   width: var(--switch-width);
   height: var(--switch-height);
   flex: 0 0 var(--switch-width);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-pill);
   background: var(--surface-active);
-  transition: border-color 120ms ease, background 120ms ease;
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 
 .switch-field-control::before {
@@ -49,14 +49,14 @@
   left: var(--switch-thumb-padding-inset);
   width: var(--switch-thumb-size);
   height: var(--switch-thumb-size);
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--text-secondary);
-  transition: transform 140ms ease, background 120ms ease;
+  transition: transform var(--motion-base) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 
 .switch-field input:checked + .switch-field-control {
   border-color: var(--text-secondary);
-  background: var(--accent);
+  background: var(--selection-surface);
 }
 
 .switch-field input:checked + .switch-field-control > span {
@@ -67,7 +67,7 @@
 .switch-field-copy {
   min-width: 0;
   display: grid;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .switch-field-copy strong {
@@ -77,7 +77,7 @@
 }
 
 .switch-field-copy small {
-  color: var(--muted);
+  color: var(--text-tertiary);
   font-size: var(--type-body);
   line-height: var(--leading-ui);
 }
@@ -88,6 +88,6 @@
 }
 
 .switch-field.is-disabled:hover {
-  border-color: var(--border);
-  background: var(--surface);
+  border-color: var(--border-strong);
+  background: var(--surface-chrome);
 }

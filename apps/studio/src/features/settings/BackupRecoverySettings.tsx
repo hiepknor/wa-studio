@@ -11,6 +11,7 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DataTableFrame } from "@/shared/ui/Composition";
 import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { TextField } from "@/shared/ui/TextField";
@@ -313,7 +314,11 @@ export function BackupRecoverySettings({
         title="On-device backups"
         titleId="settings-backup-list-title"
       >
-        <div className="data-table-scroll settings-backup-table">
+        <DataTableFrame
+          className="settings-backup-table"
+          label="Managed PostgreSQL backups"
+          variant="flush"
+        >
           <table className="data-table">
             <caption>Managed PostgreSQL backups</caption>
             <thead>
@@ -351,7 +356,7 @@ export function BackupRecoverySettings({
               ))}
             </tbody>
           </table>
-        </div>
+        </DataTableFrame>
       </SettingsSection>
 
       <SettingsSection

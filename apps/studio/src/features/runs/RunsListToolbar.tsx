@@ -1,8 +1,8 @@
 import type { Dispatch, SetStateAction } from "react";
 
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
+import { FilterChip } from "@/shared/ui/FilterChip";
 import { FilterOption } from "@/shared/ui/FilterOption";
 import { formatListResultSummary } from "@/shared/ui/list-result-summary";
 import type {
@@ -90,8 +90,4 @@ export function RunsListToolbar({
       )}
     </DataFilterToolbar>
   );
-}
-
-function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return <button aria-label={`Remove ${label} filter`} className="data-filter-chip" onClick={onRemove} type="button"><span>{label}</span><AppIcon name="close" size="xs" /></button>;
 }

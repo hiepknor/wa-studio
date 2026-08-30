@@ -19,7 +19,7 @@
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-secondary);
-  font-family: var(--font-ui);
+  font-family: var(--font-body);
   font-size: var(--type-body);
   font-weight: var(--weight-regular);
   line-height: var(--control-line-height);
@@ -47,8 +47,8 @@
   width: 5px;
   height: 5px;
   flex: 0 0 5px;
-  border-radius: 50%;
-  background: var(--warning);
+  border-radius: var(--radius-pill);
+  background: var(--state-warning);
   box-shadow: none;
 }
 .tabs-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

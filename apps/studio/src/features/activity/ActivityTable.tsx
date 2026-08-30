@@ -2,6 +2,7 @@ import type { RuntimeActivityEvent } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { DateTime } from "@/shared/ui/DateTime";
+import { DataTablePrimaryAction } from "@/shared/ui/DataTablePrimaryAction";
 import {
   activitySeverityLabel,
   activityTitle,
@@ -60,7 +61,7 @@ export function ActivityTable({
             <tr data-selected={event.id === activeEventId || undefined} key={event.id}>
               <td className="data-cell-primary">
                 <div className="stack stack-xs">
-                  <button className="data-primary-action" onClick={() => onInspect(event)} type="button">{activityTitle(event)}</button>
+                  <DataTablePrimaryAction onClick={() => onInspect(event)}>{activityTitle(event)}</DataTablePrimaryAction>
                   <span className="data-identifier">{event.eventType} · v{event.eventVersion}</span>
                 </div>
               </td>

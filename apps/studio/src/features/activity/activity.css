@@ -1,5 +1,5 @@
 .activity-table-scroll { min-width: 0; }
-.activity-table-scroll[data-updating="true"] tbody { opacity: .48; transition: opacity 120ms ease; }
+.activity-table-scroll[data-updating="true"] tbody { opacity: .48; transition: opacity var(--motion-fast) var(--ease-standard); }
 .activity-table { min-width: 720px; table-layout: fixed; }
 .activity-column-event { width: auto; }
 .activity-column-subject { width: var(--activity-subject-width); }
@@ -12,14 +12,14 @@
 .activity-table .data-cell-action { padding-inline: var(--space-hair); text-align: center; }
 .activity-table .data-cell-action:focus-within { overflow: visible; }
 .activity-load-more { display: flex; min-height: var(--table-row-height); align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-tight) var(--space-compact); border-top: var(--border-width) solid var(--divider-strong); color: var(--text-tertiary); font-size: var(--type-caption); font-variant-numeric: tabular-nums; }
-.activity-inspector-section { display: grid; gap: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.activity-inspector-section { display: grid; gap: var(--space-3); padding-top: var(--space-3); border-top: var(--border-width) solid var(--border-strong); }
 .activity-inspector-section:first-child { padding-top: 0; border-top: 0; }
 .activity-inspector-section h3 { margin: 0; font-size: var(--type-body); font-weight: var(--weight-medium); }
-.activity-inspector-section p { margin: 0; color: var(--muted); }
+.activity-inspector-section p { margin: 0; color: var(--text-tertiary); }
 .activity-inspector-badges { display: flex; gap: var(--space-2); }
 .activity-detail-list { display: grid; margin: 0; }
-.activity-detail-list > div { display: grid; grid-template-columns: minmax(var(--detail-label-width), 0.7fr) minmax(0, 1.3fr); gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
-.activity-detail-list dt { color: var(--dim); }
+.activity-detail-list > dl { border-bottom-color: var(--border-strong); }
+.activity-detail-list dt { color: var(--text-tertiary); }
 .activity-detail-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .activity-inspector-footer { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.activity-inspector-footer span { color: var(--dim); font-size: var(--type-caption); }
+.activity-inspector-footer span { color: var(--text-tertiary); font-size: var(--type-caption); }

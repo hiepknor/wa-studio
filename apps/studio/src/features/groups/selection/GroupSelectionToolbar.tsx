@@ -4,9 +4,9 @@ import type {
   RuntimeGroupCapabilityFreshness,
   RuntimeGroupCapabilityStatus,
 } from "@/shared/api/runtime-client";
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
+import { FilterChip } from "@/shared/ui/FilterChip";
 import { FilterOption } from "@/shared/ui/FilterOption";
 import { formatListResultSummary } from "@/shared/ui/list-result-summary";
 import { ParticipantRangeFilter } from "../ParticipantRangeFilter";
@@ -227,8 +227,4 @@ function CampaignTargetFilterSummary({
       <Button disabled={!hasFilters} onClick={() => onChange(emptyGroupSelectionFilters())} size="sm" variant="ghost">Clear all</Button>
     </div>
   );
-}
-
-function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return <button aria-label={`Remove ${label} filter`} className="data-filter-chip" onClick={onRemove} type="button"><span>{label}</span><AppIcon name="close" size="xs" /></button>;
 }

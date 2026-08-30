@@ -21,6 +21,7 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DataTableFrame, DescriptionList, MetricGrid } from "@/shared/ui/Composition";
 import { DateTime } from "@/shared/ui/DateTime";
 import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
@@ -1363,7 +1364,7 @@ export function GroupsScreen() {
       )}
 
       <>
-        <div className="data-table-container groups-list-panel">
+        <DataTableFrame className="data-table-container groups-list-panel" label="Group directory" scroll={false}>
           {groupsScope.scope.mode === "list:view" && (
             <section className="group-list-context-bar" aria-label="Saved list context">
               <div className="group-list-context-copy">
@@ -1518,7 +1519,7 @@ export function GroupsScreen() {
             onOffsetChange={(nextOffset) => setListState((current) => ({ ...current, offset: nextOffset }))}
             total={total}
           />
-        </div>
+        </DataTableFrame>
 
         <GroupListMetadataDialog
           draft={groupsScope.metadataDraft}
@@ -1671,20 +1672,11 @@ export function GroupsScreen() {
                         {detail.isActive ? "Active" : "Inactive"}
                       </Badge>
                     </header>
-                    <dl className="groups-inspector-metrics">
-                      <div>
-                        <dt>Participants</dt>
-                        <dd>{detail.participantsCount ?? syncedMemberTotal ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt>Session access</dt>
-                        <dd>{accessLabel(detail.isAdmin)}</dd>
-                      </div>
-                      <div>
-                        <dt>Record synced</dt>
-                        <dd><DateTime value={detail.syncedAt} /></dd>
-                      </div>
-                    </dl>
+                    <MetricGrid ariaLabel="Group profile metrics" className="groups-inspector-metrics" items={[
+                      { label: "Participants", value: detail.participantsCount ?? syncedMemberTotal ?? "—" },
+                      { label: "Session access", value: accessLabel(detail.isAdmin) },
+                      { label: "Record synced", value: <DateTime value={detail.syncedAt} /> },
+                    ]} />
                     <div className="groups-identity-row">
                       <div>
                         <span>Group ID</span>
@@ -1730,25 +1722,10 @@ export function GroupsScreen() {
                       />
                     </header>
                     <div className="groups-capability-body stack stack-md">
-                      <dl className="groups-capability-meta groups-inspector-metrics">
-                        <div>
-                          <dt>Checked</dt>
-                          <dd><DateTime value={detail.sendCapability.checkedAt} /></dd>
-                        </div>
-                        <div>
-                          <dt>Freshness</dt>
-                          <dd>
-                            <Badge
-                              tone={
-                                detailCapabilityIsStale ? "warning" : "success"
-                              }
-                              variant="status"
-                            >
-                              {detailCapabilityIsStale ? "Stale" : "Current"}
-                            </Badge>
-                          </dd>
-                        </div>
-                      </dl>
+                      <MetricGrid ariaLabel="Send capability metrics" className="groups-capability-meta groups-inspector-metrics" items={[
+                        { label: "Checked", value: <DateTime value={detail.sendCapability.checkedAt} /> },
+                        { label: "Freshness", value: <Badge tone={detailCapabilityIsStale ? "warning" : "success"} variant="status">{detailCapabilityIsStale ? "Stale" : "Current"}</Badge> },
+                      ]} />
                       <Button
                         disabled={manualCapabilityOperationActive}
                         icon="refresh"
@@ -1814,32 +1791,11 @@ export function GroupsScreen() {
                         <p>Runtime flags that govern access, posting, and settings changes.</p>
                       </div>
                     </header>
-                    <dl className="groups-facts groups-facts-grid">
-                      <div>
-                        <dt>Posting</dt>
-                        <dd>
-                          {booleanLabel(
-                            detail.isAnnounce,
-                            "Admins only",
-                            "All members",
-                          )}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Read only</dt>
-                        <dd>{booleanLabel(detail.isReadOnly, "Yes", "No")}</dd>
-                      </div>
-                      <div>
-                        <dt>Settings</dt>
-                        <dd>
-                          {booleanLabel(
-                            detail.settingsLocked,
-                            "Locked",
-                            "Unlocked",
-                          )}
-                        </dd>
-                      </div>
-                    </dl>
+                    <MetricGrid ariaLabel="Group configuration" className="groups-facts groups-facts-grid" items={[
+                      { label: "Posting", value: booleanLabel(detail.isAnnounce, "Admins only", "All members") },
+                      { label: "Read only", value: booleanLabel(detail.isReadOnly, "Yes", "No") },
+                      { label: "Settings", value: booleanLabel(detail.settingsLocked, "Locked", "Unlocked") },
+                    ]} />
                   </section>
 
                   <details
@@ -1854,42 +1810,15 @@ export function GroupsScreen() {
                       </div>
                       <AppIcon className="groups-inspector-disclosure-indicator" name="chevron-right" size="sm" />
                     </summary>
-                    <dl className="groups-facts groups-technical-facts">
-                      <div>
-                        <dt>Record synced</dt>
-                        <dd><DateTime value={detail.syncedAt} /></dd>
-                      </div>
-                      <div>
-                        <dt>Details synced</dt>
-                        <dd><DateTime value={detail.detailsSyncedAt} /></dd>
-                      </div>
-                      <div>
-                        <dt>Capability revision</dt>
-                        <dd>{detail.sendCapability.revision}</dd>
-                      </div>
-                      {detail.sendCapability.invalidatedAt && (
-                        <div>
-                          <dt>Invalidated</dt>
-                          <dd><DateTime value={detail.sendCapability.invalidatedAt} /></dd>
-                        </div>
-                      )}
-                      {detail.ownerId && (
-                        <div>
-                          <dt>Owner ID</dt>
-                          <dd>{detail.ownerId}</dd>
-                        </div>
-                      )}
-                      {detail.linkedParentId && (
-                        <div>
-                          <dt>Linked parent</dt>
-                          <dd>{detail.linkedParentId}</dd>
-                        </div>
-                      )}
-                      <div>
-                        <dt>Session ID</dt>
-                        <dd>{detail.sessionId}</dd>
-                      </div>
-                    </dl>
+                    <DescriptionList ariaLabel="Sync and identifiers" className="groups-facts groups-technical-facts" items={[
+                      { id: "record-synced", label: "Record synced", value: <DateTime value={detail.syncedAt} /> },
+                      { id: "details-synced", label: "Details synced", value: <DateTime value={detail.detailsSyncedAt} /> },
+                      { id: "capability-revision", label: "Capability revision", value: detail.sendCapability.revision },
+                      ...(detail.sendCapability.invalidatedAt ? [{ id: "invalidated", label: "Invalidated", value: <DateTime value={detail.sendCapability.invalidatedAt} /> }] : []),
+                      ...(detail.ownerId ? [{ id: "owner-id", label: "Owner ID", value: detail.ownerId }] : []),
+                      ...(detail.linkedParentId ? [{ id: "linked-parent", label: "Linked parent", value: detail.linkedParentId }] : []),
+                      { id: "session-id", label: "Session ID", value: detail.sessionId },
+                    ]} />
                   </details>
                 </div>
               )}

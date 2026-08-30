@@ -20,30 +20,30 @@
   position: sticky;
   z-index: 3;
   top: 0;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-panel) var(--space-5);
+  border-bottom: var(--border-width) solid var(--border-strong);
   background: var(--surface-chrome);
 }
 
 .workspace-dialog-notice {
-  padding: 18px 20px 0;
+  padding: var(--space-pane) var(--space-5) 0;
 }
 
 .workspace-dialog-content {
   min-width: 0;
-  padding: 22px 20px 28px;
+  padding: var(--space-5) var(--space-5) var(--space-6);
 }
 
 @media (max-width: 600px) {
   .workspace-dialog-navigation {
-    padding-inline: 16px;
+    padding-inline: var(--space-4);
   }
 
   .workspace-dialog-notice {
-    padding: 16px 16px 0;
+    padding: var(--space-4) var(--space-4) 0;
   }
 
   .workspace-dialog-content {
-    padding: 18px 16px 22px;
+    padding: var(--space-pane) var(--space-4) var(--space-5);
   }
 }

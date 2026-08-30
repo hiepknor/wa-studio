@@ -7,6 +7,7 @@ import { useRuntimeResourceRevision } from "@/shared/server-state/runtime-invali
 import { reconciledPageOffset } from "@/shared/server-state/server-page";
 import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
+import { MetricGrid } from "@/shared/ui/Composition";
 import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { ModalDialog } from "@/shared/ui/ModalDialog";
@@ -313,10 +314,10 @@ export function CampaignGroupListActions({
               <div className="campaign-group-list-review-icon"><AppIcon name="groups" size="sm" /></div>
               <div><span>Selected group list</span><strong>{selected.name}</strong>{selected.description && <p>{selected.description}</p>}</div>
             </div>
-            <dl className="campaign-group-list-review-metrics">
-              <div><dt>Groups</dt><dd>{selected.groupCount.toLocaleString()}</dd></div>
-              <div><dt>Membership revision</dt><dd>r{selected.membershipRevision}</dd></div>
-            </dl>
+            <MetricGrid ariaLabel="Selected group list" className="campaign-group-list-review-metrics" items={[
+              { label: "Groups", value: selected.groupCount.toLocaleString() },
+              { label: "Membership revision", value: `r${selected.membershipRevision}` },
+            ]} />
             <InlineAlert title={selected.groupCount === 0 ? "This list is empty" : "Replace persisted targets"} tone={selected.groupCount === 0 ? "warning" : "info"}>
               {selected.groupCount === 0
                 ? "Applying this snapshot will clear the complete persisted campaign target set."

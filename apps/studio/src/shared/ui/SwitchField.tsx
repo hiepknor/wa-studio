@@ -10,6 +10,7 @@ interface SwitchFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "
 export const SwitchField = forwardRef<HTMLInputElement, SwitchFieldProps>(function SwitchField(
   {
     "aria-describedby": ariaDescribedBy,
+    "aria-labelledby": ariaLabelledBy,
     className = "",
     description,
     disabled,
@@ -21,6 +22,7 @@ export const SwitchField = forwardRef<HTMLInputElement, SwitchFieldProps>(functi
 ) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
+  const labelId = `${inputId}-label`;
   const descriptionId = description ? `${inputId}-description` : undefined;
   const describedBy = [ariaDescribedBy, descriptionId].filter(Boolean).join(" ") || undefined;
 
@@ -29,6 +31,7 @@ export const SwitchField = forwardRef<HTMLInputElement, SwitchFieldProps>(functi
       <input
         {...props}
         aria-describedby={describedBy}
+        aria-labelledby={ariaLabelledBy ?? labelId}
         disabled={disabled}
         id={inputId}
         ref={ref}
@@ -37,7 +40,7 @@ export const SwitchField = forwardRef<HTMLInputElement, SwitchFieldProps>(functi
       />
       <span aria-hidden="true" className="switch-field-control"><span /></span>
       <span className="switch-field-copy">
-        <strong>{label}</strong>
+        <strong id={labelId}>{label}</strong>
         {description && <small id={descriptionId}>{description}</small>}
       </span>
     </label>

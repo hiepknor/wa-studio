@@ -13,6 +13,8 @@ dist/
 **/dist/
 dist-ssr/
 **/dist-ssr/
+**/playwright-report/
+**/test-results/
 *.local
 services/runtime/deploy/observability/runtime-metrics-token
 services/runtime/deploy/observability/event-inbox-metrics-token

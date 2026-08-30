@@ -18,9 +18,20 @@ function cssFiles(directory: string): string[] {
 }
 
 const tokensCss = readFileSync("src/styles/tokens.css", "utf8");
+const designSystemDoc = readFileSync("../../docs/design-system.md", "utf8");
+const componentCatalogDoc = readFileSync(
+  "../../docs/design-system-components.md",
+  "utf8",
+);
+const migrationGuideDoc = readFileSync(
+  "../../docs/design-system-migration.md",
+  "utf8",
+);
 const fontsCss = readFileSync("src/fonts.css", "utf8");
 const focusCss = readFileSync("src/styles/focus.css", "utf8");
 const appCss = readFileSync("src/app/app.css", "utf8");
+const compositionCss = readFileSync("src/shared/ui/composition.css", "utf8");
+const compositionSource = readFileSync("src/shared/ui/Composition.tsx", "utf8");
 const appIconCss = readFileSync("src/shared/ui/app-icon.css", "utf8");
 const appIconSource = readFileSync("src/shared/ui/AppIcon.tsx", "utf8");
 const buttonCss = readFileSync("src/shared/ui/button.css", "utf8");
@@ -106,7 +117,29 @@ const tauriConfig = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8")
   app: { windows: Array<{ minWidth: number }> };
 };
 
-describe("WARP design-system contract", () => {
+describe("WA Design System contract", () => {
+  it("defines a product-owned WARP-inspired contract and rollout gate", () => {
+    expect(designSystemDoc).toContain("WA Design System is a product-owned desktop interface system");
+    expect(designSystemDoc).toContain("inspired by Warp Terminal");
+    expect(designSystemDoc).toContain("Feature rollout starts only after");
+    expect(designSystemDoc).toContain("960 x 560, 1100 x 720, and 1500 x 850");
+    expect(componentCatalogDoc).toContain("API freeze rule");
+    expect(componentCatalogDoc).toContain("Compatibility surfaces");
+    expect(migrationGuideDoc).toContain("Rollout order");
+    expect(migrationGuideDoc).toContain("Definition of done");
+  });
+
+  it("keeps the token graph closed", () => {
+    const source = cssFiles("src").map((path) => readFileSync(path, "utf8")).join("\n");
+    const definitions = new Set(
+      [...source.matchAll(/(--[a-z][a-z0-9-]+)\s*:/gi)].map((match) => match[1]),
+    );
+    const references = new Set(
+      [...source.matchAll(/var\((--[a-z][a-z0-9-]+)/gi)].map((match) => match[1]),
+    );
+    expect([...references].filter((token) => !definitions.has(token)).sort()).toEqual([]);
+  });
+
   it("locks the warm foundation and operational geometry", () => {
     expect(tokensCss).toContain("--bg: #161412");
     expect(tokensCss).toContain("--surface: #1f1d1b");
@@ -117,6 +150,8 @@ describe("WARP design-system contract", () => {
     expect(tokensCss).toContain("--shell-footer-height: 32px");
     expect(tokensCss).toContain("--table-header-height: 36px");
     expect(tokensCss).toContain("--table-row-height: 48px");
+    expect(tokensCss).toContain("--table-cell-padding-inline: var(--space-4)");
+    expect(tokensCss).toContain("--table-selection-width: 48px");
     expect(tokensCss).toContain("--drawer-width-default: 360px");
     expect(tokensCss).toContain("--drawer-width-compact: 320px");
     expect(tokensCss).toContain("--rail-width: 176px");
@@ -214,7 +249,12 @@ describe("WARP design-system contract", () => {
     expect(tokensCss).toContain("--hit-slop-block: 5px");
     expect(tokensCss).toContain("--press-shift: 1px");
     expect(tokensCss).toContain("--disabled-opacity: .62");
-    expect(tokensCss).toContain("--radius-control: var(--radius-sm)");
+    expect(tokensCss).toContain("--radius-indicator: 3px");
+    expect(tokensCss).toContain("--radius-control: 6px");
+    expect(tokensCss).toContain("--radius-panel: 8px");
+    expect(tokensCss).toContain("--radius-overlay: 12px");
+    expect(tokensCss).toContain("--radius-pill: 9999px");
+    expect(tokensCss).not.toMatch(/--radius-(?:xs|sm|md|lg)\b/);
 
     expect(buttonCss).toContain("gap: var(--space-2)");
     expect(buttonCss).toContain("padding: var(--space-tight) var(--space-3)");
@@ -232,6 +272,43 @@ describe("WARP design-system contract", () => {
     expect(buttonSource).toContain("size={size}");
     expect(buttonCss).not.toMatch(/\.button-icon-only\s*\{[^}]*--button-height:/s);
     expect(buttonSource).toContain('iconOnly ? "button-icon-only" : ""');
+  });
+
+  it("keeps shared radius and motion geometry on the approved token scales", () => {
+    expect(tokensCss).toContain("--motion-snap: 90ms");
+    expect(tokensCss).toContain("--motion-fast: 120ms");
+    expect(tokensCss).toContain("--motion-base: 150ms");
+    expect(tokensCss).toContain("--motion-slow: 200ms");
+    expect(tokensCss).toContain("--motion-spin: 800ms");
+    expect(tokensCss).toContain("--ease-enter:");
+    expect(tokensCss).toContain("--ease-exit:");
+    expect(tokensCss).toContain("--shadow-flat: none");
+    expect(tokensCss).toContain("--shadow-overlay:");
+    expect(tokensCss).not.toMatch(/--(?:background|foreground|dim|ok|ok-soft|warning|warning-soft|danger|danger-soft|font-ui|elev-flat|elev-ring|elev-raised)\s*:/);
+
+    for (const path of cssFiles("src").filter((path) => path !== "src/styles/tokens.css")) {
+      const css = readFileSync(path, "utf8");
+      expect(css, `${path} must use an approved radius token`)
+        .not.toMatch(/border-radius:\s*(?:\d+(?:\.\d+)?px|50%)\b/i);
+      expect(css, `${path} must use semantic radius roles`)
+        .not.toMatch(/var\(--radius-(?:xs|sm|md|lg)\)/i);
+      expect(css, `${path} must use named motion duration tokens`)
+        .not.toMatch(/(?:transition|animation)(?:-duration)?:\s*[^;{}]*\b[1-9]\d*ms\b/i);
+      expect(css, `${path} must use the shared border-width token`)
+        .not.toMatch(/\bborder(?:-(?:top|right|bottom|left|block|inline))?:\s*1px\b/i);
+      expect(css, `${path} must use the shared border-width token in border-width shorthands`)
+        .not.toMatch(/\bborder-width:\s*[^;{}]*\b1px\b/i);
+      expect(css, `${path} must use canonical semantic tokens instead of rollout aliases`)
+        .not.toMatch(/var\(--(?:background|foreground|dim|ok|ok-soft|warning|warning-soft|danger|danger-soft|font-ui|elev-flat|elev-ring|elev-raised)\)/i);
+      expect(css, `${path} must not consume foundation colors directly`)
+        .not.toMatch(/var\(--(?:bg|surface|fg|fg-2|muted|meta|border|accent|accent-hover)\)/i);
+    }
+
+    for (const path of cssFiles("src").filter((path) => path !== "src/styles/tokens.css")) {
+      const css = readFileSync(path, "utf8");
+      expect(css, `${path} must use the shared spacing scale`)
+        .not.toMatch(/(?:gap|row-gap|column-gap|padding(?:-[a-z]+)?|margin(?:-[a-z]+)?):[^;{}]*(?<!-)[1-9]\d*px/i);
+    }
   });
 
   it("keeps action menus compact and semantically hierarchical", () => {
@@ -326,7 +403,7 @@ describe("WARP design-system contract", () => {
     expect(focusCss).toContain('[tabindex="-1"]:not(button):not(a):not(input):not(textarea):not(select)');
     expect(focusModalitySource).toContain('addEventListener("keydown"');
     expect(focusModalitySource).toContain('addEventListener("pointerdown"');
-    expect(focusCss).toContain(".focus-owner { border-radius: var(--radius-sm); }");
+    expect(focusCss).toContain(".focus-owner { border-radius: var(--radius-control); }");
     expect(focusCss).toContain(
       'html[data-focus-modality="keyboard"] .focus-owner:has(> input:focus-visible)',
     );
@@ -409,15 +486,15 @@ describe("WARP design-system contract", () => {
     expect(tokensCss).toContain("--control-border-default: color-mix(in oklab, var(--fg) 38%, transparent)");
     expect(tokensCss).toContain("--control-border-hover: color-mix(in oklab, var(--fg) 52%, transparent)");
     expect(tokensCss).toContain("--control-border-disabled: var(--border-subtle)");
-    expect(textFieldCss).toContain("border: 1px solid var(--control-border-default)");
+    expect(textFieldCss).toContain("border: var(--border-width) solid var(--control-border-default)");
     expect(textFieldCss).toContain("background: var(--control-surface-default)");
     expect(textFieldCss).toContain(".text-field-control input:hover:not(:disabled)");
     expect(textFieldCss).toContain(".text-field-control textarea:hover:not(:disabled)");
     expect(textFieldCss).toContain("border-color: var(--control-border-hover)");
     expect(textFieldCss).toContain("background: var(--control-surface-hover)");
-    expect(selectMenuCss).toContain("border: 1px solid var(--control-border-default)");
+    expect(selectMenuCss).toContain("border: var(--border-width) solid var(--control-border-default)");
     expect(selectMenuCss).toContain("background: var(--control-surface-default)");
-    expect(groupsCss).toContain("border: 1px solid var(--control-border-default)");
+    expect(groupsCss).toContain("border: var(--border-width) solid var(--control-border-default)");
     expect(groupsCss).toContain("background: var(--control-surface-default)");
     expect(searchFieldCss).not.toMatch(/(?:border(?:-color)?|background)\s*:/);
     expect(appCss).toMatch(
@@ -464,7 +541,8 @@ describe("WARP design-system contract", () => {
     expect(groupSelectionTableSource).toContain('"Show selected"');
     expect(groupSelectionTableSource).not.toContain("Saved or selected outside current results");
     expect(groupSelectionTableSource).not.toContain("group-selection-divider");
-    expect(appCss).toContain(".data-selection-cell { width: 44px;");
+    expect(appCss).toContain("width: var(--table-selection-width);");
+    expect(appCss).toContain("padding-inline: var(--space-3) !important;");
     expect(appCss).toContain(".data-selection-bar {");
   });
 
@@ -515,9 +593,9 @@ describe("WARP design-system contract", () => {
     expect(campaignsCss).not.toContain("campaign-content-type-control");
   });
 
-  it("anchors filter controls and result counts to opposite toolbar edges", () => {
+  it("aligns filter controls, result counts, and table content to one inset", () => {
     expect(dataFilterToolbarCss)
-      .toContain(".data-table-toolbar.data-filter-toolbar { padding-inline: 0; }");
+      .toContain(".data-table-toolbar.data-filter-toolbar { padding-inline: var(--table-cell-padding-inline); }");
     expect(dataFilterToolbarCss)
       .toContain("grid-template-columns: minmax(0, 1fr) auto");
     expect(dataFilterToolbarCss).toContain(".data-filter-controls { min-width: 0;");
@@ -528,7 +606,11 @@ describe("WARP design-system contract", () => {
   });
 
   it("lets the Groups scope popover escape a short table container", () => {
-    expect(appCss).toContain(".data-table-container { overflow: hidden;");
+    expect(compositionSource).toContain('variant = "outlined"');
+    expect(compositionSource).toContain("data-variant={variant}");
+    expect(compositionCss).toContain('.ui-data-table-frame[data-variant="outlined"] {');
+    expect(compositionCss).toContain("border: var(--border-width) solid var(--divider-strong);");
+    expect(compositionCss).toContain("border-radius: var(--radius-panel);");
     expect(groupsCss).toContain(
       ".data-table-container.groups-list-panel { min-width: 0; overflow: visible;",
     );

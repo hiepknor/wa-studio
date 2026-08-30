@@ -35,7 +35,9 @@ import { AppIcon } from "@/shared/ui/AppIcon";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import { DataTableFrame, MetricGrid } from "@/shared/ui/Composition";
 import { DateTime } from "@/shared/ui/DateTime";
+import { DataTablePrimaryAction } from "@/shared/ui/DataTablePrimaryAction";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { OverflowMenu } from "@/shared/ui/OverflowMenu";
@@ -1986,7 +1988,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         title="Campaigns"
         titleId="campaigns-title"
       />
-      <div className="data-table-container campaign-list-panel">
+      <DataTableFrame className="data-table-container campaign-list-panel" label="Campaigns" scroll={false}>
         <CampaignListToolbar
           filtersOpen={filtersOpen}
           firstItem={firstItem}
@@ -2008,7 +2010,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                 : !visiblePage && visibleListError ? <tr><td className="data-table-empty" colSpan={5}>Campaigns are unavailable.</td></tr>
                 : !visiblePage?.data.length ? <tr><td className="data-table-empty" colSpan={5}>{hasListCriteria ? "No campaigns match this search or filters." : "No campaigns yet. Create a draft to get started."}</td></tr>
                 : visiblePage.data.map((item) => <tr key={item.id}>
-                  <td className="data-cell-primary"><div className="stack stack-xs"><button className="data-primary-action" onClick={() => openCampaign(item)} title={`Open ${item.name}`} type="button">{item.name}</button><span className="data-identifier">{item.id}</span></div></td>
+                  <td className="data-cell-primary"><div className="stack stack-xs"><DataTablePrimaryAction onClick={() => openCampaign(item)} title={`Open ${item.name}`}>{item.name}</DataTablePrimaryAction><span className="data-identifier">{item.id}</span></div></td>
                   <td><Badge tone={statusTone(item.status)} variant="status">{statusLabel(item.status)}</Badge></td>
                   <td className="data-cell-time">{item.scheduleType === "IMMEDIATE" ? "Immediate" : <DateTime value={item.scheduledAt} />}</td>
                   <td className="data-cell-number">{item.targetCount}</td>
@@ -2024,7 +2026,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
           onOffsetChange={(nextOffset) => setListState((current) => ({ ...current, offset: nextOffset }))}
           total={total}
         />
-      </div>
+      </DataTableFrame>
 
       <WorkspaceDialog
         contentKey={`${campaign?.id ?? "new"}:${editorEpochRef.current}:${editorTab}`}
@@ -2196,12 +2198,12 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                       <CampaignGroupListActions api={api} campaignId={campaign.id} disabled={!editable || targetsLoading || campaignMutationBusy || targetsDirty} onApply={applyGroupList} sessionId={campaign.sessionId} />
                     </div>
                   </header>
-                  <dl className="campaign-target-metrics">
-                    <div><dt>Saved</dt><dd>{targetDiff.savedCount}</dd></div>
-                    <div><dt>Staged</dt><dd>{targetDiff.selectedCount}</dd></div>
-                    <div><dt>Change</dt><dd>{targetsDirty ? `+${targetDiff.addedIds.length} / −${targetDiff.removedIds.length}` : "None"}</dd></div>
-                    <div><dt>Revision</dt><dd>r{targetsRevision}</dd></div>
-                  </dl>
+                  <MetricGrid ariaLabel="Campaign target snapshot" className="campaign-target-metrics" items={[
+                    { label: "Saved", value: targetDiff.savedCount },
+                    { label: "Staged", value: targetDiff.selectedCount },
+                    { label: "Change", value: targetsDirty ? `+${targetDiff.addedIds.length} / −${targetDiff.removedIds.length}` : "None" },
+                    { label: "Revision", value: `r${targetsRevision}` },
+                  ]} />
                   <footer className="campaign-target-overview-footer">
                     <span>{targetSource
                       ? <>Membership r{targetSource.membershipRevision} · Applied <DateTime value={targetSource.appliedAt} /></>
@@ -2378,19 +2380,19 @@ function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; 
       </header>
       <section aria-labelledby="preflight-target-readiness-title" className="preflight-target-summary">
         <header><div><span>Target readiness</span><h4 id="preflight-target-readiness-title">Runtime target assessment</h4></div><p>Capability state captured by this decision.</p></header>
-        <dl className="preflight-metrics">
-          <div><dt>Total</dt><dd>{report.totalTargets}</dd></div>
-          <div data-tone="success"><dt>Allowed</dt><dd>{report.allowedTargets}</dd></div>
-          <div data-tone="danger"><dt>Denied</dt><dd>{report.deniedTargets}</dd></div>
-          <div data-tone="warning"><dt>Unknown</dt><dd>{report.unknownTargets}</dd></div>
-        </dl>
+        <MetricGrid ariaLabel="Target readiness" className="preflight-metrics" items={[
+          { label: "Total", value: report.totalTargets },
+          { label: "Allowed", tone: "success", value: report.allowedTargets },
+          { label: "Denied", tone: "danger", value: report.deniedTargets },
+          { label: "Unknown", tone: "warning", value: report.unknownTargets },
+        ]} />
       </section>
-      <dl aria-label="Preflight context" className="preflight-context">
-        <div><dt>Mode</dt><dd>{executionModeLabel(report.executionMode)}</dd></div>
-        <div><dt>Policy</dt><dd>Policy v{report.policyVersion}</dd></div>
-        <div><dt>Checked</dt><dd><DateTime value={report.checkedAt} /></dd></div>
-        <div><dt>Snapshot</dt><dd>Campaign r{report.campaignRevision} · targets r{report.targetsRevision}</dd></div>
-      </dl>
+      <MetricGrid ariaLabel="Preflight context" className="preflight-context" items={[
+        { label: "Mode", value: executionModeLabel(report.executionMode) },
+        { label: "Policy", value: `Policy v${report.policyVersion}` },
+        { label: "Checked", value: <DateTime value={report.checkedAt} /> },
+        { label: "Snapshot", value: `Campaign r${report.campaignRevision} · targets r${report.targetsRevision}` },
+      ]} />
       <div className="preflight-evidence" data-has-target-issues={report.targetIssues.length > 0 || undefined}>
         {report.targetIssues.length > 0 ? (
           <section className="preflight-evidence-panel preflight-target-issues">

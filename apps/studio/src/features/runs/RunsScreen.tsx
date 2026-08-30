@@ -22,6 +22,7 @@ import {
 import { reconciledPageOffset } from "@/shared/server-state/server-page";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
+import { DataTableFrame, DescriptionList, MetricGrid } from "@/shared/ui/Composition";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
@@ -488,7 +489,7 @@ export function RunsScreen({
         title="Runs"
         titleId="runs-title"
       />
-      <div className="data-table-container runs-list-panel">
+      <DataTableFrame className="data-table-container runs-list-panel" label="Campaign runs" scroll={false}>
         <RunsListToolbar
           filtersOpen={filtersOpen}
           firstItem={firstItem}
@@ -512,7 +513,7 @@ export function RunsScreen({
           updating={listRefreshing}
         />
         <TablePagination limit={limit} loading={listLoading || listRefreshing} offset={offset} onOffsetChange={(nextOffset) => setListState((current) => ({ ...current, offset: nextOffset }))} total={total} />
-      </div>
+      </DataTableFrame>
 
       <WorkspaceDrawer
         contentKey={`${selectedRunId ?? "none"}:${inspectorTab}`}
@@ -574,22 +575,34 @@ function RunOverview({ run }: { run: RuntimeCampaignRun }) {
       <div className="runs-inspector-status"><Badge tone={runTone(run.status)} variant="status">{runStatusLabel(run.status)}</Badge><Badge tone="neutral">{run.executionMode === "LIVE" ? "Live" : "Dry run"}</Badge></div>
       {run.statusReason && <p>{run.statusReason.replace(/_/g, " ").toLocaleLowerCase()}</p>}
       <div className="runs-progress-summary"><progress max={Math.max(1, run.totalTargets)} value={resolved} /><strong>{resolved} of {run.totalTargets} targets resolved</strong></div>
-      <dl className="runs-progress-grid">{progressRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      <MetricGrid
+        ariaLabel="Run delivery progress"
+        className="runs-progress-grid"
+        items={progressRows.map(([label, value]) => ({ label, value }))}
+      />
     </section>
-    <section className="runs-inspector-section"><h3>Lifecycle</h3><dl className="runs-detail-list">
-      <div><dt>Created</dt><dd><DateTime value={run.createdAt} /></dd></div>
-      <div><dt>Scheduled</dt><dd><DateTime value={run.scheduledAt} /></dd></div>
-      <div><dt>Started</dt><dd><DateTime fallback="Not started" value={run.startedAt} /></dd></div>
-      <div><dt>Completed</dt><dd><DateTime fallback="Not completed" value={run.completedAt} /></dd></div>
-      <div><dt>Last change</dt><dd><DateTime value={run.updatedAt} /></dd></div>
-    </dl></section>
-    <section className="runs-inspector-section"><h3>Immutable launch snapshot</h3><dl className="runs-detail-list">
-      <div><dt>Run ID</dt><dd className="data-identifier">{run.id}</dd></div>
-      <div><dt>Campaign ID</dt><dd className="data-identifier">{run.campaignId}</dd></div>
-      <div><dt>Campaign revision</dt><dd>r{run.campaignRevision}</dd></div>
-      <div><dt>Target revision</dt><dd>r{run.targetsRevision}</dd></div>
-      <div><dt>Audience source</dt><dd>{run.targetSource ? `${run.targetSource.groupListNameSnapshot} · membership r${run.targetSource.membershipRevision}` : "Custom selection"}</dd></div>
-    </dl></section>
+    <section className="runs-inspector-section"><h3>Lifecycle</h3><DescriptionList
+      ariaLabel="Run lifecycle"
+      className="runs-detail-list"
+      items={[
+        { id: "created", label: "Created", value: <DateTime value={run.createdAt} /> },
+        { id: "scheduled", label: "Scheduled", value: <DateTime value={run.scheduledAt} /> },
+        { id: "started", label: "Started", value: <DateTime fallback="Not started" value={run.startedAt} /> },
+        { id: "completed", label: "Completed", value: <DateTime fallback="Not completed" value={run.completedAt} /> },
+        { id: "updated", label: "Last change", value: <DateTime value={run.updatedAt} /> },
+      ]}
+    /></section>
+    <section className="runs-inspector-section"><h3>Immutable launch snapshot</h3><DescriptionList
+      ariaLabel="Immutable launch snapshot"
+      className="runs-detail-list"
+      items={[
+        { id: "run-id", label: "Run ID", value: run.id, valueClassName: "data-identifier" },
+        { id: "campaign-id", label: "Campaign ID", value: run.campaignId, valueClassName: "data-identifier" },
+        { id: "campaign-revision", label: "Campaign revision", value: `r${run.campaignRevision}` },
+        { id: "target-revision", label: "Target revision", value: `r${run.targetsRevision}` },
+        { id: "audience-source", label: "Audience source", value: run.targetSource ? `${run.targetSource.groupListNameSnapshot} · membership r${run.targetSource.membershipRevision}` : "Custom selection" },
+      ]}
+    /></section>
     <RunMessageSnapshot run={run} />
   </div>;
 }
@@ -599,12 +612,16 @@ function RunMessageSnapshot({ run }: { run: RuntimeCampaignRun }) {
   return <details className="runs-message-snapshot">
     <summary>Message snapshot</summary>
     {content.type === "TEXT" ? <p>{content.text}</p> : <>
-      <dl className="runs-detail-list runs-message-metadata">
-        <div><dt>Type</dt><dd>Image</dd></div>
-        <div><dt>File</dt><dd>{content.filename}</dd></div>
-        <div><dt>Format</dt><dd>{content.mimeType} · {formatRunBytes(content.byteSize)}</dd></div>
-        <div><dt>Integrity</dt><dd className="data-identifier">SHA-256 {content.sha256.slice(0, 12)}…</dd></div>
-      </dl>
+      <DescriptionList
+        ariaLabel="Message metadata"
+        className="runs-detail-list runs-message-metadata"
+        items={[
+          { id: "type", label: "Type", value: "Image" },
+          { id: "file", label: "File", value: content.filename },
+          { id: "format", label: "Format", value: `${content.mimeType} · ${formatRunBytes(content.byteSize)}` },
+          { id: "integrity", label: "Integrity", value: `SHA-256 ${content.sha256.slice(0, 12)}…`, valueClassName: "data-identifier" },
+        ]}
+      />
       <p>{content.caption || "No caption"}</p>
     </>}
   </details>;

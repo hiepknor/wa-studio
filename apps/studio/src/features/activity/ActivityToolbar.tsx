@@ -4,9 +4,9 @@ import type {
   RuntimeActivityCategory,
   RuntimeActivitySeverity,
 } from "@/shared/api/runtime-client";
-import { AppIcon } from "@/shared/ui/AppIcon";
 import { Button } from "@/shared/ui/Button";
 import { DataFilterToolbar } from "@/shared/ui/DataFilterToolbar";
+import { FilterChip } from "@/shared/ui/FilterChip";
 import { FilterOption as FilterOptionControl } from "@/shared/ui/FilterOption";
 import { formatLoadedResultSummary } from "@/shared/ui/list-result-summary";
 import {
@@ -79,8 +79,4 @@ export function ActivityToolbar({
 
 function FilterOption({ checked, label, onChange }: { checked: boolean; label: string; onChange: () => void }) {
   return <FilterOptionControl checked={checked} onChange={onChange}>{label}</FilterOptionControl>;
-}
-
-function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return <button aria-label={`Remove ${label} filter`} className="data-filter-chip" onClick={onRemove} type="button"><span>{label}</span><AppIcon name="close" size="xs" /></button>;
 }

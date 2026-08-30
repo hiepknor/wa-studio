@@ -1,0 +1,29 @@
+.data-filter-chip {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-tight);
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-active);
+  color: var(--text-secondary);
+  font-size: var(--type-micro);
+  white-space: nowrap;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.data-filter-chip:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.data-filter-chip:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
+}
