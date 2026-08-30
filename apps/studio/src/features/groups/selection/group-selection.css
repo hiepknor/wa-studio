@@ -47,7 +47,6 @@
 .group-selection-table td { height: 54px; padding: 7px 9px; border-bottom: 1px solid var(--border); font-size: var(--type-label); }
 .group-selection-table tbody tr { transition: background 120ms ease; }
 .group-selection-table tbody tr:hover { background: var(--surface-hover); }
-.group-selection-table tbody tr[data-row-click-select="true"] { cursor: pointer; }
 .group-selection-table tbody tr[data-selected="true"] { background: var(--surface-selected); }
 .group-selection-table tbody tr:last-child td { border-bottom: 0; }
 .group-selection-table .group-selection-divider { background: var(--surface-chrome); }
@@ -62,8 +61,6 @@
 .group-selection-group strong { overflow: hidden; color: var(--text-primary); font-size: var(--type-label); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
 .group-selection-group small { display: block; overflow: hidden; margin-top: 3px; color: var(--dim); font-family: var(--font-mono); font-size: var(--type-micro); text-overflow: ellipsis; white-space: nowrap; }
 .group-selection-participants { width: 86px; color: var(--text-secondary); font-family: var(--font-mono); text-align: right !important; }
-.group-selection-state { width: 94px; text-align: right !important; }
-.group-selection-state .ui-badge { margin-left: auto; }
 .group-selection-capability { width: 98px; text-align: right !important; }
 .group-selection-table-empty { height: 92px !important; color: var(--dim); text-align: center; }
 .group-selection-page-note { margin: -2px 0 0; color: var(--dim); font-size: var(--type-micro); line-height: var(--leading-ui); }

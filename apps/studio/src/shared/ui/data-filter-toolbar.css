@@ -2,16 +2,6 @@
 .data-table-toolbar.data-filter-toolbar { padding-inline: 0; }
 .data-filter-toolbar-row { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 .data-filter-controls { min-width: 0; display: flex; align-items: center; justify-self: start; gap: 7px; }
-.data-filter-trigger-wrap { position: relative; flex: 0 0 auto; }
-.data-filter-toolbar-popover .data-filter-trigger-wrap > .data-filter-panel {
-  position: absolute;
-  z-index: 12;
-  top: calc(100% + 8px);
-  right: 0;
-  max-height: min(440px, calc(100dvh - 180px));
-  overflow-y: auto;
-  box-shadow: var(--elev-raised);
-}
 .data-filter-result-summary { justify-self: end; color: var(--dim); font-size: var(--type-caption); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .data-filter-panel { width: min(620px, 100%); align-self: flex-start; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-chrome); box-shadow: none; }
 .data-filter-panel-header { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 4px 2px 11px; }

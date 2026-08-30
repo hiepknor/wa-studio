@@ -20,11 +20,8 @@ export interface GroupSelectionTableProps {
   pageIds: string[];
   pinnedIds?: ReadonlySet<string>;
   pinnedLabel?: string;
-  rowClickSelect?: boolean;
   rows: GroupSelectionRow[];
   selectedIds: ReadonlySet<string>;
-  showCapability?: boolean;
-  showState?: boolean;
   unknownParticipantsTitle?: string;
 }
 
@@ -43,40 +40,34 @@ export function GroupSelectionTable({
   pageIds,
   pinnedIds = new Set<string>(),
   pinnedLabel = "Saved or selected outside current results",
-  rowClickSelect = false,
   rows,
   selectedIds,
-  showCapability = true,
-  showState = false,
   unknownParticipantsTitle = "Participant count is unavailable.",
 }: GroupSelectionTableProps) {
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
   const somePageSelected = pageIds.some((id) => selectedIds.has(id));
   const pinnedRows = rows.filter((row) => pinnedIds.has(row.groupId));
   const resultRows = rows.filter((row) => !pinnedIds.has(row.groupId));
-  const columnCount = 3 + Number(showCapability) + Number(showState);
+  const columnCount = 4;
   function renderRow(row: GroupSelectionRow) {
     const selected = selectedIds.has(row.groupId);
     return (
       <tr
-        data-row-click-select={rowClickSelect || undefined}
         data-selected={selected || undefined}
         key={row.groupId}
-        onClick={rowClickSelect && !disabled ? () => onToggle(row.groupId) : undefined}
       >
         <td className="group-selection-check">
           <Checkbox
             aria-label={`Select ${row.groupName}`}
             checked={selected}
             disabled={disabled}
-            onClick={(event) => { if (rowClickSelect) event.stopPropagation(); }}
             onChange={() => onToggle(row.groupId)}
           />
         </td>
         <td className="group-selection-group">
           <div>
             <strong>{row.groupName}</strong>
-            {!showState && !row.isActive && <Badge tone="neutral" variant="status">Inactive</Badge>}
+            {!row.isActive && <Badge tone="neutral" variant="status">Inactive</Badge>}
           </div>
           <small>{row.groupId}</small>
         </td>
@@ -86,18 +77,9 @@ export function GroupSelectionTable({
         >
           {participantCount(row.participantsCount)}
         </td>
-        {showState && (
-          <td className="group-selection-state">
-            <Badge tone={row.isActive ? "success" : "neutral"} variant="status">
-              {row.isActive ? "Active" : "Inactive"}
-            </Badge>
-          </td>
-        )}
-        {showCapability && (
-          <td className="group-selection-capability">
-            <GroupCapabilityStatus capability={row.sendCapability} includeFreshness={false} />
-          </td>
-        )}
+        <td className="group-selection-capability">
+          <GroupCapabilityStatus capability={row.sendCapability} includeFreshness={false} />
+        </td>
       </tr>
     );
   }
@@ -105,7 +87,7 @@ export function GroupSelectionTable({
     <div aria-busy={loading || undefined} className="group-selection-table">
       <table>
         <caption>{caption}</caption>
-        <thead><tr><th className="group-selection-check" scope="col"><Checkbox aria-checked={somePageSelected && !allPageSelected ? "mixed" : allPageSelected} aria-label="Select all groups on this page" checked={allPageSelected} disabled={disabled || !pageIds.length || loading} onChange={onTogglePage} ref={(node) => { if (node) node.indeterminate = somePageSelected && !allPageSelected; }} title="Select all groups on this page" /></th><th scope="col">Group</th><th className="group-selection-participants" scope="col">Participants</th>{showState && <th className="group-selection-state" scope="col">State</th>}{showCapability && <th className="group-selection-capability" scope="col">Capability</th>}</tr></thead>
+        <thead><tr><th className="group-selection-check" scope="col"><Checkbox aria-checked={somePageSelected && !allPageSelected ? "mixed" : allPageSelected} aria-label="Select all groups on this page" checked={allPageSelected} disabled={disabled || !pageIds.length || loading} onChange={onTogglePage} ref={(node) => { if (node) node.indeterminate = somePageSelected && !allPageSelected; }} title="Select all groups on this page" /></th><th scope="col">Group</th><th className="group-selection-participants" scope="col">Participants</th><th className="group-selection-capability" scope="col">Capability</th></tr></thead>
         {loading && !rows.length ? <tbody><tr><td className="group-selection-table-empty" colSpan={columnCount}>{loadingMessage}</td></tr></tbody>
           : !rows.length ? <tbody><tr><td className="group-selection-table-empty" colSpan={columnCount}>{emptyMessage}</td></tr></tbody>
           : <>
