@@ -97,6 +97,10 @@ not introduce another surface merely to create spacing.
 - `label`: compact control metadata.
 - `micro`: table headers, policy codes, and tertiary technical labels.
 
+The shipped type system is deterministic: Inter is the self-hosted display/body family and Geist
+Mono is the self-hosted technical family. System-installed fonts are never placed ahead of those
+families because visual baselines must render identically on every supported Mac.
+
 Uppercase tracking is limited to short labels. Paragraphs, actions, and status explanations remain
 sentence case. Mono is never used to make ordinary prose appear technical.
 

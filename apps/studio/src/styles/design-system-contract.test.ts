@@ -164,11 +164,12 @@ describe("WA Design System contract", () => {
   });
 
   it("binds the self-hosted type families and semantic scale", () => {
-    expect(tokensCss).toContain('--font-display: "Matter Regular", "Matter", "Inter", ui-sans-serif, system-ui, sans-serif');
-    expect(tokensCss).toContain('--font-body: "Matter Regular", "Matter", "Inter", ui-sans-serif, system-ui, sans-serif');
-    expect(tokensCss).toContain('--font-mono: "Geist Mono", "Matter Mono Regular", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace');
+    expect(tokensCss).toContain('--font-display: "Inter", ui-sans-serif, system-ui, sans-serif');
+    expect(tokensCss).toContain('--font-body: "Inter", ui-sans-serif, system-ui, sans-serif');
+    expect(tokensCss).toContain('--font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace');
     expect(fontsCss).toContain('font-family: "Inter"');
     expect(fontsCss).toContain('font-family: "Geist Mono"');
+    expect(tokensCss).not.toContain("Matter");
     expect(fontsCss).not.toContain('font-family: "Inter Variable"');
     expect(fontsCss).not.toMatch(/https?:\/\//i);
     expect(tokensCss).toContain("--type-micro: 10px");

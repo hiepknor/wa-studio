@@ -9,9 +9,9 @@
   --border: rgb(226 226 226 / 35%);
   --accent: #353534;
   --accent-hover: #454545;
-  --font-display: "Matter Regular", "Matter", "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-body: "Matter Regular", "Matter", "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", "Matter Mono Regular", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -160,6 +160,15 @@
   --table-cell-padding-block: var(--space-tight);
   --table-cell-padding-inline: var(--space-4);
   --table-selection-width: 48px;
+  --table-action-width: 48px;
+  --table-empty-height: 100px;
+  --table-toolbar-height: 54px;
+  --table-selection-bar-height: 50px;
+  --popup-gap: 6px;
+  --popup-max-height: 260px;
+  --popup-min-width: 280px;
+  --popup-option-height: 38px;
+  --popup-option-marker-width: 16px;
   --shell-header-height: 52px;
   --shell-footer-height: 32px;
   --connection-brand-height: 62px;
@@ -187,7 +196,6 @@
   --activity-subject-width: 220px;
   --table-state-width: 148px;
   --table-date-width: 124px;
-  --table-action-width: 44px;
   --settings-nav-width: 172px;
   --setting-row-min-height: 62px;
   --copy-line-settings: 58ch;
