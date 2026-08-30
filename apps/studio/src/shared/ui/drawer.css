@@ -87,8 +87,6 @@
   white-space: nowrap;
 }
 .drawer-body { min-height: 0; padding: var(--space-panel); overflow: auto; }
-.drawer-body .inline-alert-copy { flex-wrap: wrap; }
-.drawer-body .inline-alert-copy span { white-space: normal; overflow-wrap: anywhere; }
 .drawer-footer {
   display: flex;
   align-items: center;

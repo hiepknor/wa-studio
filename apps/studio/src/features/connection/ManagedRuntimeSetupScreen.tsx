@@ -198,7 +198,7 @@ export function ManagedRuntimeSetupScreen({
               <TextField autoFocus={baseUrl.length === 0} disabled={operationBusy} icon="server" id="openwa-url" inputMode="url" label="OpenWA base URL" monospace onChange={event => { baseUrlEditedRef.current = true; setStoredProfileLoaded(false); setBaseUrl(event.currentTarget.value); }} placeholder="https://openwa.company.com" required spellCheck={false} type="url" value={baseUrl} />
               <TextField autoComplete="new-password" autoFocus={baseUrl.length > 0} description="Saved in the protected local app store after validation." disabled={operationBusy} icon="key" id="openwa-api-key" label="OpenWA API key" monospace onChange={event => setApiKey(event.currentTarget.value)} required type="password" value={apiKey} />
             </div>
-            {flow === "error" ? <InlineAlert className="connection-status" indicator title="Could not connect">{connectionError ?? snapshot.error ?? "Check the connection and try again."}</InlineAlert> : <InlineAlert className="connection-status" indicator title="Local by default" tone="neutral">Runtime and data stay on this Mac.</InlineAlert>}
+            {flow === "error" ? <InlineAlert className="connection-status" indicator layout="stacked" title="Could not connect" variant="quiet">{connectionError ?? snapshot.error ?? "Check the connection and try again."}</InlineAlert> : <InlineAlert className="connection-status" indicator layout="stacked" title="Local by default" tone="neutral" variant="quiet">Runtime and data stay on this Mac.</InlineAlert>}
             {snapshot.phase === "degraded" && (
               <section aria-labelledby="degraded-recovery-title" className="managed-runtime-recovery stack stack-sm">
                 <div>

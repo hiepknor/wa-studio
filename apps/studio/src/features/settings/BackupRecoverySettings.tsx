@@ -12,6 +12,7 @@ import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DataTableFrame } from "@/shared/ui/Composition";
+import { DataTable, DataTableEmptyCell } from "@/shared/ui/DataTable";
 import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { TextField } from "@/shared/ui/TextField";
@@ -319,21 +320,20 @@ export function BackupRecoverySettings({
           label="Managed PostgreSQL backups"
           variant="flush"
         >
-          <table className="data-table">
-            <caption>Managed PostgreSQL backups</caption>
+          <DataTable caption="Managed PostgreSQL backups">
             <thead>
               <tr>
                 <th className="data-column-time" scope="col">Created</th>
                 <th scope="col">Recovery point</th>
                 <th className="data-column-number" scope="col">Size</th>
-                <th className="align-end" scope="col">Action</th>
+                <th className="data-align-end" scope="col">Action</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td className="data-table-empty" colSpan={4}>Loading backups…</td></tr>
+                <tr><DataTableEmptyCell colSpan={4}>Loading backups…</DataTableEmptyCell></tr>
               ) : backups.length === 0 ? (
-                <tr><td className="data-table-empty" colSpan={4}>No backups are available yet.</td></tr>
+                <tr><DataTableEmptyCell colSpan={4}>No backups are available yet.</DataTableEmptyCell></tr>
               ) : backups.map(backup => (
                 <tr key={backup.id}>
                   <td className="data-cell-time"><DateTime value={new Date(backup.createdAtMs).toISOString()} /></td>
@@ -355,7 +355,7 @@ export function BackupRecoverySettings({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </DataTable>
         </DataTableFrame>
       </SettingsSection>
 

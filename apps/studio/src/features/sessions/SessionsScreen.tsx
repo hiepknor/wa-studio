@@ -181,7 +181,7 @@ export function SessionsScreen({ onOpenGroups }: SessionsScreenProps) {
           </section>
         )}</DataFilterToolbar>
 
-        {sessionsError && <InlineAlert action={<Button onClick={() => void reloadSessions()} size="sm">Retry</Button>} className="data-table-error" title="Could not reload sessions">{sessionsError}</InlineAlert>}
+        {sessionsError && <InlineAlert action={<Button onClick={() => void reloadSessions()} size="sm">Retry</Button>} title="Could not reload sessions" variant="flush">{sessionsError}</InlineAlert>}
 
         <SessionsTable
           emptyMessage={!connected.sessions.length

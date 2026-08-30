@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { Badge } from "./Badge";
 import { Button } from "./Button";
+import { DataTable } from "./DataTable";
 import {
   ActionFooter,
   DataTableFrame,
@@ -35,7 +36,7 @@ describe("WA Design System composition patterns", () => {
       ]} />
       <DescriptionList ariaLabel="Run details" items={[
         { id: "mode", label: "Mode", value: "Dry run" },
-        { id: "run-id", label: "Run ID", value: "run-01", valueClassName: "data-identifier" },
+        { id: "run-id", label: "Run ID", value: "run-01", valueClassName: "ui-technical-text" },
       ]} />
     </>);
 
@@ -55,7 +56,7 @@ describe("WA Design System composition patterns", () => {
         title: "Campaign content",
       }]} />
       <DataTableFrame label="Sessions" toolbar={<span>Toolbar</span>} footer={<span>Footer</span>}>
-        <table><tbody><tr><td>Session</td></tr></tbody></table>
+        <DataTable caption="Sessions"><tbody><tr><td>Session</td></tr></tbody></DataTable>
       </DataTableFrame>
       <DataTableFrame label="Activity" scroll={false} variant="flush"><span>Direct scroll owner</span></DataTableFrame>
       <EmptyState compact icon="activity" title="No activity">New activity will appear here.</EmptyState>
@@ -64,7 +65,8 @@ describe("WA Design System composition patterns", () => {
 
     expect(screen.getByRole("list", { name: "Checks" })).toHaveTextContent("CONTENT_VALID");
     expect(screen.getByRole("region", { name: "Sessions" })).toHaveAttribute("data-variant", "outlined");
-    expect(screen.getByRole("region", { name: "Sessions" })).toHaveTextContent("ToolbarSessionFooter");
+    expect(screen.getByRole("region", { name: "Sessions" })).toHaveTextContent("Toolbar");
+    expect(screen.getByRole("region", { name: "Sessions" })).toHaveTextContent("Footer");
     expect(screen.getByRole("region", { name: "Activity" })).toHaveAttribute("data-variant", "flush");
     expect(screen.getByRole("region", { name: "Activity" })).not.toContainHTML("ui-data-table-scroll");
     expect(screen.getByText("New activity will appear here.").closest(".ui-empty-state")).toHaveAttribute("data-compact", "true");

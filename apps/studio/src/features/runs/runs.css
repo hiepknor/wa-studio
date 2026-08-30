@@ -1,6 +1,5 @@
 .runs-list-panel { width: 100%; min-width: 0; }
 .runs-table-scroll { min-width: 0; }
-.runs-table-scroll[data-updating="true"] tbody,
 .run-delivery-list[data-updating="true"] { opacity: .48; transition: opacity var(--motion-fast) var(--ease-standard); }
 .runs-table { min-width: 680px; table-layout: fixed; }
 .runs-column-campaign { width: auto; }

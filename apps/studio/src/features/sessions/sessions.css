@@ -2,7 +2,6 @@
 .sessions-header-actions { display: flex; align-items: center; gap: var(--space-2); }
 .sessions-list-panel { min-width: 0; }
 .sessions-table-scroll { min-width: 0; }
-.sessions-table-scroll[data-updating="true"] tbody { opacity: .48; transition: opacity var(--motion-fast) var(--ease-standard); }
 .sessions-table { min-width: 720px; table-layout: fixed; }
 .sessions-column-name { width: auto; }
 .sessions-column-runtime,

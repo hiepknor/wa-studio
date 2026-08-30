@@ -197,7 +197,7 @@ export function ActivityScreen({
         setState={setState}
         state={state}
       />
-      {error && <InlineAlert action={<Button onClick={() => void load()} size="sm">Retry</Button>} className="data-table-error" title="Could not load activity">{error}</InlineAlert>}
+      {error && <InlineAlert action={<Button onClick={() => void load()} size="sm">Retry</Button>} title="Could not load activity" variant="flush">{error}</InlineAlert>}
       <ActivityTable
         activeEventId={selectedEventId}
         emptyMessage={!selectedSessionId
@@ -233,11 +233,11 @@ function ActivityInspector({ event }: { event: RuntimeActivityEvent }) {
       ariaLabel="Event details"
       className="activity-detail-list"
       items={[
-        { id: "type", label: "Type", value: event.eventType, valueClassName: "data-identifier" },
+        { id: "type", label: "Type", value: event.eventType, valueClassName: "ui-technical-text" },
         { id: "occurred", label: "Occurred", value: <DateTime value={event.occurredAt} /> },
         { id: "origin", label: "Origin", value: event.origin.charAt(0) + event.origin.slice(1).toLocaleLowerCase() },
-        { id: "event-id", label: "Event ID", value: event.id, valueClassName: "data-identifier" },
-        { id: "correlation", label: "Correlation", value: event.correlationId ?? "Not available", valueClassName: "data-identifier" },
+        { id: "event-id", label: "Event ID", value: event.id, valueClassName: "ui-technical-text" },
+        { id: "correlation", label: "Correlation", value: event.correlationId ?? "Not available", valueClassName: "ui-technical-text" },
       ]}
     /></section>
     <section className="activity-inspector-section"><h3>Subject</h3><DescriptionList
@@ -245,11 +245,11 @@ function ActivityInspector({ event }: { event: RuntimeActivityEvent }) {
       className="activity-detail-list"
       items={[
         { id: "type", label: "Type", value: event.subject.type },
-        { id: "id", label: "ID", value: event.subject.id, valueClassName: "data-identifier" },
-        ...(event.related.campaignId ? [{ id: "campaign", label: "Campaign", value: event.related.campaignId, valueClassName: "data-identifier" }] : []),
-        ...(event.related.runId ? [{ id: "run", label: "Run", value: event.related.runId, valueClassName: "data-identifier" }] : []),
-        ...(event.related.syncRunId ? [{ id: "sync-run", label: "Sync run", value: event.related.syncRunId, valueClassName: "data-identifier" }] : []),
-        ...(event.related.groupId ? [{ id: "group", label: "Group", value: event.related.groupId, valueClassName: "data-identifier" }] : []),
+        { id: "id", label: "ID", value: event.subject.id, valueClassName: "ui-technical-text" },
+        ...(event.related.campaignId ? [{ id: "campaign", label: "Campaign", value: event.related.campaignId, valueClassName: "ui-technical-text" }] : []),
+        ...(event.related.runId ? [{ id: "run", label: "Run", value: event.related.runId, valueClassName: "ui-technical-text" }] : []),
+        ...(event.related.syncRunId ? [{ id: "sync-run", label: "Sync run", value: event.related.syncRunId, valueClassName: "ui-technical-text" }] : []),
+        ...(event.related.groupId ? [{ id: "group", label: "Group", value: event.related.groupId, valueClassName: "ui-technical-text" }] : []),
       ]}
     /></section>
     {metadata.length > 0 && <section className="activity-inspector-section"><h3>Allowlisted metadata</h3><DescriptionList ariaLabel="Allowlisted metadata" className="activity-detail-list" items={metadata.map(([key, value]) => ({ id: key, label: key, value: typeof value === "object" ? JSON.stringify(value) : String(value) }))} /></section>}

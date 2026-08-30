@@ -2,6 +2,7 @@ import type { RuntimeGroup } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { Checkbox } from "@/shared/ui/Checkbox";
+import { DataTable, DataTableEmptyCell, DataTableScroll } from "@/shared/ui/DataTable";
 import { dataTablePageSelectionState } from "@/shared/ui/data-table-selection";
 import { DateTime } from "@/shared/ui/DateTime";
 import { GroupCapabilityStatus } from "./GroupCapabilityStatus";
@@ -102,13 +103,12 @@ export function GroupsTable({
         : null;
 
   return (
-    <div
-      aria-busy={loading}
-      className="data-table-scroll groups-table-scroll"
-      data-updating={(loading && rows.length > 0) || undefined}
+    <DataTableScroll
+      busy={loading}
+      className="groups-table-scroll"
+      updating={loading && rows.length > 0}
     >
-      <table className="data-table">
-        <caption>{caption}</caption>
+      <DataTable caption={caption}>
         <colgroup>
           <col className="groups-column-selection" />
           <col className="groups-column-identity" />
@@ -139,11 +139,11 @@ export function GroupsTable({
           </tr>
         </thead>
         {empty ? (
-          <tbody><tr><td className="data-table-empty" colSpan={6}>{empty}</td></tr></tbody>
+          <tbody><tr><DataTableEmptyCell colSpan={6}>{empty}</DataTableEmptyCell></tr></tbody>
         ) : (
           <tbody>{rows.map(renderRow)}</tbody>
         )}
-      </table>
-    </div>
+      </DataTable>
+    </DataTableScroll>
   );
 }

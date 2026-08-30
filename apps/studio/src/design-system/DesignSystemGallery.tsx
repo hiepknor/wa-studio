@@ -1,8 +1,11 @@
 import { useState } from "react";
 
+import { AppIcon } from "../shared/ui/AppIcon";
 import { Badge } from "../shared/ui/Badge";
+import { BrandMark } from "../shared/ui/BrandMark";
 import { Button } from "../shared/ui/Button";
 import { Checkbox } from "../shared/ui/Checkbox";
+import { ConfirmationDialog } from "../shared/ui/ConfirmationDialog";
 import {
   ActionFooter,
   DataTableFrame,
@@ -13,6 +16,12 @@ import {
   SectionHeader,
   SurfacePanel,
 } from "../shared/ui/Composition";
+import {
+  DataTable,
+  DataTableScroll,
+} from "../shared/ui/DataTable";
+import { DataFilterToolbar } from "../shared/ui/DataFilterToolbar";
+import { DateTime } from "../shared/ui/DateTime";
 import { DecisionGroup } from "../shared/ui/DecisionGroup";
 import { DataTablePrimaryAction } from "../shared/ui/DataTablePrimaryAction";
 import {
@@ -20,20 +29,29 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "../shared/ui/DropdownMenu";
+import { Drawer, DrawerHost, DrawerProvider } from "../shared/ui/Drawer";
 import { FilterOption } from "../shared/ui/FilterOption";
 import { FilterChip } from "../shared/ui/FilterChip";
 import { InlineAlert } from "../shared/ui/InlineAlert";
 import { ModalDialog } from "../shared/ui/ModalDialog";
+import { PageHeader } from "../shared/ui/PageHeader";
+import { SearchField } from "../shared/ui/SearchField";
 import { SearchSelect } from "../shared/ui/SearchSelect";
 import { SegmentedControl } from "../shared/ui/SegmentedControl";
 import { SelectMenu } from "../shared/ui/SelectMenu";
+import { StatusDot } from "../shared/ui/StatusDot";
 import { SwitchField } from "../shared/ui/SwitchField";
 import { TablePagination } from "../shared/ui/TablePagination";
 import { Tabs } from "../shared/ui/Tabs";
 import { TextAreaField } from "../shared/ui/TextAreaField";
 import { TextField } from "../shared/ui/TextField";
 import { useToast } from "../shared/ui/Toast";
+import { WorkspaceDialog } from "../shared/ui/WorkspaceDialog";
 import { WorkflowStepper } from "../shared/ui/WorkflowStepper";
+import {
+  designSystemStateNames,
+  type DesignSystemComponentName,
+} from "./design-system-state-matrix";
 
 type Tab = "overview" | "members";
 type Step = "content" | "targets" | "review";
@@ -73,6 +91,40 @@ function Specimen({ children, description, title }: {
   </section>;
 }
 
+function StateBoundary({ children, component }: {
+  children: React.ReactNode;
+  component: DesignSystemComponentName;
+}) {
+  return (
+    <div
+      className="ds-state-boundary"
+      data-ds-component={component}
+      data-ds-states={designSystemStateNames(component)}
+    >
+      {children}
+    </div>
+  );
+}
+
+function GalleryDrawerDemo() {
+  const [open, setOpen] = useState(false);
+  return (
+    <DrawerProvider className="ds-gallery-drawer-frame">
+      <Button onClick={() => setOpen(true)}>Open drawer</Button>
+      <DrawerHost />
+      <Drawer
+        description="Contextual details retain the current workspace."
+        footer={<Button onClick={() => setOpen(false)}>Done</Button>}
+        onClose={() => setOpen(false)}
+        open={open}
+        title="Runtime evidence"
+      >
+        <p>Drawer content uses one body scroll owner and a stable footer.</p>
+      </Drawer>
+    </DrawerProvider>
+  );
+}
+
 function GalleryTabPanel({ active, children, idPrefix, itemId }: {
   active: boolean;
   children: React.ReactNode;
@@ -96,7 +148,11 @@ export function DesignSystemGallery() {
   const [activeStep, setActiveStep] = useState<Step>("review");
   const [switchOn, setSwitchOn] = useState(true);
   const [filterAllowed, setFilterAllowed] = useState(true);
+  const [directoryFiltersOpen, setDirectoryFiltersOpen] = useState(false);
+  const [directoryQuery, setDirectoryQuery] = useState("");
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
 
   return <div className="ds-gallery">
     <aside className="ds-gallery-nav">
@@ -121,7 +177,9 @@ export function DesignSystemGallery() {
       </header>
 
       <section className="ds-gallery-section" id="foundation">
-        <SectionHeader description="Product-owned tokens define the visual direction before components." eyebrow="01" title="Foundation" titleId="foundation-title" />
+        <StateBoundary component="SectionHeader">
+          <SectionHeader description="Product-owned tokens define the visual direction before components." eyebrow="01" title="Foundation" titleId="foundation-title" />
+        </StateBoundary>
         <div className="ds-foundation-grid">
           <Specimen description="Canvas, chrome, raised, control, hover, and selected roles." title="Surface stack">
             <div className="ds-swatches">
@@ -144,6 +202,14 @@ export function DesignSystemGallery() {
               <small>UPPERCASE MICRO LABEL</small>
             </div>
           </Specimen>
+          <Specimen description="Product identity, icon grammar, status reinforcement, and timestamps use shipped primitives." title="Product marks and metadata">
+            <div className="ds-row ds-row-wrap">
+              <StateBoundary component="BrandMark"><BrandMark size="sm" /><BrandMark /><BrandMark size="lg" /></StateBoundary>
+              <StateBoundary component="AppIcon"><AppIcon name="groups" size="xs" /><AppIcon name="activity" /><AppIcon name="settings" size="lg" /></StateBoundary>
+              <StateBoundary component="StatusDot"><StatusDot tone="neutral" /><StatusDot tone="info" /><StatusDot tone="success" /><StatusDot tone="warning" /><StatusDot tone="danger" /></StateBoundary>
+              <StateBoundary component="DateTime"><DateTime value="2026-08-30T12:00:00.000Z" /><DateTime relativeStyle="compact" value="2026-08-30T12:00:00.000Z" variant="relative" /></StateBoundary>
+            </div>
+          </Specimen>
         </div>
       </section>
 
@@ -151,17 +217,19 @@ export function DesignSystemGallery() {
         <SectionHeader description="One anatomy across sizes, hierarchy, loading, and destructive actions." eyebrow="02" title="Actions" titleId="actions-title" />
         <Specimen description="Primary is scarce; secondary and ghost carry routine operations." title="Button matrix">
           <div className="ds-row ds-row-wrap">
-            <Button size="sm">Compact</Button>
-            <Button>Secondary</Button>
-            <Button variant="primary">Primary action</Button>
-            <Button icon="refresh">Reload</Button>
-            <Button icon="settings" variant="ghost">Settings</Button>
-            <Button variant="danger">Delete</Button>
-            <Button disabled>Disabled</Button>
-            <Button loading>Working</Button>
-            <Button aria-label="Refresh" icon="refresh" />
-            <FilterChip label="Allowed" onRemove={() => undefined} />
-            <DataTablePrimaryAction>Primary table row</DataTablePrimaryAction>
+            <StateBoundary component="Button">
+              <Button size="sm">Compact</Button>
+              <Button>Secondary</Button>
+              <Button variant="primary">Primary action</Button>
+              <Button icon="refresh">Reload</Button>
+              <Button icon="settings" variant="ghost">Settings</Button>
+              <Button variant="danger">Delete</Button>
+              <Button disabled>Disabled</Button>
+              <Button loading>Working</Button>
+              <Button aria-label="Refresh" icon="refresh" />
+            </StateBoundary>
+            <StateBoundary component="FilterChip"><FilterChip label="Allowed" onRemove={() => undefined} /></StateBoundary>
+            <StateBoundary component="DataTablePrimaryAction"><DataTablePrimaryAction>Primary table row</DataTablePrimaryAction></StateBoundary>
           </div>
         </Specimen>
       </section>
@@ -169,15 +237,18 @@ export function DesignSystemGallery() {
       <section className="ds-gallery-section" id="fields">
         <SectionHeader description="Text and selector controls share height, surface, border, hover, and focus states." eyebrow="03" title="Fields and selectors" titleId="fields-title" />
         <div className="ds-grid-3">
-          <TextField description="Normal body-family input." label="Campaign name" placeholder="e.g. August product update" />
-          <TextField description="Machine-oriented values use mono." label="Runtime URL" monospace value="https://runtime.local" readOnly />
-          <TextField error="A name is required." label="Invalid field" />
-          <SelectMenu label="Schedule" onChange={setSchedule} options={selectOptions} value={schedule} />
-          <SearchSelect label="Active session" onChange={setSession} options={sessionOptions} value={session} />
-          <TextField disabled label="Disabled field" value="Unavailable" />
+          <StateBoundary component="TextField">
+            <TextField description="Normal body-family input." label="Campaign name" placeholder="e.g. August product update" />
+            <TextField description="Machine-oriented values use mono." label="Runtime URL" monospace value="https://runtime.local" readOnly />
+            <TextField error="A name is required." label="Invalid field" />
+            <TextField disabled label="Disabled field" value="Unavailable" />
+          </StateBoundary>
+          <StateBoundary component="SearchField"><SearchField label="Find campaigns" onChange={() => undefined} placeholder="Search campaigns" value="" /></StateBoundary>
+          <StateBoundary component="SelectMenu"><SelectMenu label="Schedule" onChange={setSchedule} options={selectOptions} value={schedule} /></StateBoundary>
+          <StateBoundary component="SearchSelect"><SearchSelect label="Active session" onChange={setSession} options={sessionOptions} value={session} /></StateBoundary>
         </div>
         <div className="ds-spacer" />
-        <TextAreaField description="Long Vietnamese copy must wrap without breaking the field anatomy." label="Message text" defaultValue="Nội dung dài vẫn phải rõ ràng, dễ đọc và giữ đúng nhịp điệu của giao diện desktop." />
+        <StateBoundary component="TextAreaField"><TextAreaField description="Long Vietnamese copy must wrap without breaking the field anatomy." label="Message text" defaultValue="Nội dung dài vẫn phải rõ ràng, dễ đọc và giữ đúng nhịp điệu của giao diện desktop." /></StateBoundary>
       </section>
 
       <section className="ds-gallery-section" id="selection">
@@ -185,27 +256,32 @@ export function DesignSystemGallery() {
         <div className="ds-grid-2">
           <Specimen description="Native table/membership checkbox and compact filter option." title="Checkboxes and filters">
             <div className="ds-row ds-row-wrap">
-              <label className="ds-checkbox-label"><Checkbox defaultChecked /> Selected row</label>
-              <label className="ds-checkbox-label"><Checkbox /> Available row</label>
-              <label className="ds-checkbox-label"><Checkbox disabled /> Disabled row</label>
-              <FilterOption checked={filterAllowed} onChange={(event) => setFilterAllowed(event.currentTarget.checked)}>Allowed</FilterOption>
-              <FilterOption type="radio">Current</FilterOption>
+              <StateBoundary component="Checkbox">
+                <label className="ds-checkbox-label"><Checkbox defaultChecked /> Selected row</label>
+                <label className="ds-checkbox-label"><Checkbox /> Available row</label>
+                <label className="ds-checkbox-label"><Checkbox aria-checked="mixed" ref={(node) => { if (node) node.indeterminate = true; }} /> Mixed row</label>
+                <label className="ds-checkbox-label"><Checkbox disabled /> Disabled row</label>
+              </StateBoundary>
+              <StateBoundary component="FilterOption">
+                <FilterOption checked={filterAllowed} onChange={(event) => setFilterAllowed(event.currentTarget.checked)}>Allowed</FilterOption>
+                <FilterOption type="radio">Current</FilterOption>
+              </StateBoundary>
             </div>
           </Specimen>
           <Specimen description="Switches change durable settings; copy explains consequence." title="Switch">
-            <SwitchField checked={switchOn} description="Runtime enforces this policy for new live runs." label="Live-send protection" onChange={(event) => setSwitchOn(event.currentTarget.checked)} />
+            <StateBoundary component="SwitchField"><SwitchField checked={switchOn} description="Runtime enforces this policy for new live runs." label="Live-send protection" onChange={(event) => setSwitchOn(event.currentTarget.checked)} /><SwitchField checked={false} disabled description="Unavailable while Runtime is offline." label="Offline policy" readOnly /></StateBoundary>
           </Specimen>
           <Specimen description="Two compact peer options without secondary copy inside each option." title="Segmented control">
-            <SegmentedControl label="Execution mode" onChange={setMode} options={[
+            <StateBoundary component="SegmentedControl"><SegmentedControl label="Execution mode" onChange={setMode} options={[
               { description: "Evaluate without creating delivery work.", label: "Dry run", value: "dry" },
               { description: "Apply live policy.", label: "Live policy", value: "live" },
-            ]} value={mode} />
+            ]} value={mode} /></StateBoundary>
           </Specimen>
           <Specimen description="Use when each option needs consequence copy or metadata." title="Decision group">
-            <DecisionGroup label="Launch policy" onChange={setMode} options={[
+            <StateBoundary component="DecisionGroup"><DecisionGroup label="Launch policy" onChange={setMode} options={[
               { description: "Evaluate the campaign as a simulation.", label: "Dry run", meta: <Badge tone="neutral">Safe</Badge>, value: "dry" },
               { description: "Apply live safety policy before creating work.", label: "Live policy", meta: <Badge tone="warning">Protected</Badge>, value: "live" },
-            ]} value={mode} />
+            ]} value={mode} /></StateBoundary>
           </Specimen>
         </div>
       </section>
@@ -214,83 +290,138 @@ export function DesignSystemGallery() {
         <SectionHeader description="Semantic color communicates state; normal success remains compact." eyebrow="05" title="Status and feedback" titleId="feedback-title" />
         <Specimen description="Status variants use a dot for normal state and alert geometry for attention." title="Badge matrix">
           <div className="ds-row ds-row-wrap">
-            <Badge>Neutral</Badge>
-            <Badge tone="info" variant="status">Checking</Badge>
-            <Badge tone="success" variant="status">Allowed</Badge>
-            <Badge tone="warning" variant="status">Stale</Badge>
-            <Badge tone="danger" variant="status">Denied</Badge>
+            <StateBoundary component="Badge"><Badge>Neutral</Badge><Badge tone="info" variant="status">Checking</Badge><Badge tone="success" variant="status">Allowed</Badge><Badge tone="warning" variant="status">Stale</Badge><Badge tone="danger" variant="status">Denied</Badge></StateBoundary>
           </div>
         </Specimen>
-        <div className="ds-feedback-stack">
+        <StateBoundary component="InlineAlert"><div className="ds-feedback-stack">
           <InlineAlert indicator title="Capability updated" tone="success">The latest result is now visible.</InlineAlert>
           <InlineAlert indicator title="Refresh continues in background" tone="warning">Progress will resume when this view is reopened.</InlineAlert>
           <InlineAlert action={<Button size="sm">Retry</Button>} title="Could not load activity">Runtime is unavailable.</InlineAlert>
-        </div>
+        </div></StateBoundary>
         <div className="ds-spacer" />
-        <GalleryToastDemo />
+        <StateBoundary component="Toast"><GalleryToastDemo /></StateBoundary>
       </section>
 
       <section className="ds-gallery-section" id="navigation">
         <SectionHeader description="Tabs switch peers; steppers describe sequential workflow." eyebrow="06" title="Navigation and overlays" titleId="navigation-title" />
         <div className="ds-stack">
-          <Tabs activeTab={activeTab} ariaLabel="Inspector views" idPrefix="gallery-tabs" onChange={setActiveTab} tabs={[
+          <StateBoundary component="Tabs"><Tabs activeTab={activeTab} ariaLabel="Inspector views" idPrefix="gallery-tabs" onChange={setActiveTab} tabs={[
             { id: "overview", label: "Overview" },
             { id: "members", label: "Members", warning: true },
-          ]} />
+          ]} /></StateBoundary>
           <GalleryTabPanel active={activeTab === "overview"} idPrefix="gallery-tabs" itemId="overview">Overview specimen is active.</GalleryTabPanel>
           <GalleryTabPanel active={activeTab === "members"} idPrefix="gallery-tabs" itemId="members">Members specimen is active.</GalleryTabPanel>
-          <WorkflowStepper activeStep={activeStep} ariaLabel="Campaign workflow" idPrefix="gallery-workflow" onChange={setActiveStep} steps={[
+          <StateBoundary component="WorkflowStepper"><WorkflowStepper activeStep={activeStep} ariaLabel="Campaign workflow" idPrefix="gallery-workflow" onChange={setActiveStep} steps={[
             { id: "content", label: "Content", step: 1 },
             { id: "targets", label: "Targets", step: 2 },
             { id: "review", label: "Review & launch", meta: "Pass", step: 3 },
-          ]} />
+          ]} /></StateBoundary>
           <GalleryTabPanel active={activeStep === "content"} idPrefix="gallery-workflow" itemId="content">Content step is active.</GalleryTabPanel>
           <GalleryTabPanel active={activeStep === "targets"} idPrefix="gallery-workflow" itemId="targets">Targets step is active.</GalleryTabPanel>
           <GalleryTabPanel active={activeStep === "review"} idPrefix="gallery-workflow" itemId="review">Review and launch step is active.</GalleryTabPanel>
           <div className="ds-row ds-row-wrap">
-            <DropdownMenu ariaLabel="Campaign actions" trigger={(props) => <Button {...props} icon="more">Actions</Button>}>
+            <StateBoundary component="DropdownMenu"><DropdownMenu ariaLabel="Campaign actions" trigger={(props) => <Button {...props} icon="more">Actions</Button>}>
               <DropdownMenuItem icon="edit" onSelect={() => undefined}>Edit campaign</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem danger description="Run history will be retained." icon="trash" onSelect={() => undefined}>Delete campaign</DropdownMenuItem>
-            </DropdownMenu>
-            <Button onClick={() => setModalOpen(true)}>Open modal</Button>
-            <TablePagination limit={20} offset={0} onOffsetChange={() => undefined} total={71} />
+            </DropdownMenu></StateBoundary>
+            <StateBoundary component="ModalDialog"><Button onClick={() => setModalOpen(true)}>Open modal</Button></StateBoundary>
+            <StateBoundary component="ConfirmationDialog"><Button onClick={() => setConfirmationOpen(true)}>Open confirmation</Button></StateBoundary>
+            <StateBoundary component="WorkspaceDialog"><Button onClick={() => setWorkspaceOpen(true)}>Open workspace</Button></StateBoundary>
+            <StateBoundary component="Drawer"><GalleryDrawerDemo /></StateBoundary>
+            <StateBoundary component="TablePagination"><TablePagination limit={20} offset={0} onOffsetChange={() => undefined} total={71} /></StateBoundary>
           </div>
         </div>
         <ModalDialog description="Modal focus is isolated and returns to its trigger." eyebrow="Overlay" footer={<div className="ds-row"><Button onClick={() => setModalOpen(false)}>Cancel</Button><Button variant="primary">Continue</Button></div>} onClose={() => setModalOpen(false)} open={modalOpen} title="Confirm operation">
           <InlineAlert indicator title="Review required" tone="warning">This specimen demonstrates modal hierarchy and focus ownership.</InlineAlert>
         </ModalDialog>
+        <ConfirmationDialog
+          body="This action uses explicit confirmation and returns focus to its trigger."
+          confirmLabel="Delete draft"
+          confirmVariant="danger"
+          onCancel={() => setConfirmationOpen(false)}
+          onConfirm={() => setConfirmationOpen(false)}
+          open={confirmationOpen}
+          title="Delete campaign draft?"
+        />
+        <WorkspaceDialog
+          description="Large editing tasks retain navigation and one fixed action footer."
+          footer={<div className="ds-row"><Button onClick={() => setWorkspaceOpen(false)}>Cancel</Button><Button variant="primary">Save draft</Button></div>}
+          navigation={<WorkflowStepper activeStep="content" ariaLabel="Workspace steps" idPrefix="gallery-workspace" onChange={() => undefined} steps={[{ id: "content", label: "Content", step: 1 }, { id: "targets", label: "Targets", step: 2 }]} />}
+          onClose={() => setWorkspaceOpen(false)}
+          open={workspaceOpen}
+          title="Campaign workspace"
+        >
+          <div
+            aria-labelledby="gallery-workspace-content-tab"
+            id="gallery-workspace-content-panel"
+            role="tabpanel"
+          >
+            <PageHeader description="Edit an immutable message snapshot." title="Content & schedule" />
+            <TextField label="Campaign name" value="August operations" readOnly />
+          </div>
+          <div
+            aria-labelledby="gallery-workspace-targets-tab"
+            hidden
+            id="gallery-workspace-targets-panel"
+            role="tabpanel"
+          >
+            Target selection specimen
+          </div>
+        </WorkspaceDialog>
       </section>
 
       <section className="ds-gallery-section" id="composition">
         <SectionHeader description="Reference compositions validate hierarchy before product rollout." eyebrow="07" title="Composition patterns" titleId="composition-title" />
         <div className="ds-stack ds-reference-stack">
-          <SurfacePanel description="Capability state captured by this decision." flush title="Runtime target assessment" titleId="readiness-title">
-            <MetricGrid ariaLabel="Target readiness" items={[
+          <StateBoundary component="PageHeader"><PageHeader actions={<Button>New campaign</Button>} description="Product pages keep one title, one concise purpose, and scarce primary actions." title="Campaign workspace" /></StateBoundary>
+          <StateBoundary component="SurfacePanel"><SurfacePanel description="Capability state captured by this decision." flush headingLevel={2} title="Runtime target assessment" titleId="readiness-title">
+            <StateBoundary component="MetricGrid"><MetricGrid ariaLabel="Target readiness" items={[
               { label: "Total", value: 71 },
               { label: "Allowed", tone: "success", value: 71 },
               { label: "Denied", tone: "danger", value: 0 },
               { label: "Unknown", tone: "warning", value: 0 },
-            ]} />
-          </SurfacePanel>
+            ]} /></StateBoundary>
+          </SurfacePanel></StateBoundary>
 
           <SurfacePanel description="Checks contributing to Runtime's decision." flush title="Policy checks" titleId="policy-title">
-            <EvidenceList ariaLabel="Policy checks" items={[
+            <StateBoundary component="EvidenceList"><EvidenceList ariaLabel="Policy checks" items={[
               { description: "Image content is valid", id: "content", meta: "CONTENT_VALID", status: <Badge tone="success" variant="status">Pass</Badge>, title: "Campaign content" },
               { description: "Dry-run does not consume the live safety budget", id: "safety", meta: "SAFETY_READY", status: <Badge tone="success" variant="status">Pass</Badge>, title: "OpenWA safety" },
               { description: "Session is ready", id: "session", meta: "SESSION_SENDABLE", status: <Badge tone="success" variant="status">Pass</Badge>, title: "Runtime session" },
-            ]} />
+            ]} /></StateBoundary>
           </SurfacePanel>
 
-          <DataTableFrame footer={<TablePagination limit={20} offset={0} onOffsetChange={() => undefined} total={2} />} label="Group directory" toolbar={<div className="ds-table-toolbar"><TextField label="Search groups" labelHidden placeholder="Search name, ID, or description" /><Button icon="settings">Filters</Button><span>2 groups</span></div>}>
-            <table className="ds-reference-table">
-              <thead><tr><th><span className="ds-visually-hidden">Select</span></th><th>Name</th><th>Participants</th><th>Capability</th></tr></thead>
-              <tbody>
-                <tr><td><Checkbox aria-label="Select North America operations" /></td><td><strong>North America operations</strong><code>120363149845@g.us</code></td><td>404</td><td><Badge tone="success" variant="status">Allowed</Badge></td></tr>
-                <tr><td><Checkbox aria-label="Select Product research" /></td><td><strong>Product research with a deliberately long synchronized title</strong><code>120363165482@g.us</code></td><td>1,001</td><td><Badge tone="warning" variant="status">Unknown · stale</Badge></td></tr>
-              </tbody>
-            </table>
-          </DataTableFrame>
+          <StateBoundary component="DataTableFrame"><DataTableFrame footer={<TablePagination limit={20} offset={0} onOffsetChange={() => undefined} total={2} />} label="Group directory" scroll={false}>
+            <StateBoundary component="DataFilterToolbar"><DataFilterToolbar
+              filterCount={0}
+              filtersOpen={directoryFiltersOpen}
+              idPrefix="gallery-directory"
+              onCloseFilters={() => setDirectoryFiltersOpen(false)}
+              onSearchChange={setDirectoryQuery}
+              onToggleFilters={() => setDirectoryFiltersOpen((open) => !open)}
+              resultSummary="2 groups"
+              searchLabel="Search groups"
+              searchPlaceholder="Search name, ID, or description"
+              searchValue={directoryQuery}
+            >
+              {(closeFilters) => (
+                <section aria-label="Group filters" className="data-filter-panel" id="gallery-directory-filter-panel">
+                  <header className="data-filter-panel-header"><div><strong>Filter groups</strong><span>Optional criteria</span></div><Button aria-label="Close group filters" icon="close" onClick={closeFilters} variant="ghost" /></header>
+                  <div className="data-filter-panel-body"><fieldset><legend>Capability</legend><div className="data-filter-options"><FilterOption checked={filterAllowed} onChange={() => setFilterAllowed((allowed) => !allowed)}>Allowed</FilterOption></div></fieldset></div>
+                </section>
+              )}
+            </DataFilterToolbar></StateBoundary>
+            <DataTableScroll>
+              <StateBoundary component="DataTable"><DataTable caption="Synchronized groups">
+                <thead><tr><th className="data-selection-cell" scope="col"><span className="ds-visually-hidden">Select</span></th><th scope="col">Name</th><th className="data-column-number" scope="col">Participants</th><th scope="col">Capability</th></tr></thead>
+                <tbody>
+                  <tr data-selected="true"><td className="data-selection-cell"><Checkbox aria-label="Select North America operations" defaultChecked /></td><td><strong className="data-primary-text">North America operations</strong><span className="data-identifier">120363149845@g.us</span></td><td className="data-cell-number">404</td><td className="data-cell-status"><Badge tone="success" variant="status">Allowed</Badge></td></tr>
+                  <tr><td className="data-selection-cell"><Checkbox aria-label="Select Product research" /></td><td><strong className="data-primary-text">Product research with a deliberately long synchronized title</strong><span className="data-identifier">120363165482@g.us</span></td><td className="data-cell-number">1,001</td><td className="data-cell-status"><Badge tone="warning" variant="status">Unknown · stale</Badge></td></tr>
+                </tbody>
+              </DataTable></StateBoundary>
+            </DataTableScroll>
+          </DataTableFrame></StateBoundary>
 
           <div className="ds-reference-grid">
             <SurfacePanel description="Task-oriented settings use one row grammar." title="Settings form" titleId="settings-pattern-title">
@@ -304,10 +435,10 @@ export function DesignSystemGallery() {
               <GalleryTabPanel active idPrefix="gallery-inspector" itemId="overview">Inspector overview is active.</GalleryTabPanel>
               <GalleryTabPanel active={false} idPrefix="gallery-inspector" itemId="members">Inspector members view.</GalleryTabPanel>
               <MetricGrid ariaLabel="Group summary" items={[{ label: "Participants", value: "1,001" }, { label: "Access", value: "Allowed" }]} />
-              <DescriptionList ariaLabel="Group identifiers" items={[
-                { id: "group-id", label: "Group ID", value: "120363165482@g.us", valueClassName: "data-identifier" },
+              <StateBoundary component="DescriptionList"><DescriptionList ariaLabel="Group identifiers" items={[
+                { id: "group-id", label: "Group ID", value: "120363165482@g.us", valueClassName: "ui-technical-text" },
                 { id: "synced", label: "Record synced", value: "30 Aug 2026 · 19:02" },
-              ]} />
+              ]} /></StateBoundary>
             </SurfacePanel>
           </div>
 
@@ -322,10 +453,10 @@ export function DesignSystemGallery() {
             <GalleryTabPanel active idPrefix="reference-workflow" itemId="review">Reference review and launch step is active.</GalleryTabPanel>
             <SectionHeader description="Inspect saved evidence before creating an immutable run." divider={false} eyebrow="Safety gate" headingLevel={3} title="Review & launch" titleId="reference-review-title" />
             <InlineAlert indicator title="No target issues" tone="success">Runtime found no groups that require operator attention.</InlineAlert>
-            <ActionFooter actions={<><Button>Back</Button><Button variant="primary">Create dry run</Button></>} description="PASS · 71/71 eligible" title="Step 3 of 3 · Review & launch" />
+            <StateBoundary component="ActionFooter"><ActionFooter actions={<><Button>Back</Button><Button variant="primary">Create dry run</Button></>} description="PASS · 71/71 eligible" title="Step 3 of 3 · Review & launch" /></StateBoundary>
           </div>
 
-          <EmptyState icon="activity" title="No activity yet">Operational events will appear after Runtime accepts work.</EmptyState>
+          <StateBoundary component="EmptyState"><EmptyState icon="activity" title="No activity yet">Operational events will appear after Runtime accepts work.</EmptyState></StateBoundary>
         </div>
       </section>
     </main>

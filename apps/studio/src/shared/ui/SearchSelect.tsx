@@ -3,12 +3,12 @@ import {
   type ReactNode,
   useEffect,
   useId,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 
+import { useAnchoredPopup } from "./anchored-popup";
 import { AppIcon } from "./AppIcon";
 import {
   DEFAULT_FIELD_SIZE,
@@ -42,27 +42,9 @@ interface SearchSelectProps<T extends string> {
   value: T;
 }
 
-const POPOVER_GAP = 6;
-const POPOVER_MAX_HEIGHT = 260;
-
 function enabledOptions(container: HTMLDivElement | null): HTMLButtonElement[] {
   if (!container) return [];
   return Array.from(container.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)'));
-}
-
-function clippingBoundary(element: HTMLElement) {
-  const boundary = { bottom: window.innerHeight, top: 0 };
-  let ancestor = element.parentElement;
-  while (ancestor) {
-    const style = window.getComputedStyle(ancestor);
-    if (/auto|clip|hidden|scroll/.test(`${style.overflow} ${style.overflowY}`)) {
-      const rect = ancestor.getBoundingClientRect();
-      boundary.top = Math.max(boundary.top, rect.top);
-      boundary.bottom = Math.min(boundary.bottom, rect.bottom);
-    }
-    ancestor = ancestor.parentElement;
-  }
-  return boundary;
 }
 
 export function SearchSelect<T extends string>({
@@ -92,10 +74,6 @@ export function SearchSelect<T extends string>({
   const listboxRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [popoverLayout, setPopoverLayout] = useState({
-    maxHeight: POPOVER_MAX_HEIGHT,
-    placement: "down" as "down" | "up",
-  });
   const selectedOption = options.find((option) => option.value === value);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleOptions = useMemo(() => options.filter((option) => {
@@ -119,58 +97,24 @@ export function SearchSelect<T extends string>({
     if (restoreFocus) triggerRef.current?.focus();
   }
 
+  const popoverLayout = useAnchoredPopup({
+    estimatedChromeHeight: 50,
+    estimatedOptionCount: visibleOptions.length,
+    onDismiss: close,
+    open,
+    popupRef: popoverRef,
+    rootRef,
+    triggerRef,
+  });
+
   useEffect(() => {
     if (!open) return;
     searchRef.current?.focus();
-    function closeFromOutside(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) close();
-    }
-    document.addEventListener("pointerdown", closeFromOutside);
-    return () => {
-      document.removeEventListener("pointerdown", closeFromOutside);
-    };
   }, [open]);
 
   useEffect(() => {
     if (disabled) close();
   }, [disabled]);
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    function positionPopover() {
-      const root = rootRef.current;
-      const trigger = triggerRef.current;
-      const popover = popoverRef.current;
-      if (!root || !trigger || !popover) return;
-      const triggerRect = trigger.getBoundingClientRect();
-      const boundary = clippingBoundary(root);
-      const naturalHeight = Math.min(
-        popover.scrollHeight || visibleOptions.length * 36 + 50,
-        POPOVER_MAX_HEIGHT,
-      );
-      const spaceAbove = Math.max(0, triggerRect.top - boundary.top - POPOVER_GAP);
-      const spaceBelow = Math.max(0, boundary.bottom - triggerRect.bottom - POPOVER_GAP);
-      const placement = naturalHeight <= spaceBelow
-        ? "down"
-        : naturalHeight <= spaceAbove || spaceAbove > spaceBelow
-          ? "up"
-          : "down";
-      const maxHeight = Math.min(
-        POPOVER_MAX_HEIGHT,
-        placement === "up" ? spaceAbove : spaceBelow,
-      );
-      setPopoverLayout((current) => current.maxHeight === maxHeight && current.placement === placement
-        ? current
-        : { maxHeight, placement });
-    }
-    positionPopover();
-    window.addEventListener("resize", positionPopover);
-    window.addEventListener("scroll", positionPopover, true);
-    return () => {
-      window.removeEventListener("resize", positionPopover);
-      window.removeEventListener("scroll", positionPopover, true);
-    };
-  }, [open, visibleOptions.length]);
 
   function moveToOption(event: KeyboardEvent, index: number) {
     const items = enabledOptions(listboxRef.current);

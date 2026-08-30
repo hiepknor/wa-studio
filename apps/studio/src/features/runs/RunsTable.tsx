@@ -4,6 +4,7 @@ import type { RuntimeCampaignRunSummary } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { DateTime } from "@/shared/ui/DateTime";
+import { DataTable, DataTableEmptyCell, DataTableScroll } from "@/shared/ui/DataTable";
 import { DataTablePrimaryAction } from "@/shared/ui/DataTablePrimaryAction";
 import {
   resolvedTargets,
@@ -38,13 +39,12 @@ export function RunsTable({
       : null;
 
   return (
-    <div
-      aria-busy={loading || updating}
-      className="data-table-scroll runs-table-scroll"
-      data-updating={(updating && runs.length > 0) || undefined}
+    <DataTableScroll
+      busy={loading || updating}
+      className="runs-table-scroll"
+      updating={updating && runs.length > 0}
     >
-      <table className="data-table runs-table">
-        <caption>Campaign runs for the active session</caption>
+      <DataTable caption="Campaign runs for the active session" className="runs-table">
         <colgroup>
           <col className="runs-column-campaign" />
           <col className="runs-column-state" />
@@ -65,12 +65,12 @@ export function RunsTable({
         </thead>
         <tbody>
           {tableMessage ? (
-            <tr><td className="data-table-empty" colSpan={6}>
-              <div className="data-table-empty-state">
+            <tr><DataTableEmptyCell colSpan={6}>
+              <div className="ui-data-table-empty-state">
                 <span>{tableMessage}</span>
                 {!loading && emptyAction}
               </div>
-            </td></tr>
+            </DataTableEmptyCell></tr>
           ) : runs.map((run) => {
             const resolved = resolvedTargets(run);
             const attention = run.progress.failed + run.progress.blocked;
@@ -104,7 +104,7 @@ export function RunsTable({
             );
           })}
         </tbody>
-      </table>
-    </div>
+      </DataTable>
+    </DataTableScroll>
   );
 }

@@ -2,6 +2,7 @@ import type { RuntimeActivityEvent } from "@/shared/api/runtime-client";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { DateTime } from "@/shared/ui/DateTime";
+import { DataTable, DataTableEmptyCell, DataTableScroll } from "@/shared/ui/DataTable";
 import { DataTablePrimaryAction } from "@/shared/ui/DataTablePrimaryAction";
 import {
   activitySeverityLabel,
@@ -31,13 +32,12 @@ export function ActivityTable({
       : null;
 
   return (
-    <div
-      aria-busy={loading}
-      className="activity-table-scroll data-table-scroll"
-      data-updating={(loading && events.length > 0) || undefined}
+    <DataTableScroll
+      busy={loading}
+      className="activity-table-scroll"
+      updating={loading && events.length > 0}
     >
-      <table className="activity-table data-table">
-        <caption>Retained operational activity for the active session</caption>
+      <DataTable caption="Retained operational activity for the active session" className="activity-table">
         <colgroup>
           <col className="activity-column-event" />
           <col className="activity-column-subject" />
@@ -56,7 +56,7 @@ export function ActivityTable({
         </thead>
         <tbody>
           {tableMessage ? (
-            <tr><td className="data-table-empty" colSpan={5}>{tableMessage}</td></tr>
+            <tr><DataTableEmptyCell colSpan={5}>{tableMessage}</DataTableEmptyCell></tr>
           ) : events.map((event) => (
             <tr data-selected={event.id === activeEventId || undefined} key={event.id}>
               <td className="data-cell-primary">
@@ -77,7 +77,7 @@ export function ActivityTable({
             </tr>
           ))}
         </tbody>
-      </table>
-    </div>
+      </DataTable>
+    </DataTableScroll>
   );
 }

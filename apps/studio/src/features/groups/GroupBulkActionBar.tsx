@@ -5,6 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/shared/ui/DropdownMenu";
+import { DataTableSelectionBar } from "@/shared/ui/DataTable";
 
 interface GroupBulkActionBarProps {
   actionDisabled?: boolean;
@@ -33,23 +34,14 @@ export function GroupBulkActionBar({
 }: GroupBulkActionBarProps) {
   if (selectedCount === 0) return null;
   const mutationDisabled = actionDisabled ?? disabled;
+  const detail = mode === "remove"
+    ? `Selected from ${listName}`
+    : existingListsState === "empty"
+      ? "Create the first saved list"
+      : "Choose a saved-list destination";
   return (
-    <section
-      aria-label="Selected groups actions"
-      className="data-selection-bar group-bulk-action-bar"
-      data-active="true"
-    >
-      <div aria-live="polite" className="data-selection-summary group-bulk-action-summary">
-        <strong>{selectedCount.toLocaleString()} selected</strong>
-        <span>
-          {mode === "remove"
-            ? `Selected from ${listName}`
-            : existingListsState === "empty"
-              ? "Create the first saved list"
-              : "Choose a saved-list destination"}
-        </span>
-      </div>
-      <div className="data-selection-actions group-bulk-action-controls">
+    <DataTableSelectionBar
+      actions={<>
         <Button disabled={disabled} onClick={onClear} size="sm" variant="ghost">
           Clear
         </Button>
@@ -112,7 +104,12 @@ export function GroupBulkActionBar({
             Remove from {listName}
           </Button>
         )}
-      </div>
-    </section>
+      </>}
+      active
+      ariaLabel="Selected groups actions"
+      className="group-bulk-action-bar"
+      detail={detail}
+      selectedCount={selectedCount}
+    />
   );
 }

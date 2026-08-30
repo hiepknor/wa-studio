@@ -17,7 +17,7 @@ async function expectNoAccessibilityViolations(page: Page) {
   )).join("\n\n")).toEqual([]);
 }
 
-test("@a11y gallery and closed overlay states have no axe violations", async ({ page }) => {
+test("@a11y gallery and production overlay states have no axe violations", async ({ page }) => {
   await openGallery(page);
   await expectNoAccessibilityViolations(page);
 
@@ -26,6 +26,23 @@ test("@a11y gallery and closed overlay states have no axe violations", async ({ 
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Open modal" }).click();
+  await expectNoAccessibilityViolations(page);
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Open confirmation" }).click();
+  await expectNoAccessibilityViolations(page);
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Open workspace" }).click();
+  await expectNoAccessibilityViolations(page);
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Open drawer" }).click();
+  await expectNoAccessibilityViolations(page);
+  await page.getByRole("button", { name: "Close drawer" }).click();
+
+  await page.getByRole("button", { name: "Show toast" }).click();
+  await expect(page.getByText("Capability updated").last()).toBeVisible();
   await expectNoAccessibilityViolations(page);
 });
 
@@ -59,7 +76,13 @@ for (const viewport of [
 test("@visual keyboard focus treatment", async ({ page }) => {
   await openGallery(page, 1100, 720);
   const field = page.getByRole("textbox", { name: "Campaign name" });
-  await field.focus();
+  await page.locator("body").click({ position: { x: 4, y: 4 } });
+  for (let index = 0; index < 60; index += 1) {
+    await page.keyboard.press("Tab");
+    if (await field.evaluate((element) => document.activeElement === element)) break;
+  }
+  await expect(field).toBeFocused();
+  await expect(page.locator("html")).toHaveAttribute("data-focus-modality", "keyboard");
   await expect(page.locator("#fields")).toHaveScreenshot("keyboard-focus.png");
 });
 

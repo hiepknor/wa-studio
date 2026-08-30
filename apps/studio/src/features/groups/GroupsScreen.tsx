@@ -1468,15 +1468,15 @@ export function GroupsScreen() {
                   Retry
                 </Button>
               }
-              className="data-table-error"
               title={groupsScope.scope.mode === "list:view" ? "Could not load saved list" : "Could not load groups"}
+              variant="flush"
             >
               {groupsScope.scope.mode === "list:view" ? groupsScope.membershipError : listError}
             </InlineAlert>
           )}
 
           {groupsScope.selectionError && (
-            <InlineAlert className="group-selection-alert" title="Group selection">
+            <InlineAlert title="Group selection" variant="flush">
               {groupsScope.selectionError}
             </InlineAlert>
           )}
@@ -1738,6 +1738,7 @@ export function GroupsScreen() {
                       {capabilityRefreshState === "failed" && capabilityError && (
                         <InlineAlert
                           className="groups-capability-feedback"
+                          layout="stacked"
                           title="Capability refresh failed"
                         >
                           {capabilityError}
@@ -1747,6 +1748,7 @@ export function GroupsScreen() {
                         capabilityRefreshState !== "failed" && (
                           <InlineAlert
                             className="groups-capability-feedback"
+                            layout="stacked"
                             title={
                               capabilityRefreshState === "completed"
                                 ? "Capability updated"

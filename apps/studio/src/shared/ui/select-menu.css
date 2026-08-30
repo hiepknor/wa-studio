@@ -35,7 +35,7 @@
   z-index: 20;
   right: 0;
   left: 0;
-  max-height: 260px;
+  max-height: var(--popup-max-height);
   overflow: auto;
   padding: var(--space-1);
   border: var(--border-width) solid var(--border-strong);
@@ -44,11 +44,11 @@
   box-shadow: none;
   animation: select-menu-enter var(--motion-snap) var(--ease-enter);
 }
-.select-menu-listbox[data-placement="down"] { top: calc(100% + 6px); transform-origin: top; }
-.select-menu-listbox[data-placement="up"] { bottom: calc(100% + 6px); transform-origin: bottom; }
+.select-menu-listbox[data-placement="down"] { top: calc(100% + var(--popup-gap)); transform-origin: top; }
+.select-menu-listbox[data-placement="up"] { bottom: calc(100% + var(--popup-gap)); transform-origin: bottom; }
 .select-menu-option {
   width: 100%;
-  min-height: 38px;
+  min-height: var(--popup-option-height);
   display: flex;
   align-items: center;
   gap: var(--space-2);

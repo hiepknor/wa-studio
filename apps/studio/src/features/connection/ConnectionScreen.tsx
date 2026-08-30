@@ -119,10 +119,10 @@ export function ConnectionScreen({
             value={apiKey}
           />
         </div>
-        {state.status === "idle" && <InlineAlert className="connection-status" indicator title="Waiting for developer credentials" tone="neutral">Managed desktop setup is not available in this mode.</InlineAlert>}
-        {state.status === "checking" && <InlineAlert className="connection-status" indicator title="Attaching external Runtime" tone="warning">Verifying credentials and Runtime readiness…</InlineAlert>}
-        {state.status === "failed" && <InlineAlert className="connection-status" indicator title="Connection failed">{state.message}</InlineAlert>}
-        {state.status === "connected" && <InlineAlert className="connection-status" indicator title="External Runtime attached" tone="success">{state.result.readySessions} of {state.result.sessionCount} sessions ready.</InlineAlert>}
+        {state.status === "idle" && <InlineAlert className="connection-status" indicator layout="stacked" title="Waiting for developer credentials" tone="neutral" variant="quiet">Managed desktop setup is not available in this mode.</InlineAlert>}
+        {state.status === "checking" && <InlineAlert className="connection-status" indicator layout="stacked" title="Attaching external Runtime" tone="warning" variant="quiet">Verifying credentials and Runtime readiness…</InlineAlert>}
+        {state.status === "failed" && <InlineAlert className="connection-status" indicator layout="stacked" title="Connection failed" variant="quiet">{state.message}</InlineAlert>}
+        {state.status === "connected" && <InlineAlert className="connection-status" indicator layout="stacked" title="External Runtime attached" tone="success" variant="quiet">{state.result.readySessions} of {state.result.sessionCount} sessions ready.</InlineAlert>}
         <Button
           aria-label={isChecking ? "Attaching external Runtime" : "Attach external Runtime"}
           className="connection-submit-button"

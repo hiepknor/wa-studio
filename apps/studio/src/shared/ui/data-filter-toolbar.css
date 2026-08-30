@@ -1,5 +1,17 @@
-.data-filter-toolbar { position: relative; width: 100%; container: data-filter-toolbar / inline-size; flex-direction: column; align-items: stretch; gap: var(--space-2); }
-.data-table-toolbar.data-filter-toolbar { padding-inline: var(--table-cell-padding-inline); }
+.data-filter-toolbar {
+  position: relative;
+  width: 100%;
+  min-height: var(--table-toolbar-height);
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-compact) var(--table-cell-padding-inline);
+  border-bottom: var(--border-width) solid var(--border-subtle);
+  background: transparent;
+  container: data-filter-toolbar / inline-size;
+}
 .data-filter-toolbar-row { width: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); }
 .data-filter-controls { min-width: 0; display: flex; align-items: center; justify-self: start; gap: var(--space-tight); }
 .data-filter-result-summary { justify-self: end; color: var(--text-tertiary); font-size: var(--type-caption); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
@@ -36,4 +48,8 @@
   .data-filter-panel-grid-2 .data-filter-panel-body fieldset:nth-child(even) { border-left: 0; }
   .data-filter-panel-grid-2 .data-filter-panel-body fieldset + fieldset { border-top: var(--border-width) solid var(--border-subtle); }
   .data-filter-panel fieldset + fieldset { border-left: 0; border-top: var(--border-width) solid var(--border-subtle); }
+}
+
+@media (max-width: 600px) {
+  .data-filter-toolbar { align-items: stretch; }
 }

@@ -500,7 +500,7 @@ export function RunsScreen({
           state={listState}
           total={total}
         />
-        {listError && <InlineAlert action={<Button onClick={() => void loadRuns(listState)} size="sm">Retry</Button>} className="data-table-error" title="Could not load runs">{listError}</InlineAlert>}
+        {listError && <InlineAlert action={<Button onClick={() => void loadRuns(listState)} size="sm">Retry</Button>} title="Could not load runs" variant="flush">{listError}</InlineAlert>}
         <RunsTable
           emptyAction={selectedSessionId && total === 0 && !listError && !hasCriteria && onOpenCampaigns
             ? <Button onClick={onOpenCampaigns} size="sm">Open Campaigns</Button>
@@ -596,8 +596,8 @@ function RunOverview({ run }: { run: RuntimeCampaignRun }) {
       ariaLabel="Immutable launch snapshot"
       className="runs-detail-list"
       items={[
-        { id: "run-id", label: "Run ID", value: run.id, valueClassName: "data-identifier" },
-        { id: "campaign-id", label: "Campaign ID", value: run.campaignId, valueClassName: "data-identifier" },
+        { id: "run-id", label: "Run ID", value: run.id, valueClassName: "ui-technical-text" },
+        { id: "campaign-id", label: "Campaign ID", value: run.campaignId, valueClassName: "ui-technical-text" },
         { id: "campaign-revision", label: "Campaign revision", value: `r${run.campaignRevision}` },
         { id: "target-revision", label: "Target revision", value: `r${run.targetsRevision}` },
         { id: "audience-source", label: "Audience source", value: run.targetSource ? `${run.targetSource.groupListNameSnapshot} · membership r${run.targetSource.membershipRevision}` : "Custom selection" },
@@ -619,7 +619,7 @@ function RunMessageSnapshot({ run }: { run: RuntimeCampaignRun }) {
           { id: "type", label: "Type", value: "Image" },
           { id: "file", label: "File", value: content.filename },
           { id: "format", label: "Format", value: `${content.mimeType} · ${formatRunBytes(content.byteSize)}` },
-          { id: "integrity", label: "Integrity", value: `SHA-256 ${content.sha256.slice(0, 12)}…`, valueClassName: "data-identifier" },
+          { id: "integrity", label: "Integrity", value: `SHA-256 ${content.sha256.slice(0, 12)}…`, valueClassName: "ui-technical-text" },
         ]}
       />
       <p>{content.caption || "No caption"}</p>
@@ -705,7 +705,7 @@ function RunDeliveries({
       {!page && loading ? <div className="run-delivery-state">Loading deliveries…</div>
         : error && !page?.data.length ? <div className="run-delivery-state">Deliveries are unavailable.</div>
           : !page?.data.length ? <div className="run-delivery-state">{inputQuery || deliveryFilter !== "ALL" ? "No deliveries match these criteria." : "No deliveries have been materialized yet."}</div>
-            : page.data.map((delivery) => <div className="run-delivery-block" key={delivery.id} role="listitem"><span><strong title={delivery.groupName}>{delivery.groupName}</strong><small className="data-identifier" title={delivery.groupId}>{delivery.groupId}</small>{delivery.failureReason && <small className="runs-delivery-failure" title={delivery.failureReason}>{delivery.failureReason}</small>}</span><Badge tone={deliveryTone(delivery.status)} variant="status">{runStatusLabel(delivery.status)}</Badge></div>)}
+            : page.data.map((delivery) => <div className="run-delivery-block" key={delivery.id} role="listitem"><span><strong title={delivery.groupName}>{delivery.groupName}</strong><small className="ui-technical-text" title={delivery.groupId}>{delivery.groupId}</small>{delivery.failureReason && <small className="runs-delivery-failure" title={delivery.failureReason}>{delivery.failureReason}</small>}</span><Badge tone={deliveryTone(delivery.status)} variant="status">{runStatusLabel(delivery.status)}</Badge></div>)}
     </div>
     {total > 0 && <TablePagination label={`${total} ${total === 1 ? "delivery" : "deliveries"}`} limit={page?.meta.limit ?? 20} loading={loading} offset={page?.meta.offset ?? 0} onOffsetChange={onOffsetChange} total={total} />}
   </div>;

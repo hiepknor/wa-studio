@@ -52,7 +52,7 @@ export function DataFilterToolbar({
 
   return (
     <div
-      className="data-table-toolbar data-filter-toolbar"
+      className="ui-data-filter-toolbar data-filter-toolbar"
       onKeyDown={(event) => {
         if (!filtersOpen || event.key !== "Escape") return;
         event.preventDefault();

@@ -44,9 +44,11 @@ button, input, textarea { font: inherit; }
 .ds-row { display: flex; align-items: center; gap: var(--space-2); }
 .ds-row-wrap { flex-wrap: wrap; }
 .ds-stack { display: grid; gap: var(--space-4); }
+.ds-state-boundary { display: contents; }
 .ds-spacer { height: var(--space-4); }
 .ds-feedback-stack { display: grid; gap: var(--space-2); margin-top: var(--space-4); }
 .ds-reference-stack { gap: var(--space-5); }
+.ds-gallery-drawer-frame { width: auto; height: auto; overflow: visible; }
 
 .ds-swatches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
 .ds-swatch { min-height: 76px; display: flex; align-items: end; padding: var(--space-2); border: var(--border-width) solid var(--divider); border-radius: var(--radius-control); }
@@ -66,18 +68,6 @@ button, input, textarea { font: inherit; }
 .ds-type-scale small { color: var(--text-tertiary); font-size: var(--type-micro); letter-spacing: var(--tracking-label); }
 .ds-checkbox-label { min-height: var(--control-height); display: inline-flex; align-items: center; gap: var(--space-tight); color: var(--text-secondary); }
 
-.ds-table-toolbar { min-width: 0; display: grid; grid-template-columns: minmax(260px, 1fr) auto auto; align-items: center; gap: var(--space-2); }
-.ds-table-toolbar > span { justify-self: end; color: var(--text-tertiary); font-family: var(--font-mono); font-size: var(--type-micro); }
-.ds-reference-table { width: 100%; border-collapse: collapse; }
-.ds-reference-table th,
-.ds-reference-table td { height: var(--table-row-height); padding: var(--table-cell-padding-block) var(--table-cell-padding-inline); border-bottom: var(--border-width) solid var(--divider); text-align: left; }
-.ds-reference-table th { height: var(--table-header-height); background: var(--surface-chrome); color: var(--text-tertiary); font-size: var(--type-micro); font-weight: var(--weight-regular); letter-spacing: var(--tracking-label); text-transform: uppercase; }
-.ds-reference-table tbody tr:hover { background: var(--surface-hover); }
-.ds-reference-table td:first-child { width: var(--table-selection-width); }
-.ds-reference-table td strong,
-.ds-reference-table td code { max-width: 48ch; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ds-reference-table td strong { font-weight: var(--weight-medium); }
-.ds-reference-table td code { margin-top: var(--space-pixel); color: var(--text-tertiary); font-family: var(--font-mono); font-size: var(--type-micro); }
 .ds-settings-pattern { display: grid; gap: var(--space-3); }
 .ds-settings-pattern > div { min-height: 62px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); border-top: var(--border-width) solid var(--divider); }
 .ds-settings-pattern > div > span { color: var(--text-primary); }
@@ -102,6 +92,4 @@ button, input, textarea { font: inherit; }
   .ds-reference-grid { grid-template-columns: 1fr; }
   .ds-gallery-nav { grid-template-columns: 1fr; }
   .ds-gallery-nav nav { justify-content: flex-start; }
-  .ds-table-toolbar { grid-template-columns: 1fr; }
-  .ds-table-toolbar > span { justify-self: start; }
 }

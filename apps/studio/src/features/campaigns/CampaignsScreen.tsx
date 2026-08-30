@@ -36,6 +36,7 @@ import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DataTableFrame, MetricGrid } from "@/shared/ui/Composition";
+import { DataTable, DataTableEmptyCell, DataTableScroll } from "@/shared/ui/DataTable";
 import { DateTime } from "@/shared/ui/DateTime";
 import { DataTablePrimaryAction } from "@/shared/ui/DataTablePrimaryAction";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/shared/ui/DropdownMenu";
@@ -1999,16 +2000,15 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
           state={listState}
           total={total}
         />
-        {visibleListError && <InlineAlert action={<Button onClick={() => void loadCampaigns(listStateRef.current)} size="sm">Retry</Button>} className="data-table-error" title="Could not load campaigns">{visibleListError}</InlineAlert>}
-        <div className="data-table-scroll">
-          <table className="data-table">
-            <caption>Campaigns for the active session</caption>
+        {visibleListError && <InlineAlert action={<Button onClick={() => void loadCampaigns(listStateRef.current)} size="sm">Retry</Button>} title="Could not load campaigns" variant="flush">{visibleListError}</InlineAlert>}
+        <DataTableScroll busy={listPending} updating={listPending && Boolean(visiblePage?.data.length)}>
+          <DataTable caption="Campaigns for the active session">
             <thead><tr><th scope="col">Campaign</th><th scope="col">Status</th><th className="data-column-time" scope="col">Schedule</th><th className="data-column-number" scope="col">Targets</th><th aria-label="Actions" className="data-column-actions" scope="col" /></tr></thead>
             <tbody>
-              {!selectedSessionId ? <tr><td className="data-table-empty" colSpan={5}>Select a session to view campaigns.</td></tr>
-                : !visiblePage && listPending ? <tr><td className="data-table-empty" colSpan={5}>Loading campaigns…</td></tr>
-                : !visiblePage && visibleListError ? <tr><td className="data-table-empty" colSpan={5}>Campaigns are unavailable.</td></tr>
-                : !visiblePage?.data.length ? <tr><td className="data-table-empty" colSpan={5}>{hasListCriteria ? "No campaigns match this search or filters." : "No campaigns yet. Create a draft to get started."}</td></tr>
+              {!selectedSessionId ? <tr><DataTableEmptyCell colSpan={5}>Select a session to view campaigns.</DataTableEmptyCell></tr>
+                : !visiblePage && listPending ? <tr><DataTableEmptyCell colSpan={5}>Loading campaigns…</DataTableEmptyCell></tr>
+                : !visiblePage && visibleListError ? <tr><DataTableEmptyCell colSpan={5}>Campaigns are unavailable.</DataTableEmptyCell></tr>
+                : !visiblePage?.data.length ? <tr><DataTableEmptyCell colSpan={5}>{hasListCriteria ? "No campaigns match this search or filters." : "No campaigns yet. Create a draft to get started."}</DataTableEmptyCell></tr>
                 : visiblePage.data.map((item) => <tr key={item.id}>
                   <td className="data-cell-primary"><div className="stack stack-xs"><DataTablePrimaryAction onClick={() => openCampaign(item)} title={`Open ${item.name}`}>{item.name}</DataTablePrimaryAction><span className="data-identifier">{item.id}</span></div></td>
                   <td><Badge tone={statusTone(item.status)} variant="status">{statusLabel(item.status)}</Badge></td>
@@ -2017,8 +2017,8 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                   <td className="data-cell-action"><CampaignActionsMenu campaign={item} disabledReason={campaignDeleteDisabledReason(item)} onDelete={requestCampaignDelete} onOpen={openCampaign} /></td>
                 </tr>)}
             </tbody>
-          </table>
-        </div>
+          </DataTable>
+        </DataTableScroll>
         <TablePagination
           limit={pageLimit}
           loading={listPending}
@@ -2216,7 +2216,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                 </section>}
                 <GroupSelectionPanel
                   key={campaign.id}
-                  afterToolbar={<>{targetNotice && <InlineAlert title="Persisted target snapshot" tone="success">{targetNotice}</InlineAlert>}{groupDirectory.error && <InlineAlert action={<Button onClick={groupDirectory.retry} size="sm">Retry</Button>} title="Could not load groups">{groupDirectory.error}</InlineAlert>}</>}
+                  afterToolbar={<>{targetNotice && <InlineAlert title="Persisted target snapshot" tone="success" variant="flush">{targetNotice}</InlineAlert>}{groupDirectory.error && <InlineAlert action={<Button onClick={groupDirectory.retry} size="sm">Retry</Button>} title="Could not load groups" variant="flush">{groupDirectory.error}</InlineAlert>}</>}
                   description="Search and filter the Runtime directory. Saved and selected groups remain visible."
                   headingLevel="h4"
                   pageNote={!groupDirectory.loading && groupDirectory.groups.length === 0 && targetRows.length > 0 ? groupDirectory.hasCriteria ? "No additional synchronized groups match this search or filters. Selected and saved targets remain visible above." : "No additional synchronized groups are available. Selected and saved targets remain visible above." : undefined}

@@ -1,6 +1,7 @@
 import { createElement, type ReactNode } from "react";
 
 import { AppIcon, type AppIconName } from "./AppIcon";
+import { DataTableScroll } from "./DataTable";
 import "./composition.css";
 
 type HeadingLevel = 2 | 3 | 4;
@@ -201,7 +202,7 @@ export function DataTableFrame({
     >
       {toolbar && <div className="ui-data-table-toolbar">{toolbar}</div>}
       {afterToolbar}
-      {scroll ? <div className="ui-data-table-scroll">{children}</div> : children}
+      {scroll ? <DataTableScroll>{children}</DataTableScroll> : children}
       {footer && <div className="ui-data-table-footer">{footer}</div>}
     </section>
   );

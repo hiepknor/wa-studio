@@ -1,5 +1,4 @@
 .activity-table-scroll { min-width: 0; }
-.activity-table-scroll[data-updating="true"] tbody { opacity: .48; transition: opacity var(--motion-fast) var(--ease-standard); }
 .activity-table { min-width: 720px; table-layout: fixed; }
 .activity-column-event { width: auto; }
 .activity-column-subject { width: var(--activity-subject-width); }

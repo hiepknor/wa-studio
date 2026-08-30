@@ -1568,7 +1568,7 @@ describe("CampaignsScreen", () => {
     expect(within(picker).getByText("No list selected")).toBeInTheDocument();
     const listRow = await within(picker).findByRole("radio", { name: /Launch list/ });
     await user.click(listRow);
-    expect(listRow).toHaveAttribute("aria-checked", "true");
+    expect(listRow).toBeChecked();
     expect(within(picker).getByText("Ready to review before applying.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Review" }));
     const dialog = screen.getByRole("dialog", { name: "Review target replacement" });

@@ -2,6 +2,7 @@ import type { RuntimeSession } from "@/shared/api/runtime-client";
 import { sessionIdentityLabel } from "@/shared/presentation/session";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
+import { DataTable, DataTableEmptyCell, DataTableScroll } from "@/shared/ui/DataTable";
 import { DateTime } from "@/shared/ui/DateTime";
 import type { FeedbackTone } from "@/shared/ui/feedback-tone";
 
@@ -42,13 +43,12 @@ export function SessionsTable({
       : null;
 
   return (
-    <div
-      aria-busy={loading}
-      className="data-table-scroll sessions-table-scroll"
-      data-updating={(loading && sessions.length > 0) || undefined}
+    <DataTableScroll
+      busy={loading}
+      className="sessions-table-scroll"
+      updating={loading && sessions.length > 0}
     >
-      <table className="data-table sessions-table">
-        <caption>WA Runtime sessions</caption>
+      <DataTable caption="WA Runtime sessions" className="sessions-table">
         <colgroup>
           <col className="sessions-column-name" />
           <col className="sessions-column-runtime" />
@@ -62,12 +62,12 @@ export function SessionsTable({
             <th className="data-cell-status" scope="col">Runtime status</th>
             <th className="data-cell-status" scope="col">Engine</th>
             <th className="data-column-time" scope="col">Last data sync</th>
-            <th className="align-end" scope="col">Workspace</th>
+            <th className="data-align-end" scope="col">Workspace</th>
           </tr>
         </thead>
         <tbody>
           {tableMessage ? (
-            <tr><td className="data-table-empty" colSpan={5}>{tableMessage}</td></tr>
+            <tr><DataTableEmptyCell colSpan={5}>{tableMessage}</DataTableEmptyCell></tr>
           ) : sessions.map((session) => (
             <tr data-selected={session.id === selectedSessionId || undefined} key={session.id}>
               <td className="data-cell-primary">
@@ -112,7 +112,7 @@ export function SessionsTable({
             </tr>
           ))}
         </tbody>
-      </table>
-    </div>
+      </DataTable>
+    </DataTableScroll>
   );
 }

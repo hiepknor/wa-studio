@@ -32,6 +32,8 @@ const focusCss = readFileSync("src/styles/focus.css", "utf8");
 const appCss = readFileSync("src/app/app.css", "utf8");
 const compositionCss = readFileSync("src/shared/ui/composition.css", "utf8");
 const compositionSource = readFileSync("src/shared/ui/Composition.tsx", "utf8");
+const dataTableCss = readFileSync("src/shared/ui/data-table.css", "utf8");
+const dataTableSource = readFileSync("src/shared/ui/DataTable.tsx", "utf8");
 const appIconCss = readFileSync("src/shared/ui/app-icon.css", "utf8");
 const appIconSource = readFileSync("src/shared/ui/AppIcon.tsx", "utf8");
 const buttonCss = readFileSync("src/shared/ui/button.css", "utf8");
@@ -86,7 +88,9 @@ const workspaceShell = readFileSync("src/app/WorkspaceShell.tsx", "utf8");
 const searchFieldCss = readFileSync("src/shared/ui/search-field.css", "utf8");
 const searchSelectCss = readFileSync("src/shared/ui/search-select.css", "utf8");
 const searchSelectSource = readFileSync("src/shared/ui/SearchSelect.tsx", "utf8");
+const anchoredPopupSource = readFileSync("src/shared/ui/anchored-popup.ts", "utf8");
 const selectMenuCss = readFileSync("src/shared/ui/select-menu.css", "utf8");
+const selectMenuSource = readFileSync("src/shared/ui/SelectMenu.tsx", "utf8");
 const segmentedControlCss = readFileSync("src/shared/ui/segmented-control.css", "utf8");
 const segmentedControlSource = readFileSync("src/shared/ui/SegmentedControl.tsx", "utf8");
 const decisionGroupCss = readFileSync("src/shared/ui/decision-group.css", "utf8");
@@ -219,11 +223,13 @@ describe("WA Design System contract", () => {
     expect(appCss).toContain("h1, h2, h3, h4, h5, h6 { font-weight: var(--weight-regular); }");
     expect(appCss).toContain("strong, b { font-weight: var(--weight-medium); }");
     expect(appCss).toContain("font-size: var(--type-body);\n  text-align: left;\n  white-space: nowrap;");
-    expect(appCss).toContain("table { width: 100%; border-collapse: collapse; font-size: var(--type-body); }");
-    expect(appCss).toContain(".data-table { font-size: var(--type-body); line-height: var(--leading-ui); }");
-    expect(appCss).toContain(".data-column-time, .data-cell-time");
-    expect(appCss).toContain(".data-cell-value,\n.data-cell-number,\n.data-cell-time {");
-    expect(appCss).toContain("font-weight: var(--weight-regular); letter-spacing: var(--tracking-label); text-transform: uppercase");
+    expect(dataTableCss).toContain(".ui-data-table {");
+    expect(dataTableCss).toContain("font-size: var(--type-body);");
+    expect(dataTableCss).toContain(".ui-data-table .data-column-time,");
+    expect(dataTableCss).toContain(".ui-data-table .data-cell-value,");
+    expect(dataTableCss).toContain("font-weight: var(--weight-regular);");
+    expect(dataTableCss).toContain("letter-spacing: var(--tracking-label);");
+    expect(dataTableCss).toContain("text-transform: uppercase;");
 
     expect(buttonCss).toContain("font-size: var(--type-body)");
     expect(buttonCss).toContain("font-weight: var(--weight-medium)");
@@ -514,8 +520,8 @@ describe("WA Design System contract", () => {
     expect(allCss).not.toMatch(
       /\[(?:aria-current|aria-selected|data-selected)="true"\][^{]*::(?:before|after)/,
     );
-    expect(appCss).toContain(
-      'tbody tr[data-selected="true"] { background: var(--surface-selected); }',
+    expect(dataTableCss).toContain(
+      '.ui-data-table > tbody > tr[data-selected="true"] { background: var(--surface-selected); }',
     );
     expect(selectMenuCss).toContain(
       '.select-menu-option[aria-selected="true"] { background: var(--surface-selected);',
@@ -526,7 +532,7 @@ describe("WA Design System contract", () => {
     expect(groupsCss).toContain(
       '.group-scope-option[aria-selected="true"] { background: var(--surface-selected);',
     );
-    expect(groupSelectionTableSource).toContain('className="data-table"');
+    expect(groupSelectionTableSource).toContain("<DataTable caption={caption}>");
     expect(groupSelectionTableSource).toContain("data-selected={selected || undefined}");
     expect(segmentedControlCss).toContain(
       '.segmented-control-option:has(.segmented-control-input:checked) {\n  background: var(--surface-selected);',
@@ -538,13 +544,14 @@ describe("WA Design System contract", () => {
     expect(groupSelectionTableSource).toContain("dataTablePageSelectionState(");
     expect(groupsTableSource).toContain('className="data-selection-cell"');
     expect(groupSelectionTableSource).toContain('className="data-selection-cell"');
-    expect(groupSelectionTableSource).toContain('className="data-selection-bar"');
+    expect(groupSelectionTableSource).toContain("<DataTableSelectionBar");
     expect(groupSelectionTableSource).toContain('"Show selected"');
     expect(groupSelectionTableSource).not.toContain("Saved or selected outside current results");
     expect(groupSelectionTableSource).not.toContain("group-selection-divider");
-    expect(appCss).toContain("width: var(--table-selection-width);");
-    expect(appCss).toContain("padding-inline: var(--space-3) !important;");
-    expect(appCss).toContain(".data-selection-bar {");
+    expect(dataTableCss).toContain("width: var(--table-selection-width);");
+    expect(dataTableCss).toContain("padding-inline: var(--space-3);");
+    expect(dataTableCss).toContain(".ui-data-table-selection-bar {");
+    expect(dataTableSource).toContain('aria-label={ariaLabel}');
   });
 
   it("keeps one tab anatomy and separates sequential workflow navigation", () => {
@@ -587,7 +594,12 @@ describe("WA Design System contract", () => {
     expect(searchSelectSource).toContain('searchLabel = "Search options"');
     expect(searchSelectSource).toContain('role="listbox"');
     expect(searchSelectCss).toContain("height: var(--field-control-height)");
-    expect(searchSelectCss).toContain("width: max(100%, 280px)");
+    expect(searchSelectCss).toContain("width: max(100%, var(--popup-min-width))");
+    expect(searchSelectSource).toContain("useAnchoredPopup({");
+    expect(selectMenuSource).toContain("useAnchoredPopup({");
+    expect(searchSelectSource).not.toContain("clippingBoundary");
+    expect(selectMenuSource).not.toContain("clippingBoundary");
+    expect(anchoredPopupSource).toContain("popupClippingBoundary(root)");
     expect(focusCss).toContain(".segmented-control-input:focus-visible");
     expect(focusCss).toContain(".decision-group-input:focus-visible");
     expect(focusCss).toContain(".search-select-trigger");
@@ -595,8 +607,7 @@ describe("WA Design System contract", () => {
   });
 
   it("aligns filter controls, result counts, and table content to one inset", () => {
-    expect(dataFilterToolbarCss)
-      .toContain(".data-table-toolbar.data-filter-toolbar { padding-inline: var(--table-cell-padding-inline); }");
+    expect(dataFilterToolbarCss).toContain("padding: var(--space-compact) var(--table-cell-padding-inline);");
     expect(dataFilterToolbarCss)
       .toContain("grid-template-columns: minmax(0, 1fr) auto");
     expect(dataFilterToolbarCss).toContain(".data-filter-controls { min-width: 0;");

@@ -18,6 +18,9 @@
 .inline-alert-copy strong { min-width: 0; flex: 0 1 auto; overflow-wrap: anywhere; }
 .inline-alert-copy span { min-width: 0; opacity: .78; overflow-wrap: anywhere; }
 .inline-alert-action { flex: 0 0 auto; }
+.inline-alert[data-layout="stacked"] .inline-alert-copy { align-items: flex-start; flex-direction: column; gap: var(--space-1); }
+.inline-alert[data-variant="flush"] { border-width: 0 0 var(--border-width); border-radius: 0; }
+.inline-alert[data-variant="quiet"] { border-width: var(--border-width) 0; border-radius: 0; background: transparent; }
 .inline-alert-neutral { color: var(--text-tertiary); }
 .inline-alert-danger { border-color: var(--state-danger-border); background: var(--state-danger-surface); color: var(--state-danger); }
 .inline-alert-info { border-color: var(--state-info-border); background: var(--state-info-surface); color: var(--state-info); }

@@ -216,9 +216,11 @@
 .campaign-group-list-picker-retained > div { min-width: 0; display: flex; flex-direction: column; gap: var(--space-hair); }
 .campaign-group-list-picker-retained span { color: var(--text-tertiary); font-size: var(--type-micro); letter-spacing: var(--tracking-label); text-transform: uppercase; }
 .campaign-group-list-picker-retained strong { overflow: hidden; color: var(--text-primary); font-size: var(--type-label); text-overflow: ellipsis; white-space: nowrap; }
-.campaign-group-list-picker-row { width: 100%; min-height: 54px; display: grid; align-items: center; grid-template-columns: 20px minmax(0, 1fr) auto; gap: var(--space-compact); padding: var(--space-compact) var(--space-3); border: 0; border-bottom: var(--border-width) solid var(--border-strong); background: transparent; color: inherit; text-align: left; }
-.campaign-group-list-picker-row:hover { background: var(--surface-hover); }
+.campaign-group-list-picker-row { position: relative; width: 100%; min-height: 54px; display: grid; align-items: center; grid-template-columns: 20px minmax(0, 1fr) auto; gap: var(--space-compact); padding: var(--space-compact) var(--space-3); border: 0; border-bottom: var(--border-width) solid var(--border-strong); background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.campaign-group-list-picker-row:hover:not([data-disabled="true"]) { background: var(--surface-hover); }
+.campaign-group-list-picker-row[data-disabled="true"] { color: var(--text-disabled); cursor: not-allowed; }
 .campaign-group-list-picker-row[data-selected="true"] { background: var(--surface-selected); }
+.campaign-group-list-picker-input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
 .campaign-group-list-picker-radio { width: 17px; height: 17px; display: grid; place-items: center; border: var(--border-width) solid var(--border-strong); border-radius: var(--radius-pill); background: var(--surface-control); color: var(--text-primary); }
 .campaign-group-list-picker-row[data-selected="true"] .campaign-group-list-picker-radio { border-color: var(--text-secondary); background: var(--selection-surface); }
 .campaign-group-list-picker-copy,

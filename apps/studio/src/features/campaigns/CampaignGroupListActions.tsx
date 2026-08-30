@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import type { RuntimeApi, RuntimeGroupList } from "@/shared/api/runtime-client";
 import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
@@ -53,6 +53,7 @@ export function CampaignGroupListActions({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listsRead = useLatestRequest();
   const applyOperation = useSingleFlightOperation();
+  const radioName = useId();
   const context = `${sessionId}:${campaignId}`;
   const contextRef = useRef(context);
   const normalizedInput = inputQuery.trim();
@@ -295,11 +296,12 @@ export function CampaignGroupListActions({
                 ) : lists.length ? lists.map((list) => {
                   const checked = selected?.id === list.id;
                   return (
-                    <button aria-checked={checked} className="campaign-group-list-picker-row" data-selected={checked || undefined} disabled={applying} key={list.id} onClick={() => changeList(list)} role="radio" type="button">
+                    <label className="campaign-group-list-picker-row" data-disabled={applying || undefined} data-selected={checked || undefined} key={list.id}>
+                      <input aria-label={list.name} checked={checked} className="campaign-group-list-picker-input" disabled={applying} name={radioName} onChange={() => changeList(list)} type="radio" value={list.id} />
                       <span className="campaign-group-list-picker-radio">{checked && <AppIcon name="check" size="xs" />}</span>
                       <span className="campaign-group-list-picker-copy"><strong>{list.name}</strong><small>{list.description || "No description"}</small></span>
                       <span className="campaign-group-list-picker-metadata"><strong>{list.groupCount.toLocaleString()} {list.groupCount === 1 ? "group" : "groups"}</strong><small>Membership r{list.membershipRevision} · Updated <DateTime value={list.updatedAt} /></small></span>
-                    </button>
+                    </label>
                   );
                 }) : (
                   <div className="campaign-group-list-picker-state"><AppIcon name="groups" size="sm" /><strong>{query ? "No matching group lists" : "No group lists yet"}</strong><span>{query ? `No active lists match “${query}”.` : "Create a reusable list from the Groups workspace first."}</span></div>

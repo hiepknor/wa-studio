@@ -85,6 +85,7 @@ html[data-focus-modality="keyboard"] .switch-field input:focus-visible,
 html[data-focus-modality="keyboard"] .filter-option-input:focus-visible,
 html[data-focus-modality="keyboard"] .segmented-control-input:focus-visible,
 html[data-focus-modality="keyboard"] .decision-group-input:focus-visible,
+html[data-focus-modality="keyboard"] .campaign-group-list-picker-input:focus-visible,
 html[data-focus-modality="keyboard"] .group-list-destination-radio:focus-visible {
   outline: none;
 }
@@ -96,6 +97,7 @@ html[data-focus-modality="keyboard"] .filter-option:has(.filter-option-input:foc
 }
 html[data-focus-modality="keyboard"] .segmented-control-control:has(.segmented-control-input:focus-visible),
 html[data-focus-modality="keyboard"] .decision-group-control:has(.decision-group-input:focus-visible),
+html[data-focus-modality="keyboard"] .campaign-group-list-picker-row:has(.campaign-group-list-picker-input:focus-visible),
 html[data-focus-modality="keyboard"] .group-list-destination-option:has(.group-list-destination-radio:focus-visible) {
   border-color: var(--focus-inner-border);
   outline: var(--focus-width) solid var(--focus-outer-color);
