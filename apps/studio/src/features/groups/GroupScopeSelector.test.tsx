@@ -53,6 +53,31 @@ describe("GroupScopeSelector", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("does not unmount options when WebKit reports a null blur target", async () => {
+    const user = userEvent.setup();
+    const onSelectList = vi.fn();
+    render(
+      <GroupScopeSelector
+        lists={lists}
+        onNewList={vi.fn()}
+        onQueryChange={vi.fn()}
+        onSelectDirectory={vi.fn()}
+        onSelectList={onSelectList}
+        query=""
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Group scope" }));
+    const search = screen.getByRole("searchbox", { name: "Search saved lists" });
+    await waitFor(() => expect(search).toHaveFocus());
+
+    search.blur();
+    const savedOption = screen.getByRole("option", { name: /North America/ });
+    await user.click(savedOption);
+
+    expect(onSelectList).toHaveBeenCalledWith(lists[0]);
+  });
+
   it("supports keyboard traversal and restores trigger focus on Escape", async () => {
     const user = userEvent.setup();
     render(

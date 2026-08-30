@@ -105,13 +105,15 @@ export function GroupScopeSelector({
   useEffect(() => {
     if (!open) return;
     const frame = window.requestAnimationFrame(() => searchRef.current?.focus());
-    function closeFromOutside(event: PointerEvent) {
+    function closeFromOutside(event: PointerEvent | FocusEvent) {
       if (!rootRef.current?.contains(event.target as Node)) close();
     }
     document.addEventListener("pointerdown", closeFromOutside);
+    document.addEventListener("focusin", closeFromOutside);
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("pointerdown", closeFromOutside);
+      document.removeEventListener("focusin", closeFromOutside);
     };
   }, [open]);
 
@@ -183,9 +185,6 @@ export function GroupScopeSelector({
   return (
     <div
       className="group-scope-selector"
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close();
-      }}
       ref={rootRef}
     >
       <span className="text-field-label text-field-label-hidden" id={labelId}>Group scope</span>
