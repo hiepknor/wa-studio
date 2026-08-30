@@ -47,7 +47,7 @@ function storagePresentation(diagnostics: ManagedRuntimeDiagnostics | null): {
 }
 
 function runtimePresentation(
-  phase: ManagedRuntimeSnapshot["phase"],
+  runtime: ManagedRuntimeSnapshot,
   health: RuntimeOperationalHealth | null,
 ): {
   badgeLabel: string;
@@ -55,7 +55,7 @@ function runtimePresentation(
   label: string;
   tone: OverviewTone;
 } {
-  if (phase === "ready") {
+  if (runtime.availability === "online") {
     if (health?.reason === "dependency_unavailable"
       || health?.reason === "background_process_degraded") {
       return {
@@ -73,6 +73,17 @@ function runtimePresentation(
         tone: "warning",
       };
     }
+    if (runtime.maintenance) {
+      const operation = runtime.maintenance.kind === "automaticBackup"
+        ? "Creating an encrypted recovery point"
+        : "Checking database integrity";
+      return {
+        badgeLabel: "Ready",
+        description: `${operation} in the background. The workspace remains available.`,
+        label: "WA Runtime is ready",
+        tone: "success",
+      };
+    }
     return {
       badgeLabel: "Ready",
       description: "API, workers, scheduler, database, and queue are available on this device.",
@@ -80,7 +91,7 @@ function runtimePresentation(
       tone: "success",
     };
   }
-  if (phase === "degraded") {
+  if (runtime.availability === "degraded") {
     return {
       badgeLabel: "Degraded",
       description: "WA Runtime is available, but one or more managed services need attention.",
@@ -88,7 +99,7 @@ function runtimePresentation(
       tone: "warning",
     };
   }
-  if (phase === "unavailable") {
+  if (runtime.availability === "offline") {
     return {
       badgeLabel: "Unavailable",
       description: "The desktop supervisor cannot reach the local Runtime right now.",
@@ -159,7 +170,7 @@ export function SettingsOverviewPanel({
   refreshing,
   updateState,
 }: SettingsOverviewPanelProps) {
-  const runtime = runtimePresentation(managedRuntime.phase, operationalHealth);
+  const runtime = runtimePresentation(managedRuntime, operationalHealth);
   const openwa = openwaPresentation(operationalHealth);
   const protection = freshnessPresentation(diagnostics?.recoveryFreshness);
   const storage = storagePresentation(diagnostics);

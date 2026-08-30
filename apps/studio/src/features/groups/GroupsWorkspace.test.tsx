@@ -174,7 +174,7 @@ describe("GroupsWorkspace unified canvas", () => {
     );
   });
 
-  it("renders a saved list in the same table without editable selection", async () => {
+  it("renders a saved list in the same selectable table", async () => {
     const user = userEvent.setup();
     const api = renderWorkspace();
     await connect(user);
@@ -186,12 +186,14 @@ describe("GroupsWorkspace unified canvas", () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     const table = screen.getByRole("table", { name: `Groups saved in ${savedList.name}` });
-    expect(within(table).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(table).getByRole("checkbox", { name: `Select ${group.name}` })).toBeEnabled();
     expect(within(table).getByText(group.name)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Edit list" })).toBeEnabled();
+    await user.click(screen.getByRole("combobox", { name: "Group scope" }));
+    expect(screen.getByRole("option", { name: /All groups/ })).toHaveTextContent("All groups1 group");
   });
 
-  it("creates an empty list only after the metadata and membership steps", async () => {
+  it("creates an empty list from the scope panel metadata dialog", async () => {
     const user = userEvent.setup();
     const created = { ...savedList, groupCount: 0, name: "Empty cohort" };
     const createGroupList = vi.fn().mockResolvedValue(created);
@@ -200,41 +202,99 @@ describe("GroupsWorkspace unified canvas", () => {
     await connect(user);
 
     await user.click(screen.getByRole("combobox", { name: "Group scope" }));
-    await user.click(screen.getByRole("button", { name: /New list/ }));
-    const dialog = screen.getByRole("dialog", { name: "Create group list" });
+    await user.click(screen.getByRole("button", { name: "New list" }));
+    const dialog = screen.getByRole("dialog", { name: "New list" });
     expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("");
     await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "Empty cohort");
-    await user.click(within(dialog).getByRole("button", { name: "Continue" }));
-
-    expect(screen.getByText("New list draft")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search groups for this list" })).toHaveFocus());
     expect(createGroupList).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(within(dialog).queryByRole("table")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Create list" })).toBeEnabled();
+    await user.click(within(dialog).getByRole("button", { name: "Create list" }));
     await waitFor(() => expect(createGroupList).toHaveBeenCalledWith({
       description: null,
       groupIds: [],
       name: "Empty cohort",
       sessionId: session.id,
     }, expect.any(String)));
-    expect(await screen.findByText("Group list saved")).toBeInTheDocument();
+    expect(await screen.findByText("Group list created")).toBeInTheDocument();
   });
 
-  it("preserves directory selection after saving it as a list", async () => {
+  it("creates a list from selection made directly in the directory table", async () => {
     const user = userEvent.setup();
-    renderWorkspace();
+    const createGroupList = vi.fn().mockResolvedValue(savedList);
+    renderWorkspace({ createGroupList });
     await connect(user);
-    const checkbox = await screen.findByRole("checkbox", { name: `Select ${group.name}` });
-    await user.click(checkbox);
-    await user.click(screen.getByRole("button", { name: "Save as list · 1" }));
-    const dialog = screen.getByRole("dialog", { name: "Create group list" });
-    expect(within(dialog).getByText("1 groups")).toBeInTheDocument();
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), savedList.name);
-    await user.click(within(dialog).getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    await screen.findByText("Saved static list");
+    const directory = screen.getByRole("table", { name: "Groups in the active Gateway session" });
+    await user.click(within(directory).getByRole("checkbox", { name: `Select ${group.name}` }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Group scope" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Add to list" }));
+    await user.click(screen.getByRole("menuitem", { name: /Create new list/ }));
 
-    await chooseScope(user, /All groups/);
-    expect(await screen.findByRole("checkbox", { name: `Select ${group.name}` })).toBeChecked();
+    const dialog = screen.getByRole("dialog", { name: "New list" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), savedList.name);
+    expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Create and add" }));
+
+    await waitFor(() => expect(createGroupList).toHaveBeenCalledWith(
+      expect.objectContaining({ groupIds: [group.id] }),
+      expect.any(String),
+    ));
+    expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
+  });
+
+  it("routes an Add action directly to first-list creation when the catalog is empty", async () => {
+    const user = userEvent.setup();
+    const created = { ...savedList, name: "First list" };
+    const createGroupList = vi.fn().mockResolvedValue(created);
+    const listGroupLists = vi.fn().mockResolvedValue({
+      data: [],
+      meta: { limit: 50, offset: 0, total: 0 },
+    });
+    renderWorkspace({ createGroupList, listGroupLists });
+    await connect(user);
+    await waitFor(() => expect(listGroupLists).toHaveBeenCalled());
+
+    await user.click(screen.getByRole("checkbox", { name: `Select ${group.name}` }));
+    const create = await screen.findByRole("button", { name: "New list" });
+    expect(screen.queryByRole("button", { name: "Add to list" })).not.toBeInTheDocument();
+    await user.click(create);
+    const dialog = screen.getByRole("dialog", { name: "New list" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), created.name);
+    await user.click(within(dialog).getByRole("button", { name: "Create and add" }));
+
+    await waitFor(() => expect(createGroupList).toHaveBeenCalledWith(
+      expect.objectContaining({ groupIds: [group.id], name: created.name }),
+      expect.any(String),
+    ));
+  });
+
+  it("adds the directory selection to an existing list with canonical membership", async () => {
+    const user = userEvent.setup();
+    const updatedList = {
+      ...savedList,
+      groupCount: 1,
+      membershipRevision: savedList.membershipRevision + 1,
+    };
+    const getGroupListMembership = vi.fn().mockResolvedValue({ data: [], list: savedList });
+    const replaceGroupListGroups = vi.fn().mockResolvedValue({ data: [member], list: updatedList });
+    renderWorkspace({ getGroupListMembership, replaceGroupListGroups });
+    await connect(user);
+
+    await user.click(screen.getByRole("checkbox", { name: `Select ${group.name}` }));
+    await user.click(screen.getByRole("button", { name: "Add to list" }));
+    await user.click(screen.getByRole("menuitem", { name: /Add to existing list/ }));
+    const dialog = screen.getByRole("dialog", { name: "Add to existing list" });
+    await user.click(within(dialog).getByRole("radio", { name: /Launch groups/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Add to list" }));
+
+    await waitFor(() => expect(replaceGroupListGroups).toHaveBeenCalledWith(
+      savedList.id,
+      [group.id],
+      savedList.membershipRevision,
+    ));
+    expect(await screen.findByText("1 group added")).toBeInTheDocument();
+    expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
   });
 
   it("guards dirty scope changes and retains the draft when cancelled", async () => {
@@ -242,19 +302,17 @@ describe("GroupsWorkspace unified canvas", () => {
     renderWorkspace();
     await connect(user);
     await user.click(screen.getByRole("combobox", { name: "Group scope" }));
-    await user.click(screen.getByRole("button", { name: /New list/ }));
-    const dialog = screen.getByRole("dialog", { name: "Create group list" });
+    await user.click(screen.getByRole("button", { name: "New list" }));
+    const dialog = screen.getByRole("dialog", { name: "New list" });
     await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "Draft cohort");
-    await user.click(within(dialog).getByRole("button", { name: "Continue" }));
-
-    await chooseScope(user, /All groups/);
-    const confirm = screen.getByRole("dialog", { name: "Discard group list changes?" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    const confirm = screen.getByRole("dialog", { name: "Discard list details?" });
     await user.click(within(confirm).getByRole("button", { name: "Keep editing" }));
-    expect(screen.getByText("New list draft")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New list" })).toBeInTheDocument();
 
-    await chooseScope(user, /All groups/);
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(screen.queryByText("New list draft")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New list" })).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Group scope" })).toHaveTextContent("All groups");
   });
 
@@ -319,45 +377,33 @@ describe("GroupsWorkspace unified canvas", () => {
     expect(screen.getByRole("combobox", { name: "Group scope" })).toHaveTextContent("All groups");
   });
 
-  it("saves edited metadata before membership with canonical revisions", async () => {
+  it("edits metadata without touching membership", async () => {
     const user = userEvent.setup();
     const metadataList = { ...savedList, name: "Launch groups v2", revision: 5 };
-    const finalList = {
-      ...metadataList,
-      groupCount: 0,
-      membershipRevision: 3,
-      revision: 6,
-    };
     const updateGroupList = vi.fn().mockResolvedValue(metadataList);
-    const replaceGroupListGroups = vi.fn().mockResolvedValue({ data: [], list: finalList });
+    const replaceGroupListGroups = vi.fn();
     renderWorkspace({ replaceGroupListGroups, updateGroupList });
     await connect(user);
     await chooseScope(user, /Launch groups/);
     await screen.findByText("Saved static list");
-    await user.click(screen.getByRole("button", { name: "Edit" }));
-    await user.click(screen.getByRole("checkbox", { name: `Select ${group.name}` }));
-    await user.click(screen.getByRole("button", { name: "Details" }));
-    const details = screen.getByRole("dialog", { name: "Edit list details" });
-    const name = within(details).getByRole("textbox", { name: "Name" });
+    await user.click(screen.getByRole("button", { name: "Edit list" }));
+    const editor = screen.getByRole("dialog", { name: "Edit list" });
+    expect(within(editor).queryByRole("checkbox")).not.toBeInTheDocument();
+    const name = within(editor).getByRole("textbox", { name: "Name" });
     await user.clear(name);
     await user.type(name, metadataList.name);
-    await user.click(within(details).getByRole("button", { name: "Apply details" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(editor).getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateGroupList).toHaveBeenCalledWith(savedList.id, {
       description: savedList.description,
       expectedRevision: savedList.revision,
       name: metadataList.name,
     }));
-    expect(replaceGroupListGroups).toHaveBeenCalledWith(
-      savedList.id,
-      [],
-      metadataList.membershipRevision,
-    );
+    expect(replaceGroupListGroups).not.toHaveBeenCalled();
     expect(await screen.findByText("Saved static list")).toBeInTheDocument();
   });
 
-  it("does not continue a multi-step save after the active session changes", async () => {
+  it("ignores an in-flight metadata save after the active session changes", async () => {
     const user = userEvent.setup();
     const metadata = deferred<RuntimeGroupList>();
     const updateGroupList = vi.fn().mockReturnValue(metadata.promise);
@@ -366,18 +412,15 @@ describe("GroupsWorkspace unified canvas", () => {
     await connect(user);
     await chooseScope(user, /Launch groups/);
     await screen.findByText("Saved static list");
-    await user.click(screen.getByRole("button", { name: "Edit" }));
-    await user.click(screen.getByRole("checkbox", { name: `Select ${group.name}` }));
-    await user.click(screen.getByRole("button", { name: "Details" }));
-    const details = screen.getByRole("dialog", { name: "Edit list details" });
-    const name = within(details).getByRole("textbox", { name: "Name" });
+    await user.click(screen.getByRole("button", { name: "Edit list" }));
+    const editor = screen.getByRole("dialog", { name: "Edit list" });
+    const name = within(editor).getByRole("textbox", { name: "Name" });
     await user.clear(name);
     await user.type(name, "Launch groups v2");
-    await user.click(within(details).getByRole("button", { name: "Apply details" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(editor).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(updateGroupList).toHaveBeenCalledTimes(1));
 
-    await user.click(screen.getByRole("button", { name: "Switch session" }));
+    act(() => screen.getByRole("button", { name: "Switch session", hidden: true }).click());
     await act(async () => {
       metadata.resolve({ ...savedList, name: "Launch groups v2", revision: 5 });
       await metadata.promise;
@@ -387,32 +430,34 @@ describe("GroupsWorkspace unified canvas", () => {
     expect(screen.queryByText("Saved static list")).not.toBeInTheDocument();
   });
 
-  it("reloads canonical membership after a conflict while retaining staged changes", async () => {
+  it("retries a membership removal once with the latest canonical revision", async () => {
     const user = userEvent.setup();
     const latest = { ...savedList, membershipRevision: 3, revision: 5 };
     const getGroupListMembership = vi.fn()
       .mockResolvedValueOnce({ data: [member], list: savedList })
-      .mockResolvedValue({ data: [member], list: latest });
-    const replaceGroupListGroups = vi.fn().mockRejectedValue(
-      new RuntimeRequestError("opaque", {
+      .mockResolvedValueOnce({ data: [member], list: savedList })
+      .mockResolvedValueOnce({ data: [member], list: latest });
+    const finalList = { ...latest, groupCount: 0, membershipRevision: 4, revision: 6 };
+    const replaceGroupListGroups = vi.fn()
+      .mockRejectedValueOnce(new RuntimeRequestError("opaque", {
         code: "GROUP_LIST_REVISION_CONFLICT",
         status: 409,
-      }),
-    );
+      }))
+      .mockResolvedValueOnce({ data: [], list: finalList });
     renderWorkspace({ getGroupListMembership, replaceGroupListGroups });
     await connect(user);
     await chooseScope(user, /Launch groups/);
     await screen.findByText("Saved static list");
-    await user.click(screen.getByRole("button", { name: "Edit" }));
-    const checkbox = screen.getByRole("checkbox", { name: `Select ${group.name}` });
-    await user.click(checkbox);
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("checkbox", { name: `Select ${group.name}` }));
+    await user.click(screen.getByRole("button", { name: `Remove from ${savedList.name}` }));
+    const confirmation = screen.getByRole("dialog", { name: `Remove from ${savedList.name}?` });
+    await user.click(within(confirmation).getByRole("button", { name: "Remove groups" }));
 
-    expect(await screen.findByText(/changed concurrently/)).toBeInTheDocument();
-    expect(replaceGroupListGroups).toHaveBeenCalledWith(savedList.id, [], savedList.membershipRevision);
-    await waitFor(() => expect(getGroupListMembership).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole("checkbox", { name: `Select ${group.name}` })).not.toBeChecked();
-    expect(screen.getByText(/Saved 1 · Staged 0/)).toBeInTheDocument();
+    await waitFor(() => expect(replaceGroupListGroups).toHaveBeenCalledTimes(2));
+    expect(replaceGroupListGroups).toHaveBeenNthCalledWith(1, savedList.id, [], savedList.membershipRevision);
+    expect(replaceGroupListGroups).toHaveBeenNthCalledWith(2, savedList.id, [], latest.membershipRevision);
+    expect(await screen.findByText("1 group removed")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: `Remove from ${savedList.name}?` })).not.toBeInTheDocument();
   });
 
   it("reuses the create idempotency key across a retry", async () => {
@@ -426,19 +471,18 @@ describe("GroupsWorkspace unified canvas", () => {
     renderWorkspace({ createGroupList });
     await connect(user);
     await user.click(screen.getByRole("combobox", { name: "Group scope" }));
-    await user.click(screen.getByRole("button", { name: /New list/ }));
-    const metadata = screen.getByRole("dialog", { name: "Create group list" });
-    await user.type(within(metadata).getByRole("textbox", { name: "Name" }), savedList.name);
-    await user.click(within(metadata).getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "New list" }));
+    const editor = screen.getByRole("dialog", { name: "New list" });
+    await user.type(within(editor).getByRole("textbox", { name: "Name" }), savedList.name);
+    await user.click(within(editor).getByRole("button", { name: "Create list" }));
     expect(await screen.findByText(/same request key/)).toBeInTheDocument();
-    await user.click(screen.getByRole("checkbox", { name: `Select ${group.name}` }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.type(within(editor).getByRole("textbox", { name: "Description · Optional" }), "Changed");
+    await user.click(within(editor).getByRole("button", { name: "Create list" }));
     expect(await screen.findByText(/could create a duplicate group list/)).toBeInTheDocument();
     expect(createGroupList).toHaveBeenCalledTimes(1);
-    await user.click(screen.getByRole("button", { name: "Restore request" }));
-    expect(screen.getByRole("checkbox", { name: `Select ${group.name}` })).not.toBeChecked();
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(editor).getByRole("button", { name: "Restore request" }));
+    expect(within(editor).getByRole("textbox", { name: "Description · Optional" })).toHaveValue("");
+    await user.click(within(editor).getByRole("button", { name: "Create list" }));
     await waitFor(() => expect(createGroupList).toHaveBeenCalledTimes(2));
     expect(createGroupList.mock.calls[0]?.[1]).toBe(createGroupList.mock.calls[1]?.[1]);
   });

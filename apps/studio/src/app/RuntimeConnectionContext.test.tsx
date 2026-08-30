@@ -57,6 +57,15 @@ function deferred<T>() {
 
 const managedReady = (): ManagedRuntimeSnapshot => ({
   phase: "ready",
+  availability: "online",
+  capabilities: {
+    canRead: true,
+    canEditDrafts: true,
+    canSync: true,
+    canLaunchCampaign: true,
+    canSend: true,
+  },
+  maintenance: null,
   manifest: {
     schemaVersion: 2,
     service: "wa-runtime",
@@ -108,6 +117,7 @@ describe("RuntimeConnectionProvider managed mode", () => {
     const snapshot: ManagedRuntimeSnapshot = {
       ...managedReady(),
       phase: "provisioningRequired",
+      availability: "needsSetup",
       connection: null,
     };
 
@@ -192,6 +202,7 @@ describe("RuntimeConnectionProvider managed mode", () => {
       ...managedReady(),
       connection: null,
       phase: "runtimeStarting",
+      availability: "starting",
     };
     render(
       <RuntimeConnectionProvider
@@ -261,6 +272,7 @@ describe("RuntimeConnectionProvider managed mode", () => {
         ...managedReady(),
         connection: null,
         phase: "provisioningRequired",
+        availability: "needsSetup",
       });
       await discovery.promise;
     });
@@ -302,12 +314,112 @@ describe("RuntimeConnectionProvider managed mode", () => {
     expect(screen.getByTestId("connection-flow")).toHaveTextContent("connected");
   });
 
+  it("detaches a stale native connection when the supervisor degrades", async () => {
+    let publishSnapshot: ((snapshot: ManagedRuntimeSnapshot) => void) | undefined;
+    const initialSnapshot: ManagedRuntimeSnapshot = {
+      ...managedReady(),
+      connection: null,
+      phase: "runtimeStarting",
+      availability: "starting",
+    };
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => ({}) as RuntimeApi}
+        discoverManagedRuntime={async () => initialSnapshot}
+        probeConnection={vi.fn().mockResolvedValue({
+          sessionCount: 0,
+          readySessions: 0,
+          sessions: [],
+        })}
+        subscribeToManagedRuntime={async handler => {
+          publishSnapshot = handler;
+          return () => undefined;
+        }}
+      >
+        <ConnectionObserver />
+      </RuntimeConnectionProvider>,
+    );
+    await waitFor(() => expect(publishSnapshot).toBeDefined());
+    act(() => publishSnapshot?.(managedReady()));
+    await waitFor(() => expect(screen.getByTestId("connection-flow")).toHaveTextContent("connected"));
+
+    act(() => publishSnapshot?.({
+      ...managedReady(),
+      availability: "degraded",
+      capabilities: {
+        canRead: false,
+        canEditDrafts: false,
+        canSync: false,
+        canLaunchCampaign: false,
+        canSend: false,
+      },
+      connection: null,
+      error: "Local services did not close safely.",
+      phase: "degraded",
+    }));
+
+    expect(screen.getByTestId("connection-origin")).toHaveTextContent("disconnected");
+    expect(screen.getByTestId("connection-flow")).toHaveTextContent("error");
+    expect(screen.getByText("Local services did not close safely.")).toBeInTheDocument();
+  });
+
+  it("cancels an in-flight native attach when the supervisor degrades", async () => {
+    const probe = deferred<RuntimeConnectionResult>();
+    let publishSnapshot: ((snapshot: ManagedRuntimeSnapshot) => void) | undefined;
+    const initialSnapshot: ManagedRuntimeSnapshot = {
+      ...managedReady(),
+      connection: null,
+      phase: "runtimeStarting",
+      availability: "starting",
+    };
+    render(
+      <RuntimeConnectionProvider
+        createApi={() => ({}) as RuntimeApi}
+        discoverManagedRuntime={async () => initialSnapshot}
+        probeConnection={vi.fn().mockReturnValue(probe.promise)}
+        subscribeToManagedRuntime={async handler => {
+          publishSnapshot = handler;
+          return () => undefined;
+        }}
+      >
+        <ConnectionObserver />
+      </RuntimeConnectionProvider>,
+    );
+    await waitFor(() => expect(publishSnapshot).toBeDefined());
+    act(() => publishSnapshot?.(managedReady()));
+    await waitFor(() => expect(screen.getByTestId("connection-flow")).toHaveTextContent("attaching"));
+
+    act(() => publishSnapshot?.({
+      ...managedReady(),
+      availability: "degraded",
+      capabilities: {
+        canRead: false,
+        canEditDrafts: false,
+        canSync: false,
+        canLaunchCampaign: false,
+        canSend: false,
+      },
+      connection: null,
+      error: "Runtime stopped during attachment.",
+      phase: "degraded",
+    }));
+    await act(async () => {
+      probe.resolve({ sessionCount: 0, readySessions: 0, sessions: [] });
+      await probe.promise;
+    });
+
+    expect(screen.getByTestId("connection-origin")).toHaveTextContent("disconnected");
+    expect(screen.getByTestId("connection-flow")).toHaveTextContent("error");
+    expect(screen.getByText("Runtime stopped during attachment.")).toBeInTheDocument();
+  });
+
   it("redacts the submitted OpenWA key from managed provisioning errors", async () => {
     const user = userEvent.setup();
     const initialSnapshot: ManagedRuntimeSnapshot = {
       ...managedReady(),
       connection: null,
       phase: "provisioningRequired",
+      availability: "needsSetup",
     };
     render(
       <RuntimeConnectionProvider

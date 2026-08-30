@@ -48,6 +48,15 @@ function context(): RuntimeConnectionContextValue {
     managedConnectionError: null,
     managedRuntime: {
       phase: "ready",
+      availability: "online",
+      capabilities: {
+        canRead: true,
+        canEditDrafts: true,
+        canSync: true,
+        canLaunchCampaign: true,
+        canSend: true,
+      },
+      maintenance: null,
       manifest: {
         schemaVersion: 2,
         service: "wa-runtime",

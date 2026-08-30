@@ -196,13 +196,13 @@ describe("GroupsScreen Contacts v2 members", () => {
     expect(
       await screen.findByText("No synchronized members match this search."),
     ).toBeInTheDocument();
-    expect(listGroupMembers).toHaveBeenLastCalledWith({
+    await waitFor(() => expect(listGroupMembers).toHaveBeenLastCalledWith({
       sessionId: session.id,
       groupId: firstGroup.id,
       limit: 25,
       offset: 0,
       query: "missing",
-    }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
   });
 
   it("renders deterministic enriched identity fallbacks without trusting LID phoneNumber", async () => {

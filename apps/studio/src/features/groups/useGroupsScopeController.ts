@@ -4,7 +4,6 @@ import {
   RuntimeRequestError,
   type RuntimeApi,
   type RuntimeGroupList,
-  type RuntimeGroupListGroup,
   type RuntimeGroupListMembership,
 } from "@/shared/api/runtime-client";
 import {
@@ -16,27 +15,19 @@ import {
   useRuntimeInvalidation,
   useRuntimeResourceRevision,
 } from "@/shared/server-state/runtime-invalidation";
-import type { GroupsTableRow } from "./GroupsTable";
+import { groupListErrorMessage } from "./group-list-domain";
 import {
-  createGroupListDraft,
-  editGroupListDraft,
-  groupListDraftDiff,
-  isGroupsScopeDirty,
-  toggleGroupListDraftMember,
-  toggleGroupListDraftPage,
-  updateGroupListDraftMetadata,
-  type GroupListDraft,
+  createGroupListMetadataDraft,
+  editGroupListMetadataDraft,
+  groupListMetadataDirty,
+  updateGroupListMetadataDraft,
+  type GroupListMetadataDraft,
+  type GroupListMetadataSource,
   type GroupsScope,
 } from "./groups-workspace-state";
 import { MAX_GROUP_SELECTION } from "./selection/group-selection";
-import { groupListErrorMessage } from "./group-list-domain";
 
 const CATALOG_PAGE_SIZE = 50;
-
-type ScopeTransition =
-  | { kind: "directory" }
-  | { kind: "list"; list: RuntimeGroupList }
-  | { kind: "metadata"; seedIds: string[] };
 
 interface ScopeError {
   body: string;
@@ -55,20 +46,15 @@ interface GroupListCreateIntent {
   };
 }
 
+export interface GroupListBulkResult {
+  changedCount: number;
+  list: RuntimeGroupList;
+  unchangedCount: number;
+}
+
 interface UseGroupsScopeControllerInput {
   api: RuntimeApi;
   sessionId: string | null;
-}
-
-function membershipRow(row: GroupsTableRow): RuntimeGroupListGroup {
-  return {
-    groupId: row.id,
-    groupName: row.name,
-    isActive: row.isActive,
-    participantsCount: row.participantsCount,
-    sendCapability: row.sendCapability,
-    syncedAt: row.syncedAt,
-  };
 }
 
 function mergeCatalog(
@@ -84,6 +70,23 @@ function runtimeErrorMessage(error: unknown, fallback: string): string {
   return groupListErrorMessage(error, fallback);
 }
 
+function revisionConflict(error: unknown): boolean {
+  return error instanceof RuntimeRequestError
+    && error.code === "GROUP_LIST_REVISION_CONFLICT";
+}
+
+function assertMembershipAvailable(
+  membership: RuntimeGroupListMembership,
+  sessionId: string,
+): void {
+  if (
+    membership.list.sessionId !== sessionId
+    || membership.list.archivedAt !== null
+  ) {
+    throw new Error("This saved list is not available in the active session.");
+  }
+}
+
 export function useGroupsScopeController({
   api,
   sessionId,
@@ -92,43 +95,61 @@ export function useGroupsScopeController({
   const groupsResourceRevision = useRuntimeResourceRevision(["groups"], sessionId);
   const groupListsResourceRevision = useRuntimeResourceRevision(["groupLists"], sessionId);
   const [scope, setScope] = useState<GroupsScope>({ mode: "directory" });
-  const [directoryIds, setDirectoryIds] = useState<string[]>([]);
-  const [knownRows, setKnownRows] = useState<Record<string, RuntimeGroupListGroup>>({});
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectionError, setSelectionError] = useState<string | null>(null);
-  const [metadataOpen, setMetadataOpen] = useState(false);
-  const [metadataSeedIds, setMetadataSeedIds] = useState<string[]>([]);
-  const [pendingTransition, setPendingTransition] = useState<ScopeTransition | null>(null);
+  const [metadataDraft, setMetadataDraft] = useState<GroupListMetadataDraft | null>(null);
+  const [metadataDiscardOpen, setMetadataDiscardOpen] = useState(false);
+  const [destinationOpen, setDestinationOpen] = useState(false);
   const [membership, setMembership] = useState<RuntimeGroupListMembership | null>(null);
   const [membershipLoading, setMembershipLoading] = useState(false);
   const [membershipError, setMembershipError] = useState<string | null>(null);
   const [membershipRevision, setMembershipRevision] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [saveError, setSaveError] = useState<ScopeError | null>(null);
+  const [bulkError, setBulkError] = useState<ScopeError | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | undefined>>({});
   const [catalogInputQuery, setCatalogInputQuery] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogOffset, setCatalogOffset] = useState(0);
   const [catalogLists, setCatalogLists] = useState<RuntimeGroupList[]>([]);
   const [catalogTotal, setCatalogTotal] = useState(0);
+  const [catalogUnfilteredTotal, setCatalogUnfilteredTotal] = useState<number | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [catalogRevision, setCatalogRevision] = useState(0);
   const membershipRequestRef = useRef(0);
   const catalogRequestRef = useRef(0);
-  const saveRequestRef = useRef(0);
-  const saveActiveRequestRef = useRef<number | null>(null);
+  const metadataRequestRef = useRef(0);
+  const metadataActiveRequestRef = useRef<number | null>(null);
+  const bulkRequestRef = useRef(0);
+  const bulkActiveRequestRef = useRef<number | null>(null);
   const createIntentRef = useRef<GroupListCreateIntent | null>(null);
   const sessionRef = useRef(sessionId);
   const catalogRead = useLatestRequest();
   const membershipRead = useLatestRequest();
 
-  const selectedList = scope.mode === "list:view"
-    ? scope.list
-    : scope.mode === "list:edit"
-      ? scope.draft.canonical
-      : null;
-  const directorySelectedIds = useMemo(() => new Set(directoryIds), [directoryIds]);
-  const dirty = isGroupsScopeDirty(scope);
+  const selectedList = scope.mode === "list:view" ? scope.list : null;
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const dirty = metadataDraft ? groupListMetadataDirty(metadataDraft) : false;
+
+  const resetTransientState = useCallback(() => {
+    metadataRequestRef.current += 1;
+    metadataActiveRequestRef.current = null;
+    bulkRequestRef.current += 1;
+    bulkActiveRequestRef.current = null;
+    createIntentRef.current = null;
+    setSelectedIds([]);
+    setSelectionError(null);
+    setMetadataDraft(null);
+    setMetadataDiscardOpen(false);
+    setDestinationOpen(false);
+    setSaving(false);
+    setBulkSaving(false);
+    setSaveError(null);
+    setBulkError(null);
+    setFieldErrors({});
+  }, []);
 
   useEffect(() => {
     if (sessionRef.current === sessionId) return;
@@ -137,36 +158,30 @@ export function useGroupsScopeController({
     membershipRead.cancel();
     membershipRequestRef.current += 1;
     catalogRequestRef.current += 1;
-    saveRequestRef.current += 1;
-    saveActiveRequestRef.current = null;
-    createIntentRef.current = null;
+    resetTransientState();
     setScope({ mode: "directory" });
-    setDirectoryIds([]);
-    setKnownRows({});
-    setSelectionError(null);
-    setMetadataOpen(false);
-    setMetadataSeedIds([]);
-    setPendingTransition(null);
     setMembership(null);
     setMembershipLoading(false);
     setMembershipError(null);
     setMembershipRevision(0);
-    setSaving(false);
-    setSaveError(null);
-    setFieldErrors({});
     setCatalogInputQuery("");
     setCatalogQuery("");
     setCatalogOffset(0);
     setCatalogLists([]);
     setCatalogTotal(0);
+    setCatalogUnfilteredTotal(null);
     setCatalogLoading(false);
     setCatalogError(null);
-  }, [catalogRead, membershipRead, sessionId]);
+  }, [catalogRead, membershipRead, resetTransientState, sessionId]);
 
   useEffect(() => () => {
-    saveRequestRef.current += 1;
-    saveActiveRequestRef.current = null;
+    metadataRequestRef.current += 1;
+    metadataActiveRequestRef.current = null;
+    bulkRequestRef.current += 1;
+    bulkActiveRequestRef.current = null;
     createIntentRef.current = null;
+    membershipRequestRef.current += 1;
+    catalogRequestRef.current += 1;
   }, []);
 
   useEffect(() => {
@@ -186,11 +201,13 @@ export function useGroupsScopeController({
     if (!sessionId) {
       setCatalogLists([]);
       setCatalogTotal(0);
+      setCatalogUnfilteredTotal(null);
       return;
     }
     if (typeof api.listGroupLists !== "function") {
       setCatalogLists([]);
       setCatalogTotal(0);
+      setCatalogUnfilteredTotal(null);
       setCatalogLoading(false);
       setCatalogError(null);
       return;
@@ -217,10 +234,12 @@ export function useGroupsScopeController({
         ? [...page.data]
         : mergeCatalog(current, page.data));
       setCatalogTotal(page.meta.total);
+      if (!catalogQuery) setCatalogUnfilteredTotal(page.meta.total);
     }).catch((error: unknown) => {
       if (!catalogRead.isCurrent(signal)) return;
-      if (request !== catalogRequestRef.current) return;
-      setCatalogError(runtimeErrorMessage(error, "Could not load saved lists."));
+      if (request === catalogRequestRef.current) {
+        setCatalogError(runtimeErrorMessage(error, "Could not load saved lists."));
+      }
     }).finally(() => {
       const current = catalogRead.isCurrent(signal);
       catalogRead.complete(signal);
@@ -251,14 +270,13 @@ export function useGroupsScopeController({
         || request !== membershipRequestRef.current
         || sessionRef.current !== sessionId
       ) return;
-      if (next.list.sessionId !== sessionId || next.list.archivedAt !== null) {
-        throw new Error("This saved list is not available in the active session.");
-      }
+      if (!sessionId) return;
+      assertMembershipAvailable(next, sessionId);
       setMembership(next);
-      setKnownRows((current) => ({
-        ...current,
-        ...Object.fromEntries(next.data.map((row) => [row.groupId, row])),
-      }));
+      setSelectedIds((current) => {
+        const available = new Set(next.data.map((row) => row.groupId));
+        return current.filter((id) => available.has(id));
+      });
       setScope((current) => current.mode === "list:view" && current.list.id === list.id
         ? { list: next.list, mode: "list:view" }
         : current);
@@ -282,67 +300,14 @@ export function useGroupsScopeController({
     sessionId,
   ]);
 
-  useEffect(() => () => {
-    membershipRequestRef.current += 1;
-    catalogRequestRef.current += 1;
-  }, []);
-
-  const applyTransition = useCallback((transition: ScopeTransition) => {
-    saveRequestRef.current += 1;
-    saveActiveRequestRef.current = null;
-    setSaving(false);
-    createIntentRef.current = null;
+  function clearSelection() {
+    setSelectedIds([]);
     setSelectionError(null);
-    setSaveError(null);
-    setFieldErrors({});
-    if (transition.kind === "directory") {
-      membershipRead.cancel();
-      membershipRequestRef.current += 1;
-      setMembership(null);
-      setMembershipLoading(false);
-      setMembershipError(null);
-      setScope({ mode: "directory" });
-      return;
-    }
-    if (transition.kind === "list") {
-      setScope({ list: transition.list, mode: "list:view" });
-      return;
-    }
-    setMetadataSeedIds([...transition.seedIds]);
-    setMetadataOpen(true);
-  }, [membershipRead]);
+    setBulkError(null);
+  }
 
-  const requestTransition = useCallback((transition: ScopeTransition) => {
-    if (isGroupsScopeDirty(scope)) {
-      setPendingTransition(transition);
-      return;
-    }
-    applyTransition(transition);
-  }, [applyTransition, scope]);
-
-  const rememberRows = useCallback((rows: readonly GroupsTableRow[]) => {
-    if (!rows.length) return;
-    const incoming = Object.fromEntries(rows.map((row) => [row.id, membershipRow(row)]));
-    setKnownRows((current) => ({ ...current, ...incoming }));
-    setScope((current) => {
-      if (current.mode !== "list:create" && current.mode !== "list:edit") return current;
-      const retained = new Set([...current.draft.memberIds, ...current.draft.baselineIds]);
-      const additions = Object.fromEntries(
-        Object.entries(incoming).filter(([id]) => retained.has(id)),
-      );
-      if (!Object.keys(additions).length) return current;
-      return {
-        ...current,
-        draft: {
-          ...current.draft,
-          membershipRows: { ...current.draft.membershipRows, ...additions },
-        },
-      };
-    });
-  }, []);
-
-  function toggleDirectory(groupId: string) {
-    setDirectoryIds((current) => {
+  function toggleSelection(groupId: string) {
+    setSelectedIds((current) => {
       if (current.includes(groupId)) return current.filter((id) => id !== groupId);
       if (current.length >= MAX_GROUP_SELECTION) {
         setSelectionError("Group lists are limited to 1,000 unique groups.");
@@ -353,8 +318,8 @@ export function useGroupsScopeController({
     });
   }
 
-  function toggleDirectoryPage(pageIds: readonly string[]) {
-    setDirectoryIds((current) => {
+  function toggleSelectionPage(pageIds: readonly string[]) {
+    setSelectedIds((current) => {
       const page = [...new Set(pageIds)];
       const selected = new Set(current);
       if (page.length > 0 && page.every((id) => selected.has(id))) {
@@ -371,115 +336,105 @@ export function useGroupsScopeController({
     });
   }
 
-  function continueMetadata(metadata: { description: string; name: string }) {
-    if (!sessionId) return;
+  function resetCatalogSearch() {
+    setCatalogInputQuery("");
+    setCatalogQuery("");
+    setCatalogOffset(0);
+  }
+
+  function changeScope(next: GroupsScope) {
+    if (selectedIds.length || saving || bulkSaving) return;
+    membershipRead.cancel();
+    membershipRequestRef.current += 1;
+    setMembership(null);
+    setMembershipLoading(false);
+    setMembershipError(null);
+    setBulkError(null);
+    resetCatalogSearch();
+    setScope(next);
+  }
+
+  function requestCreate(source: GroupListMetadataSource = "scope") {
+    if (!sessionId || saving || bulkSaving) return;
+    const memberIds = source === "selection" ? selectedIds : [];
+    if (source === "selection" && memberIds.length === 0) return;
     createIntentRef.current = null;
-    const draft = createGroupListDraft({
-      ...metadata,
+    setMetadataDraft(createGroupListMetadataDraft({
       idempotencyKey: crypto.randomUUID(),
-      memberIds: metadataSeedIds,
+      memberIds,
       sessionId,
-    });
-    draft.membershipRows = Object.fromEntries(
-      metadataSeedIds.flatMap((id) => knownRows[id] ? [[id, knownRows[id]]] : []),
-    );
-    setMetadataOpen(false);
-    setScope({ draft, mode: "list:create" });
+      source,
+    }));
+    setMetadataDiscardOpen(false);
+    setSaveError(null);
+    setFieldErrors({});
+    setDestinationOpen(false);
+    resetCatalogSearch();
   }
 
   function startEdit() {
-    if (!membership || !selectedList) return;
+    if (!selectedList || saving || bulkSaving) return;
     createIntentRef.current = null;
-    setScope({
-      draft: editGroupListDraft(membership, crypto.randomUUID()),
-      mode: "list:edit",
-    });
+    setMetadataDraft(editGroupListMetadataDraft(selectedList));
+    setMetadataDiscardOpen(false);
     setSaveError(null);
     setFieldErrors({});
   }
 
-  function updateDraftMetadata(metadata: { description: string; name: string }) {
-    setScope((current) => current.mode === "list:create" || current.mode === "list:edit"
-      ? { ...current, draft: updateGroupListDraftMetadata(current.draft, metadata) }
+  function updateMetadata(metadata: { description: string; name: string }) {
+    setMetadataDraft((current) => current
+      ? updateGroupListMetadataDraft(current, metadata)
       : current);
-    setFieldErrors((current) => ({ ...current, name: undefined, description: undefined }));
+    setFieldErrors((current) => ({
+      ...current,
+      description: undefined,
+      name: undefined,
+    }));
   }
 
-  function applyDraftSelection(
-    update: (draft: GroupListDraft) => { draft: GroupListDraft; ok: boolean },
-  ) {
-    setScope((current) => {
-      if (current.mode !== "list:create" && current.mode !== "list:edit") return current;
-      const result = update(current.draft);
-      if (!result.ok) {
-        setSelectionError("Group lists are limited to 1,000 unique groups.");
-        return current;
-      }
-      const membershipRows = { ...result.draft.membershipRows };
-      result.draft.memberIds.forEach((id) => {
-        if (knownRows[id]) membershipRows[id] = knownRows[id];
-      });
-      setSelectionError(null);
-      return { ...current, draft: { ...result.draft, membershipRows } };
-    });
+  function closeMetadata() {
+    metadataRequestRef.current += 1;
+    metadataActiveRequestRef.current = null;
+    createIntentRef.current = null;
+    setMetadataDraft(null);
+    setMetadataDiscardOpen(false);
+    setSaving(false);
+    setSaveError(null);
+    setFieldErrors({});
   }
 
-  function toggleDraft(groupId: string) {
-    applyDraftSelection((draft) => toggleGroupListDraftMember(draft, groupId));
-  }
-
-  function toggleDraftPage(pageIds: readonly string[]) {
-    applyDraftSelection((draft) => toggleGroupListDraftPage(draft, pageIds));
-  }
-
-  async function reloadCanonicalPreservingDraft(
-    draft: GroupListDraft,
-    requestIsCurrent: () => boolean,
-  ) {
-    if (!draft.canonical) return;
-    try {
-      const latest = await api.getGroupListMembership(draft.canonical.id);
-      if (!requestIsCurrent() || latest.list.sessionId !== sessionId) return;
-      const canonicalDraft = editGroupListDraft(latest, draft.createIdempotencyKey);
-      setKnownRows((current) => ({
-        ...current,
-        ...Object.fromEntries(latest.data.map((row) => [row.groupId, row])),
-      }));
-      setScope((current) => current.mode === "list:edit" && current.draft.canonical?.id === draft.canonical?.id
-        ? {
-          mode: "list:edit",
-          draft: {
-            ...canonicalDraft,
-            description: draft.description,
-            memberIds: draft.memberIds,
-            membershipRows: { ...canonicalDraft.membershipRows, ...draft.membershipRows },
-            name: draft.name,
-          },
-        }
-        : current);
-    } catch {
-      // The actionable mutation error remains primary; retry can reload again.
+  function requestCloseMetadata() {
+    if (!metadataDraft || saving) return;
+    if (groupListMetadataDirty(metadataDraft)) {
+      setMetadataDiscardOpen(true);
+      return;
     }
+    closeMetadata();
   }
 
-  async function saveDraft(): Promise<RuntimeGroupList | null> {
-    if (
-      (scope.mode !== "list:create" && scope.mode !== "list:edit")
-      || saveActiveRequestRef.current !== null
-    ) return null;
-    const draft = scope.draft;
-    const request = ++saveRequestRef.current;
+  function commitList(list: RuntimeGroupList) {
+    setCatalogLists((current) => mergeCatalog(current, [list]));
+    setCatalogRevision((revision) => revision + 1);
+    invalidate({ resources: ["groupLists"], sessionId: list.sessionId });
+  }
+
+  async function saveMetadata(): Promise<RuntimeGroupList | null> {
+    if (!metadataDraft || metadataActiveRequestRef.current !== null) return null;
+    const draft = metadataDraft;
     const targetSessionId = sessionId;
-    const requestIsCurrent = () => request === saveRequestRef.current
-      && sessionRef.current === targetSessionId;
+    if (!targetSessionId || draft.sessionId !== targetSessionId) return null;
     const name = draft.name.trim();
     if (!name) {
       setFieldErrors({ name: "Name is required." });
       return null;
     }
-    const diff = groupListDraftDiff(draft);
+    if (draft.mode === "edit" && !groupListMetadataDirty(draft)) return null;
+
+    const request = ++metadataRequestRef.current;
+    const requestIsCurrent = () => request === metadataRequestRef.current
+      && sessionRef.current === targetSessionId;
     let createIntent: GroupListCreateIntent | null = null;
-    if (!draft.canonical) {
+    if (draft.mode === "create") {
       const payload = {
         sessionId: draft.sessionId,
         name,
@@ -491,7 +446,7 @@ export function useGroupsScopeController({
       if (existing?.outcomeUnknown && existing.fingerprint !== fingerprint) {
         setSaveError({
           title: "Create result not confirmed",
-          body: "Restore the exact unconfirmed request before retrying it, or discard this draft. Changing its request key could create a duplicate group list.",
+          body: "Restore the exact unconfirmed request before retrying it, or cancel this dialog. Changing its request key could create a duplicate group list.",
         });
         return null;
       }
@@ -502,69 +457,42 @@ export function useGroupsScopeController({
           key: draft.createIdempotencyKey,
           outcomeUnknown: false,
           payload,
-      };
+        };
       createIntentRef.current = createIntent;
     }
-    saveActiveRequestRef.current = request;
+
+    metadataActiveRequestRef.current = request;
     setSaving(true);
     setSaveError(null);
     setFieldErrors({});
-    let metadataCommitted = false;
-    let membershipAttempted = false;
     try {
-      let savedList: RuntimeGroupList;
-      let savedMembership: RuntimeGroupListMembership;
-      if (createIntent) {
-        savedList = await api.createGroupList(
-          createIntent.payload,
-          createIntent.key,
-        );
-        if (!requestIsCurrent()) return null;
-        savedMembership = await api.getGroupListMembership(savedList.id);
-      } else {
-        if (!draft.canonical) return null;
-        savedList = draft.canonical;
-        if (diff.metadataDirty) {
-          savedList = await api.updateGroupList(savedList.id, {
-            name,
-            description: draft.description.trim() || null,
-            expectedRevision: savedList.revision,
-          });
-          if (!requestIsCurrent()) return null;
-          metadataCommitted = true;
-        }
-        if (diff.membershipDirty) {
-          membershipAttempted = true;
-          savedMembership = await api.replaceGroupListGroups(
-            savedList.id,
-            draft.memberIds,
-            savedList.membershipRevision,
-          );
-          if (!requestIsCurrent()) return null;
-          savedList = savedMembership.list;
-        } else {
-          savedMembership = await api.getGroupListMembership(savedList.id);
-          savedList = savedMembership.list;
-        }
-      }
+      const saved = draft.mode === "create"
+        ? await api.createGroupList(createIntent!.payload, createIntent!.key)
+        : await api.updateGroupList(draft.canonical.id, {
+          name,
+          description: draft.description.trim() || null,
+          expectedRevision: draft.canonical.revision,
+        });
       if (!requestIsCurrent()) return null;
-      if (
-        savedList.sessionId !== targetSessionId
-        || savedMembership.list.sessionId !== targetSessionId
-      ) {
-        throw new Error("This saved list belongs to a different Runtime session.");
+      if (saved.sessionId !== targetSessionId || saved.archivedAt !== null) {
+        throw new Error("This saved list is not available in the active session.");
       }
-      setMembership(savedMembership);
-      setKnownRows((current) => ({
-        ...current,
-        ...Object.fromEntries(savedMembership.data.map((row) => [row.groupId, row])),
-      }));
-      setScope({ list: savedMembership.list, mode: "list:view" });
-      setCatalogLists((current) => mergeCatalog(current, [savedMembership.list]));
-      setCatalogRevision((revision) => revision + 1);
-      invalidate({ resources: ["groupLists"], sessionId: targetSessionId });
+      commitList(saved);
+      if (draft.mode === "edit") {
+        setScope((current) => current.mode === "list:view" && current.list.id === saved.id
+          ? { list: saved, mode: "list:view" }
+          : current);
+        setMembership((current) => current?.list.id === saved.id
+          ? { ...current, list: saved }
+          : current);
+      } else if (draft.source === "scope") {
+        setScope({ list: saved, mode: "list:view" });
+      } else {
+        clearSelection();
+      }
       createIntentRef.current = null;
-      return savedMembership.list;
+      setMetadataDraft(null);
+      return saved;
     } catch (error) {
       if (!requestIsCurrent()) return null;
       const outcomeUnknown = isUnknownMutationOutcome(error);
@@ -578,38 +506,195 @@ export function useGroupsScopeController({
           name: error.fieldErrors.name?.[0],
         });
       }
-      if (membershipAttempted) {
-        const conflict = error instanceof RuntimeRequestError
-          && error.code === "GROUP_LIST_REVISION_CONFLICT";
-        setSaveError({
-          title: "Group selection was not saved",
-          body: outcomeUnknown
-            ? unknownMutationOutcomeMessage("canonical-reload")
-            : conflict
-            ? `${metadataCommitted ? "List details were saved, but membership" : "Membership"} changed concurrently. Runtime's canonical membership was reloaded; your staged changes remain available for review.`
-            : `${metadataCommitted ? "List details were saved, but group membership" : "Group membership"} was not updated. Runtime keeps the previous saved membership; your staged changes remain available to retry.`,
-        });
-      } else {
-        setSaveError({
-          title: draft.canonical && diff.metadataDirty
-            ? "List details were not saved"
-            : "Could not save group list",
-          body: outcomeUnknown
-            ? unknownMutationOutcomeMessage(
-              draft.canonical ? "canonical-reload" : "idempotent-retry",
-            )
-            : runtimeErrorMessage(error, "Could not save group list."),
-        });
+      if (draft.mode === "edit" && outcomeUnknown) {
+        try {
+          const canonical = await api.getGroupList(draft.canonical.id);
+          if (!requestIsCurrent()) return null;
+          const intendedDescription = draft.description.trim() || null;
+          if (canonical.name === name && canonical.description === intendedDescription) {
+            commitList(canonical);
+            setScope({ list: canonical, mode: "list:view" });
+            setMembership((current) => current?.list.id === canonical.id
+              ? { ...current, list: canonical }
+              : current);
+            setMetadataDraft(null);
+            return canonical;
+          }
+          setMetadataDraft({
+            ...draft,
+            baselineDescription: canonical.description ?? "",
+            baselineName: canonical.name,
+            canonical,
+          });
+        } catch {
+          // Keep the intended edit visible; the mutation error remains primary.
+        }
       }
-      if (draft.canonical) {
-        await reloadCanonicalPreservingDraft(draft, requestIsCurrent);
+      setSaveError({
+        title: draft.mode === "create" ? "Could not create group list" : "Could not save list details",
+        body: outcomeUnknown
+          ? unknownMutationOutcomeMessage(draft.mode === "create" ? "idempotent-retry" : "canonical-reload")
+          : runtimeErrorMessage(error, "Could not save group list details."),
+      });
+      return null;
+    } finally {
+      if (metadataActiveRequestRef.current === request) {
+        metadataActiveRequestRef.current = null;
+      }
+      if (requestIsCurrent()) setSaving(false);
+    }
+  }
+
+  async function mutateMembership(
+    list: RuntimeGroupList,
+    ids: readonly string[],
+    mode: "add" | "remove",
+  ): Promise<{ membership: RuntimeGroupListMembership; changedCount: number; unchangedCount: number }> {
+    if (!sessionId || list.sessionId !== sessionId) {
+      throw new Error("Choose a group list from the active session.");
+    }
+    const snapshot = [...new Set(ids)];
+    let lastConflict: unknown = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const canonical = await api.getGroupListMembership(list.id);
+      assertMembershipAvailable(canonical, sessionId);
+      const currentIds = canonical.data.map((row) => row.groupId);
+      const current = new Set(currentIds);
+      const selected = new Set(snapshot);
+      const nextIds = mode === "add"
+        ? [...currentIds, ...snapshot.filter((id) => !current.has(id))]
+        : currentIds.filter((id) => !selected.has(id));
+      const changedCount = mode === "add"
+        ? nextIds.length - currentIds.length
+        : currentIds.length - nextIds.length;
+      const unchangedCount = snapshot.length - changedCount;
+      if (nextIds.length > MAX_GROUP_SELECTION) {
+        throw new Error(
+          `Adding these groups would exceed the ${MAX_GROUP_SELECTION.toLocaleString()}-group list limit.`,
+        );
+      }
+      if (changedCount === 0) {
+        return { membership: canonical, changedCount, unchangedCount };
+      }
+      try {
+        const updated = await api.replaceGroupListGroups(
+          list.id,
+          nextIds,
+          canonical.list.membershipRevision,
+        );
+        assertMembershipAvailable(updated, sessionId);
+        return { membership: updated, changedCount, unchangedCount };
+      } catch (error) {
+        if (revisionConflict(error) && attempt === 0) {
+          lastConflict = error;
+          continue;
+        }
+        if (isUnknownMutationOutcome(error)) {
+          try {
+            const reconciled = await api.getGroupListMembership(list.id);
+            assertMembershipAvailable(reconciled, sessionId);
+            const reconciledIds = new Set(reconciled.data.map((row) => row.groupId));
+            const applied = mode === "add"
+              ? snapshot.every((id) => reconciledIds.has(id))
+              : snapshot.every((id) => !reconciledIds.has(id));
+            if (applied) return { membership: reconciled, changedCount, unchangedCount };
+          } catch {
+            // Preserve the unknown-outcome message below.
+          }
+          throw new Error(
+            "Runtime did not confirm the membership result. Reload the list before retrying.",
+          );
+        }
+        throw error;
+      }
+    }
+    throw lastConflict ?? new Error("The group list changed while membership was being updated.");
+  }
+
+  async function addSelectionToList(list: RuntimeGroupList): Promise<GroupListBulkResult | null> {
+    if (
+      scope.mode !== "directory"
+      || selectedIds.length === 0
+      || bulkActiveRequestRef.current !== null
+      || !sessionId
+    ) return null;
+    const snapshot = [...selectedIds];
+    const request = ++bulkRequestRef.current;
+    const targetSessionId = sessionId;
+    const requestIsCurrent = () => request === bulkRequestRef.current
+      && sessionRef.current === targetSessionId;
+    bulkActiveRequestRef.current = request;
+    setBulkSaving(true);
+    setBulkError(null);
+    try {
+      const result = await mutateMembership(list, snapshot, "add");
+      if (!requestIsCurrent()) return null;
+      setCatalogLists((current) => mergeCatalog(current, [result.membership.list]));
+      setCatalogRevision((revision) => revision + 1);
+      invalidate({ resources: ["groupLists"], sessionId: targetSessionId });
+      setSelectedIds([]);
+      setDestinationOpen(false);
+      resetCatalogSearch();
+      return {
+        changedCount: result.changedCount,
+        list: result.membership.list,
+        unchangedCount: result.unchangedCount,
+      };
+    } catch (error) {
+      if (requestIsCurrent()) {
+        setBulkError({
+          title: "Could not add groups",
+          body: runtimeErrorMessage(error, "The selected groups were not added to this list."),
+        });
       }
       return null;
     } finally {
-      if (saveActiveRequestRef.current === request) {
-        saveActiveRequestRef.current = null;
+      if (bulkActiveRequestRef.current === request) bulkActiveRequestRef.current = null;
+      if (requestIsCurrent()) setBulkSaving(false);
+    }
+  }
+
+  async function removeSelectionFromList(): Promise<GroupListBulkResult | null> {
+    if (
+      scope.mode !== "list:view"
+      || selectedIds.length === 0
+      || bulkActiveRequestRef.current !== null
+      || !sessionId
+    ) return null;
+    const list = scope.list;
+    const snapshot = [...selectedIds];
+    const request = ++bulkRequestRef.current;
+    const targetSessionId = sessionId;
+    const requestIsCurrent = () => request === bulkRequestRef.current
+      && sessionRef.current === targetSessionId;
+    bulkActiveRequestRef.current = request;
+    setBulkSaving(true);
+    setBulkError(null);
+    try {
+      const result = await mutateMembership(list, snapshot, "remove");
+      if (!requestIsCurrent()) return null;
+      setMembership(result.membership);
+      setScope({ list: result.membership.list, mode: "list:view" });
+      setCatalogLists((current) => mergeCatalog(current, [result.membership.list]));
+      setCatalogRevision((revision) => revision + 1);
+      invalidate({ resources: ["groupLists"], sessionId: targetSessionId });
+      setSelectedIds([]);
+      return {
+        changedCount: result.changedCount,
+        list: result.membership.list,
+        unchangedCount: result.unchangedCount,
+      };
+    } catch (error) {
+      if (requestIsCurrent()) {
+        setBulkError({
+          title: "Could not remove groups",
+          body: runtimeErrorMessage(error, "The selected groups were not removed from this list."),
+        });
       }
-      if (requestIsCurrent()) setSaving(false);
+      return null;
+    } finally {
+      if (bulkActiveRequestRef.current === request) bulkActiveRequestRef.current = null;
+      if (requestIsCurrent()) setBulkSaving(false);
     }
   }
 
@@ -621,23 +706,27 @@ export function useGroupsScopeController({
   function savedListDeleted(listId: string) {
     setCatalogLists((current) => current.filter((list) => list.id !== listId));
     setCatalogTotal((current) => Math.max(0, current - 1));
-    if (selectedList?.id === listId) applyTransition({ kind: "directory" });
+    setCatalogUnfilteredTotal((current) => current === null
+      ? current
+      : Math.max(0, current - 1));
+    if (selectedList?.id === listId) {
+      clearSelection();
+      setScope({ mode: "directory" });
+      setMembership(null);
+    }
     setCatalogRevision((revision) => revision + 1);
   }
 
   function restoreUnconfirmedCreateIntent() {
     const intent = createIntentRef.current;
     if (!intent?.outcomeUnknown) return;
-    setScope((current) => current.mode === "list:create"
-      && current.draft.createIdempotencyKey === intent.key
+    setMetadataDraft((current) => current?.mode === "create"
+      && current.createIdempotencyKey === intent.key
       ? {
         ...current,
-        draft: {
-          ...current.draft,
-          description: intent.payload.description ?? "",
-          memberIds: [...intent.payload.groupIds],
-          name: intent.payload.name,
-        },
+        description: intent.payload.description ?? "",
+        memberIds: [...intent.payload.groupIds],
+        name: intent.payload.name,
       }
       : current);
     setFieldErrors({});
@@ -648,57 +737,71 @@ export function useGroupsScopeController({
   }
 
   return {
-    cancelDiscard: () => setPendingTransition(null),
+    addSelectionToList,
+    bulkError,
+    bulkSaving,
+    cancelDiscard: () => setMetadataDiscardOpen(false),
     catalogError,
+    catalogAvailability: catalogUnfilteredTotal !== null
+      ? catalogUnfilteredTotal > 0 ? "available" as const : "empty" as const
+      : catalogError ? "unavailable" as const : "loading" as const,
     catalogHasMore: catalogLists.length < catalogTotal,
     catalogInputQuery,
     catalogLists,
     catalogLoading,
-    confirmDiscard: () => {
-      if (pendingTransition) applyTransition(pendingTransition);
-      setPendingTransition(null);
+    clearBulkError: () => setBulkError(null),
+    clearSelection,
+    closeDestination: () => {
+      if (!bulkSaving) {
+        setDestinationOpen(false);
+        setBulkError(null);
+        resetCatalogSearch();
+      }
     },
-    continueMetadata,
-    directoryIds,
-    directorySelectedIds,
+    confirmDiscard: closeMetadata,
+    destinationOpen,
     dirty,
-    discardConfirmationOpen: Boolean(pendingTransition),
+    discardConfirmationOpen: metadataDiscardOpen,
     fieldErrors,
-    membership,
-    membershipError,
-    membershipLoading,
-    metadataOpen,
-    metadataSeedCount: metadataSeedIds.length,
     hasUnconfirmedCreateIntent: Boolean(createIntentRef.current?.outcomeUnknown),
-    rememberRows,
-    requestDirectory: () => requestTransition({ kind: "directory" }),
-    requestList: (list: RuntimeGroupList) => requestTransition({ kind: "list", list }),
-    requestMetadata: (seedIds: readonly string[] = []) => requestTransition({
-      kind: "metadata",
-      seedIds: [...seedIds],
-    }),
-    saveDraft,
-    saveError,
-    savedListDeleted,
-    savedListUpdated,
-    saving,
-    scope,
-    selectedList,
-    selectionError,
-    setCatalogInputQuery,
-    setMetadataOpen,
-    reloadMembership: () => setMembershipRevision((revision) => revision + 1),
-    restoreUnconfirmedCreateIntent,
-    startEdit,
-    toggleDirectory,
-    toggleDirectoryPage,
-    toggleDraft,
-    toggleDraftPage,
-    updateDraftMetadata,
     loadMoreCatalog: () => {
       if (!catalogLoading && catalogLists.length < catalogTotal) {
         setCatalogOffset((current) => current + CATALOG_PAGE_SIZE);
       }
     },
+    membership,
+    membershipError,
+    membershipLoading,
+    metadataDraft,
+    reloadMembership: () => setMembershipRevision((revision) => revision + 1),
+    removeSelectionFromList,
+    requestAddDestination: () => {
+      if (scope.mode === "directory" && selectedIds.length > 0 && !bulkSaving) {
+        setBulkError(null);
+        resetCatalogSearch();
+        setDestinationOpen(true);
+      }
+    },
+    requestCloseMetadata,
+    requestCreate,
+    requestDirectory: () => changeScope({ mode: "directory" }),
+    requestList: (list: RuntimeGroupList) => changeScope({ list, mode: "list:view" }),
+    restoreUnconfirmedCreateIntent,
+    saveError,
+    saveMetadata,
+    savedListDeleted,
+    savedListUpdated,
+    saving,
+    scope,
+    selectedIds,
+    selectedIdSet,
+    selectedList,
+    selectionError,
+    selectionLocked: selectedIds.length > 0,
+    setCatalogInputQuery,
+    startEdit,
+    toggleSelection,
+    toggleSelectionPage,
+    updateMetadata,
   };
 }

@@ -3,6 +3,7 @@ use std::{
     io::{self, BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -22,6 +23,8 @@ const INTEGRITY_MARKER_PREFIX: &str = "integrity-ok-v1-";
 const AUTOMATIC_BACKUP_RETENTION_COUNT: usize = 7;
 const MANUAL_BACKUP_RETENTION_COUNT: usize = 5;
 const SAFETY_BACKUP_RETENTION_COUNT: usize = 3;
+const PROCESS_OUTPUT_LIMIT: usize = 64 * 1024;
+const MAINTENANCE_CANCELLED: &str = "Managed PostgreSQL maintenance was cancelled.";
 
 pub struct ManagedPostgres {
     postgresql: PostgreSQL,
@@ -103,11 +106,37 @@ impl ManagedPostgres {
         self.database_preexisting
     }
 
+    #[cfg(test)]
     pub fn create_release_backup(
         &self,
         backup_directory: &Path,
         release_version: &str,
         identity: &x25519::Identity,
+    ) -> Result<Option<PathBuf>, String> {
+        self.create_release_backup_inner(backup_directory, release_version, identity, None)
+    }
+
+    pub fn create_release_backup_with_cancellation(
+        &self,
+        backup_directory: &Path,
+        release_version: &str,
+        identity: &x25519::Identity,
+        cancellation: &AtomicBool,
+    ) -> Result<Option<PathBuf>, String> {
+        self.create_release_backup_inner(
+            backup_directory,
+            release_version,
+            identity,
+            Some(cancellation),
+        )
+    }
+
+    fn create_release_backup_inner(
+        &self,
+        backup_directory: &Path,
+        release_version: &str,
+        identity: &x25519::Identity,
+        cancellation: Option<&AtomicBool>,
     ) -> Result<Option<PathBuf>, String> {
         if !self.database_preexisting {
             return Ok(None);
@@ -123,8 +152,14 @@ impl ManagedPostgres {
         if backup_exists(backup_directory, &prefix)? {
             return Ok(None);
         }
-        self.create_encrypted_backup(backup_directory, &prefix, identity, true)
-            .map(Some)
+        self.create_encrypted_backup_with_cancellation(
+            backup_directory,
+            &prefix,
+            identity,
+            true,
+            cancellation,
+        )
+        .map(Some)
     }
 
     pub fn restore_backup(
@@ -144,6 +179,7 @@ impl ManagedPostgres {
         Ok(safety_backup)
     }
 
+    #[cfg(test)]
     pub fn create_update_backup(
         &self,
         backup_directory: &Path,
@@ -151,18 +187,59 @@ impl ManagedPostgres {
         target_version: &str,
         identity: &x25519::Identity,
     ) -> Result<PathBuf, String> {
+        self.create_update_backup_inner(
+            backup_directory,
+            current_version,
+            target_version,
+            identity,
+            None,
+        )
+    }
+
+    pub fn create_update_backup_with_cancellation(
+        &self,
+        backup_directory: &Path,
+        current_version: &str,
+        target_version: &str,
+        identity: &x25519::Identity,
+        cancellation: &AtomicBool,
+    ) -> Result<PathBuf, String> {
+        self.create_update_backup_inner(
+            backup_directory,
+            current_version,
+            target_version,
+            identity,
+            Some(cancellation),
+        )
+    }
+
+    fn create_update_backup_inner(
+        &self,
+        backup_directory: &Path,
+        current_version: &str,
+        target_version: &str,
+        identity: &x25519::Identity,
+        cancellation: Option<&AtomicBool>,
+    ) -> Result<PathBuf, String> {
         let prefix = format!(
             "pre-update-v{}-to-v{}-",
             safe_filename_component(current_version),
             safe_filename_component(target_version),
         );
-        self.create_encrypted_backup(backup_directory, &prefix, identity, true)
+        self.create_encrypted_backup_with_cancellation(
+            backup_directory,
+            &prefix,
+            identity,
+            true,
+            cancellation,
+        )
     }
 
     pub fn create_automatic_backup(
         &self,
         backup_directory: &Path,
         identity: &x25519::Identity,
+        cancellation: &AtomicBool,
     ) -> Result<Option<PathBuf>, String> {
         if !self.database_preexisting {
             return Ok(None);
@@ -174,19 +251,36 @@ impl ManagedPostgres {
         }) {
             return Ok(None);
         }
-        self.create_encrypted_backup(backup_directory, "automatic-", identity, true)
-            .map(Some)
+        self.create_encrypted_backup_with_cancellation(
+            backup_directory,
+            "automatic-",
+            identity,
+            true,
+            Some(cancellation),
+        )
+        .map(Some)
     }
 
-    pub fn create_manual_backup(
+    pub fn create_manual_backup_with_cancellation(
         &self,
         backup_directory: &Path,
         identity: &x25519::Identity,
+        cancellation: &AtomicBool,
     ) -> Result<PathBuf, String> {
-        self.create_encrypted_backup(backup_directory, "manual-", identity, true)
+        self.create_encrypted_backup_with_cancellation(
+            backup_directory,
+            "manual-",
+            identity,
+            true,
+            Some(cancellation),
+        )
     }
 
-    pub fn verify_integrity_if_due(&self, state_directory: &Path) -> Result<bool, String> {
+    pub fn verify_integrity_if_due(
+        &self,
+        state_directory: &Path,
+        cancellation: &AtomicBool,
+    ) -> Result<bool, String> {
         if !self.database_preexisting {
             return Ok(false);
         }
@@ -203,24 +297,48 @@ impl ManagedPostgres {
         {
             return Ok(false);
         }
-        self.run_pg_amcheck()?;
+        self.run_pg_amcheck(cancellation)?;
         commit_integrity_marker(state_directory, now)?;
         Ok(true)
     }
 
+    #[cfg(test)]
     pub fn create_portable_backup(
         &self,
         destination: &Path,
         passphrase: SecretString,
     ) -> Result<(), String> {
+        self.create_portable_backup_inner(destination, passphrase, None)
+    }
+
+    pub fn create_portable_backup_with_cancellation(
+        &self,
+        destination: &Path,
+        passphrase: SecretString,
+        cancellation: &AtomicBool,
+    ) -> Result<(), String> {
+        self.create_portable_backup_inner(destination, passphrase, Some(cancellation))
+    }
+
+    fn create_portable_backup_inner(
+        &self,
+        destination: &Path,
+        passphrase: SecretString,
+        cancellation: Option<&AtomicBool>,
+    ) -> Result<(), String> {
         validate_portable_destination(destination)?;
         let partial_path = portable_partial_path(destination)?;
         let result = (|| {
-            self.write_encrypted_dump_with(
+            self.write_encrypted_dump_with_cancellation(
                 &partial_path,
                 Encryptor::with_user_passphrase(passphrase.clone()),
+                cancellation,
             )?;
-            self.verify_passphrase_encrypted_dump(&partial_path, passphrase)?;
+            self.verify_passphrase_encrypted_dump_with_cancellation(
+                &partial_path,
+                passphrase,
+                cancellation,
+            )?;
             fs::rename(&partial_path, destination).map_err(|error| {
                 format!(
                     "Could not commit portable PostgreSQL recovery archive {}: {error}",
@@ -270,10 +388,10 @@ impl ManagedPostgres {
             .map_err(|error| format!("Could not stop managed PostgreSQL: {error}"))
     }
 
-    fn run_pg_amcheck(&self) -> Result<(), String> {
+    fn run_pg_amcheck(&self, cancellation: &AtomicBool) -> Result<(), String> {
         let settings = self.postgresql.settings();
         let pg_amcheck = settings.binary_dir().join(postgres_binary("pg_amcheck"));
-        let output = Command::new(&pg_amcheck)
+        let mut child = Command::new(&pg_amcheck)
             .args([
                 "--no-password",
                 "--install-missing=pg_catalog",
@@ -288,14 +406,63 @@ impl ManagedPostgres {
                 DATABASE_NAME,
             ])
             .env("PGPASSWORD", &settings.password)
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|error| format!("Could not start bundled pg_amcheck: {error}"))?;
-        if output.status.success() {
+        let Some(stdout) = child.stdout.take() else {
+            let _ = child.kill();
+            return Err("Could not capture bundled pg_amcheck output.".to_string());
+        };
+        let Some(stderr) = child.stderr.take() else {
+            let _ = child.kill();
+            return Err("Could not capture bundled pg_amcheck errors.".to_string());
+        };
+        let stdout_reader = std::thread::spawn(move || drain_process_output(stdout));
+        let stderr_reader = std::thread::spawn(move || drain_process_output(stderr));
+        let status = loop {
+            if cancellation.load(Ordering::Acquire) {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(MAINTENANCE_CANCELLED.to_string());
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err(format!("Could not wait for bundled pg_amcheck: {error}"));
+                }
+            }
+        };
+        let (stdout, stdout_truncated) = stdout_reader
+            .join()
+            .map_err(|_| "Bundled pg_amcheck output reader panicked.".to_string())?
+            .map_err(|error| format!("Could not read bundled pg_amcheck output: {error}"))?;
+        let (stderr, stderr_truncated) = stderr_reader
+            .join()
+            .map_err(|_| "Bundled pg_amcheck error reader panicked.".to_string())?
+            .map_err(|error| format!("Could not read bundled pg_amcheck errors: {error}"))?;
+        if status.success() {
             return Ok(());
         }
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if !stderr.is_empty() { stderr } else { stdout };
+        let stderr = String::from_utf8_lossy(&stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&stdout).trim().to_string();
+        let (detail, truncated) = if !stderr.is_empty() {
+            (stderr, stderr_truncated)
+        } else {
+            (stdout, stdout_truncated)
+        };
+        let detail = if truncated {
+            format!("{detail} [output truncated]")
+        } else {
+            detail
+        };
         Err(if detail.is_empty() {
             "Managed PostgreSQL integrity check failed.".to_string()
         } else {
@@ -303,22 +470,24 @@ impl ManagedPostgres {
         })
     }
 
-    fn write_encrypted_dump(
+    fn write_encrypted_dump_cancellable(
         &self,
         destination: &Path,
         identity: &x25519::Identity,
+        cancellation: Option<&AtomicBool>,
     ) -> Result<(), String> {
         let recipient = identity.to_public();
         let encryptor =
             Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
                 .map_err(|error| format!("Could not initialize backup encryption: {error}"))?;
-        self.write_encrypted_dump_with(destination, encryptor)
+        self.write_encrypted_dump_with_cancellation(destination, encryptor, cancellation)
     }
 
-    fn write_encrypted_dump_with(
+    fn write_encrypted_dump_with_cancellation(
         &self,
         destination: &Path,
         encryptor: Encryptor,
+        cancellation: Option<&AtomicBool>,
     ) -> Result<(), String> {
         let settings = self.postgresql.settings();
         let pg_dump = settings.binary_dir().join(postgres_binary("pg_dump"));
@@ -353,7 +522,7 @@ impl ManagedPostgres {
             let mut encrypted = encryptor
                 .wrap_output(output)
                 .map_err(|error| format!("Could not write backup encryption header: {error}"))?;
-            io::copy(&mut plaintext, &mut encrypted)
+            copy_with_cancellation(&mut plaintext, &mut encrypted, cancellation)
                 .map_err(|error| format!("Could not encrypt PostgreSQL backup: {error}"))?;
             let mut output = encrypted
                 .finish()
@@ -392,6 +561,23 @@ impl ManagedPostgres {
         identity: &x25519::Identity,
         rotate_after: bool,
     ) -> Result<PathBuf, String> {
+        self.create_encrypted_backup_with_cancellation(
+            backup_directory,
+            prefix,
+            identity,
+            rotate_after,
+            None,
+        )
+    }
+
+    fn create_encrypted_backup_with_cancellation(
+        &self,
+        backup_directory: &Path,
+        prefix: &str,
+        identity: &x25519::Identity,
+        rotate_after: bool,
+        cancellation: Option<&AtomicBool>,
+    ) -> Result<PathBuf, String> {
         fs::create_dir_all(backup_directory).map_err(|error| {
             format!(
                 "Could not create managed PostgreSQL backup directory {}: {error}",
@@ -401,11 +587,15 @@ impl ManagedPostgres {
         let timestamp = unix_timestamp_millis()?;
         let final_path = backup_directory.join(format!("{prefix}{timestamp}.dump.age"));
         let partial_path = backup_directory.join(format!("{prefix}{timestamp}.dump.age.partial"));
-        if let Err(error) = self.write_encrypted_dump(&partial_path, identity) {
+        if let Err(error) =
+            self.write_encrypted_dump_cancellable(&partial_path, identity, cancellation)
+        {
             let _ = fs::remove_file(&partial_path);
             return Err(error);
         }
-        if let Err(error) = self.verify_encrypted_dump(&partial_path, identity) {
+        if let Err(error) =
+            self.verify_encrypted_dump_with_cancellation(&partial_path, identity, cancellation)
+        {
             let _ = fs::remove_file(&partial_path);
             return Err(error);
         }
@@ -426,6 +616,15 @@ impl ManagedPostgres {
         source: &Path,
         identity: &x25519::Identity,
     ) -> Result<(), String> {
+        self.verify_encrypted_dump_with_cancellation(source, identity, None)
+    }
+
+    fn verify_encrypted_dump_with_cancellation(
+        &self,
+        source: &Path,
+        identity: &x25519::Identity,
+        cancellation: Option<&AtomicBool>,
+    ) -> Result<(), String> {
         let encrypted = File::open(source)
             .map(BufReader::new)
             .map_err(|error| format!("Could not open encrypted PostgreSQL backup: {error}"))?;
@@ -434,10 +633,11 @@ impl ManagedPostgres {
         let mut plaintext = decryptor
             .decrypt(std::iter::once(identity as &dyn age::Identity))
             .map_err(|error| format!("Could not decrypt PostgreSQL backup: {error}"))?;
-        self.run_pg_restore(
+        self.run_pg_restore_with_cancellation(
             &mut plaintext,
             &["--list"],
             "Encrypted PostgreSQL backup verification",
+            cancellation,
         )
     }
 
@@ -474,11 +674,21 @@ impl ManagedPostgres {
         source: &Path,
         passphrase: SecretString,
     ) -> Result<(), String> {
+        self.verify_passphrase_encrypted_dump_with_cancellation(source, passphrase, None)
+    }
+
+    fn verify_passphrase_encrypted_dump_with_cancellation(
+        &self,
+        source: &Path,
+        passphrase: SecretString,
+        cancellation: Option<&AtomicBool>,
+    ) -> Result<(), String> {
         let mut plaintext = passphrase_decryptor(source, passphrase)?;
-        self.run_pg_restore(
+        self.run_pg_restore_with_cancellation(
             &mut plaintext,
             &["--list"],
             "Portable PostgreSQL recovery archive verification",
+            cancellation,
         )
     }
 
@@ -508,6 +718,16 @@ impl ManagedPostgres {
         plaintext: &mut dyn Read,
         arguments: &[&str],
         operation: &str,
+    ) -> Result<(), String> {
+        self.run_pg_restore_with_cancellation(plaintext, arguments, operation, None)
+    }
+
+    fn run_pg_restore_with_cancellation(
+        &self,
+        plaintext: &mut dyn Read,
+        arguments: &[&str],
+        operation: &str,
+        cancellation: Option<&AtomicBool>,
     ) -> Result<(), String> {
         let settings = self.postgresql.settings();
         let pg_restore = settings.binary_dir().join(postgres_binary("pg_restore"));
@@ -540,7 +760,9 @@ impl ManagedPostgres {
             .stdin
             .take()
             .ok_or_else(|| "Could not open bundled pg_restore input.".to_string())
-            .and_then(|mut input| stream_archive_to(plaintext, &mut input, operation));
+            .and_then(|mut input| {
+                stream_archive_to(plaintext, &mut input, operation, cancellation)
+            });
         if copy_result.is_err() {
             let _ = child.kill();
         }
@@ -562,6 +784,22 @@ impl ManagedPostgres {
         }
         copy_result?;
         Ok(())
+    }
+}
+
+fn drain_process_output(mut reader: impl Read) -> io::Result<(Vec<u8>, bool)> {
+    let mut retained = Vec::new();
+    let mut buffer = [0_u8; 8 * 1024];
+    let mut truncated = false;
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            return Ok((retained, truncated));
+        }
+        let remaining = PROCESS_OUTPUT_LIMIT.saturating_sub(retained.len());
+        let keep = remaining.min(read);
+        retained.extend_from_slice(&buffer[..keep]);
+        truncated |= keep < read;
     }
 }
 
@@ -743,19 +981,43 @@ fn stream_archive_to(
     plaintext: &mut dyn Read,
     output: &mut dyn Write,
     operation: &str,
+    cancellation: Option<&AtomicBool>,
 ) -> Result<(), String> {
-    match io::copy(plaintext, output) {
+    match copy_with_cancellation(plaintext, output, cancellation) {
         Ok(_) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
             // `pg_restore --list` may finish after reading the archive table of contents and
             // close stdin before the data blocks arrive. Drain the decrypted stream so age still
             // authenticates the complete backup instead of treating that successful early exit
             // as a corrupt archive.
-            io::copy(plaintext, &mut io::sink())
+            copy_with_cancellation(plaintext, &mut io::sink(), cancellation)
                 .map(|_| ())
                 .map_err(|error| format!("{operation} could not authenticate its archive: {error}"))
         }
         Err(error) => Err(format!("{operation} could not stream its archive: {error}")),
+    }
+}
+
+fn copy_with_cancellation(
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    cancellation: Option<&AtomicBool>,
+) -> io::Result<u64> {
+    let mut copied = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        if cancellation.is_some_and(|token| token.load(Ordering::Acquire)) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                MAINTENANCE_CANCELLED,
+            ));
+        }
+        let read = input.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(copied);
+        }
+        output.write_all(&buffer[..read])?;
+        copied = copied.saturating_add(read as u64);
     }
 }
 
@@ -1038,6 +1300,7 @@ mod tests {
         fs,
         io::{self, Cursor, Write},
         process::Command,
+        sync::atomic::AtomicBool,
     };
 
     use age::{secrecy::SecretString, x25519};
@@ -1045,11 +1308,12 @@ mod tests {
     use super::super::secret_store::random_secret;
 
     use super::{
-        acquire_root_lock, commit_integrity_marker, latest_integrity_check, list_backups,
-        postgres_binary, remove_incomplete_backups, resolve_managed_backup,
-        retain_staged_managed_backup, rotate_backups, safe_filename_component,
-        stage_managed_backup, stream_archive_to, ManagedPostgres, AUTOMATIC_BACKUP_RETENTION_COUNT,
-        DATABASE_NAME, MANUAL_BACKUP_RETENTION_COUNT, SAFETY_BACKUP_RETENTION_COUNT,
+        acquire_root_lock, commit_integrity_marker, copy_with_cancellation, drain_process_output,
+        latest_integrity_check, list_backups, postgres_binary, remove_incomplete_backups,
+        resolve_managed_backup, retain_staged_managed_backup, rotate_backups,
+        safe_filename_component, stage_managed_backup, stream_archive_to, ManagedPostgres,
+        AUTOMATIC_BACKUP_RETENTION_COUNT, DATABASE_NAME, MANUAL_BACKUP_RETENTION_COUNT,
+        PROCESS_OUTPUT_LIMIT, SAFETY_BACKUP_RETENTION_COUNT,
     };
 
     struct EarlyClosingWriter {
@@ -1072,6 +1336,26 @@ mod tests {
     }
 
     #[test]
+    fn drains_process_output_without_retaining_unbounded_diagnostics() {
+        let payload = vec![7_u8; PROCESS_OUTPUT_LIMIT + 8 * 1024];
+
+        let (output, truncated) = drain_process_output(Cursor::new(payload)).unwrap();
+
+        assert_eq!(output.len(), PROCESS_OUTPUT_LIMIT);
+        assert!(truncated);
+    }
+
+    #[test]
+    fn retains_complete_process_output_within_the_diagnostic_limit() {
+        let payload = vec![7_u8; 8 * 1024];
+
+        let (output, truncated) = drain_process_output(Cursor::new(payload.clone())).unwrap();
+
+        assert_eq!(output, payload);
+        assert!(!truncated);
+    }
+
+    #[test]
     fn drains_an_archive_when_a_successful_reader_closes_its_pipe_early() {
         let payload = vec![7_u8; 64];
         let mut plaintext = Cursor::new(payload.clone());
@@ -1079,9 +1363,23 @@ mod tests {
             bytes_before_close: 8,
         };
 
-        stream_archive_to(&mut plaintext, &mut output, "backup verification").unwrap();
+        stream_archive_to(&mut plaintext, &mut output, "backup verification", None).unwrap();
 
         assert_eq!(plaintext.position(), payload.len() as u64);
+    }
+
+    #[test]
+    fn cancels_archive_streaming_before_reading_more_data() {
+        let mut plaintext = Cursor::new(vec![7_u8; 64]);
+        let mut output = Vec::new();
+        let cancellation = AtomicBool::new(true);
+
+        let error =
+            copy_with_cancellation(&mut plaintext, &mut output, Some(&cancellation)).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(plaintext.position(), 0);
+        assert!(output.is_empty());
     }
 
     #[test]
@@ -1254,11 +1552,12 @@ mod tests {
         );
         postgres.database_preexisting = true;
         let integrity_state = tempfile::tempdir().unwrap();
+        let cancellation = AtomicBool::new(false);
         assert!(postgres
-            .verify_integrity_if_due(integrity_state.path())
+            .verify_integrity_if_due(integrity_state.path(), &cancellation)
             .unwrap());
         assert!(!postgres
-            .verify_integrity_if_due(integrity_state.path())
+            .verify_integrity_if_due(integrity_state.path(), &cancellation)
             .unwrap());
         let identity = x25519::Identity::generate();
         let backup = postgres

@@ -14,6 +14,7 @@ import { SearchField } from "@/shared/ui/SearchField";
 
 interface GroupScopeSelectorProps {
   disabled?: boolean;
+  directoryCount?: number | null;
   directorySelected?: boolean;
   error?: string | null;
   hasMore?: boolean;
@@ -37,8 +38,27 @@ function scopeOptions(container: HTMLDivElement | null): HTMLButtonElement[] {
   );
 }
 
+function scopeCatalogSummary(input: {
+  error: string | null;
+  hasMore: boolean;
+  listCount: number;
+  loading: boolean;
+  query: string;
+}): string {
+  if (input.error) return "Saved lists unavailable";
+  if (input.loading && input.listCount === 0) return "Loading saved lists…";
+  if (input.listCount === 0 && !input.query.trim()) {
+    return "Saved lists belong to the current session";
+  }
+  const count = `${input.listCount.toLocaleString()}${input.hasMore ? "+" : ""}`;
+  const noun = input.listCount === 1 && !input.hasMore ? "list" : "lists";
+  const kind = input.query.trim() ? "matching" : "saved";
+  return `${count} ${kind} ${noun} · Current session only`;
+}
+
 export function GroupScopeSelector({
   disabled = false,
+  directoryCount = null,
   directorySelected: directorySelectedProp,
   error = null,
   hasMore = false,
@@ -57,6 +77,8 @@ export function GroupScopeSelector({
   const id = useId();
   const listboxId = `${id}-listbox`;
   const labelId = `${id}-label`;
+  const directoryLabelId = `${id}-directory-label`;
+  const savedListsLabelId = `${id}-saved-lists-label`;
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -135,7 +157,6 @@ export function GroupScopeSelector({
       } else moveOption(event, currentIndex - 1);
     } else if (event.key === "Home") moveOption(event, 0);
     else if (event.key === "End") moveOption(event, options.length - 1);
-    else if (event.key === "Tab") close();
   }
 
   function handleScroll(event: UIEvent<HTMLDivElement>) {
@@ -157,9 +178,16 @@ export function GroupScopeSelector({
   }
 
   const directorySelected = directorySelectedProp ?? selectedListId === null;
+  const hasQuery = Boolean(query.trim());
 
   return (
-    <div className="group-scope-selector" ref={rootRef}>
+    <div
+      className="group-scope-selector"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close();
+      }}
+      ref={rootRef}
+    >
       <span className="text-field-label text-field-label-hidden" id={labelId}>Group scope</span>
       <button
         aria-controls={listboxId}
@@ -183,10 +211,17 @@ export function GroupScopeSelector({
           <header className="group-scope-header">
             <span>Group scope</span>
             <Button
-              icon="groups"
+              icon="list-plus"
               onClick={() => {
                 close();
                 onNewList();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  close(true);
+                }
               }}
               size="sm"
               variant="ghost"
@@ -214,49 +249,83 @@ export function GroupScopeSelector({
             ref={listboxRef}
             role="listbox"
           >
-            <span className="group-scope-section-label">Directory</span>
-            <button
-              aria-selected={directorySelected}
-              className="group-scope-option"
-              onClick={chooseDirectory}
-              role="option"
-              type="button"
-            >
-              <span className="group-scope-option-marker">
-                {directorySelected && <AppIcon name="check" size="xs" />}
-              </span>
-              <span className="group-scope-option-copy">
-                <strong>All groups</strong>
-                <small>Complete synchronized directory</small>
-              </span>
-            </button>
-            <span className="group-scope-section-label">Saved lists</span>
-            {error ? (
-              <p className="group-scope-message" role="alert">{error}</p>
-            ) : lists.length === 0 && !loading ? (
-              <p className="group-scope-message">
-                {query ? "No saved lists match this search." : "No saved lists yet."}
-              </p>
-            ) : lists.map((list) => (
+            <div aria-labelledby={directoryLabelId} role="group">
+              <span className="group-scope-section-label" id={directoryLabelId}>Directory</span>
               <button
-                aria-selected={list.id === selectedListId}
+                aria-selected={directorySelected}
                 className="group-scope-option"
-                key={list.id}
-                onClick={() => chooseList(list)}
+                onClick={chooseDirectory}
                 role="option"
                 type="button"
               >
                 <span className="group-scope-option-marker">
-                  {list.id === selectedListId && <AppIcon name="check" size="xs" />}
+                  {directorySelected && <AppIcon name="check" size="xs" />}
                 </span>
                 <span className="group-scope-option-copy">
-                  <strong>{list.name}</strong>
-                  <small>{list.groupCount.toLocaleString()} groups</small>
+                  <span className="group-scope-option-heading">
+                    <strong>All groups</strong>
+                    <span>
+                      {directoryCount === null
+                        ? "— groups"
+                        : `${directoryCount.toLocaleString()} ${directoryCount === 1 ? "group" : "groups"}`}
+                    </span>
+                  </span>
+                  <small>Complete synchronized directory</small>
                 </span>
               </button>
-            ))}
-            {loading && <p aria-live="polite" className="group-scope-message">Loading lists…</p>}
+            </div>
+            <div aria-labelledby={savedListsLabelId} role="group">
+              <span className="group-scope-section-label" id={savedListsLabelId}>Saved lists</span>
+              {error ? (
+                <p className="group-scope-message" role="alert">{error}</p>
+              ) : lists.length === 0 && !loading ? (
+                <div className="group-scope-empty-state">
+                  <AppIcon name={hasQuery ? "search" : "list-plus"} size="sm" />
+                  <span>
+                    <strong>{hasQuery ? "No matching lists" : "No saved lists"}</strong>
+                    <small>
+                      {hasQuery
+                        ? "Try another list name."
+                        : "Create one to reuse a group selection."}
+                    </small>
+                  </span>
+                </div>
+              ) : lists.map((list) => (
+                <button
+                  aria-selected={list.id === selectedListId}
+                  className="group-scope-option"
+                  key={list.id}
+                  onClick={() => chooseList(list)}
+                  role="option"
+                  type="button"
+                >
+                  <span className="group-scope-option-marker">
+                    {list.id === selectedListId && <AppIcon name="check" size="xs" />}
+                  </span>
+                  <span className="group-scope-option-copy">
+                    <span className="group-scope-option-heading">
+                      <strong>{list.name}</strong>
+                      <span>{list.groupCount.toLocaleString()} groups</span>
+                    </span>
+                    <small>{list.description || "No description"}</small>
+                  </span>
+                </button>
+              ))}
+              {loading && <p aria-live="polite" className="group-scope-message">Loading lists…</p>}
+            </div>
           </div>
+          <footer className="group-scope-footer">
+            <AppIcon name="info" size="xs" />
+            <span aria-live="polite">
+              {scopeCatalogSummary({
+                error,
+                hasMore,
+                listCount: lists.length,
+                loading,
+                query,
+              })}
+            </span>
+          </footer>
         </div>
       )}
     </div>

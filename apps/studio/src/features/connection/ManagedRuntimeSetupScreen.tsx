@@ -31,17 +31,49 @@ interface ManagedRuntimeSetupScreenProps {
 
 type SetupOperation = "connect" | "restore" | null;
 
-const progressCopy = {
-  booting: ["Preparing local workspace", "Inspecting the bundled Runtime…"],
-  validating: ["Checking OpenWA", "Validating the gateway and discovering Event Inbox…"],
-  starting: ["Starting local services", "Preparing PostgreSQL, API, worker, and scheduler…"],
-  attaching: ["Opening workspace", "Attaching Studio to the healthy local Runtime…"],
-} as const;
+function progressCopy(
+  flow: ManagedConnectionFlow,
+  snapshot: ManagedRuntimeSnapshot,
+): readonly [string, string] {
+  if (flow === "validating") {
+    return ["Checking OpenWA", "Validating the gateway and discovering Event Inbox…"];
+  }
+  if (flow === "attaching") {
+    return ["Opening workspace", "Attaching Studio to the healthy local Runtime…"];
+  }
+  if (snapshot.maintenance?.kind === "preMigrationBackup") {
+    return ["Protecting local data", "Creating and verifying a recovery point before the schema upgrade…"];
+  }
+  switch (snapshot.phase) {
+    case "databaseStarting":
+      return ["Starting local database", "Starting the managed PostgreSQL service…"];
+    case "migrating":
+      return ["Upgrading local data", "Applying the pending Runtime database migrations…"];
+    case "runtimeStarting":
+      return ["Starting WA Runtime", "Starting the API, worker, and scheduler processes…"];
+    case "reconfiguring":
+      return ["Applying connection settings", "Restarting local services with the new OpenWA configuration…"];
+    case "restoring":
+      return ["Restoring local data", "Authenticating and restoring the selected recovery point…"];
+    case "updating":
+      return ["Preparing the update", "Protecting local data before WA Studio restarts…"];
+    case "stopping":
+      return ["Closing local services", "Finishing active work before the managed Runtime stops…"];
+    default:
+      return ["Inspecting local workspace", "Checking the bundled Runtime and local configuration…"];
+  }
+}
 
-function activeStep(flow: ManagedConnectionFlow): number {
-  if (flow === "starting") return 1;
-  if (flow === "attaching" || flow === "connected") return 2;
-  return 0;
+function availabilityLabel(availability: ManagedRuntimeSnapshot["availability"]): string {
+  switch (availability) {
+    case "busy": return "Maintenance";
+    case "degraded": return "Needs attention";
+    case "needsSetup": return "Setup required";
+    case "offline": return "Offline";
+    case "online": return "Online";
+    case "stopping": return "Closing";
+    default: return "Starting";
+  }
 }
 
 export function ManagedRuntimeSetupScreen({
@@ -67,10 +99,7 @@ export function ManagedRuntimeSetupScreen({
   const connecting = operation === "connect";
   const restoringBackup = operation === "restore";
   const showForm = flow === "configure" || flow === "error";
-  const step = activeStep(flow);
-  const progress = flow in progressCopy
-    ? progressCopy[flow as keyof typeof progressCopy]
-    : progressCopy.booting;
+  const progress = progressCopy(flow, snapshot);
 
   useEffect(() => {
     if (!showForm) return;
@@ -193,22 +222,10 @@ export function ManagedRuntimeSetupScreen({
           </form>
         ) : (
           <section aria-label="Connection progress" aria-live="polite" className="connection-form connection-setup-card">
-            <header className="connection-section-label"><span>Workspace setup</span><span className="connection-step-count">{Math.min(step + 1, 3)} of 3</span></header>
+            <header className="connection-section-label"><span>Local workspace</span><span className="connection-step-count">{availabilityLabel(snapshot.availability)}</span></header>
             <div className="connection-card-heading"><h2>{progress[0]}</h2><p>Keep WA Studio open while setup completes.</p></div>
-            <ol aria-label="Workspace setup progress" className="connection-setup-steps">
-              {[
-                ["Connect OpenWA", "Validate the gateway and discover Event Inbox."],
-                ["Start local services", "Prepare Runtime, PostgreSQL, and the durable queue."],
-                ["Open workspace", "Attach Studio after every local process is healthy."],
-              ].map(([title, description], index) => (
-                <li className={index < step ? "is-complete" : index === step ? "is-active" : ""} key={title}>
-                  <span className="connection-step-index">{index < step ? <AppIcon name="check" size="xs" /> : index + 1}</span>
-                  <span><strong>{title}</strong><small>{description}</small></span>
-                </li>
-              ))}
-            </ol>
             <p className="managed-runtime-progress" role="status"><span aria-hidden="true" /><strong>{progress[1]}</strong></p>
-            <dl className="connection-runtime-grid"><div><dt>Database</dt><dd>PostgreSQL</dd></div><div><dt>Queue</dt><dd>PostgreSQL</dd></div><div><dt>Processes</dt><dd>API · Worker · Scheduler</dd></div></dl>
+            <dl className="connection-runtime-grid"><div><dt>Data</dt><dd>PostgreSQL · local</dd></div><div><dt>Queue</dt><dd>Durable · local</dd></div><div><dt>Runtime</dt><dd>Supervised by WA Studio</dd></div></dl>
           </section>
         )}
       </ConnectionShell>

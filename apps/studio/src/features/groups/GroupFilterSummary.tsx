@@ -105,8 +105,8 @@ export function GroupFilterSummary({
         )}
         {state.isActive !== undefined && (
           <FilterChip
-            accessibleLabel="Inactive groups"
-            label="Inactive groups"
+            accessibleLabel={state.isActive ? "Active groups" : "Inactive groups"}
+            label={state.isActive ? "Active groups" : "Inactive groups"}
             onRemove={() => setState((current) => ({
               ...current,
               isActive: undefined,

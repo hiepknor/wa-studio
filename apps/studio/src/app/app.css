@@ -85,51 +85,6 @@ h1 { margin: 10px 0 12px; font-family: var(--font-display); font-size: var(--typ
 .connection-card-heading p { max-width: var(--copy-line-narrow); margin: 0; color: var(--text-tertiary); font-size: var(--type-caption); line-height: var(--leading-ui); }
 .connection-card-kicker { color: var(--text-tertiary); font-family: var(--font-mono); font-size: var(--type-micro); letter-spacing: var(--tracking-label); text-transform: uppercase; }
 .connection-fields { display: grid; gap: var(--space-4); }
-.connection-setup-steps {
-  display: grid;
-  margin: 0 0 var(--space-pane);
-  padding: 0;
-  border-block: var(--border-width) solid var(--divider);
-  list-style: none;
-}
-.connection-setup-steps li {
-  min-height: calc(var(--row-height-relaxed) + var(--space-4));
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border-bottom: var(--border-width) solid var(--divider);
-  color: var(--text-disabled);
-}
-.connection-setup-steps li:last-child { border-bottom: 0; }
-.connection-step-index {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  border: var(--border-width) solid var(--divider-strong);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-size: var(--type-micro);
-}
-.connection-setup-steps li > span:last-child { display: grid; gap: 3px; padding-top: 1px; }
-.connection-setup-steps strong { color: var(--text-secondary); font-size: var(--type-body); font-weight: var(--weight-medium); }
-.connection-setup-steps small { color: var(--text-tertiary); font-size: var(--type-label); line-height: var(--leading-ui); }
-.connection-setup-steps .is-active .connection-step-index {
-  border-color: var(--text-secondary);
-  background: var(--surface-active);
-  color: var(--text-primary);
-  box-shadow: none;
-}
-.connection-setup-steps .is-active strong { color: var(--text-primary); }
-.connection-setup-steps .is-complete .connection-step-index {
-  border-color: var(--state-success-border);
-  color: var(--ok);
-}
-.connection-setup-steps .is-complete strong { color: var(--text-secondary); }
 .connection-status.inline-alert {
   display: flex;
   align-items: center;

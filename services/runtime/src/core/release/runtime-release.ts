@@ -15,7 +15,7 @@ export interface RuntimeReleaseManifest {
   openwaReleaseTag: typeof OPENWA_RELEASE_TAG;
   openwaContractSha256: typeof OPENWA_CONTRACT_SHA256;
   profiles: readonly ['server', 'desktop-managed'];
-  roles: readonly ['api', 'worker', 'scheduler', 'desktop', 'migrate'];
+  roles: readonly ['api', 'worker', 'scheduler', 'desktop', 'migration-plan', 'migrate'];
   databaseBackends: readonly ['postgres'];
   queueBackends: readonly ['redis', 'postgres'];
 }
@@ -29,7 +29,7 @@ export function runtimeReleaseManifest(): RuntimeReleaseManifest {
     openwaReleaseTag: OPENWA_RELEASE_TAG,
     openwaContractSha256: OPENWA_CONTRACT_SHA256,
     profiles: ['server', 'desktop-managed'],
-    roles: ['api', 'worker', 'scheduler', 'desktop', 'migrate'],
+    roles: ['api', 'worker', 'scheduler', 'desktop', 'migration-plan', 'migrate'],
     databaseBackends: ['postgres'],
     queueBackends: ['redis', 'postgres'],
   };

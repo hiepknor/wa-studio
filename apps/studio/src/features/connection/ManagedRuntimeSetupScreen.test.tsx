@@ -13,6 +13,15 @@ function deferred<T>() {
 
 const snapshot: ManagedRuntimeSnapshot = {
   phase: "provisioningRequired",
+  availability: "needsSetup",
+  capabilities: {
+    canRead: false,
+    canEditDrafts: false,
+    canSync: false,
+    canLaunchCampaign: false,
+    canSend: false,
+  },
+  maintenance: null,
   manifest: { schemaVersion: 2, service: "wa-runtime", version: "0.1.0", contractVersion: "v1", openwaReleaseTag: "1.2.3", openwaContractSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", profiles: ["desktop-managed"], roles: ["api", "worker", "scheduler"], databaseBackends: ["postgres"], queueBackends: ["postgres"] },
   connection: null,
   error: null,
@@ -63,13 +72,16 @@ describe("ManagedRuntimeSetupScreen", () => {
   });
 
   it.each([
-    ["validating", "Checking OpenWA"],
-    ["starting", "Starting local services"],
-    ["attaching", "Opening workspace"],
-  ] as const)("renders the %s lifecycle without a form", (flow, heading) => {
-    render(<ManagedRuntimeSetupScreen flow={flow} onConnect={vi.fn()} snapshot={snapshot} />);
+    ["validating", "provisioningRequired", "Checking OpenWA"],
+    ["starting", "databaseStarting", "Starting local database"],
+    ["starting", "migrating", "Upgrading local data"],
+    ["starting", "runtimeStarting", "Starting WA Runtime"],
+    ["attaching", "ready", "Opening workspace"],
+  ] as const)("renders the %s/%s lifecycle without a form", (flow, phase, heading) => {
+    render(<ManagedRuntimeSetupScreen flow={flow} onConnect={vi.fn()} snapshot={{ ...snapshot, phase, availability: phase === "ready" ? "online" : "starting" }} />);
     expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
     expect(screen.queryByLabelText("OpenWA API key")).not.toBeInTheDocument();
+    expect(screen.queryByText(/of 3/u)).not.toBeInTheDocument();
   });
 
   it("renders a stable repair form with the native error", async () => {

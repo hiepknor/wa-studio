@@ -135,6 +135,44 @@ describe('PostgresQueueTransport', () => {
     expect(secondClosed).toBe(true);
   });
 
+  it('releases a job claimed after shutdown begins without processing it', async () => {
+    await transport.publish(
+      'message-send',
+      'shutdown-race',
+      { value: 'must-remain-queued' },
+      { jobId: 'shutdown-race-job', attempts: 1 },
+    );
+    const lock = await pool.connect();
+    await lock.query('BEGIN');
+    await lock.query(
+      `SELECT 1 FROM runtime_queue_jobs
+       WHERE queue_name = 'message-send' AND job_id = 'shutdown-race-job'
+       FOR UPDATE`,
+    );
+    const processed = vi.fn();
+    const errors: Error[] = [];
+    const worker = transport.startWorker(
+      'message-send',
+      1,
+      processed,
+      error => { errors.push(error); },
+    );
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const closing = worker.close();
+
+    await lock.query('COMMIT');
+    lock.release();
+    await closing;
+
+    expect(processed).not.toHaveBeenCalled();
+    expect(errors).toEqual([]);
+    const queued = await pool.query(
+      `SELECT lease_owner, lease_expires_at FROM runtime_queue_jobs
+       WHERE queue_name = 'message-send' AND job_id = 'shutdown-race-job'`,
+    );
+    expect(queued.rows[0]).toMatchObject({ lease_owner: null, lease_expires_at: null });
+  });
+
   it('reclaims a delivery after its previous worker lease expires', async () => {
     await transport.publish(
       'campaign',

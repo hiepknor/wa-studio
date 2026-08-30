@@ -25,7 +25,6 @@ import { DropdownMenu, DropdownMenuItem } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import { SearchField } from "@/shared/ui/SearchField";
-import { SegmentedControl } from "@/shared/ui/SegmentedControl";
 import { Tabs } from "@/shared/ui/Tabs";
 import { TablePagination } from "@/shared/ui/TablePagination";
 import { useToast } from "@/shared/ui/Toast";
@@ -58,17 +57,13 @@ import {
   GroupCapabilityStatus,
   groupCapabilityIsStale,
 } from "./GroupCapabilityStatus";
-import { GroupSearchToolbar } from "./GroupSearchToolbar";
+import { GroupBulkActionBar } from "./GroupBulkActionBar";
+import { GroupListDestinationDialog } from "./GroupListDestinationDialog";
 import { GroupListMetadataDialog } from "./GroupListMetadataDialog";
+import { GroupSearchToolbar } from "./GroupSearchToolbar";
 import { GroupScopeSelector } from "./GroupScopeSelector";
 import { GroupsTable, type GroupsTableRow } from "./GroupsTable";
-import {
-  filterGroupListMembership,
-  groupListCapacityLabel,
-  groupListDraftDiff,
-  groupListDraftRowOrder,
-  type GroupMembershipFilter,
-} from "./groups-workspace-state";
+import { filterGroupListMembership } from "./groups-workspace-state";
 import { reconcileMemberDatasetRevision } from "./member-dataset";
 import {
   memberDisplayName,
@@ -206,10 +201,11 @@ export function GroupsScreen() {
     sessionId: selectedSessionId,
   });
   useWorkspaceNavigationGuard(groupsScope.dirty, {
-    message: "Unsaved group list details or staged membership will be discarded before leaving this workspace. Runtime data is not changed.",
+    message: "Unsaved group list details will be discarded before leaving this workspace. Runtime data is not changed.",
     title: "Leave group list draft?",
   });
   const [page, setPage] = useState<RuntimeGroupPage | null>(null);
+  const [directoryTotal, setDirectoryTotal] = useState<number | null>(null);
   const [listState, setListState] = useState<GroupListState>(() =>
     initialGroupListState(selectedSessionId),
   );
@@ -244,19 +240,13 @@ export function GroupsScreen() {
   const [syncedMemberTotal, setSyncedMemberTotal] = useState<number | null>(
     null,
   );
-  const [membershipFilter, setMembershipFilter] =
-    useState<GroupMembershipFilter>("all");
-  const [draftDetailsOpen, setDraftDetailsOpen] = useState(false);
+  const [removeConfirmationOpen, setRemoveConfirmationOpen] = useState(false);
   const [deleteIntent, setDeleteIntent] = useState<RuntimeGroupList | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const scopeKey = groupsScope.scope.mode === "directory"
     ? "directory"
-    : groupsScope.scope.mode === "list:view"
-      ? `view:${groupsScope.scope.list.id}`
-      : groupsScope.scope.mode === "list:edit"
-        ? `edit:${groupsScope.scope.draft.canonical?.id ?? "unknown"}`
-        : `create:${groupsScope.scope.draft.createIdempotencyKey}`;
+    : `view:${groupsScope.scope.list.id}`;
   const scopeKeyRef = useRef(scopeKey);
   const listRevision = useRef(0);
   const listTargetRef = useRef("");
@@ -280,7 +270,6 @@ export function GroupsScreen() {
     groupId: string;
   } | null>(null);
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const groupSearchRef = useRef<HTMLInputElement | null>(null);
   const groupsRead = useLatestRequest();
   const groupDetailRead = useLatestRequest();
   const membersRead = useLatestRequest();
@@ -369,6 +358,14 @@ export function GroupsScreen() {
         )
           return false;
 
+        const unfilteredDirectory = !state.query
+          && state.capabilityStatuses.length === 0
+          && state.capabilityFreshness.length === 0
+          && state.isActive === undefined
+          && state.minParticipants === undefined
+          && state.maxParticipants === undefined;
+        if (unfilteredDirectory) setDirectoryTotal(nextPage.meta.total);
+
         const recoveredOffset = reconciledPageOffset({
           limit: PAGE_SIZE,
           offset: state.offset,
@@ -434,6 +431,12 @@ export function GroupsScreen() {
   const syncError = sync.error;
   const syncForeground = sync.active;
   const syncActive = sync.active;
+
+  useEffect(() => {
+    if (groupsScope.selectedIds.length === 0 && !groupsScope.bulkSaving) {
+      setRemoveConfirmationOpen(false);
+    }
+  }, [groupsScope.bulkSaving, groupsScope.selectedIds.length]);
 
   const loadMembers = useCallback(
     async (
@@ -548,6 +551,7 @@ export function GroupsScreen() {
     deleteActiveRequestRef.current = null;
     cancelCapabilityRefresh();
     setPage(null);
+    setDirectoryTotal(null);
     setListState(initialGroupListState(selectedSessionId));
     setFiltersOpen(false);
     setListLoadReason(null);
@@ -572,8 +576,7 @@ export function GroupsScreen() {
     setMembersError(null);
     setSyncedMemberTotal(null);
     setSyncConfirmationOpen(false);
-    setMembershipFilter("all");
-    setDraftDetailsOpen(false);
+    setRemoveConfirmationOpen(false);
     setDeleteIntent(null);
     setDeleting(false);
     setDeleteError(null);
@@ -589,12 +592,8 @@ export function GroupsScreen() {
     setListLoadReason(null);
     setListError(null);
     setFiltersOpen(false);
-    setMembershipFilter("all");
-    setDraftDetailsOpen(false);
-    if (groupsScope.scope.mode === "list:create") {
-      window.requestAnimationFrame(() => groupSearchRef.current?.focus());
-    }
-  }, [groupsRead, groupsScope.scope.mode, scopeKey, selectedSessionId]);
+    setRemoveConfirmationOpen(false);
+  }, [groupsRead, scopeKey, selectedSessionId]);
 
   useEffect(() => {
     const {
@@ -996,12 +995,50 @@ export function GroupsScreen() {
     });
   }
 
-  async function saveGroupList() {
-    const saved = await groupsScope.saveDraft();
+  async function saveGroupListMetadata() {
+    const mode = groupsScope.metadataDraft?.mode;
+    const source = groupsScope.metadataDraft?.mode === "create"
+      ? groupsScope.metadataDraft.source
+      : null;
+    const selectedCount = groupsScope.metadataDraft?.mode === "create"
+      ? groupsScope.metadataDraft.memberIds.length
+      : 0;
+    const saved = await groupsScope.saveMetadata();
     if (!saved) return;
     toast.notify({
+      description: mode === "create" && source === "selection"
+        ? `${selectedCount.toLocaleString()} ${selectedCount === 1 ? "group was" : "groups were"} included.`
+        : undefined,
       id: `group-list-saved-${saved.id}`,
-      title: "Group list saved",
+      title: mode === "edit" ? "List details saved" : "Group list created",
+      tone: "success",
+    });
+  }
+
+  async function addSelectionToList(list: RuntimeGroupList) {
+    const result = await groupsScope.addSelectionToList(list);
+    if (!result) return;
+    toast.notify({
+      description: result.unchangedCount
+        ? `${result.unchangedCount.toLocaleString()} already belonged to this list.`
+        : undefined,
+      id: `group-list-add-${result.list.id}`,
+      title: result.changedCount
+        ? `${result.changedCount.toLocaleString()} ${result.changedCount === 1 ? "group" : "groups"} added`
+        : "All selected groups were already included",
+      tone: "success",
+    });
+  }
+
+  async function removeSelectionFromList() {
+    const result = await groupsScope.removeSelectionFromList();
+    if (!result) return;
+    setRemoveConfirmationOpen(false);
+    toast.notify({
+      id: `group-list-remove-${result.list.id}`,
+      title: result.changedCount
+        ? `${result.changedCount.toLocaleString()} ${result.changedCount === 1 ? "group" : "groups"} removed`
+        : "Selected groups were already absent",
       tone: "success",
     });
   }
@@ -1104,36 +1141,39 @@ export function GroupsScreen() {
     listState.query ||
     listState.capabilityStatuses.length ||
     listState.capabilityFreshness.length ||
-    listState.isActive !== undefined,
+    listState.isActive !== undefined ||
+    listState.minParticipants !== undefined ||
+    listState.maxParticipants !== undefined,
   );
   const directoryRows = useMemo<GroupsTableRow[]>(
     () => visiblePage?.data ?? [],
     [visiblePage],
   );
-  useEffect(() => groupsScope.rememberRows(directoryRows), [directoryRows, groupsScope.rememberRows]);
+  const clientCriteria = {
+    active: listState.isActive,
+    capabilityFreshness: listState.capabilityFreshness,
+    capabilityStatuses: listState.capabilityStatuses,
+    maxParticipants: listState.maxParticipants,
+    minParticipants: listState.minParticipants,
+    query: listState.query,
+  };
 
   const tableModel = useMemo(() => {
     const scope = groupsScope.scope;
     const directoryTotal = visiblePage?.meta.total ?? 0;
     const directoryLimit = visiblePage?.meta.limit ?? PAGE_SIZE;
     const directoryOffset = visiblePage?.meta.offset ?? offset;
-    const criteria = {
-      active: listState.isActive ?? true,
-      capabilityFreshness: listState.capabilityFreshness,
-      capabilityStatuses: listState.capabilityStatuses,
-      query: listState.query,
-    };
+    const displayedList = scope.mode === "list:view" ? scope.list : null;
 
-    if (scope.mode === "list:view") {
+    if (displayedList) {
       const filtered = filterGroupListMembership(groupsScope.membership?.data ?? [], {
-        ...criteria,
-        membership: "all",
+        ...clientCriteria,
       });
       const rows = filtered
         .slice(offset, offset + PAGE_SIZE)
-        .map((row) => groupListTableRow(row, scope.list.sessionId));
+        .map((row) => groupListTableRow(row, displayedList.sessionId));
       return {
-        caption: `Groups saved in ${scope.list.name}`,
+        caption: `Groups saved in ${displayedList.name}`,
         emptyMessage: hasListCriteria
           ? "No saved groups match this search or filters."
           : "This saved list has no groups.",
@@ -1142,99 +1182,31 @@ export function GroupsScreen() {
         pageIds: rows.map((row) => row.id),
         pageLimit: PAGE_SIZE,
         pageOffset: offset,
-        pinnedIds: new Set<string>(),
         rows,
-        selection: "none" as const,
         total: filtered.length,
       };
     }
 
-    if (scope.mode === "directory") {
-      return {
-        caption: "Groups in the active Gateway session",
-        emptyMessage: hasListCriteria
-          ? "No groups match this search or filters."
-          : "No groups were returned for this session.",
-        error: Boolean(listError),
-        loading,
-        pageIds: directoryRows.map((row) => row.id),
-        pageLimit: directoryLimit,
-        pageOffset: directoryOffset,
-        pinnedIds: new Set<string>(),
-        rows: directoryRows,
-        selection: "directory" as const,
-        total: directoryTotal,
-      };
-    }
-
-    const draft = scope.draft;
-    const selectedIds = new Set(draft.memberIds);
-    if (membershipFilter === "in-list") {
-      const filtered = filterGroupListMembership(
-        draft.memberIds.flatMap((id) => draft.membershipRows[id] ? [draft.membershipRows[id]] : []),
-        { ...criteria, membership: "in-list", selectedIds },
-      );
-      const rows = filtered
-        .slice(offset, offset + PAGE_SIZE)
-        .map((row) => groupListTableRow(row, draft.sessionId));
-      return {
-        caption: `Groups staged for ${draft.name}`,
-        emptyMessage: "No staged groups match this search or filters.",
-        error: false,
-        loading: false,
-        pageIds: rows.map((row) => row.id),
-        pageLimit: PAGE_SIZE,
-        pageOffset: offset,
-        pinnedIds: new Set<string>(),
-        rows,
-        selection: "draft" as const,
-        total: filtered.length,
-      };
-    }
-
-    const currentRows = membershipFilter === "not-in-list"
-      ? directoryRows.filter((row) => !selectedIds.has(row.id))
-      : directoryRows;
-    const currentIds = currentRows.map((row) => row.id);
-    const rowOrder = membershipFilter === "not-in-list"
-      ? (() => {
-        const current = new Set(currentIds);
-        const removed = draft.baselineIds.filter((id) => !selectedIds.has(id) && !current.has(id));
-        return { pinnedIds: new Set(removed), rowIds: [...removed, ...currentIds] };
-      })()
-      : groupListDraftRowOrder(draft, currentIds);
-    const currentById = Object.fromEntries(currentRows.map((row) => [row.id, row]));
-    const rows = rowOrder.rowIds.flatMap((id) => {
-      if (currentById[id]) return [currentById[id]];
-      const retained = draft.membershipRows[id];
-      return retained ? [groupListTableRow(retained, draft.sessionId)] : [];
-    });
-    const selectedMatching = membershipFilter === "not-in-list"
-      ? filterGroupListMembership(
-        draft.memberIds.flatMap((id) => draft.membershipRows[id] ? [draft.membershipRows[id]] : []),
-        { ...criteria, membership: "in-list", selectedIds },
-      ).length
-      : 0;
     return {
-      caption: `Directory membership editor for ${draft.name}`,
-      emptyMessage: membershipFilter === "not-in-list"
-        ? "No unselected groups match this search or filters."
-        : hasListCriteria
-          ? "No groups match this search or filters."
-          : "No groups were returned for this session.",
+      caption: "Groups in the active Gateway session",
+      emptyMessage: hasListCriteria
+        ? "No groups match this search or filters."
+        : "No groups were returned for this session.",
       error: Boolean(listError),
       loading,
-      pageIds: currentIds,
+      pageIds: directoryRows.map((row) => row.id),
       pageLimit: directoryLimit,
       pageOffset: directoryOffset,
-      pinnedIds: rowOrder.pinnedIds,
-      rows,
-      selection: "draft" as const,
-      total: membershipFilter === "not-in-list"
-        ? Math.max(0, directoryTotal - selectedMatching)
-        : directoryTotal,
+      rows: directoryRows,
+      total: directoryTotal,
     };
   }, [
+    clientCriteria.active,
+    clientCriteria.capabilityFreshness,
+    clientCriteria.capabilityStatuses,
+    clientCriteria.maxParticipants,
+    clientCriteria.minParticipants,
+    clientCriteria.query,
     directoryRows,
     groupsScope.membership,
     groupsScope.membershipError,
@@ -1242,12 +1214,7 @@ export function GroupsScreen() {
     groupsScope.scope,
     hasListCriteria,
     listError,
-    listState.capabilityFreshness,
-    listState.capabilityStatuses,
-    listState.isActive,
-    listState.query,
     loading,
-    membershipFilter,
     offset,
     visiblePage,
   ]);
@@ -1255,13 +1222,10 @@ export function GroupsScreen() {
   const pageLimit = tableModel.pageLimit;
   const pageOffset = tableModel.pageOffset;
   useEffect(() => {
-    const clientPaginated = groupsScope.scope.mode === "list:view"
-      || ((groupsScope.scope.mode === "list:create" || groupsScope.scope.mode === "list:edit")
-        && membershipFilter === "in-list");
-    if (!clientPaginated || offset === 0 || tableModel.total > offset) return;
+    if (groupsScope.scope.mode !== "list:view" || offset === 0 || tableModel.total > offset) return;
     const lastOffset = lastPageOffset(tableModel.total, PAGE_SIZE);
     setListState((current) => ({ ...current, offset: lastOffset }));
-  }, [groupsScope.scope.mode, membershipFilter, offset, tableModel.total]);
+  }, [groupsScope.scope.mode, offset, tableModel.total]);
   const firstItem = total === 0 ? 0 : pageOffset + 1;
   const lastItem = Math.min(pageOffset + tableModel.pageIds.length, total);
   const memberTotal = memberPage?.meta.total ?? 0;
@@ -1286,18 +1250,7 @@ export function GroupsScreen() {
           ? "Sync finished · Updating session metadata and the current groups page…"
           : groupsScope.scope.mode === "list:view"
             ? `Viewing the persisted membership of ${groupsScope.scope.list.name}.`
-            : groupsScope.scope.mode === "list:create" || groupsScope.scope.mode === "list:edit"
-              ? `Staging static membership for ${groupsScope.scope.draft.name}.`
-              : `Groups synchronized for ${selectedSession?.name ?? "the active session"}.`;
-  const activeDraft = groupsScope.scope.mode === "list:create"
-    || groupsScope.scope.mode === "list:edit"
-    ? groupsScope.scope.draft
-    : null;
-  const draftDiff = activeDraft ? groupListDraftDiff(activeDraft) : null;
-  const draftCapacity = activeDraft
-    ? groupListCapacityLabel(activeDraft.memberIds.length)
-    : null;
-
+            : `Groups synchronized for ${selectedSession?.name ?? "the active session"}.`;
   async function copyGroupId(groupId: string) {
     try {
       await navigator.clipboard.writeText(groupId);
@@ -1314,7 +1267,13 @@ export function GroupsScreen() {
           <div className="groups-page-actions">
             <Button
               aria-label={reloadingCurrentView ? "Reloading groups" : "Reload groups"}
-              disabled={!selectedSessionId || loading || groupsScope.membershipLoading}
+              disabled={
+                !selectedSessionId
+                || loading
+                || groupsScope.membershipLoading
+                || groupsScope.selectionLocked
+                || groupsScope.bulkSaving
+              }
               icon="refresh"
               loading={reloadingCurrentView}
               onClick={() => void reloadGroups()}
@@ -1326,7 +1285,12 @@ export function GroupsScreen() {
             </Button>
             <Button
               aria-label={syncState === "updating" ? "Updating groups view" : syncForeground ? "Syncing groups" : "Sync groups"}
-              disabled={!selectedSessionId || syncActive}
+              disabled={
+                !selectedSessionId
+                || syncActive
+                || groupsScope.selectionLocked
+                || groupsScope.bulkSaving
+              }
               icon="sync"
               loading={syncForeground}
               onClick={() => setSyncConfirmationOpen(true)}
@@ -1413,17 +1377,30 @@ export function GroupsScreen() {
               </div>
               <div className="group-list-context-actions">
                 <Button
-                  disabled={groupsScope.membershipLoading || !groupsScope.membership}
+                  disabled={
+                    groupsScope.membershipLoading
+                    || !groupsScope.membership
+                    || groupsScope.selectionLocked
+                    || groupsScope.bulkSaving
+                  }
                   icon="edit"
                   onClick={groupsScope.startEdit}
                   size="sm"
                 >
-                  Edit
+                  Edit list
                 </Button>
                 <DropdownMenu
                   ariaLabel={`Actions for ${groupsScope.scope.list.name}`}
+                  disabled={groupsScope.selectionLocked || groupsScope.bulkSaving}
                   trigger={(triggerProps) => (
-                    <Button {...triggerProps} aria-label={`More actions for ${groupsScope.selectedList?.name ?? "saved list"}`} icon="more" size="sm" variant="ghost" />
+                    <Button
+                      {...triggerProps}
+                      aria-label={`More actions for ${groupsScope.selectedList?.name ?? "saved list"}`}
+                      disabled={groupsScope.selectionLocked || groupsScope.bulkSaving}
+                      icon="more"
+                      size="sm"
+                      variant="ghost"
+                    />
                   )}
                 >
                   <DropdownMenuItem
@@ -1442,129 +1419,43 @@ export function GroupsScreen() {
             </section>
           )}
 
-          {activeDraft && draftDiff && (
-            <section className="group-list-draft-bar" aria-label="Group list draft">
-              <div className="group-list-context-copy">
-                <span>{groupsScope.scope.mode === "list:create" ? "New list draft" : "Editing saved list"}</span>
-                <strong>{activeDraft.name}</strong>
-                <small>
-                  {groupsScope.scope.mode === "list:edit"
-                    ? `Saved ${draftDiff.savedCount.toLocaleString()} · Staged ${draftDiff.stagedCount.toLocaleString()} · +${draftDiff.addedIds.length} / −${draftDiff.removedIds.length}`
-                    : `${draftDiff.stagedCount.toLocaleString()} groups staged`}
-                  {draftCapacity ? ` · ${draftCapacity}` : ""}
-                </small>
-              </div>
-              <div className="group-list-context-actions">
-                <Button onClick={() => setDraftDetailsOpen(true)} size="sm" variant="ghost">Details</Button>
-                {groupsScope.scope.mode === "list:create" && groupsScope.hasUnconfirmedCreateIntent && (
-                  <Button
-                    disabled={groupsScope.saving}
-                    onClick={groupsScope.restoreUnconfirmedCreateIntent}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    Restore request
-                  </Button>
-                )}
-                <Button
-                  disabled={groupsScope.saving}
-                  onClick={() => groupsScope.scope.mode === "list:edit" && groupsScope.scope.draft.canonical
-                    ? groupsScope.requestList(groupsScope.scope.draft.canonical)
-                    : groupsScope.requestDirectory()}
-                  size="sm"
-                >
-                  Discard
-                </Button>
-                <Button
-                  disabled={groupsScope.saving || !activeDraft.name.trim() || (groupsScope.scope.mode === "list:edit" && !groupsScope.dirty)}
-                  loading={groupsScope.saving}
-                  onClick={() => void saveGroupList()}
-                  size="sm"
-                  variant="primary"
-                >
-                  Save
-                </Button>
-              </div>
-            </section>
-          )}
-
           <GroupSearchToolbar
-            actions={activeDraft ? (
-              <SegmentedControl
-                containerClassName="groups-membership-filter"
-                label="Membership"
-                labelHidden
-                onChange={setMembershipFilter}
-                options={[
-                  { label: "All groups", value: "all" },
-                  { label: "In list", value: "in-list" },
-                  { label: "Not in list", value: "not-in-list" },
-                ]}
-                value={membershipFilter}
-              />
-            ) : groupsScope.scope.mode === "directory" && groupsScope.directoryIds.length > 0 ? (
-              <Button
-                onClick={() => groupsScope.requestMetadata(groupsScope.directoryIds)}
-                size="sm"
-                variant="primary"
-              >
-                Save as list · {groupsScope.directoryIds.length.toLocaleString()}
-              </Button>
-            ) : undefined}
             filtersOpen={filtersOpen}
             firstItem={firstItem}
             lastItem={lastItem}
             leading={(
               <GroupScopeSelector
-                disabled={!selectedSessionId || groupsScope.saving}
+                disabled={
+                  !selectedSessionId
+                  || groupsScope.saving
+                  || groupsScope.bulkSaving
+                  || groupsScope.selectionLocked
+                }
+                directoryCount={directoryTotal}
                 directorySelected={groupsScope.scope.mode === "directory"}
                 error={groupsScope.catalogError}
                 hasMore={groupsScope.catalogHasMore}
                 lists={groupsScope.catalogLists}
                 loading={groupsScope.catalogLoading}
                 onLoadMore={groupsScope.loadMoreCatalog}
-                onNewList={() => groupsScope.requestMetadata([])}
+                onNewList={() => groupsScope.requestCreate("scope")}
                 onQueryChange={groupsScope.setCatalogInputQuery}
                 onSelectDirectory={groupsScope.requestDirectory}
                 onSelectList={groupsScope.requestList}
                 query={groupsScope.catalogInputQuery}
                 selectedList={groupsScope.selectedList}
                 selectedListId={groupsScope.selectedList?.id ?? null}
-                valueLabel={activeDraft?.name}
               />
             )}
             loading={tableModel.loading}
             searchLabel={groupsScope.scope.mode === "list:view"
               ? `Search groups in ${groupsScope.scope.list.name}`
-              : activeDraft
-                ? "Search groups for this list"
-                : "Search all synchronized groups"}
-            searchInputRef={groupSearchRef}
+              : "Search all synchronized groups"}
             setFiltersOpen={setFiltersOpen}
             setState={setListState}
             state={listState}
             total={total}
           />
-
-          {(groupsScope.selectionError
-            || groupsScope.saveError
-            || groupsScope.fieldErrors.groupIds
-            || groupsScope.fieldErrors.name
-            || groupsScope.fieldErrors.description) && (
-            <InlineAlert
-              className="data-table-error"
-              title={groupsScope.saveError?.title
-                ?? (groupsScope.fieldErrors.name || groupsScope.fieldErrors.description
-                  ? "Invalid list details"
-                  : "Group selection")}
-            >
-              {groupsScope.saveError?.body
-                ?? groupsScope.fieldErrors.name
-                ?? groupsScope.fieldErrors.description
-                ?? groupsScope.fieldErrors.groupIds
-                ?? groupsScope.selectionError}
-            </InlineAlert>
-          )}
 
           {(groupsScope.scope.mode === "list:view" ? groupsScope.membershipError : listError) && (
             <InlineAlert
@@ -1585,31 +1476,41 @@ export function GroupsScreen() {
             </InlineAlert>
           )}
 
+          {groupsScope.selectionError && (
+            <InlineAlert className="group-selection-alert" title="Group selection">
+              {groupsScope.selectionError}
+            </InlineAlert>
+          )}
+
+          <GroupBulkActionBar
+            actionDisabled={groupsScope.bulkSaving || tableModel.loading}
+            disabled={groupsScope.bulkSaving}
+            existingListsState={groupsScope.catalogAvailability}
+            listName={groupsScope.scope.mode === "list:view" ? groupsScope.scope.list.name : undefined}
+            mode={groupsScope.scope.mode === "directory" ? "add" : "remove"}
+            onAddExisting={groupsScope.requestAddDestination}
+            onClear={groupsScope.clearSelection}
+            onCreate={() => groupsScope.requestCreate("selection")}
+            onRemove={() => {
+              groupsScope.clearBulkError();
+              setRemoveConfirmationOpen(true);
+            }}
+            selectedCount={groupsScope.selectedIds.length}
+          />
+
           <GroupsTable
             activeGroupId={selectedGroup?.id}
             caption={tableModel.caption}
             emptyMessage={tableModel.emptyMessage}
             error={tableModel.error}
             loading={tableModel.loading}
+            onToggle={groupsScope.toggleSelection}
+            onTogglePage={() => groupsScope.toggleSelectionPage(tableModel.pageIds)}
             onView={(group, trigger) => void openGroup(group, trigger)}
+            pageIds={tableModel.pageIds}
             rows={tableModel.rows}
-            selection={tableModel.selection === "none" ? undefined : {
-              disabled: groupsScope.saving,
-              onToggle: tableModel.selection === "directory"
-                ? groupsScope.toggleDirectory
-                : groupsScope.toggleDraft,
-              onTogglePage: () => tableModel.selection === "directory"
-                ? groupsScope.toggleDirectoryPage(tableModel.pageIds)
-                : groupsScope.toggleDraftPage(tableModel.pageIds),
-              pageIds: tableModel.pageIds,
-              pinnedIds: tableModel.pinnedIds,
-              pinnedLabel: groupsScope.scope.mode === "list:edit"
-                ? "Saved or staged outside current results"
-                : "Selected outside current results",
-              selectedIds: tableModel.selection === "directory"
-                ? groupsScope.directorySelectedIds
-                : activeDraft ? new Set(activeDraft.memberIds) : new Set<string>(),
-            }}
+            selectedIds={groupsScope.selectedIdSet}
+            selectionDisabled={groupsScope.bulkSaving || tableModel.loading}
           />
 
           <TablePagination
@@ -1622,42 +1523,67 @@ export function GroupsScreen() {
         </div>
 
         <GroupListMetadataDialog
-          onClose={() => groupsScope.setMetadataOpen(false)}
-          onContinue={groupsScope.continueMetadata}
-          open={groupsScope.metadataOpen}
-          seedCount={groupsScope.metadataSeedCount}
-          sessionName={selectedSession?.name ?? "Active session"}
+          draft={groupsScope.metadataDraft}
+          fieldErrors={groupsScope.fieldErrors}
+          hasUnconfirmedCreateIntent={groupsScope.hasUnconfirmedCreateIntent}
+          onClose={groupsScope.requestCloseMetadata}
+          onRestoreUnconfirmedCreateIntent={groupsScope.restoreUnconfirmedCreateIntent}
+          onSave={() => void saveGroupListMetadata()}
+          onUpdate={groupsScope.updateMetadata}
+          saveError={groupsScope.saveError}
+          saving={groupsScope.saving}
         />
 
-        {activeDraft && (
-          <GroupListMetadataDialog
-            continueLabel="Apply details"
-            dialogDescription="Update the reusable list details without leaving the membership workspace."
-            eyebrow="List details"
-            initialDescription={activeDraft.description}
-            initialName={activeDraft.name}
-            notice="Details remain staged until the full list is saved."
-            onClose={() => setDraftDetailsOpen(false)}
-            onContinue={(metadata) => {
-              groupsScope.updateDraftMetadata(metadata);
-              setDraftDetailsOpen(false);
-            }}
-            open={draftDetailsOpen}
-            seedCount={activeDraft.memberIds.length}
-            sessionName={selectedSession?.name ?? "Active session"}
-            title="Edit list details"
-          />
-        )}
+        <GroupListDestinationDialog
+          emptyCatalog={groupsScope.catalogAvailability === "empty"}
+          error={groupsScope.bulkError ?? (groupsScope.catalogError
+            ? {
+                body: groupsScope.catalogError,
+                title: "Could not load saved lists",
+              }
+            : null)}
+          hasMore={groupsScope.catalogHasMore}
+          lists={groupsScope.catalogLists}
+          loading={groupsScope.catalogLoading}
+          onApply={(list) => void addSelectionToList(list)}
+          onClose={groupsScope.closeDestination}
+          onCreate={() => groupsScope.requestCreate("selection")}
+          onLoadMore={groupsScope.loadMoreCatalog}
+          onQueryChange={groupsScope.setCatalogInputQuery}
+          open={groupsScope.destinationOpen}
+          query={groupsScope.catalogInputQuery}
+          saving={groupsScope.bulkSaving}
+          selectedCount={groupsScope.selectedIds.length}
+        />
 
         <ConfirmationDialog
-          body="Unsaved list details or staged membership will be discarded. Runtime data is not changed."
+          body="Unsaved name or description changes will be discarded. Group membership is not affected."
           cancelLabel="Keep editing"
           confirmLabel="Discard changes"
           confirmVariant="danger"
           onCancel={groupsScope.cancelDiscard}
           onConfirm={groupsScope.confirmDiscard}
           open={groupsScope.discardConfirmationOpen}
-          title="Discard group list changes?"
+          title="Discard list details?"
+        />
+
+        <ConfirmationDialog
+          body={`Remove ${groupsScope.selectedIds.length.toLocaleString()} selected ${groupsScope.selectedIds.length === 1 ? "group" : "groups"} from “${groupsScope.selectedList?.name ?? "this list"}”?`}
+          busy={groupsScope.bulkSaving}
+          busyLabel="Removing…"
+          cancelLabel="Cancel"
+          confirmLabel="Remove groups"
+          confirmVariant="danger"
+          error={groupsScope.bulkError?.body}
+          errorTitle={groupsScope.bulkError?.title}
+          onCancel={() => {
+            if (groupsScope.bulkSaving) return;
+            setRemoveConfirmationOpen(false);
+            groupsScope.clearBulkError();
+          }}
+          onConfirm={() => void removeSelectionFromList()}
+          open={removeConfirmationOpen}
+          title={`Remove from ${groupsScope.selectedList?.name ?? "list"}?`}
         />
 
         <ConfirmationDialog

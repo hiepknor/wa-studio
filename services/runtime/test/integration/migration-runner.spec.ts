@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
-import { runMigrations } from '../../src/core/database/migration-runner';
+import { planMigrations, runMigrations } from '../../src/core/database/migration-runner';
 import { integrationPool } from '../support/integration-database';
 
 describe('migration runner', () => {
@@ -27,6 +27,13 @@ describe('migration runner', () => {
     await writeFile(resolve(directory, migrationName),
       'SELECT pg_sleep(0.1); CREATE TABLE migration_runner_probe (id integer);\n');
 
+    expect(await planMigrations(pool, directory)).toMatchObject({
+      databaseState: 'managed',
+      pending: [migrationName],
+      checksumsBackfill: [],
+      requiresBackup: true,
+    });
+
     const [first, second] = await Promise.all([
       runMigrations(pool, directory),
       runMigrations(pool, directory),
@@ -37,6 +44,11 @@ describe('migration runner', () => {
       'SELECT checksum FROM schema_migrations WHERE name = $1', [migrationName],
     );
     expect(record.rows[0]?.checksum).toMatch(/^[a-f0-9]{64}$/u);
+    expect(await planMigrations(pool, directory)).toMatchObject({
+      pending: [],
+      checksumsBackfill: [],
+      requiresBackup: false,
+    });
   });
 
   it('fails closed when an already-applied migration changes', async () => {
@@ -52,6 +64,12 @@ describe('migration runner', () => {
     await writeFile(resolve(directory, migrationName),
       'SELECT pg_sleep(0.1); CREATE TABLE migration_runner_probe (id integer);\n');
     await pool.query('UPDATE schema_migrations SET checksum = NULL WHERE name = $1', [migrationName]);
+
+    expect(await planMigrations(pool, directory)).toMatchObject({
+      pending: [],
+      checksumsBackfill: [migrationName],
+      requiresBackup: false,
+    });
 
     const result = await runMigrations(pool, directory);
 

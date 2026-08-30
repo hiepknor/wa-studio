@@ -51,6 +51,15 @@ function defaultCreateApi(profile: RuntimeConnectionProfile): RuntimeApi {
 
 const DISCOVERING_MANAGED_RUNTIME: ManagedRuntimeSnapshot = {
   phase: "discovering",
+  availability: "starting",
+  capabilities: {
+    canRead: false,
+    canEditDrafts: false,
+    canSync: false,
+    canLaunchCampaign: false,
+    canSend: false,
+  },
+  maintenance: null,
   manifest: null,
   connection: null,
   error: null,
@@ -86,6 +95,7 @@ export function RuntimeConnectionProvider({
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [operationalHealth, setOperationalHealth] =
     useState<RuntimeOperationalHealth | null>(null);
+  const connectedRef = useRef<ConnectedRuntime | null>(null);
   const connectionRevision = useRef(0);
   const managedConfigurationInFlight = useRef(false);
   const managedConnectionInFlight = useRef<string | null>(null);
@@ -100,6 +110,23 @@ export function RuntimeConnectionProvider({
     setManagedConnectionFlowState(flow);
   }, []);
 
+  const detachConnection = useCallback((managedOnly = false) => {
+    const current = connectedRef.current;
+    const managed = managedConnectionInFlight.current !== null || (current
+      ? "transport" in current.profile && current.profile.transport === "native"
+      : false);
+    if (managedOnly && !managed) return;
+    connectionRead.cancel();
+    sessionsRead.cancel();
+    healthRead.cancel();
+    connectionRevision.current += 1;
+    managedConnectionInFlight.current = null;
+    connectedRef.current = null;
+    setConnected(null);
+    setSelectedSessionId(null);
+    setOperationalHealth(null);
+  }, [connectionRead, healthRead, sessionsRead]);
+
   const attach = useCallback(
     async (input: RuntimeConnectionProfile) => {
       const revision = ++connectionRevision.current;
@@ -111,7 +138,9 @@ export function RuntimeConnectionProvider({
           || !connectionRead.isCurrent(signal)
         ) throw supersededRequestError(signal);
         const profile = normalizeRuntimeProfile(input);
-        setConnected({ api: createApi(profile), profile, sessions: result.sessions });
+        const nextConnection = { api: createApi(profile), profile, sessions: result.sessions };
+        connectedRef.current = nextConnection;
+        setConnected(nextConnection);
         setOperationalHealth(null);
         setManagedConnectionFlow("connected");
         setSelectedSessionId(
@@ -184,6 +213,7 @@ export function RuntimeConnectionProvider({
     const acceptManagedRuntime = (snapshot: ManagedRuntimeSnapshot) => {
       if (disposed) return;
       setManagedRuntime(snapshot);
+      if (snapshot.phase !== "ready") detachConnection(true);
       if (snapshot.phase === "unavailable") {
         setManagedConnectionFlow("manual");
         return;
@@ -245,6 +275,15 @@ export function RuntimeConnectionProvider({
         if (!disposed && !receivedManagedEvent) {
           setManagedRuntime({
             phase: "unavailable",
+            availability: "offline",
+            capabilities: {
+              canRead: false,
+              canEditDrafts: false,
+              canSync: false,
+              canLaunchCampaign: false,
+              canSend: false,
+            },
+            maintenance: null,
             manifest: null,
             connection: null,
             error: null,
@@ -257,20 +296,19 @@ export function RuntimeConnectionProvider({
       disposed = true;
       unlisten?.();
     };
-  }, [attach, discoverManagedRuntime, setManagedConnectionFlow, subscribeToManagedRuntime]);
+  }, [
+    attach,
+    detachConnection,
+    discoverManagedRuntime,
+    setManagedConnectionFlow,
+    subscribeToManagedRuntime,
+  ]);
 
   const disconnect = useCallback(() => {
-    connectionRead.cancel();
-    sessionsRead.cancel();
-    healthRead.cancel();
-    connectionRevision.current += 1;
-    managedConnectionInFlight.current = null;
-    setConnected(null);
+    detachConnection();
     setManagedConnectionError(null);
     setManagedConnectionFlow(managedRuntime.phase === "unavailable" ? "manual" : "configure");
-    setSelectedSessionId(null);
-    setOperationalHealth(null);
-  }, [connectionRead, healthRead, managedRuntime.phase, sessionsRead, setManagedConnectionFlow]);
+  }, [detachConnection, managedRuntime.phase, setManagedConnectionFlow]);
 
   const refreshOperationalHealth = useCallback(async () => {
     if (!connected || typeof connected.api.getOperationalHealth !== "function") return false;

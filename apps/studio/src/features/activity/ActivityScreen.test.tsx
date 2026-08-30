@@ -87,6 +87,15 @@ function activityContext(
     managedConnectionFlow: "manual",
     managedRuntime: {
       phase: "unavailable",
+      availability: "offline",
+      capabilities: {
+        canRead: false,
+        canEditDrafts: false,
+        canSync: false,
+        canLaunchCampaign: false,
+        canSend: false,
+      },
+      maintenance: null,
       manifest: null,
       connection: null,
       error: null,

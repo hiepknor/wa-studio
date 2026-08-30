@@ -9,7 +9,7 @@ const lists: RuntimeGroupList[] = [
   {
     archivedAt: null,
     createdAt: "2026-08-25T00:00:00.000Z",
-    description: null,
+    description: "Launch operations",
     groupCount: 12,
     id: "list-1",
     membershipRevision: 2,
@@ -27,6 +27,7 @@ describe("GroupScopeSelector", () => {
     const onSelectList = vi.fn();
     render(
       <GroupScopeSelector
+        directoryCount={128}
         lists={lists}
         onNewList={vi.fn()}
         onQueryChange={onQueryChange}
@@ -40,6 +41,10 @@ describe("GroupScopeSelector", () => {
     await user.click(trigger);
     await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search saved lists" })).toHaveFocus());
     expect(screen.getByRole("option", { name: /All groups/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: /All groups/ })).toHaveTextContent("All groups128 groups");
+    const savedOption = screen.getByRole("option", { name: /North America/ });
+    expect(savedOption).toHaveTextContent("North America12 groupsLaunch operations");
+    expect(screen.getByText("1 saved list · Current session only")).toBeInTheDocument();
 
     await user.type(screen.getByRole("searchbox", { name: "Search saved lists" }), "north");
     expect(onQueryChange).toHaveBeenLastCalledWith("h");
@@ -103,7 +108,7 @@ describe("GroupScopeSelector", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
-  it("keeps New list available in the fixed pane header", async () => {
+  it("keeps creation separate from scope navigation", async () => {
     const user = userEvent.setup();
     const onNewList = vi.fn();
     render(
@@ -117,8 +122,34 @@ describe("GroupScopeSelector", () => {
       />,
     );
     await user.click(screen.getByRole("combobox", { name: "Group scope" }));
-    await user.click(screen.getByRole("button", { name: /New list/ }));
-    expect(onNewList).toHaveBeenCalledOnce();
+    const newList = screen.getByRole("button", { name: "New list" });
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(screen.getByText("No saved lists")).toBeInTheDocument();
+    expect(screen.getByText("Create one to reuse a group selection.")).toBeInTheDocument();
+    expect(screen.getByText("Saved lists belong to the current session")).toBeInTheDocument();
+    expect(newList).not.toHaveAttribute("role", "option");
+    await user.click(newList);
+    expect(onNewList).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("distinguishes an empty catalog from an empty search result", async () => {
+    const user = userEvent.setup();
+    render(
+      <GroupScopeSelector
+        lists={[]}
+        onNewList={vi.fn()}
+        onQueryChange={vi.fn()}
+        onSelectDirectory={vi.fn()}
+        onSelectList={vi.fn()}
+        query="missing"
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Group scope" }));
+    expect(screen.getByText("No matching lists")).toBeInTheDocument();
+    expect(screen.getByText("Try another list name.")).toBeInTheDocument();
+    expect(screen.getByText("0 matching lists · Current session only")).toBeInTheDocument();
+    expect(screen.queryByText("No saved lists")).not.toBeInTheDocument();
   });
 });

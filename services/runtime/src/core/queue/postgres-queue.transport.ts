@@ -186,6 +186,19 @@ export class PostgresQueueTransport implements QueueTransport {
     );
   }
 
+  async release(queue: RuntimeQueueName, jobId: string, leaseOwner: string): Promise<void> {
+    await this.database.query(
+      `WITH released AS (
+         UPDATE runtime_queue_jobs
+         SET lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+         WHERE queue_name = $1 AND job_id = $2 AND lease_owner = $3
+         RETURNING 1
+       )
+       SELECT pg_notify('${QUEUE_WAKEUP_CHANNEL}', $1) FROM released`,
+      [queue, jobId, leaseOwner],
+    );
+  }
+
   async complete(queue: RuntimeQueueName, jobId: string, leaseOwner: string): Promise<void> {
     await this.database.query(
       `DELETE FROM runtime_queue_jobs
@@ -343,6 +356,14 @@ class PostgresQueueWorker<T> implements RuntimeQueueWorker {
       if (!claimed) {
         await this.transport.waitForWork(this.queue, generation);
         continue;
+      }
+      if (this.stopping) {
+        try {
+          await this.transport.release(this.queue, claimed.job_id, claimed.lease_owner);
+        } catch (error) {
+          this.onError(asError(error));
+        }
+        break;
       }
 
       const renewal = setInterval(() => {

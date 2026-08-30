@@ -34,6 +34,7 @@ export async function runDesktop(): Promise<void> {
     },
     async () => {
       termination.dispose();
+      stopAcceptingHttpRequests(app);
       await runWithCleanup(
         () => runCleanupTasks([
           () => scheduler.stop(),
@@ -43,6 +44,11 @@ export async function runDesktop(): Promise<void> {
       );
     },
   );
+}
+
+function stopAcceptingHttpRequests(app: NestExpressApplication): void {
+  const server = app.getHttpServer() as { listening?: boolean; close(): unknown };
+  if (server.listening !== false) server.close();
 }
 
 if (require.main === module) {

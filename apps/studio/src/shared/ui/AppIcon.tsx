@@ -26,6 +26,7 @@ export type AppIconName =
   | "groups"
   | "info"
   | "key"
+  | "list-plus"
   | "more"
   | "refresh"
   | "runs"
@@ -88,6 +89,12 @@ const WARP_ICONS: Partial<Record<AppIconName, ReactNode>> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M12 11v6M12 7h.01" />
+    </>
+  ),
+  "list-plus": (
+    <>
+      <path d="M4 6h10M4 12h8M4 18h7" />
+      <path d="M17 13v6M14 16h6" />
     </>
   ),
   more: (

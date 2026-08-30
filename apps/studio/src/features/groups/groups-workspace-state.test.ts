@@ -4,16 +4,12 @@ import type {
   RuntimeGroupListGroup,
 } from "@/shared/api/runtime-client";
 import {
-  createGroupListDraft,
-  editGroupListDraft,
+  createGroupListMetadataDraft,
+  editGroupListMetadataDraft,
   filterGroupListMembership,
   groupListCapacityLabel,
-  groupListDraftDiff,
-  groupListDraftRowOrder,
-  isGroupsScopeDirty,
-  toggleGroupListDraftMember,
-  toggleGroupListDraftPage,
-  updateGroupListDraftMetadata,
+  groupListMetadataDirty,
+  updateGroupListMetadataDraft,
 } from "./groups-workspace-state";
 
 const list: RuntimeGroupList = {
@@ -51,88 +47,49 @@ function membershipRow(
 }
 
 describe("groups workspace state", () => {
-  it("creates a new-list draft without consuming or mutating its seed selection", () => {
+  it("creates a metadata draft without consuming or mutating its seed selection", () => {
     const seed = ["group-1", "group-2"];
-    const draft = createGroupListDraft({
-      description: "  Reusable  ",
+    const draft = createGroupListMetadataDraft({
       idempotencyKey: "create-key",
       memberIds: seed,
-      name: "  Founders  ",
       sessionId: "session-1",
+      source: "selection",
     });
 
     expect(draft.memberIds).toEqual(seed);
     expect(draft.memberIds).not.toBe(seed);
-    expect(draft.name).toBe("Founders");
-    expect(draft.description).toBe("Reusable");
-    expect(isGroupsScopeDirty({ draft, mode: "list:create" })).toBe(true);
+    expect(draft.name).toBe("");
+    expect(draft.description).toBe("");
+    expect(groupListMetadataDirty(draft)).toBe(false);
   });
 
-  it("builds an edit draft from canonical metadata and membership", () => {
-    const rows = [membershipRow("group-1"), membershipRow("group-2")];
-    const draft = editGroupListDraft({ data: rows, list }, "unused-key");
+  it("builds an edit draft from canonical metadata only", () => {
+    const draft = editGroupListMetadataDraft(list);
 
-    expect(draft.baselineIds).toEqual(["group-1", "group-2"]);
-    expect(draft.membershipRows["group-2"]).toBe(rows[1]);
-    expect(isGroupsScopeDirty({ draft, mode: "list:edit" })).toBe(false);
+    expect(draft.name).toBe("North America");
+    expect(draft.description).toBe("Priority accounts");
+    expect(draft.memberIds).toEqual([]);
+    expect(groupListMetadataDirty(draft)).toBe(false);
   });
 
-  it("tracks metadata and set-based membership changes independently", () => {
-    const draft = editGroupListDraft(
-      { data: [membershipRow("group-1"), membershipRow("group-2")], list },
-      "unused-key",
+  it("tracks trimmed metadata changes", () => {
+    const draft = editGroupListMetadataDraft(list);
+    const unchanged = updateGroupListMetadataDraft(
+      draft,
+      { description: "Priority accounts  ", name: "North America  " },
     );
-    const changed = updateGroupListDraftMetadata(
-      toggleGroupListDraftMember(draft, "group-1").draft,
+    const changed = updateGroupListMetadataDraft(
+      draft,
       { description: "Priority accounts", name: "North America v2" },
     );
 
-    expect(groupListDraftDiff(changed)).toMatchObject({
-      membershipDirty: true,
-      metadataDirty: true,
-      removedIds: ["group-1"],
-      savedCount: 2,
-      stagedCount: 1,
-    });
-  });
-
-  it("toggles a visible page atomically and enforces capacity", () => {
-    const draft = createGroupListDraft({
-      idempotencyKey: "create-key",
-      memberIds: ["group-1"],
-      name: "Founders",
-      sessionId: "session-1",
-    });
-    const selected = toggleGroupListDraftPage(draft, ["group-1", "group-2"], 2);
-    expect(selected.ok).toBe(true);
-    expect(selected.draft.memberIds).toEqual(["group-1", "group-2"]);
-
-    const rejected = toggleGroupListDraftMember(selected.draft, "group-3", 2);
-    expect(rejected.ok).toBe(false);
-    expect(rejected.draft).toBe(selected.draft);
-
-    const cleared = toggleGroupListDraftPage(selected.draft, ["group-1", "group-2"], 2);
-    expect(cleared.draft.memberIds).toEqual([]);
-  });
-
-  it("pins saved or staged membership outside the current directory page", () => {
-    const draft = editGroupListDraft(
-      { data: [membershipRow("saved"), membershipRow("visible")], list },
-      "unused-key",
-    );
-    const changed = toggleGroupListDraftMember(
-      toggleGroupListDraftMember(draft, "saved").draft,
-      "staged",
-    ).draft;
-
-    const order = groupListDraftRowOrder(changed, ["visible", "page"]);
-    expect(order.rowIds).toEqual(["staged", "saved", "visible", "page"]);
-    expect([...order.pinnedIds]).toEqual(["staged", "saved"]);
+    expect(groupListMetadataDirty(unchanged)).toBe(false);
+    expect(groupListMetadataDirty(changed)).toBe(true);
   });
 
   it("filters membership rows with the same real group semantics", () => {
     const rows = [
-      membershipRow("allowed"),
+      membershipRow("allowed", { participantsCount: 120 }),
       membershipRow("denied", {
         groupName: "Dormant Europe",
         isActive: false,
@@ -150,14 +107,11 @@ describe("groups workspace state", () => {
       active: false,
       capabilityFreshness: ["STALE"],
       capabilityStatuses: ["DENIED"],
-      membership: "in-list",
       query: "europe",
-      selectedIds: new Set(["denied"]),
     })).toEqual([rows[1]]);
     expect(filterGroupListMembership(rows, {
-      membership: "not-in-list",
+      minParticipants: 100,
       query: "",
-      selectedIds: new Set(["denied"]),
     })).toEqual([rows[0]]);
   });
 

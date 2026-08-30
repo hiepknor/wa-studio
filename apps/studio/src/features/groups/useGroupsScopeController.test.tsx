@@ -74,8 +74,8 @@ describe("useGroupsScopeController", () => {
       { wrapper },
     );
 
-    act(() => result.current.requestMetadata());
-    act(() => result.current.continueMetadata({
+    act(() => result.current.requestCreate("scope"));
+    act(() => result.current.updateMetadata({
       description: "",
       name: savedList.name,
     }));
@@ -83,8 +83,8 @@ describe("useGroupsScopeController", () => {
     let firstSave!: Promise<RuntimeGroupList | null>;
     let secondSave!: Promise<RuntimeGroupList | null>;
     act(() => {
-      firstSave = result.current.saveDraft();
-      secondSave = result.current.saveDraft();
+      firstSave = result.current.saveMetadata();
+      secondSave = result.current.saveMetadata();
     });
 
     await expect(secondSave).resolves.toBeNull();

@@ -187,7 +187,7 @@ function GroupSelectionFilterPanel({
       id={`${idPrefix}-filter-panel`}
     >
       <header className="data-filter-panel-header">
-        <div><strong>{title}</strong><span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span></div>
+        <div><strong>{title}</strong><span>{filterCount ? `${filterCount} applied` : "Optional criteria"}</span></div>
         <Button aria-label={`Close ${ariaLabel.toLocaleLowerCase()}`} className="data-filter-panel-close" icon="close" onClick={onClose} variant="ghost" />
       </header>
       <div className="data-filter-panel-body">
@@ -199,7 +199,8 @@ function GroupSelectionFilterPanel({
         </div></fieldset>
         <fieldset><legend>Participants</legend><ParticipantRangeFilter errors={participantErrors} idPrefix={idPrefix} maxParticipants={filters.maxParticipants} minParticipants={filters.minParticipants} onChange={(range) => onChange({ ...filters, ...range })} onErrorsClear={onParticipantErrorsClear} /></fieldset>
         <fieldset><legend>Group state</legend><div className="data-filter-options data-filter-options-single">
-          <FilterOption checked={filters.isActive === undefined} name={`${idPrefix}-state-filter`} onChange={() => onChange({ ...filters, isActive: undefined })} type="radio">Active</FilterOption>
+          <FilterOption checked={filters.isActive === undefined} name={`${idPrefix}-state-filter`} onChange={() => onChange({ ...filters, isActive: undefined })} type="radio">All states</FilterOption>
+          <FilterOption checked={filters.isActive === true} name={`${idPrefix}-state-filter`} onChange={() => onChange({ ...filters, isActive: true })} type="radio">Active</FilterOption>
           <FilterOption checked={filters.isActive === false} name={`${idPrefix}-state-filter`} onChange={() => onChange({ ...filters, isActive: false })} type="radio">Inactive</FilterOption>
         </div></fieldset>
       </div>
@@ -221,7 +222,7 @@ function CampaignTargetFilterSummary({
         {filters.capabilityFreshness.map((value) => <FilterChip key={value} label={FRESHNESS_OPTIONS.find((option) => option.value === value)?.label ?? value} onRemove={() => onChange({ ...filters, capabilityFreshness: filters.capabilityFreshness.filter((candidate) => candidate !== value) })} />)}
         {filters.minParticipants !== undefined && <FilterChip label={`≥ ${filters.minParticipants} participants`} onRemove={() => onChange({ ...filters, minParticipants: undefined })} />}
         {filters.maxParticipants !== undefined && <FilterChip label={`≤ ${filters.maxParticipants} participants`} onRemove={() => onChange({ ...filters, maxParticipants: undefined })} />}
-        {filters.isActive === false && <FilterChip label="Inactive groups" onRemove={() => onChange({ ...filters, isActive: undefined })} />}
+        {filters.isActive !== undefined && <FilterChip label={filters.isActive ? "Active groups" : "Inactive groups"} onRemove={() => onChange({ ...filters, isActive: undefined })} />}
       </div>
       <Button disabled={!hasFilters} onClick={() => onChange(emptyGroupSelectionFilters())} size="sm" variant="ghost">Clear all</Button>
     </div>

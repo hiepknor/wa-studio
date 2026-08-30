@@ -2,6 +2,8 @@ mod app_updates;
 mod managed_runtime;
 mod windowing;
 
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -41,12 +43,42 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if matches!(
-                event,
-                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
-            ) {
-                managed_runtime::shutdown(app);
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { code, api, .. } => {
+                let state = app.state::<managed_runtime::ManagedRuntimeState>();
+                if code != Some(tauri::RESTART_EXIT_CODE) && !state.exit_is_authorized() {
+                    api.prevent_exit();
+                    if state.begin_exit_shutdown() {
+                        let shutdown_app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            match managed_runtime::shutdown(&shutdown_app).await {
+                                Ok(()) => {
+                                    managed_runtime::authorize_app_exit(&shutdown_app);
+                                    shutdown_app.exit(0);
+                                }
+                                Err(error) => {
+                                    managed_runtime::recover_from_failed_shutdown(
+                                        &shutdown_app,
+                                        &error,
+                                    );
+                                    let _ = windowing::show_main_window(&shutdown_app);
+                                }
+                            }
+                        });
+                    }
+                }
             }
+            tauri::RunEvent::Exit => {
+                let state = app.state::<managed_runtime::ManagedRuntimeState>();
+                if !state.exit_is_authorized() {
+                    let _ = state.begin_exit_shutdown();
+                    let _ = managed_runtime::shutdown_blocking(app);
+                }
+            }
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => {
+                let _ = windowing::show_main_window(app);
+            }
+            _ => {}
         });
 }

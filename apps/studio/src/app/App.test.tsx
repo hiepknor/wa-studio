@@ -10,7 +10,7 @@ describe("App", () => {
     expect(
       screen.getByRole("heading", { name: "Preparing this machine." }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Preparing local workspace" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Inspecting the bundled Runtime");
+    expect(screen.getByRole("heading", { name: "Inspecting local workspace" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Checking the bundled Runtime");
   });
 });

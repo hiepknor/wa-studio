@@ -21,11 +21,12 @@ use std::{
 use age::secrecy::SecretString;
 use config::{DesktopDatabaseConfig, DesktopRuntimeConfig};
 use model::{
-    ManagedRuntimeConnection, ManagedRuntimePhase, ManagedRuntimeStorageDiagnostics,
-    ProtectionFreshness, StoragePressure,
+    ManagedRuntimeConnection, ManagedRuntimeMaintenance, ManagedRuntimeMaintenanceKind,
+    ManagedRuntimePhase, ManagedRuntimeStorageDiagnostics, ProtectionFreshness, StoragePressure,
 };
 use provisioning::{ManagedRuntimeProvisioningInput, ManagedRuntimeProvisioningProfile};
 use release::{OPENWA_CONTRACT_SHA256, OPENWA_RELEASE_TAG};
+use serde::Deserialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -45,6 +46,29 @@ const STORAGE_WARNING_AVAILABLE_BYTES: u64 = 20 * GIBIBYTE;
 const STORAGE_CRITICAL_AVAILABLE_BYTES: u64 = 10 * GIBIBYTE;
 const STORAGE_WARNING_AVAILABLE_PERCENT: u8 = 15;
 const STORAGE_CRITICAL_AVAILABLE_PERCENT: u8 = 8;
+const BACKGROUND_MAINTENANCE_START_DELAY: Duration = Duration::from_secs(15);
+
+struct ManagedPostgresMaintenanceContext {
+    backup_directory: PathBuf,
+    backup_identity: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeMigrationPlan {
+    database_state: String,
+    pending: Vec<String>,
+    checksums_backfill: Vec<String>,
+    current_fingerprint: String,
+    target_fingerprint: String,
+    requires_backup: bool,
+}
+
+impl RuntimeMigrationPlan {
+    fn has_work(&self) -> bool {
+        !self.pending.is_empty() || !self.checksums_backfill.is_empty()
+    }
+}
 
 fn current_timestamp_millis() -> Result<u64, String> {
     SystemTime::now()
@@ -259,7 +283,8 @@ pub async fn list_managed_runtime_backups(
 #[tauri::command]
 pub async fn create_managed_runtime_backup(app: AppHandle) -> Result<(), String> {
     let state = app.state::<ManagedRuntimeState>();
-    let _maintenance = state.begin_maintenance("manual database backup")?;
+    let maintenance = state.begin_maintenance("manual database backup")?;
+    let cancellation = maintenance.cancellation();
     if state.snapshot()?.phase != ManagedRuntimePhase::Ready {
         return Err("Managed Runtime must be ready before creating a manual backup.".to_string());
     }
@@ -271,7 +296,7 @@ pub async fn create_managed_runtime_backup(app: AppHandle) -> Result<(), String>
         postgres::remove_incomplete_backups(&backup_directory)?;
         backup_app
             .state::<ManagedRuntimeState>()
-            .create_manual_postgres_backup(&backup_directory, &identity)
+            .create_manual_postgres_backup(&backup_directory, &identity, &cancellation)
     })
     .await
     .map_err(|error| format!("Managed PostgreSQL manual backup task failed: {error}"))??;
@@ -315,7 +340,8 @@ pub async fn export_managed_runtime_recovery_archive(
         .into_path()
         .map_err(|error| format!("Recovery archive destination is invalid: {error}"))?;
     let state = app.state::<ManagedRuntimeState>();
-    let _maintenance = state.begin_maintenance("recovery archive export")?;
+    let maintenance = state.begin_maintenance("recovery archive export")?;
+    let cancellation = maintenance.cancellation();
     if state.snapshot()?.phase != ManagedRuntimePhase::Ready {
         return Err(
             "Managed Runtime changed state before the recovery export started.".to_string(),
@@ -330,7 +356,7 @@ pub async fn export_managed_runtime_recovery_archive(
     tauri::async_runtime::spawn_blocking(move || {
         export_app
             .state::<ManagedRuntimeState>()
-            .create_portable_postgres_backup(&destination, passphrase)
+            .create_portable_postgres_backup(&destination, passphrase, &cancellation)
     })
     .await
     .map_err(|error| format!("Portable PostgreSQL backup task failed: {error}"))??;
@@ -706,8 +732,9 @@ pub fn initialize(app: &AppHandle) {
     });
 }
 
-pub fn shutdown(app: &AppHandle) {
+fn prepare_shutdown(app: &AppHandle) {
     let state = app.state::<ManagedRuntimeState>();
+    state.cancel_maintenance();
     if let Ok(snapshot) = state.snapshot() {
         if let Some(manifest) = snapshot.manifest {
             publish_snapshot(
@@ -716,8 +743,62 @@ pub fn shutdown(app: &AppHandle) {
             );
         }
     }
-    let _ = state.stop_processes();
-    let _ = state.stop_postgres();
+}
+
+fn report_shutdown_result(result: &Result<(), String>, task_failed: bool) {
+    match result {
+        Err(error) => observability::error(
+            "managed_runtime.shutdown_failed",
+            json!({ "reason": error, "taskFailed": task_failed }),
+        ),
+        Ok(()) => observability::info("managed_runtime.shutdown_completed", json!({})),
+    }
+}
+
+pub async fn shutdown(app: &AppHandle) -> Result<(), String> {
+    prepare_shutdown(app);
+    let shutdown_app = app.clone();
+    let (result, task_failed) = match tauri::async_runtime::spawn_blocking(move || {
+        shutdown_app
+            .state::<ManagedRuntimeState>()
+            .shutdown_services()
+    })
+    .await
+    {
+        Ok(result) => (result, false),
+        Err(error) => (
+            Err(format!("Managed Runtime shutdown task failed: {error}")),
+            true,
+        ),
+    };
+    report_shutdown_result(&result, task_failed);
+    result
+}
+
+pub fn shutdown_blocking(app: &AppHandle) -> Result<(), String> {
+    prepare_shutdown(app);
+    let result = app.state::<ManagedRuntimeState>().shutdown_services();
+    report_shutdown_result(&result, false);
+    result
+}
+
+pub fn authorize_app_exit(app: &AppHandle) {
+    app.state::<ManagedRuntimeState>().authorize_exit();
+}
+
+pub fn recover_from_failed_shutdown(app: &AppHandle, error: &str) {
+    let state = app.state::<ManagedRuntimeState>();
+    state.finish_failed_exit_shutdown();
+    let manifest = state.snapshot().ok().and_then(|snapshot| snapshot.manifest);
+    publish_snapshot(
+        app,
+        ManagedRuntimeSnapshot::degraded(
+            manifest,
+            format!(
+                "WA Studio could not close local services safely. The application remains open so you can retry quitting. {error}"
+            ),
+        ),
+    );
 }
 
 pub async fn prepare_for_app_update(
@@ -726,7 +807,8 @@ pub async fn prepare_for_app_update(
     target_version: &str,
 ) -> Result<std::path::PathBuf, String> {
     let state = app.state::<ManagedRuntimeState>();
-    let _maintenance = state.begin_maintenance("app update")?;
+    let maintenance = state.begin_maintenance("app update")?;
+    let cancellation = maintenance.cancellation();
     let snapshot = state.snapshot()?;
     if snapshot.phase != ManagedRuntimePhase::Ready {
         return Err("Managed Runtime must be ready before installing an app update.".to_string());
@@ -785,6 +867,7 @@ pub async fn prepare_for_app_update(
                 &current_version,
                 &target_version,
                 &identity,
+                &cancellation,
             )
     })
     .await
@@ -883,8 +966,8 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| format!("Could not resolve WA Desktop data directory: {error}"))?;
     create_dir_all(&app_data_directory)
         .map_err(|error| format!("Could not create WA Desktop data directory: {error}"))?;
-    let database_url = match config.database.clone() {
-        DesktopDatabaseConfig::External { url } => url,
+    let (database_url, maintenance) = match config.database.clone() {
+        DesktopDatabaseConfig::External { url } => (url, None),
         DesktopDatabaseConfig::Managed {
             root,
             backup_root,
@@ -911,7 +994,6 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
             };
             let backup_directory = backup_root
                 .unwrap_or_else(|| app_data_directory.join("backups").join("postgresql"));
-            let release_version = manifest.version.clone();
             let database_app = app.clone();
             let (database_url, database_preexisting) =
                 tauri::async_runtime::spawn_blocking(move || {
@@ -921,68 +1003,11 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
                 })
                 .await
                 .map_err(|error| format!("Managed PostgreSQL task failed: {error}"))??;
-            if database_preexisting {
-                let integrity_app = app.clone();
-                let integrity_directory = backup_directory.clone();
-                let integrity_checked = tauri::async_runtime::spawn_blocking(move || {
-                    integrity_app
-                        .state::<ManagedRuntimeState>()
-                        .verify_postgres_integrity_if_due(&integrity_directory)
-                })
-                .await
-                .map_err(|error| format!("Managed PostgreSQL integrity task failed: {error}"))??;
-                if integrity_checked {
-                    observability::info(
-                        "managed_postgres.integrity_check_succeeded",
-                        json!({ "tool": "pg_amcheck" }),
-                    );
-                }
-                let identity = match backup_identity {
-                    Some(encoded) => secret_store::parse_backup_identity(&encoded)?,
-                    None => tauri::async_runtime::spawn_blocking(
-                        secret_store::managed_postgres_backup_identity,
-                    )
-                    .await
-                    .map_err(|error| {
-                        format!("Managed PostgreSQL local secret task failed: {error}")
-                    })??,
-                };
-                let backup_app = app.clone();
-                let (release_backup, automatic_backup) =
-                    tauri::async_runtime::spawn_blocking(move || {
-                        let state = backup_app.state::<ManagedRuntimeState>();
-                        postgres::remove_incomplete_backups(&backup_directory)?;
-                        let release_backup = state.create_postgres_backup(
-                            &backup_directory,
-                            &release_version,
-                            &identity,
-                        )?;
-                        let automatic_backup =
-                            state.create_automatic_postgres_backup(&backup_directory, &identity)?;
-                        Ok::<_, String>((release_backup, automatic_backup))
-                    })
-                    .await
-                    .map_err(|error| format!("Managed PostgreSQL backup task failed: {error}"))??;
-                if let Some(path) = release_backup {
-                    observability::info(
-                        "managed_postgres.backup_created",
-                        json!({
-                            "kind": "pre-migration",
-                            "backupId": backup_file_name(&path),
-                        }),
-                    );
-                }
-                if let Some(path) = automatic_backup {
-                    observability::info(
-                        "managed_postgres.backup_created",
-                        json!({
-                            "kind": "automatic",
-                            "backupId": backup_file_name(&path),
-                        }),
-                    );
-                }
-            }
-            database_url
+            let maintenance = database_preexisting.then_some(ManagedPostgresMaintenanceContext {
+                backup_directory,
+                backup_identity,
+            });
+            (database_url, maintenance)
         }
     };
     let migration_path = migrations_directory
@@ -990,12 +1015,41 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
         .ok_or_else(|| "Runtime migration path is not valid UTF-8.".to_string())?;
     let environment =
         config.runtime_environment(migration_path, &database_url, &manifest.openwa_release_tag);
-
-    publish_snapshot(
-        app,
-        ManagedRuntimeSnapshot::phase(ManagedRuntimePhase::Migrating, manifest.clone()),
+    let migration_plan = run_migration_plan(app, &environment, &app_data_directory).await?;
+    observability::info(
+        "managed_runtime.migration_plan_inspected",
+        json!({
+            "databaseState": migration_plan.database_state,
+            "pendingCount": migration_plan.pending.len(),
+            "checksumBackfillCount": migration_plan.checksums_backfill.len(),
+            "requiresBackup": migration_plan.requires_backup,
+            "currentFingerprint": migration_plan.current_fingerprint,
+            "targetFingerprint": migration_plan.target_fingerprint,
+        }),
     );
-    run_migrations(app, &environment, &app_data_directory).await?;
+    if migration_plan.requires_backup {
+        if let Some(context) = maintenance.as_ref() {
+            create_pre_migration_backup(
+                app,
+                context,
+                &manifest.version,
+                &migration_plan.target_fingerprint,
+            )
+            .await?;
+        } else {
+            observability::warn(
+                "managed_runtime.external_database_migration_unprotected",
+                json!({ "pendingCount": migration_plan.pending.len() }),
+            );
+        }
+    }
+    if migration_plan.has_work() {
+        publish_snapshot(
+            app,
+            ManagedRuntimeSnapshot::phase(ManagedRuntimePhase::Migrating, manifest.clone()),
+        );
+        run_migrations(app, &environment, &app_data_directory).await?;
+    }
 
     publish_snapshot(
         app,
@@ -1019,7 +1073,178 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
     .await?;
 
     publish_ready_snapshot(app, manifest, config.port, config.api_key)?;
+    if let Some(maintenance) = maintenance {
+        schedule_background_postgres_maintenance(app, maintenance);
+    }
     Ok(())
+}
+
+async fn create_pre_migration_backup(
+    app: &AppHandle,
+    context: &ManagedPostgresMaintenanceContext,
+    release_version: &str,
+    target_fingerprint: &str,
+) -> Result<(), String> {
+    let identity = match context.backup_identity.as_ref() {
+        Some(encoded) => secret_store::parse_backup_identity(encoded)?,
+        None => {
+            tauri::async_runtime::spawn_blocking(secret_store::managed_postgres_backup_identity)
+                .await
+                .map_err(|error| {
+                    format!("Managed PostgreSQL local secret task failed: {error}")
+                })??
+        }
+    };
+    let backup_directory = context.backup_directory.clone();
+    let backup_release = format!(
+        "{}-schema-{}",
+        release_version,
+        target_fingerprint.get(..16).unwrap_or(target_fingerprint),
+    );
+    let backup_app = app.clone();
+    let release_backup_result = tauri::async_runtime::spawn_blocking(move || {
+        let state = backup_app.state::<ManagedRuntimeState>();
+        let maintenance = state.begin_maintenance("pre-migration database backup")?;
+        let cancellation = maintenance.cancellation();
+        publish_maintenance(
+            &backup_app,
+            Some(ManagedRuntimeMaintenance {
+                kind: ManagedRuntimeMaintenanceKind::PreMigrationBackup,
+                blocking: true,
+                cancellable: true,
+            }),
+        );
+        let result = (|| {
+            postgres::remove_incomplete_backups(&backup_directory)?;
+            state.create_postgres_backup(
+                &backup_directory,
+                &backup_release,
+                &identity,
+                &cancellation,
+            )
+        })();
+        publish_maintenance(&backup_app, None);
+        result
+    })
+    .await;
+    let release_backup = release_backup_result
+        .map_err(|error| format!("Managed PostgreSQL backup task failed: {error}"))??;
+    if let Some(path) = release_backup {
+        observability::info(
+            "managed_postgres.backup_created",
+            json!({
+                "kind": "pre-migration",
+                "backupId": backup_file_name(&path),
+                "migrationFingerprint": target_fingerprint,
+            }),
+        );
+    }
+    Ok(())
+}
+
+fn schedule_background_postgres_maintenance(
+    app: &AppHandle,
+    context: ManagedPostgresMaintenanceContext,
+) {
+    let maintenance_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            thread::sleep(BACKGROUND_MAINTENANCE_START_DELAY);
+            let state = maintenance_app.state::<ManagedRuntimeState>();
+            if state.snapshot()?.phase != ManagedRuntimePhase::Ready {
+                return Ok::<_, String>(());
+            }
+            let guard = match state.begin_maintenance("background database protection") {
+                Ok(guard) => guard,
+                Err(reason) => {
+                    observability::info(
+                        "managed_postgres.background_maintenance_deferred",
+                        json!({ "reason": reason }),
+                    );
+                    return Ok(());
+                }
+            };
+            let cancellation = guard.cancellation();
+            publish_maintenance(
+                &maintenance_app,
+                Some(ManagedRuntimeMaintenance {
+                    kind: ManagedRuntimeMaintenanceKind::IntegrityCheck,
+                    blocking: false,
+                    cancellable: true,
+                }),
+            );
+            let maintenance_result = (|| {
+                let identity = match context.backup_identity {
+                    Some(encoded) => secret_store::parse_backup_identity(&encoded)?,
+                    None => secret_store::managed_postgres_backup_identity()?,
+                };
+                let integrity_checked = state
+                    .verify_postgres_integrity_if_due(&context.backup_directory, &cancellation)?;
+                if integrity_checked {
+                    observability::info(
+                        "managed_postgres.integrity_check_succeeded",
+                        json!({ "tool": "pg_amcheck", "blockingStartup": false }),
+                    );
+                }
+                publish_maintenance(
+                    &maintenance_app,
+                    Some(ManagedRuntimeMaintenance {
+                        kind: ManagedRuntimeMaintenanceKind::AutomaticBackup,
+                        blocking: false,
+                        cancellable: true,
+                    }),
+                );
+                if let Some(path) = state.create_automatic_postgres_backup(
+                    &context.backup_directory,
+                    &identity,
+                    &cancellation,
+                )? {
+                    observability::info(
+                        "managed_postgres.backup_created",
+                        json!({
+                            "kind": "automatic",
+                            "backupId": backup_file_name(&path),
+                            "blockingStartup": false,
+                        }),
+                    );
+                }
+                Ok(())
+            })();
+            publish_maintenance(&maintenance_app, None);
+            maintenance_result
+        })
+        .await;
+        match result {
+            Err(error) => observability::warn(
+                "managed_postgres.background_maintenance_failed",
+                json!({ "reason": error.to_string(), "taskFailed": true }),
+            ),
+            Ok(Err(error)) if error.contains("maintenance was cancelled") => {
+                observability::info(
+                    "managed_postgres.background_maintenance_cancelled",
+                    json!({}),
+                );
+            }
+            Ok(Err(error)) => observability::warn(
+                "managed_postgres.background_maintenance_failed",
+                json!({ "reason": error, "taskFailed": false }),
+            ),
+            Ok(Ok(())) => {}
+        }
+    });
+}
+
+fn publish_maintenance(app: &AppHandle, maintenance: Option<ManagedRuntimeMaintenance>) {
+    let state = app.state::<ManagedRuntimeState>();
+    match state.set_maintenance(maintenance) {
+        Ok(snapshot) => {
+            let _ = app.emit(STATE_CHANGED_EVENT, snapshot);
+        }
+        Err(error) => observability::error(
+            "managed_runtime.maintenance_state_update_failed",
+            json!({ "reason": error }),
+        ),
+    }
 }
 
 async fn managed_backup_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -1104,6 +1329,64 @@ async fn inspect_sidecar(app: &AppHandle) -> Result<RuntimeReleaseManifest, Stri
     }
 
     parse_and_validate_manifest(&output.stdout)
+}
+
+async fn run_migration_plan(
+    app: &AppHandle,
+    environment: &[(String, String)],
+    working_directory: &Path,
+) -> Result<RuntimeMigrationPlan, String> {
+    let envelope = config_envelope::prepare(working_directory, environment)?;
+    let (mut events, mut child) = app
+        .shell()
+        .sidecar("wa-runtime")
+        .map_err(|error| format!("Could not resolve WA Runtime sidecar: {error}"))?
+        .args(["migration-plan"])
+        .env_clear()
+        .envs(envelope.process_environment())
+        .current_dir(working_directory)
+        .spawn()
+        .map_err(|error| {
+            envelope.remove();
+            format!("Could not inspect Runtime migrations: {error}")
+        })?;
+    if let Err(error) = child.write(envelope.key_line().as_bytes()) {
+        envelope.remove();
+        let _ = child.kill();
+        return Err(format!(
+            "Could not deliver Runtime migration-plan configuration: {error}"
+        ));
+    }
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut exit_code = None;
+    while let Some(event) = events.recv().await {
+        match event {
+            CommandEvent::Stdout(line) => {
+                stdout.extend_from_slice(&line);
+                stdout.push(b'\n');
+            }
+            CommandEvent::Stderr(line) => {
+                stderr.extend_from_slice(&line);
+                stderr.push(b'\n');
+            }
+            CommandEvent::Error(error) => {
+                stderr.extend_from_slice(error.as_bytes());
+                stderr.push(b'\n');
+            }
+            CommandEvent::Terminated(payload) => {
+                exit_code = payload.code;
+                break;
+            }
+            _ => {}
+        }
+    }
+    envelope.remove();
+    if exit_code != Some(0) {
+        return Err(command_failure("Runtime migration plan", &stderr));
+    }
+    serde_json::from_slice(&stdout)
+        .map_err(|error| format!("Runtime returned an invalid migration plan: {error}"))
 }
 
 async fn run_migrations(
@@ -1577,7 +1860,7 @@ fn parse_and_validate_manifest(bytes: &[u8]) -> Result<RuntimeReleaseManifest, S
     {
         return Err("WA Runtime does not support the desktop-managed profile.".to_string());
     }
-    for role in ["desktop", "migrate"] {
+    for role in ["desktop", "migration-plan", "migrate"] {
         if !manifest.roles.iter().any(|candidate| candidate == role) {
             return Err(format!("WA Runtime does not provide the {role} role."));
         }
@@ -1621,7 +1904,7 @@ mod tests {
           "openwaReleaseTag": OPENWA_RELEASE_TAG,
           "openwaContractSha256": OPENWA_CONTRACT_SHA256,
           "profiles": ["server", "desktop-managed"],
-          "roles": ["api", "worker", "scheduler", "desktop", "migrate"],
+          "roles": ["api", "worker", "scheduler", "desktop", "migration-plan", "migrate"],
           "databaseBackends": ["postgres"],
           "queueBackends": ["redis", "postgres"]
         })

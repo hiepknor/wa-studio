@@ -169,7 +169,7 @@ async function main() {
     app = spawn(appBinary, [], { env: appEnvironment, stdio: "inherit" });
     await waitForRuntimeOperational(profile.runtimeApiKey);
     await waitForRuntimeReady(profile.runtimeApiKey);
-    assertManagedBackupCreated();
+    await waitForManagedBackupCreated();
     nativeQuitStudio();
     await waitForChildExit(
       app,
@@ -225,6 +225,25 @@ function assertManagedBackupCreated() {
       `Packaged Runtime backup is not an age archive: ${backup}`,
     );
   }
+}
+
+async function waitForManagedBackupCreated() {
+  const deadline = Date.now() + 120_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      assertManagedBackupCreated();
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(250);
+  }
+
+  throw new Error(
+    "Timed out waiting for the background managed Runtime backup",
+    { cause: lastError },
+  );
 }
 
 function eventInboxTestProfile() {

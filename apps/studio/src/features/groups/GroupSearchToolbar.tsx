@@ -12,6 +12,7 @@ interface GroupSearchToolbarProps {
   actions?: ReactNode;
   filtersOpen: boolean;
   firstItem: number;
+  idPrefix?: string;
   lastItem: number;
   loading: boolean;
   leading?: ReactNode;
@@ -28,6 +29,7 @@ export function GroupSearchToolbar({
   actions,
   filtersOpen,
   firstItem,
+  idPrefix = "group-list",
   lastItem,
   loading,
   leading,
@@ -47,7 +49,7 @@ export function GroupSearchToolbar({
       actions={actions}
       filterCount={filterCount}
       filtersOpen={filtersOpen}
-      idPrefix="group-list"
+      idPrefix={idPrefix}
       loading={loading}
       leading={leading}
       onCloseFilters={() => setFiltersOpen(false)}
@@ -70,6 +72,7 @@ export function GroupSearchToolbar({
     >
       {(closeFilters) => filtersOpen && (
         <GroupFilterPanel
+          idPrefix={idPrefix}
           onClose={closeFilters}
           setState={setState}
           state={state}

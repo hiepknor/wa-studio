@@ -45,6 +45,56 @@ pub enum ManagedRuntimePhase {
     Stopping,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ManagedRuntimeAvailability {
+    #[default]
+    Starting,
+    NeedsSetup,
+    Online,
+    Busy,
+    Degraded,
+    Stopping,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedRuntimeCapabilities {
+    pub can_read: bool,
+    pub can_edit_drafts: bool,
+    pub can_sync: bool,
+    pub can_launch_campaign: bool,
+    pub can_send: bool,
+}
+
+impl ManagedRuntimeCapabilities {
+    fn online() -> Self {
+        Self {
+            can_read: true,
+            can_edit_drafts: true,
+            can_sync: true,
+            can_launch_campaign: true,
+            can_send: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ManagedRuntimeMaintenanceKind {
+    PreMigrationBackup,
+    IntegrityCheck,
+    AutomaticBackup,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedRuntimeMaintenance {
+    pub kind: ManagedRuntimeMaintenanceKind,
+    pub blocking: bool,
+    pub cancellable: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ManagedRuntimeBackup {
@@ -101,6 +151,9 @@ pub struct ManagedRuntimeDiagnostics {
 #[serde(rename_all = "camelCase")]
 pub struct ManagedRuntimeSnapshot {
     pub phase: ManagedRuntimePhase,
+    pub availability: ManagedRuntimeAvailability,
+    pub capabilities: ManagedRuntimeCapabilities,
+    pub maintenance: Option<ManagedRuntimeMaintenance>,
     pub manifest: Option<RuntimeReleaseManifest>,
     pub connection: Option<ManagedRuntimeConnection>,
     pub error: Option<String>,
@@ -110,6 +163,9 @@ impl ManagedRuntimeSnapshot {
     pub fn phase(phase: ManagedRuntimePhase, manifest: RuntimeReleaseManifest) -> Self {
         Self {
             phase,
+            availability: availability_for_phase(phase),
+            capabilities: ManagedRuntimeCapabilities::default(),
+            maintenance: None,
             manifest: Some(manifest),
             connection: None,
             error: None,
@@ -119,6 +175,9 @@ impl ManagedRuntimeSnapshot {
     pub fn ready(manifest: RuntimeReleaseManifest, connection: ManagedRuntimeConnection) -> Self {
         Self {
             phase: ManagedRuntimePhase::Ready,
+            availability: ManagedRuntimeAvailability::Online,
+            capabilities: ManagedRuntimeCapabilities::online(),
+            maintenance: None,
             manifest: Some(manifest),
             connection: Some(connection),
             error: None,
@@ -128,6 +187,9 @@ impl ManagedRuntimeSnapshot {
     pub fn degraded(manifest: Option<RuntimeReleaseManifest>, error: impl Into<String>) -> Self {
         Self {
             phase: ManagedRuntimePhase::Degraded,
+            availability: ManagedRuntimeAvailability::Degraded,
+            capabilities: ManagedRuntimeCapabilities::default(),
+            maintenance: None,
             manifest,
             connection: None,
             error: Some(error.into()),
@@ -137,9 +199,28 @@ impl ManagedRuntimeSnapshot {
     pub fn provisioning_required(manifest: RuntimeReleaseManifest) -> Self {
         Self {
             phase: ManagedRuntimePhase::ProvisioningRequired,
+            availability: ManagedRuntimeAvailability::NeedsSetup,
+            capabilities: ManagedRuntimeCapabilities::default(),
+            maintenance: None,
             manifest: Some(manifest),
             connection: None,
             error: None,
         }
+    }
+}
+
+fn availability_for_phase(phase: ManagedRuntimePhase) -> ManagedRuntimeAvailability {
+    match phase {
+        ManagedRuntimePhase::Discovering
+        | ManagedRuntimePhase::DatabaseStarting
+        | ManagedRuntimePhase::Migrating
+        | ManagedRuntimePhase::RuntimeStarting => ManagedRuntimeAvailability::Starting,
+        ManagedRuntimePhase::ProvisioningRequired => ManagedRuntimeAvailability::NeedsSetup,
+        ManagedRuntimePhase::Ready => ManagedRuntimeAvailability::Online,
+        ManagedRuntimePhase::Reconfiguring
+        | ManagedRuntimePhase::Restoring
+        | ManagedRuntimePhase::Updating => ManagedRuntimeAvailability::Busy,
+        ManagedRuntimePhase::Degraded => ManagedRuntimeAvailability::Degraded,
+        ManagedRuntimePhase::Stopping => ManagedRuntimeAvailability::Stopping,
     }
 }

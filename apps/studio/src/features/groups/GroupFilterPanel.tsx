@@ -13,24 +13,25 @@ import { GroupFilterSummary } from "./GroupFilterSummary";
 import { ParticipantRangeFilter } from "./ParticipantRangeFilter";
 
 interface GroupFilterPanelProps {
+  idPrefix?: string;
   onClose: () => void;
   setState: Dispatch<SetStateAction<GroupListState>>;
   state: GroupListState;
 }
 
-export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelProps) {
+export function GroupFilterPanel({ idPrefix = "group-list", onClose, setState, state }: GroupFilterPanelProps) {
   const filterCount = activeGroupFilterCount(state);
 
   return (
     <section
       aria-label="Group filters"
       className="data-filter-panel data-filter-panel-grid-2"
-      id="group-list-filter-panel"
+      id={`${idPrefix}-filter-panel`}
     >
       <header className="data-filter-panel-header">
         <div>
           <strong>Filter groups</strong>
-          <span>{filterCount ? `${filterCount} applied` : "Server-side filters"}</span>
+          <span>{filterCount ? `${filterCount} applied` : "Optional criteria"}</span>
         </div>
         <Button
           aria-label="Close group filters"
@@ -103,17 +104,27 @@ export function GroupFilterPanel({ onClose, setState, state }: GroupFilterPanelP
           <div className="data-filter-options data-filter-options-single">
             <FilterOption
                 checked={state.isActive === undefined}
-                name="group-state-filter"
+                name={`${idPrefix}-state-filter`}
                 onChange={() => setState((current) => ({
                   ...current,
                   isActive: undefined,
                   offset: 0,
                 }))}
                 type="radio"
+            >All states</FilterOption>
+            <FilterOption
+                checked={state.isActive === true}
+                name={`${idPrefix}-state-filter`}
+                onChange={() => setState((current) => ({
+                  ...current,
+                  isActive: true,
+                  offset: 0,
+                }))}
+                type="radio"
             >Active</FilterOption>
             <FilterOption
                 checked={state.isActive === false}
-                name="group-state-filter"
+                name={`${idPrefix}-state-filter`}
                 onChange={() => setState((current) => ({
                   ...current,
                   isActive: false,

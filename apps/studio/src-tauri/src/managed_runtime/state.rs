@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -13,7 +13,10 @@ use std::thread;
 
 use tauri_plugin_shell::process::CommandChild;
 
-use super::{postgres::ManagedPostgres, ManagedRuntimePhase, ManagedRuntimeSnapshot};
+use super::{
+    postgres::ManagedPostgres, ManagedRuntimeMaintenance, ManagedRuntimePhase,
+    ManagedRuntimeSnapshot,
+};
 
 #[derive(Clone)]
 pub struct RuntimeTransportCredentials {
@@ -22,6 +25,7 @@ pub struct RuntimeTransportCredentials {
 }
 
 const AUTO_RESTART_WINDOW: Duration = Duration::from_secs(5 * 60);
+const RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(45);
 const AUTO_RESTART_DELAYS: [Duration; 3] = [
     Duration::from_secs(1),
     Duration::from_secs(2),
@@ -70,8 +74,12 @@ pub struct ManagedRuntimeState {
     restart_scheduled: AtomicBool,
     initializing: AtomicBool,
     maintenance: AtomicBool,
+    maintenance_cancellation: Mutex<Option<Arc<AtomicBool>>>,
     provisioning: AtomicBool,
     stopping: AtomicBool,
+    shutdown_gate: Mutex<()>,
+    exit_shutdown_started: AtomicBool,
+    exit_authorized: AtomicBool,
 }
 
 impl ManagedRuntimeState {
@@ -79,6 +87,11 @@ impl ManagedRuntimeState {
         &self,
         operation: &'static str,
     ) -> Result<ManagedRuntimeMaintenanceGuard<'_>, String> {
+        if self.stopping.load(Ordering::Acquire) {
+            return Err(format!(
+                "Managed Runtime cannot start {operation} while the application is quitting."
+            ));
+        }
         self.maintenance
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| {
@@ -86,7 +99,51 @@ impl ManagedRuntimeState {
                     "Managed Runtime cannot start {operation} while another maintenance operation is active."
                 )
             })?;
-        Ok(ManagedRuntimeMaintenanceGuard(&self.maintenance))
+        let cancellation = Arc::new(AtomicBool::new(false));
+        match self.maintenance_cancellation.lock() {
+            Ok(mut slot) => *slot = Some(cancellation.clone()),
+            Err(_) => {
+                self.maintenance.store(false, Ordering::Release);
+                return Err("Managed Runtime maintenance state lock is poisoned.".to_string());
+            }
+        }
+        Ok(ManagedRuntimeMaintenanceGuard {
+            active: &self.maintenance,
+            cancellation,
+            cancellation_slot: &self.maintenance_cancellation,
+        })
+    }
+
+    pub fn cancel_maintenance(&self) {
+        if let Ok(slot) = self.maintenance_cancellation.lock() {
+            if let Some(cancellation) = slot.as_ref() {
+                cancellation.store(true, Ordering::Release);
+            }
+        }
+    }
+
+    pub fn begin_exit_shutdown(&self) -> bool {
+        let started = self
+            .exit_shutdown_started
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok();
+        if started {
+            self.stopping.store(true, Ordering::Release);
+        }
+        started
+    }
+
+    pub fn authorize_exit(&self) {
+        self.exit_authorized.store(true, Ordering::Release);
+    }
+
+    pub fn finish_failed_exit_shutdown(&self) {
+        self.exit_shutdown_started.store(false, Ordering::Release);
+        self.stopping.store(false, Ordering::Release);
+    }
+
+    pub fn exit_is_authorized(&self) -> bool {
+        self.exit_authorized.load(Ordering::Acquire)
     }
 
     pub fn begin_initialization(&self) -> Result<(), String> {
@@ -104,7 +161,9 @@ impl ManagedRuntimeState {
     }
 
     pub fn resume_for_restart(&self) {
-        self.stopping.store(false, Ordering::Release);
+        if !self.exit_shutdown_started.load(Ordering::Acquire) {
+            self.stopping.store(false, Ordering::Release);
+        }
     }
 
     pub fn begin_provisioning(&self) -> Result<(), String> {
@@ -138,6 +197,18 @@ impl ManagedRuntimeState {
                 .map_err(|_| "Managed Runtime transport lock is poisoned.".to_string())? = None;
         }
         Ok(())
+    }
+
+    pub fn set_maintenance(
+        &self,
+        maintenance: Option<ManagedRuntimeMaintenance>,
+    ) -> Result<ManagedRuntimeSnapshot, String> {
+        let mut snapshot = self
+            .snapshot
+            .lock()
+            .map_err(|_| "Managed Runtime state lock is poisoned.".to_string())?;
+        snapshot.maintenance = maintenance;
+        Ok(snapshot.clone())
     }
 
     pub fn set_runtime_transport(&self, base_url: String, api_key: String) -> Result<(), String> {
@@ -280,6 +351,7 @@ impl ManagedRuntimeState {
         backup_directory: &Path,
         release_version: &str,
         identity: &age::x25519::Identity,
+        cancellation: &AtomicBool,
     ) -> Result<Option<PathBuf>, String> {
         let slot = self
             .postgres
@@ -290,13 +362,19 @@ impl ManagedRuntimeState {
         }
         slot.as_ref()
             .ok_or_else(|| "Managed PostgreSQL is not running.".to_string())?
-            .create_release_backup(backup_directory, release_version, identity)
+            .create_release_backup_with_cancellation(
+                backup_directory,
+                release_version,
+                identity,
+                cancellation,
+            )
     }
 
     pub fn create_automatic_postgres_backup(
         &self,
         backup_directory: &Path,
         identity: &age::x25519::Identity,
+        cancellation: &AtomicBool,
     ) -> Result<Option<PathBuf>, String> {
         let slot = self
             .postgres
@@ -307,10 +385,14 @@ impl ManagedRuntimeState {
         }
         slot.as_ref()
             .ok_or_else(|| "Managed PostgreSQL is not running.".to_string())?
-            .create_automatic_backup(backup_directory, identity)
+            .create_automatic_backup(backup_directory, identity, cancellation)
     }
 
-    pub fn verify_postgres_integrity_if_due(&self, state_directory: &Path) -> Result<bool, String> {
+    pub fn verify_postgres_integrity_if_due(
+        &self,
+        state_directory: &Path,
+        cancellation: &AtomicBool,
+    ) -> Result<bool, String> {
         let slot = self
             .postgres
             .lock()
@@ -320,13 +402,14 @@ impl ManagedRuntimeState {
         }
         slot.as_ref()
             .ok_or_else(|| "Managed PostgreSQL is not running.".to_string())?
-            .verify_integrity_if_due(state_directory)
+            .verify_integrity_if_due(state_directory, cancellation)
     }
 
     pub fn create_manual_postgres_backup(
         &self,
         backup_directory: &Path,
         identity: &age::x25519::Identity,
+        cancellation: &AtomicBool,
     ) -> Result<PathBuf, String> {
         let slot = self
             .postgres
@@ -337,13 +420,14 @@ impl ManagedRuntimeState {
         }
         slot.as_ref()
             .ok_or_else(|| "Managed PostgreSQL is not running.".to_string())?
-            .create_manual_backup(backup_directory, identity)
+            .create_manual_backup_with_cancellation(backup_directory, identity, cancellation)
     }
 
     pub fn create_portable_postgres_backup(
         &self,
         destination: &Path,
         passphrase: age::secrecy::SecretString,
+        cancellation: &AtomicBool,
     ) -> Result<(), String> {
         let slot = self
             .postgres
@@ -354,7 +438,7 @@ impl ManagedRuntimeState {
         }
         slot.as_ref()
             .ok_or_else(|| "Managed PostgreSQL is not running.".to_string())?
-            .create_portable_backup(destination, passphrase)
+            .create_portable_backup_with_cancellation(destination, passphrase, cancellation)
     }
 
     pub fn restore_postgres_backup(
@@ -425,6 +509,7 @@ impl ManagedRuntimeState {
         current_version: &str,
         target_version: &str,
         identity: &age::x25519::Identity,
+        cancellation: &AtomicBool,
     ) -> Result<PathBuf, String> {
         let slot = self
             .postgres
@@ -435,7 +520,13 @@ impl ManagedRuntimeState {
         }
         slot.as_ref()
             .ok_or_else(|| "Managed PostgreSQL is not running.".to_string())?
-            .create_update_backup(backup_directory, current_version, target_version, identity)
+            .create_update_backup_with_cancellation(
+                backup_directory,
+                current_version,
+                target_version,
+                identity,
+                cancellation,
+            )
     }
 
     pub fn stop_postgres(&self) -> Result<(), String> {
@@ -448,15 +539,35 @@ impl ManagedRuntimeState {
     }
 
     fn stop_postgres_inner(&self) -> Result<(), String> {
-        let postgres = self
+        self.cancel_maintenance();
+        let mut postgres = self
             .postgres
             .lock()
-            .map_err(|_| "Managed PostgreSQL state lock is poisoned.".to_string())?
-            .take();
-        if let Some(postgres) = postgres {
+            .map_err(|_| "Managed PostgreSQL state lock is poisoned.".to_string())?;
+        if let Some(postgres) = postgres.as_ref() {
             postgres.stop()?;
         }
+        postgres.take();
         Ok(())
+    }
+
+    pub fn shutdown_services(&self) -> Result<(), String> {
+        self.stopping.store(true, Ordering::Release);
+        self.cancel_maintenance();
+        let _shutdown = self
+            .shutdown_gate
+            .lock()
+            .map_err(|_| "Managed Runtime shutdown lock is poisoned.".to_string())?;
+        let runtime_result = self.stop_processes_inner();
+        let postgres_result = self.stop_postgres_inner();
+        match (runtime_result, postgres_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(runtime_error), Ok(())) => Err(runtime_error),
+            (Ok(()), Err(postgres_error)) => Err(postgres_error),
+            (Err(runtime_error), Err(postgres_error)) => Err(format!(
+                "{runtime_error} Managed PostgreSQL shutdown also failed: {postgres_error}"
+            )),
+        }
     }
 
     pub fn stop_processes(&self) -> Result<(), String> {
@@ -480,7 +591,8 @@ impl ManagedRuntimeState {
             let pid = process.child.pid();
             // SAFETY: `pid` comes from a live child created by the shell plugin.
             let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-            for _ in 0..50 {
+            let deadline = Instant::now() + RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT;
+            while Instant::now() < deadline {
                 if !process_is_running(pid) {
                     break;
                 }
@@ -495,11 +607,29 @@ impl ManagedRuntimeState {
     }
 }
 
-pub struct ManagedRuntimeMaintenanceGuard<'a>(&'a AtomicBool);
+pub struct ManagedRuntimeMaintenanceGuard<'a> {
+    active: &'a AtomicBool,
+    cancellation: Arc<AtomicBool>,
+    cancellation_slot: &'a Mutex<Option<Arc<AtomicBool>>>,
+}
+
+impl ManagedRuntimeMaintenanceGuard<'_> {
+    pub fn cancellation(&self) -> Arc<AtomicBool> {
+        self.cancellation.clone()
+    }
+}
 
 impl Drop for ManagedRuntimeMaintenanceGuard<'_> {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
+        if let Ok(mut slot) = self.cancellation_slot.lock() {
+            if slot
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &self.cancellation))
+            {
+                *slot = None;
+            }
+        }
+        self.active.store(false, Ordering::Release);
     }
 }
 
@@ -511,7 +641,10 @@ fn process_is_running(pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::{
+        sync::atomic::Ordering,
+        time::{Duration, Instant},
+    };
 
     use super::{ManagedRuntimeState, RestartBudget};
 
@@ -522,6 +655,38 @@ mod tests {
         assert!(state.begin_maintenance("update").is_err());
         drop(guard);
         assert!(state.begin_maintenance("update").is_ok());
+    }
+
+    #[test]
+    fn signals_active_maintenance_before_postgres_shutdown_waits_for_it() {
+        let state = ManagedRuntimeState::default();
+        let guard = state.begin_maintenance("automatic backup").unwrap();
+        let cancellation = guard.cancellation();
+
+        state.cancel_maintenance();
+
+        assert!(cancellation.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn exit_shutdown_cannot_be_reopened_by_operation_recovery() {
+        let state = ManagedRuntimeState::default();
+
+        assert!(state.begin_exit_shutdown());
+        state.resume_for_restart();
+
+        assert!(state.begin_initialization().is_err());
+        assert!(!state.begin_exit_shutdown());
+    }
+
+    #[test]
+    fn failed_exit_shutdown_can_be_retried() {
+        let state = ManagedRuntimeState::default();
+
+        assert!(state.begin_exit_shutdown());
+        state.finish_failed_exit_shutdown();
+
+        assert!(state.begin_exit_shutdown());
     }
 
     #[test]

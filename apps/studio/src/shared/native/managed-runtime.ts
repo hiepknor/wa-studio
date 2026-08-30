@@ -15,6 +15,29 @@ export type ManagedRuntimePhase =
   | "stopping"
   | "unavailable";
 
+export type ManagedRuntimeAvailability =
+  | "starting"
+  | "needsSetup"
+  | "online"
+  | "busy"
+  | "degraded"
+  | "stopping"
+  | "offline";
+
+export interface ManagedRuntimeCapabilities {
+  canRead: boolean;
+  canEditDrafts: boolean;
+  canSync: boolean;
+  canLaunchCampaign: boolean;
+  canSend: boolean;
+}
+
+export interface ManagedRuntimeMaintenance {
+  kind: "preMigrationBackup" | "integrityCheck" | "automaticBackup";
+  blocking: boolean;
+  cancellable: boolean;
+}
+
 interface RuntimeReleaseManifestBase {
   service: "wa-runtime";
   version: string;
@@ -40,6 +63,9 @@ export type RuntimeReleaseManifest = RuntimeReleaseManifestBase & (
 
 export interface ManagedRuntimeSnapshot {
   phase: ManagedRuntimePhase;
+  availability: ManagedRuntimeAvailability;
+  capabilities: ManagedRuntimeCapabilities;
+  maintenance: ManagedRuntimeMaintenance | null;
   manifest: RuntimeReleaseManifest | null;
   connection: ManagedRuntimeConnection | null;
   error: string | null;

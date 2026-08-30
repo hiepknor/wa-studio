@@ -226,6 +226,7 @@ pub async fn install_app_update(
         ));
     }
     emit_progress(&app, "restarting", None, None);
+    managed_runtime::authorize_app_exit(&app);
     app.restart();
 }
 

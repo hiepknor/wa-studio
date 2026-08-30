@@ -24,7 +24,7 @@ describe('runtime release manifest', () => {
       openwaReleaseTag: OPENWA_RELEASE_TAG,
       openwaContractSha256: OPENWA_CONTRACT_SHA256,
       profiles: ['server', 'desktop-managed'],
-      roles: ['api', 'worker', 'scheduler', 'desktop', 'migrate'],
+      roles: ['api', 'worker', 'scheduler', 'desktop', 'migration-plan', 'migrate'],
       databaseBackends: ['postgres'],
       queueBackends: ['redis', 'postgres'],
     });
@@ -32,14 +32,14 @@ describe('runtime release manifest', () => {
 });
 
 describe('unified Runtime command', () => {
-  it.each(['api', 'worker', 'scheduler', 'desktop', 'migrate', 'manifest'] as const)(
+  it.each(['api', 'worker', 'scheduler', 'desktop', 'migration-plan', 'migrate', 'manifest'] as const)(
     'accepts the %s role',
     command => expect(parseRuntimeCommand(command)).toBe(command),
   );
 
   it.each([undefined, '', 'unknown'])('rejects missing or unsupported role %s', command => {
     expect(() => parseRuntimeCommand(command)).toThrow(
-      'Usage: wa-runtime <api|worker|scheduler|desktop|migrate|manifest>',
+      'Usage: wa-runtime <api|worker|scheduler|desktop|migration-plan|migrate|manifest>',
     );
   });
 });

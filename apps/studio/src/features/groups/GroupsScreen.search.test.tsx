@@ -219,7 +219,7 @@ describe("GroupsScreen global search and filters", () => {
     await connect(user);
 
     await user.click(screen.getByRole("button", { name: "Filters" }));
-    expect(screen.getByRole("radio", { name: "Active" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "All states" })).toBeChecked();
     expect(screen.getByText("No filters applied")).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "Denied" }));
     await user.click(screen.getByRole("checkbox", { name: "Unknown" }));

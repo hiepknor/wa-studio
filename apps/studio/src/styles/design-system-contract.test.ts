@@ -438,7 +438,8 @@ describe("WARP design-system contract", () => {
     expect(dataFilterToolbarCss).toContain(".data-filter-controls { min-width: 0;");
     expect(dataFilterToolbarCss).toContain("justify-self: start");
     expect(dataFilterToolbarCss).toContain(".data-filter-result-summary { justify-self: end;");
-    expect(dataFilterToolbarSource).toContain('ref={filterTriggerRef}\n            size="md"');
+    expect(dataFilterToolbarSource).toMatch(/ref=\{filterTriggerRef\}\s+size="md"/);
+    expect(dataFilterToolbarCss).toContain(".data-filter-toolbar-popover .data-filter-trigger-wrap > .data-filter-panel");
   });
 
   it("lets the Groups scope popover escape a short table container", () => {

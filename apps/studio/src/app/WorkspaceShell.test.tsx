@@ -1042,18 +1042,17 @@ describe("WorkspaceShell", () => {
     );
     await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
     await user.click(await screen.findByRole("combobox", { name: "Group scope" }));
-    await user.click(screen.getByRole("button", { name: /New list/ }));
-    const metadata = screen.getByRole("dialog", { name: "Create group list" });
-    await user.type(within(metadata).getByRole("textbox", { name: "Name" }), "Guarded draft");
-    await user.click(within(metadata).getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "New list" }));
+    const editor = screen.getByRole("dialog", { name: "New list" });
+    await user.type(within(editor).getByRole("textbox", { name: "Name" }), "Guarded draft");
 
-    await user.click(screen.getByRole("button", { name: "Campaigns" }));
+    act(() => screen.getByRole("button", { name: "Campaigns", hidden: true }).click());
     const guard = screen.getByRole("dialog", { name: "Leave group list draft?" });
     await user.click(within(guard).getByRole("button", { name: "Keep editing" }));
-    expect(screen.getByRole("button", { name: "Groups" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("New list draft")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Groups", hidden: true })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("dialog", { name: "New list" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Campaigns" }));
+    act(() => screen.getByRole("button", { name: "Campaigns", hidden: true }).click());
     await user.click(screen.getByRole("button", { name: "Discard and continue" }));
     expect(await screen.findByRole("button", { name: "Campaigns" })).toHaveAttribute("aria-current", "page");
   });
@@ -1087,16 +1086,15 @@ describe("WorkspaceShell", () => {
     );
     await user.click(screen.getByRole("button", { name: "Connect test WA Runtime" }));
     await user.click(await screen.findByRole("combobox", { name: "Group scope" }));
-    await user.click(screen.getByRole("button", { name: /New list/ }));
-    const metadata = screen.getByRole("dialog", { name: "Create group list" });
-    await user.type(within(metadata).getByRole("textbox", { name: "Name" }), "Session guard");
-    await user.click(within(metadata).getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "New list" }));
+    const editor = screen.getByRole("dialog", { name: "New list" });
+    await user.type(within(editor).getByRole("textbox", { name: "Name" }), "Session guard");
 
-    await user.click(screen.getByRole("button", { name: "Active session" }));
-    const listbox = screen.getByRole("listbox", { name: "Gateway sessions" });
-    await user.click(within(listbox).getByRole("option", { name: /standby-session/ }));
+    act(() => screen.getByRole("button", { name: "Active session", hidden: true }).click());
+    const listbox = screen.getByRole("listbox", { name: "Gateway sessions", hidden: true });
+    act(() => within(listbox).getByRole("option", { name: /standby-session/, hidden: true }).click());
     expect(screen.getByRole("dialog", { name: "Leave group list draft?" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Active session" })).toHaveTextContent("dev-session");
+    expect(screen.getByRole("button", { name: "Active session", hidden: true })).toHaveTextContent("dev-session");
 
     await user.click(screen.getByRole("button", { name: "Discard and continue" }));
     expect(screen.getByRole("button", { name: "Active session" })).toHaveTextContent("standby-session");
