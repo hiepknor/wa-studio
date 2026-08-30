@@ -1,5 +1,6 @@
 import { type ReactNode, useId } from "react";
 
+import { AppIcon } from "./AppIcon";
 import "./decision-group.css";
 import "./text-field.css";
 
@@ -46,15 +47,22 @@ export function DecisionGroup<T extends string>({
       <div
         aria-describedby={ariaDescribedBy}
         aria-labelledby={labelId}
+        aria-orientation="horizontal"
         className="decision-group-control"
         data-disabled={disabled || undefined}
         role="radiogroup"
       >
-        {options.map((option) => (
-          <label className="decision-group-option" key={option.value}>
+        {options.map((option) => {
+          const selected = option.value === value;
+          return <label
+            className="decision-group-option"
+            data-disabled={disabled || option.disabled || undefined}
+            data-selected={selected || undefined}
+            key={option.value}
+          >
             <input
               aria-label={typeof option.label === "string" ? option.label : undefined}
-              checked={option.value === value}
+              checked={selected}
               className="decision-group-input"
               disabled={disabled || option.disabled}
               name={name ?? generatedId}
@@ -62,13 +70,15 @@ export function DecisionGroup<T extends string>({
               type="radio"
               value={option.value}
             />
-            <span aria-hidden="true" className="decision-group-indicator" />
+            <span aria-hidden="true" className="decision-group-indicator">
+              {selected && <AppIcon name="check" size="xs" />}
+            </span>
             <span className="decision-group-copy">
               <span className="decision-group-title"><strong>{option.label}</strong>{option.meta}</span>
               <small>{option.description}</small>
             </span>
-          </label>
-        ))}
+          </label>;
+        })}
       </div>
     </div>
   );

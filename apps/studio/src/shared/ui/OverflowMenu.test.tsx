@@ -32,7 +32,11 @@ describe("OverflowMenu", () => {
     const editItem = screen.getByRole("menuitem", { name: "Edit resource" });
     expect(editItem).toHaveFocus();
     expect(editItem).toHaveAccessibleDescription("Edit resource details.");
+    expect(editItem).toHaveAttribute("data-description", "true");
+    expect(editItem).toHaveAttribute("data-tone", "neutral");
+    expect(editItem.querySelector(".menu-item-icon-slot .ui-icon")).toBeInTheDocument();
     expect(screen.getByRole("separator")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete resource" })).toHaveAttribute("data-tone", "danger");
     await user.keyboard("{ArrowDown}{Enter}");
     expect(onDelete).toHaveBeenCalledOnce();
     expect(trigger).toHaveFocus();

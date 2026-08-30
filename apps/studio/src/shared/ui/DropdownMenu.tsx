@@ -13,6 +13,7 @@ import {
 } from "react";
 
 import { AppIcon, type AppIconName } from "./AppIcon";
+import "./dropdown-menu.css";
 
 export interface DropdownTriggerProps {
   "aria-controls": string;
@@ -217,11 +218,15 @@ export function DropdownMenuItem({
       aria-describedby={description ? descriptionId : undefined}
       aria-disabled={disabled || undefined}
       className={`menu-item ${description ? "menu-item-rich" : ""} ${danger ? "menu-item-danger" : ""} ${className}`.trim()}
+      data-description={description ? "true" : undefined}
+      data-tone={danger ? "danger" : "neutral"}
       onClick={() => { if (!disabled) onSelect(); }}
       role="menuitem"
       type="button"
     >
-      {icon && <AppIcon className="menu-item-icon" name={icon} size="sm" />}
+      <span aria-hidden="true" className="menu-item-icon-slot">
+        {icon && <AppIcon className="menu-item-icon" name={icon} size="sm" />}
+      </span>
       <span className="menu-item-copy">
         <span className="menu-item-label" id={labelId}>{children}</span>
         {description && <span className="menu-item-description" id={descriptionId}>{description}</span>}

@@ -44,7 +44,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
         <AppIcon
           className={loading ? "button-icon ui-icon-spin" : "button-icon"}
           name={leadingIcon}
-          size="md"
+          size={size}
         />
       )}
       {hasLabel && <span className="button-label">{children}</span>}

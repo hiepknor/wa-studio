@@ -26,6 +26,8 @@ export function InlineAlert({
     <div
       {...props}
       className={`inline-alert inline-alert-${tone} ${className}`.trim()}
+      data-has-action={Boolean(action) || undefined}
+      data-has-indicator={indicator || undefined}
       role={role ?? feedbackRole(tone)}
     >
       {indicator && <StatusDot glow tone={tone} />}

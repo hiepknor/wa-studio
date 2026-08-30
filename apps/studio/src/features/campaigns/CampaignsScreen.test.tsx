@@ -185,6 +185,10 @@ describe("CampaignsScreen", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Campaign name" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Message text" })).toBeInTheDocument();
+    const messagePreview = screen.getByRole("region", { name: "Message preview" });
+    expect(within(messagePreview).getByText("Ship it")).toBeInTheDocument();
+    expect(within(messagePreview).getByText("Text message")).toBeInTheDocument();
+    expect(within(messagePreview).getByText("7 / 4,096")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset to saved" })).toBeDisabled();
     await user.type(screen.getByRole("textbox", { name: "Campaign name" }), " updated");
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
@@ -204,7 +208,17 @@ describe("CampaignsScreen", () => {
     expect(screen.getByRole("heading", { name: "Release" })).toBeInTheDocument();
 
     const workspace = screen.getByRole("dialog", { name: campaign.name });
-    expect(workspace.querySelector(".campaign-details-grid")).toBeInTheDocument();
+    const contentLayout = workspace.querySelector<HTMLElement>(".campaign-content-layout");
+    const contentEditor = workspace.querySelector<HTMLElement>(".campaign-content-editor");
+    const deliveryHeading = screen.getByRole("heading", { name: "Delivery timing" });
+    expect(contentLayout).toBeInTheDocument();
+    expect(contentEditor).toBeInTheDocument();
+    expect(contentLayout).toHaveClass("campaign-workspace-section");
+    expect(messagePreview).not.toHaveClass("campaign-workspace-section");
+    expect(contentLayout).toContainElement(messagePreview);
+    expect(contentLayout).toContainElement(deliveryHeading);
+    expect(contentEditor).toContainElement(deliveryHeading);
+    expect(messagePreview).not.toContainElement(deliveryHeading);
     expect(within(workspace).getByRole("button", { name: `More actions for ${campaign.name}` })).toBeInTheDocument();
     const dialogBody = workspace.querySelector<HTMLElement>(".modal-dialog-body");
     expect(dialogBody).not.toBeNull();
@@ -221,10 +235,18 @@ describe("CampaignsScreen", () => {
     expect(within(targetOverview).getByRole("button", { name: "Apply group list" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Review & launch" }));
-    expect(workspace.querySelector(".campaign-review-grid")).toBeInTheDocument();
-    expect(screen.getByText("Ready for evaluation")).toBeInTheDocument();
+    expect(workspace.querySelector(".campaign-review-flow")).toBeInTheDocument();
+    const reviewPlan = screen.getByRole("region", { name: "Campaign r3 · targets r4" });
+    expect(within(reviewPlan).getByText("Safety gate")).toBeInTheDocument();
+    expect(screen.getByText("No Runtime decision yet")).toBeInTheDocument();
     expect(screen.getByText("No preflight result yet")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Dry run" })).toBeChecked();
+    const executionMode = screen.getByRole("radiogroup", { name: "Execution mode" });
+    expect(executionMode).toHaveClass("segmented-control-control");
+    expect(executionMode.parentElement?.previousElementSibling).toHaveClass("campaign-review-eyebrow");
+    expect(executionMode.parentElement?.previousElementSibling).toHaveTextContent("Execution mode");
+    expect(within(executionMode).getByRole("radio", { name: "Dry run" })).toBeChecked();
+    expect(within(executionMode).queryByText("Evaluate the campaign as a simulation.")).not.toBeInTheDocument();
+    expect(within(executionMode).queryByText("Apply live policy without creating a run or sending messages.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run preflight" })).toBeInTheDocument();
   });
 
@@ -397,6 +419,47 @@ describe("CampaignsScreen", () => {
       },
       scheduleType: "IMMEDIATE",
     }, expect.any(String));
+  });
+
+  it("restores a persisted image preview when the campaign workspace is reopened", async () => {
+    const user = userEvent.setup();
+    const image = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const assetId = "22222222-2222-4222-8222-222222222222";
+    const imageCampaign: RuntimeCampaign = {
+      ...campaign,
+      text: "Release image",
+      content: {
+        type: "IMAGE",
+        mediaAssetId: assetId,
+        caption: "Release image",
+        filename: "release.png",
+        mimeType: "image/png",
+        byteSize: image.byteLength,
+        sha256: "b".repeat(64),
+      },
+    };
+    const getCampaignMediaContent = vi.fn().mockResolvedValue(new Blob([image], {
+      type: "image/png",
+    }));
+    renderCampaigns({
+      getCampaignMediaContent,
+      getCampaignMediaPolicy: vi.fn().mockResolvedValue({
+        chunkSize: 393_216,
+        imageMimeTypes: ["image/jpeg", "image/png", "image/webp"],
+        imageMaxBytes: 8 * 1024 * 1024,
+        storageMaxBytes: 512 * 1024 * 1024,
+      }),
+    }, [imageCampaign]);
+    await connect(user);
+    await openCampaign(user);
+
+    const preview = await screen.findByRole("img", { name: "Preview of release.png" });
+    expect(preview).toHaveAttribute("src", expect.stringMatching(/^blob:/u));
+    const messagePreview = screen.getByRole("region", { name: "Message preview" });
+    expect(within(messagePreview).getByRole("img", { name: "Message preview: release.png" }))
+      .toHaveAttribute("src", preview.getAttribute("src"));
+    expect(within(messagePreview).getByText("Release image")).toBeInTheDocument();
+    expect(getCampaignMediaContent).toHaveBeenCalledWith(assetId, READ_OPTIONS);
   });
 
   it("admits only one create mutation before React can render its busy state", async () => {
@@ -925,13 +988,24 @@ describe("CampaignsScreen", () => {
     await connect(user);
     await openCampaign(user);
     await user.click(screen.getByRole("tab", { name: "Review & launch" }));
-    expect(screen.getByRole("heading", { name: "Run control" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "Execution mode" })).toBeInTheDocument();
     await runPreflight(user, mode);
     const result = await screen.findByRole("region", { name: "Preflight result" });
+    expect(screen.getByRole("heading", {
+      name: status === "BLOCK"
+        ? "Launch is blocked"
+        : status === "WARN"
+          ? mode === "LIVE"
+            ? "Live launch needs a pass"
+            : "Eligible with warnings"
+          : mode === "DRY_RUN"
+            ? "Eligible for a dry run"
+            : "Ready for live confirmation",
+    })).toBeInTheDocument();
     expect(within(result).getByRole("heading", {
       name: status === "PASS" ? "Ready to continue" : status === "WARN" ? "Review warnings" : "Action required",
     })).toBeInTheDocument();
-    expect(within(result).getByRole("heading", { name: "Target assessment" })).toBeInTheDocument();
+    expect(within(result).getByRole("heading", { name: "Runtime target assessment" })).toBeInTheDocument();
     const checksPanel = within(result).getByRole("heading", { name: "Policy checks" }).closest("section");
     expect(checksPanel).not.toBeNull();
     expect(within(checksPanel!).getByText(status === "PASS" ? "Pass" : status === "WARN" ? "Warn" : "Block")).toHaveClass(
@@ -953,6 +1027,62 @@ describe("CampaignsScreen", () => {
     expect(within(metrics!).getByText("3")).toBeInTheDocument();
     expect(within(metrics!).getByText("1")).toBeInTheDocument();
     expect(preflightCampaign).toHaveBeenCalledWith(campaign.id, mode);
+  });
+
+  it("collapses an empty target issue result and keeps policy evidence full width", async () => {
+    const user = userEvent.setup();
+    const cleanReport = {
+      ...report("DRY_RUN", "PASS"),
+      allowedTargets: 9,
+      deniedTargets: 0,
+      unknownTargets: 0,
+      targetIssues: [],
+    };
+    renderCampaigns({ preflightCampaign: vi.fn().mockResolvedValue(cleanReport) });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
+    await runPreflight(user);
+
+    const result = await screen.findByRole("region", { name: "Preflight result" });
+    const evidence = result.querySelector(".preflight-evidence");
+    expect(evidence).not.toBeNull();
+    expect(evidence).not.toHaveAttribute("data-has-target-issues");
+    expect(within(result).queryByRole("heading", { name: "Target issues" })).not.toBeInTheDocument();
+    const noTargetIssues = within(result).getByRole("status");
+    expect(noTargetIssues).toHaveClass("inline-alert", "inline-alert-success");
+    expect(noTargetIssues).toHaveTextContent("No target issues");
+    expect(noTargetIssues).toHaveTextContent("Runtime found no groups that require operator attention.");
+    expect(noTargetIssues.querySelector(".status-tone-success")).toBeInTheDocument();
+    expect(within(result).getByRole("heading", { name: "Policy checks" }).closest("section"))
+      .toHaveClass("preflight-policy-checks");
+    expect(screen.getByText(/PASS · 9\/9 eligible · Checked/)).toBeInTheDocument();
+    expect(within(screen.getByRole("tab", { name: "Review & launch" })).queryByText("PASS"))
+      .not.toBeInTheDocument();
+  });
+
+  it("allows a warned DRY_RUN but never offers LIVE launch without a passing proof", async () => {
+    const user = userEvent.setup();
+    const preflightCampaign = vi.fn()
+      .mockResolvedValueOnce(report("DRY_RUN", "WARN"))
+      .mockResolvedValueOnce(report("LIVE", "WARN"));
+    const createCampaignRun = vi.fn().mockResolvedValue(campaignRun("DRY_RUN"));
+    renderCampaigns({ createCampaignRun, preflightCampaign });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
+
+    await runPreflight(user);
+    expect(await screen.findByRole("button", { name: "Create dry run" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Create dry run" }));
+    await waitFor(() => expect(createCampaignRun).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole("radio", { name: "Live policy" }));
+    await user.click(screen.getByRole("button", { name: "Run preflight" }));
+    expect(await screen.findByRole("heading", { name: "Live launch needs a pass" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Launch live campaign" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run preflight again" })).toBeEnabled();
+    expect(createCampaignRun).toHaveBeenCalledOnce();
   });
 
   it("renders stale capability and unknown future policy codes safely", async () => {
@@ -1128,7 +1258,7 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("button", { name: "Create dry run" }));
     expect(await screen.findByText(/changed after review/)).toBeInTheDocument();
     expect(createCampaignRun).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Ready for evaluation")).toBeInTheDocument();
+    expect(screen.getByText("No Runtime decision yet")).toBeInTheDocument();
   });
 
   it("reconciles pause and resume with the separate Campaign lifecycle", async () => {
@@ -1790,7 +1920,7 @@ describe("CampaignsScreen", () => {
     await user.click(rowAction);
     expect(screen.getByRole("menuitem", { name: "Edit campaign" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Edit campaign" })).toHaveAccessibleDescription(
-      "Edit campaign details, targets, and preflight.",
+      "Change content, targets, and launch checks.",
     );
     await user.click(screen.getByRole("menuitem", { name: /Delete campaign/ }));
     const dialog = screen.getByRole("dialog", { name: "Delete campaign?" });

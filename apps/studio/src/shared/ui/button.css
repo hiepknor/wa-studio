@@ -46,7 +46,6 @@
   opacity: var(--disabled-opacity);
 }
 .button-icon-only {
-  --button-height: var(--control-height);
   width: var(--button-height);
   min-width: var(--button-height);
   height: var(--button-height);
@@ -60,4 +59,4 @@
 }
 .button-icon-only:is(.button-secondary, .button-ghost):hover:not(:disabled) { border-color: var(--divider-strong); background: var(--surface-hover); color: var(--text-primary); }
 .button-icon { color: currentColor; }
-.button-label { display: block; }
+.button-label { min-width: 0; display: inline-flex; align-items: center; line-height: inherit; }

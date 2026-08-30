@@ -14,6 +14,14 @@ describe("Button", () => {
     expect(button.querySelector("svg")).toHaveClass("ui-icon-md");
   });
 
+  it("matches icon geometry to the button size", () => {
+    render(<Button icon="refresh" size="sm">Reload</Button>);
+
+    const button = screen.getByRole("button", { name: "Reload" });
+    expect(button).toHaveClass("button-sm");
+    expect(button.querySelector("svg")).toHaveClass("ui-icon-sm");
+  });
+
   it("keeps a stable visual label while exposing loading semantics", () => {
     render(
       <Button aria-label="Refreshing sessions" loading>

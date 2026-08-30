@@ -36,8 +36,7 @@ import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
 import { DateTime } from "@/shared/ui/DateTime";
-import { DecisionGroup } from "@/shared/ui/DecisionGroup";
-import { DropdownMenuItem } from "@/shared/ui/DropdownMenu";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@/shared/ui/DropdownMenu";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { OverflowMenu } from "@/shared/ui/OverflowMenu";
 import { PageHeader } from "@/shared/ui/PageHeader";
@@ -95,6 +94,11 @@ interface CampaignCreateIntent {
   payload: RuntimeCreateCampaign;
 }
 
+interface CampaignMediaPreview {
+  assetId: string;
+  url: string;
+}
+
 const PAGE_SIZE = 50;
 const NON_TERMINAL_RUN_STATUSES = new Set<RuntimeCampaignRun["status"]>([
   "PREPARING",
@@ -122,12 +126,10 @@ const CONTENT_TYPE_OPTIONS = [
 ] as const;
 const PREFLIGHT_MODE_OPTIONS = [
   {
-    description: "Evaluate the campaign as a simulation.",
     label: "Dry run",
     value: "DRY_RUN",
   },
   {
-    description: "Apply live policy without creating a run or sending messages.",
     label: "Live policy",
     value: "LIVE",
   },
@@ -168,14 +170,19 @@ function reportTone(status: "PASS" | "WARN" | "BLOCK") {
   return "danger" as const;
 }
 
-function preflightStatusPresentation(status: RuntimeCampaignPreflight["status"]) {
+function preflightStatusPresentation(
+  status: RuntimeCampaignPreflight["status"],
+  executionMode: RuntimeCampaignExecutionMode,
+) {
   if (status === "PASS") return {
     description: "Runtime found no blocking policy issues for these persisted revisions.",
     icon: "check" as const,
     title: "Ready to continue",
   };
   if (status === "WARN") return {
-    description: "Runtime allows this revision set, but the warnings below should be reviewed first.",
+    description: executionMode === "LIVE"
+      ? "Runtime reported warnings and did not issue live launch proof. Resolve them before launching."
+      : "Runtime allows this dry-run simulation, but the warnings below should be reviewed first.",
     icon: "triangle-alert" as const,
     title: "Review warnings",
   };
@@ -232,19 +239,22 @@ function CampaignActionsMenu({
       triggerLabel={`More actions for ${campaign.name}`}
     >
       {onOpen && (
-        <DropdownMenuItem
-          description={campaign.status === "DRAFT"
-            ? "Edit campaign details, targets, and preflight."
-            : "Review campaign details, targets, runs, and preflight."}
-          icon={campaign.status === "DRAFT" ? "edit" : "view"}
-          onSelect={() => onOpen(campaign)}
-        >
-          {openLabel}
-        </DropdownMenuItem>
+        <>
+          <DropdownMenuItem
+            description={campaign.status === "DRAFT"
+              ? "Change content, targets, and launch checks."
+              : "Inspect content, targets, runs, and launch checks."}
+            icon={campaign.status === "DRAFT" ? "edit" : "view"}
+            onSelect={() => onOpen(campaign)}
+          >
+            {openLabel}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+        </>
       )}
       <DropdownMenuItem
         danger
-        description={disabledReason ?? "Remove this campaign from the workspace. Run and delivery history will be retained."}
+        description={disabledReason ?? "Remove the campaign. Run and delivery history stays available."}
         disabled={Boolean(disabledReason)}
         icon="trash"
         onSelect={() => onDelete(campaign)}
@@ -252,6 +262,98 @@ function CampaignActionsMenu({
         Delete campaign
       </DropdownMenuItem>
     </OverflowMenu>
+  );
+}
+
+function CampaignMessagePreview({
+  form,
+  mediaPreview,
+  mediaPreviewError,
+  mediaPreviewLoading,
+  onRetryPreview,
+}: {
+  form: CampaignFormValues;
+  mediaPreview: CampaignMediaPreview | null;
+  mediaPreviewError: string | null;
+  mediaPreviewLoading: boolean;
+  onRetryPreview: () => void;
+}) {
+  const message = form.text.trim();
+  const characterLimit = form.contentType === "TEXT" ? 4_096 : 1_024;
+  const previewUrl = form.mediaAsset && mediaPreview?.assetId === form.mediaAsset.id
+    ? mediaPreview.url
+    : null;
+
+  return (
+    <section
+      aria-labelledby="campaign-message-preview-title"
+      className="campaign-message-preview-panel"
+    >
+      <div className="campaign-message-preview-sticky">
+        <header className="campaign-form-section-heading">
+          <div>
+            <span>Draft preview</span>
+            <h4 id="campaign-message-preview-title">Message preview</h4>
+            <p>Reflects the message payload currently staged in this editor.</p>
+          </div>
+        </header>
+        <div className="campaign-message-preview-surface" data-content-type={form.contentType.toLocaleLowerCase()}>
+          <div className="campaign-message-preview-canvas">
+            {form.contentType === "TEXT" ? (
+              message ? (
+                <p className="campaign-message-preview-text">{message}</p>
+              ) : (
+                <div className="campaign-message-preview-empty">
+                  <AppIcon name="campaigns" size="lg" />
+                  <strong>No message text yet</strong>
+                  <span>Enter message text to preview the outgoing payload.</span>
+                </div>
+              )
+            ) : previewUrl && form.mediaAsset ? (
+              <figure className="campaign-message-preview-media">
+                <img alt={`Message preview: ${form.mediaAsset.filename}`} src={previewUrl} />
+                <figcaption data-empty={!message || undefined}>
+                  {message || "No caption"}
+                </figcaption>
+              </figure>
+            ) : (
+              <div
+                className="campaign-message-preview-empty"
+                data-tone={mediaPreviewError ? "danger" : undefined}
+              >
+                <AppIcon name={mediaPreviewError ? "triangle-alert" : "campaigns"} size="lg" />
+                <strong>
+                  {mediaPreviewLoading
+                    ? "Loading image preview"
+                    : mediaPreviewError
+                      ? "Preview unavailable"
+                      : form.mediaAsset
+                        ? "Preparing image preview"
+                        : "No image selected"}
+                </strong>
+                <span>
+                  {mediaPreviewError
+                    ?? (form.mediaAsset
+                      ? "The verified image will appear here."
+                      : "Choose an image to preview the outgoing payload.")}
+                </span>
+                {mediaPreviewError && <Button onClick={onRetryPreview} size="sm" variant="secondary">Retry preview</Button>}
+              </div>
+            )}
+          </div>
+          <footer className="campaign-message-preview-meta">
+            <span>
+              {form.contentType === "TEXT"
+                ? "Text message"
+                : form.mediaAsset
+                  ? `Image · ${formatBytes(form.mediaAsset.byteSize)}`
+                  : "Image message"}
+            </span>
+            <span>{form.text.length.toLocaleString("en-US")} / {characterLimit.toLocaleString("en-US")}</span>
+          </footer>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -280,7 +382,10 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const [mediaPolicyRequest, setMediaPolicyRequest] = useState(0);
   const [mediaUploadProgress, setMediaUploadProgress] = useState<CampaignMediaUploadProgress | null>(null);
   const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
-  const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<CampaignMediaPreview | null>(null);
+  const [mediaPreviewLoading, setMediaPreviewLoading] = useState(false);
+  const [mediaPreviewError, setMediaPreviewError] = useState<string | null>(null);
+  const [mediaPreviewRequest, setMediaPreviewRequest] = useState(0);
   const [targets, setTargets] = useState<RuntimeCampaignTarget[]>([]);
   const [draftTargetIds, setDraftTargetIds] = useState<string[]>([]);
   const [targetsRevision, setTargetsRevision] = useState<number | null>(null);
@@ -317,6 +422,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const deleteRequestRef = useRef(0);
   const mediaFileInputRef = useRef<HTMLInputElement>(null);
   const mediaUploadAbortRef = useRef<AbortController | null>(null);
+  const mediaPreviewRequestRef = useRef(0);
   const listTargetRef = useRef(campaignListRequestKey(listState));
   const pageKeyRef = useRef("");
   const errorKeyRef = useRef("");
@@ -466,7 +572,10 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     mediaUploadAbortRef.current = null;
     setMediaUploadProgress(null);
     setMediaUploadError(null);
-    setMediaPreviewUrl(null);
+    mediaPreviewRequestRef.current += 1;
+    setMediaPreview(null);
+    setMediaPreviewLoading(false);
+    setMediaPreviewError(null);
     setEditor({ kind: "closed" });
     setDiscardConfirmationOpen(false);
     setCampaignPage(null);
@@ -543,8 +652,57 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   }, [api, editor.kind, form.contentType, mediaPolicy, mediaPolicyRequest]);
 
   useEffect(() => () => {
-    if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl);
-  }, [mediaPreviewUrl]);
+    if (mediaPreview?.url) URL.revokeObjectURL(mediaPreview.url);
+  }, [mediaPreview?.url]);
+
+  useEffect(() => {
+    const asset = form.mediaAsset;
+    if (
+      editor.kind !== "open"
+      || !asset
+      || asset.kind !== "IMAGE"
+      || mediaPreview?.assetId === asset.id
+    ) {
+      setMediaPreviewLoading(false);
+      if (!asset || mediaPreview?.assetId === asset.id) setMediaPreviewError(null);
+      return;
+    }
+
+    const request = ++mediaPreviewRequestRef.current;
+    const epoch = editorEpochRef.current;
+    const controller = new AbortController();
+    setMediaPreviewLoading(true);
+    setMediaPreviewError(null);
+    void api.getCampaignMediaContent(asset.id, { signal: controller.signal })
+      .then((blob) => {
+        if (
+          controller.signal.aborted
+          || request !== mediaPreviewRequestRef.current
+          || epoch !== editorEpochRef.current
+        ) return;
+        const mimeType = blob.type.split(";", 1)[0]?.trim().toLocaleLowerCase();
+        if (blob.size !== asset.byteSize || mimeType !== asset.mimeType.toLocaleLowerCase()) {
+          throw new Error("Stored image response did not match its verified metadata.");
+        }
+        setMediaPreview({ assetId: asset.id, url: URL.createObjectURL(blob) });
+      })
+      .catch((error) => {
+        if (
+          controller.signal.aborted
+          || request !== mediaPreviewRequestRef.current
+          || epoch !== editorEpochRef.current
+        ) return;
+        setMediaPreviewError(campaignErrorMessage(error, "Could not load the saved image preview."));
+      })
+      .finally(() => {
+        if (
+          !controller.signal.aborted
+          && request === mediaPreviewRequestRef.current
+          && epoch === editorEpochRef.current
+        ) setMediaPreviewLoading(false);
+      });
+    return () => controller.abort();
+  }, [api, editor.kind, form.mediaAsset, mediaPreview?.assetId, mediaPreviewRequest]);
 
   useEffect(() => () => {
     mediaUploadAbortRef.current?.abort();
@@ -673,7 +831,10 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     mediaUploadAbortRef.current = null;
     setMediaUploadProgress(null);
     setMediaUploadError(null);
-    setMediaPreviewUrl(null);
+    mediaPreviewRequestRef.current += 1;
+    setMediaPreview(null);
+    setMediaPreviewLoading(false);
+    setMediaPreviewError(null);
     if (mediaFileInputRef.current) mediaFileInputRef.current.value = "";
   }
 
@@ -997,7 +1158,10 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     mediaUploadAbortRef.current = null;
     setMediaUploadProgress(null);
     setMediaUploadError(null);
-    setMediaPreviewUrl(null);
+    mediaPreviewRequestRef.current += 1;
+    setMediaPreview(null);
+    setMediaPreviewLoading(false);
+    setMediaPreviewError(null);
     if (mediaFileInputRef.current) mediaFileInputRef.current.value = "";
     setForm((current) => ({
       ...current,
@@ -1046,7 +1210,9 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
           },
         }
         : current);
-      if (asset.kind === "IMAGE") setMediaPreviewUrl(URL.createObjectURL(uploadedFile));
+      if (asset.kind === "IMAGE") {
+        setMediaPreview({ assetId: asset.id, url: URL.createObjectURL(uploadedFile) });
+      }
       if (optimization.applied) {
         toast.notify({
           description: `${formatBytes(optimization.originalByteSize)} → ${formatBytes(optimization.uploadedByteSize)} · dimensions and pixels verified`,
@@ -1072,7 +1238,10 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     mediaUploadAbortRef.current = null;
     setMediaUploadProgress(null);
     setMediaUploadError(null);
-    setMediaPreviewUrl(null);
+    mediaPreviewRequestRef.current += 1;
+    setMediaPreview(null);
+    setMediaPreviewLoading(false);
+    setMediaPreviewError(null);
     setForm((current) => ({ ...current, mediaAsset: null }));
     setFormErrors((current) => ({ ...current, mediaAsset: undefined }));
   }
@@ -1667,6 +1836,11 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
           : targetDiff.savedCount === 0
             ? "Empty target set · No unsaved changes"
             : `${targetDiff.savedCount} saved target${targetDiff.savedCount === 1 ? "" : "s"} · No unsaved changes`;
+  const reviewFooterState = reportStale
+    ? "Run preflight again after saving changes"
+    : preflight
+      ? <>{preflight.status} · {preflight.allowedTargets.toLocaleString()}/{preflight.totalTargets.toLocaleString()} eligible · Checked <DateTime value={preflight.checkedAt} /></>
+      : "No preflight result yet";
   const footerState = editorTab === "details"
     ? campaign
       ? detailsDirty
@@ -1675,7 +1849,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
       : "Create the draft to unlock targets and preflight"
     : editorTab === "targets"
       ? targetChangeState
-      : reportStale ? "Run preflight again after saving changes" : preflight ? `Last result: ${preflight.status}` : "No preflight result yet";
+      : reviewFooterState;
   const editorStep = editorTab === "details" ? 1 : editorTab === "targets" ? 2 : 3;
   const editorStepLabel = editorTab === "details" ? "Content" : editorTab === "targets" ? "Targets" : "Review & launch";
   const detailDeleteReason = campaign ? campaignDeleteDisabledReason(campaign, runs) : null;
@@ -1692,14 +1866,103 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     && campaign.status === "DRAFT"
     && preflight
     && !reportStale
-    && preflight.status !== "BLOCK",
+    && preflight.status !== "BLOCK"
+    && (
+      preflight.executionMode === "DRY_RUN"
+      || (preflight.status === "PASS" && Boolean(preflight.liveLaunchToken))
+    ),
   );
+  const reviewGate = preflightLoading
+    ? {
+        badge: "Checking",
+        description: "Runtime is evaluating the saved campaign and target revisions.",
+        icon: "activity" as const,
+        title: "Evaluation in progress",
+        tone: "neutral" as const,
+      }
+    : revisionRefreshRequired
+      ? {
+          badge: "Refresh required",
+          description: "Reopen this campaign to load the current Runtime revisions before evaluating it.",
+          icon: "triangle-alert" as const,
+          title: "Snapshot is out of date",
+          tone: "warning" as const,
+        }
+      : reportStale
+        ? {
+            badge: "Stale",
+            description: "The campaign or target set changed after this decision. Save changes and run preflight again.",
+            icon: "triangle-alert" as const,
+            title: "Decision is no longer current",
+            tone: "warning" as const,
+          }
+        : !preflight && preflightError
+          ? {
+              badge: "Failed",
+              description: "Runtime could not complete the safety evaluation. Retry before creating a run.",
+              icon: "circle-alert" as const,
+              title: "Evaluation unavailable",
+              tone: "danger" as const,
+            }
+          : preflight?.status === "BLOCK"
+            ? {
+                badge: "Blocked",
+                description: "Resolve the blocking policy checks and run preflight again.",
+                icon: "circle-alert" as const,
+                title: "Launch is blocked",
+                tone: "danger" as const,
+              }
+            : preflight?.executionMode === "LIVE" && preflight.status === "WARN"
+              ? {
+                  badge: "Warnings",
+                  description: "Runtime requires a passing LIVE decision. Resolve the warnings or switch to Dry run for a simulation.",
+                  icon: "triangle-alert" as const,
+                  title: "Live launch needs a pass",
+                  tone: "warning" as const,
+                }
+              : preflight?.executionMode === "LIVE" && preflight.status === "PASS" && !preflight.liveLaunchToken
+                ? {
+                    badge: "Recheck required",
+                    description: "Runtime did not return launch proof for this decision. Run LIVE preflight again before continuing.",
+                    icon: "triangle-alert" as const,
+                    title: "Live launch proof unavailable",
+                    tone: "warning" as const,
+                  }
+                : canLaunchReviewedRun && preflight
+                  ? {
+                      badge: preflight.status === "WARN" ? "Warnings" : "Ready",
+                      description: preflight.status === "WARN"
+                        ? "Runtime allows this snapshot, but the reported warnings should be reviewed before continuing."
+                        : `Runtime will verify campaign r${preflight.campaignRevision} and targets r${preflight.targetsRevision} again when the run is created.`,
+                      icon: preflight.status === "WARN" ? "triangle-alert" as const : "check" as const,
+                      title: preflight.status === "WARN"
+                        ? "Eligible with warnings"
+                        : preflight.executionMode === "DRY_RUN"
+                          ? "Eligible for a dry run"
+                          : "Ready for live confirmation",
+                      tone: preflight.status === "WARN" ? "warning" as const : "success" as const,
+                    }
+                  : detailsDirty || targetsDirty
+                    ? {
+                        badge: "Save required",
+                        description: "Preflight reads persisted Runtime state. Save campaign details and targets first.",
+                        icon: "triangle-alert" as const,
+                        title: "Unsaved changes are excluded",
+                        tone: "warning" as const,
+                      }
+                    : {
+                        badge: "Not checked",
+                        description: "Run preflight to receive Runtime's authoritative decision for this saved snapshot.",
+                        icon: "runs" as const,
+                        title: "Awaiting Runtime decision",
+                        tone: "neutral" as const,
+                      };
   const reviewPrimaryAction = canLaunchReviewedRun && preflight ? (
     preflight.executionMode === "DRY_RUN"
       ? <Button disabled={campaignMutationBusy || preflightLoading} loading={runMutation === "launch:DRY_RUN"} onClick={() => void launchRun("DRY_RUN")} variant="primary">Create dry run</Button>
       : <Button disabled={campaignMutationBusy || preflightLoading} loading={runMutation === "launch:LIVE"} onClick={() => { setRunError(null); setLiveLaunchConfirmationOpen(true); }} variant="primary">Launch live campaign</Button>
   ) : (
-    <Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired || campaignMutationBusy || preflightLoading} loading={preflightLoading} onClick={() => void runPreflight(preflightMode)} variant="primary">{reportStale ? "Run preflight again" : "Run preflight"}</Button>
+    <Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired || campaignMutationBusy || preflightLoading} loading={preflightLoading} onClick={() => void runPreflight(preflightMode)} variant="primary">{reportStale || preflight ? "Run preflight again" : "Run preflight"}</Button>
   );
   const footerAction = editorTab === "details" ? (
     <>
@@ -1780,7 +2043,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
             steps={[
               { id: "details", label: "Content", step: 1, warning: Boolean(campaign && detailsDirty) },
               { disabled: !campaign, id: "targets", label: "Targets", step: 2, warning: Boolean(campaign && targetsDirty) },
-              { disabled: !campaign, id: "preflight", label: "Review & launch", meta: preflight?.status, step: 3, warning: reportStale },
+              { disabled: !campaign, id: "preflight", label: "Review & launch", step: 3, warning: reportStale },
             ]}
           />
         )}
@@ -1806,87 +2069,109 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
               />
               {detailsError && <InlineAlert title="Could not save details">{detailsError}</InlineAlert>}
               <div className="campaign-details-grid">
-                <section aria-labelledby="campaign-content-title" className="campaign-composer-panel campaign-workspace-section stack stack-md">
-                  <header className="campaign-form-section-heading">
-                    <div><span>Message</span><h4 id="campaign-content-title">Message content</h4><p>Name this campaign and define the content copied into future runs.</p></div>
-                  </header>
-                  <div className="campaign-content-identity-grid">
-                    <TextField error={formErrors.name} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} />
-                    <SegmentedControl
-                      disabled={!editable || Boolean(mediaUploadProgress)}
-                      label="Message type"
-                      onChange={updateContentType}
-                      options={CONTENT_TYPE_OPTIONS}
-                      value={form.contentType}
-                    />
-                  </div>
-                  {form.contentType === "TEXT" ? (
-                    <TextAreaField description={<span className="campaign-message-description"><span>Plain-text message used by future campaign runs.</span><span>{form.text.length} / 4,096</span></span>} disabled={!editable} error={formErrors.text} label="Message text" maxLength={4_096} onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} />
-                  ) : (
-                    <div className="campaign-media-field stack stack-sm">
-                      <div className="campaign-media-label-row">
-                        <span className="text-field-label">Image</span>
-                        {mediaPolicy && <span>Maximum {formatBytes(mediaPolicy.imageMaxBytes)} after lossless optimization</span>}
-                      </div>
-                      <input
-                        accept="image/jpeg,image/png,image/webp"
-                        aria-label="Choose an image"
-                        className="campaign-media-input"
-                        disabled={!editable || !mediaPolicy || Boolean(mediaUploadProgress)}
-                        onChange={(event) => void selectMediaFile(event)}
-                        ref={mediaFileInputRef}
-                        type="file"
-                      />
-                      {form.mediaAsset ? (
-                        <div className="campaign-media-asset">
-                          {mediaPreviewUrl ? <img alt="Selected campaign media preview" src={mediaPreviewUrl} /> : <div aria-hidden="true" className="campaign-media-file-icon"><AppIcon name="campaigns" size="lg" /></div>}
-                          <div className="campaign-media-asset-copy">
-                            <strong>{form.mediaAsset.filename}</strong>
-                            <span>{form.mediaAsset.mimeType} · {formatBytes(form.mediaAsset.byteSize)}</span>
-                            <span>Verified · {form.mediaAsset.sha256.slice(0, 12)}…</span>
-                          </div>
-                          <Button disabled={!editable || Boolean(mediaUploadProgress)} onClick={removeMediaAsset} size="sm" variant="ghost">Remove</Button>
-                        </div>
-                      ) : (
-                        <div className={`campaign-media-dropzone ${formErrors.mediaAsset ? "campaign-media-dropzone-error" : ""}`.trim()}>
-                          <div>
-                            <strong>No image uploaded</strong>
-                            <span>The file is verified and stored by WA Runtime before this draft can be saved.</span>
-                          </div>
-                          <Button
-                            disabled={!editable || !mediaPolicy || Boolean(mediaUploadProgress)}
-                            loading={mediaPolicyLoading}
-                            onClick={() => mediaFileInputRef.current?.click()}
-                            size="sm"
-                          >Choose file</Button>
-                        </div>
-                      )}
-                      {mediaUploadProgress && (
-                        <div className="campaign-media-progress" role="status">
-                          <div><span>{mediaUploadProgress.phase === "optimizing" ? "Optimizing without quality loss" : mediaUploadProgress.phase === "hashing" ? "Preparing file" : mediaUploadProgress.phase === "verifying" ? "Verifying upload" : "Uploading"}</span>{mediaUploadProgress.phase !== "optimizing" && <span>{Math.round((mediaUploadProgress.bytesCompleted / mediaUploadProgress.bytesTotal) * 100)}%</span>}</div>
-                          <progress max={mediaUploadProgress.bytesTotal} value={mediaUploadProgress.phase === "optimizing" ? undefined : mediaUploadProgress.bytesCompleted} />
-                          <Button onClick={() => mediaUploadAbortRef.current?.abort()} size="sm" variant="ghost">Cancel upload</Button>
-                        </div>
-                      )}
-                      {formErrors.mediaAsset && <span className="text-field-error campaign-media-error" role="alert">{formErrors.mediaAsset}</span>}
-                      {mediaUploadError && <InlineAlert action={!mediaPolicy && !mediaPolicyLoading ? <Button onClick={() => setMediaPolicyRequest((value) => value + 1)} size="sm">Retry</Button> : undefined} title="Image upload failed">{mediaUploadError}</InlineAlert>}
-                      <TextAreaField description={<span className="campaign-message-description"><span>Optional text shown with the attachment.</span><span>{form.text.length} / 1,024</span></span>} disabled={!editable} error={formErrors.text} label="Caption · Optional" maxLength={1_024} onChange={(event) => updateForm("text", event.target.value)} rows={3} value={form.text} />
-                    </div>
-                  )}
-                </section>
-                <section aria-labelledby="campaign-timing-title" className="campaign-delivery-panel campaign-workspace-section">
-                  <div className="campaign-delivery-layout">
+                <div className="campaign-content-layout campaign-workspace-section">
+                  <div className="campaign-content-editor">
+                    <section aria-labelledby="campaign-content-title" className="campaign-composer-panel stack stack-md">
                     <header className="campaign-form-section-heading">
-                      <div>
-                        <span>Delivery</span>
-                        <h4 id="campaign-timing-title">Delivery timing</h4>
-                        <p>Choose when Runtime may begin this campaign.</p>
-                      </div>
+                      <div><span>Message</span><h4 id="campaign-content-title">Message content</h4><p>Name this campaign and define the content copied into future runs.</p></div>
                     </header>
-                    <SegmentedControl disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />
-                    {form.scheduleType === "ONCE" && <TextField description="Shown in local time and stored by Runtime in UTC." disabled={!editable} error={formErrors.scheduledAt} label="Run at" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}
+                    <div className="campaign-content-identity-grid">
+                      <TextField error={formErrors.name} disabled={!editable} label="Campaign name" onChange={(event) => updateForm("name", event.target.value)} value={form.name} />
+                      <SegmentedControl
+                        disabled={!editable || Boolean(mediaUploadProgress)}
+                        label="Message type"
+                        onChange={updateContentType}
+                        options={CONTENT_TYPE_OPTIONS}
+                        value={form.contentType}
+                      />
+                    </div>
+                    {form.contentType === "TEXT" ? (
+                      <TextAreaField description={<span className="campaign-message-description"><span>Plain-text message used by future campaign runs.</span><span>{form.text.length} / 4,096</span></span>} disabled={!editable} error={formErrors.text} label="Message text" maxLength={4_096} onChange={(event) => updateForm("text", event.target.value)} rows={5} value={form.text} />
+                    ) : (
+                      <div className="campaign-media-field stack stack-sm">
+                        <div className="campaign-media-label-row">
+                          <span className="text-field-label">Image</span>
+                          {mediaPolicy && <span>Maximum {formatBytes(mediaPolicy.imageMaxBytes)} after lossless optimization</span>}
+                        </div>
+                        <input
+                          accept="image/jpeg,image/png,image/webp"
+                          aria-label="Choose an image"
+                          className="campaign-media-input"
+                          disabled={!editable || !mediaPolicy || Boolean(mediaUploadProgress)}
+                          onChange={(event) => void selectMediaFile(event)}
+                          ref={mediaFileInputRef}
+                          type="file"
+                        />
+                        {form.mediaAsset ? (
+                          <div className="campaign-media-asset">
+                            {mediaPreview?.assetId === form.mediaAsset.id
+                              ? <img alt={`Preview of ${form.mediaAsset.filename}`} src={mediaPreview.url} />
+                              : <div aria-hidden="true" className="campaign-media-file-icon"><AppIcon name="campaigns" size="lg" /></div>}
+                            <div className="campaign-media-asset-copy">
+                              <strong>{form.mediaAsset.filename}</strong>
+                              <span>{form.mediaAsset.mimeType} · {formatBytes(form.mediaAsset.byteSize)}</span>
+                              <span
+                                className={mediaPreviewError ? "campaign-media-preview-error" : undefined}
+                                title={mediaPreviewError ?? undefined}
+                              >
+                                {mediaPreviewLoading
+                                  ? "Loading preview…"
+                                  : mediaPreviewError
+                                    ? "Preview unavailable"
+                                    : `Verified · ${form.mediaAsset.sha256.slice(0, 12)}…`}
+                              </span>
+                            </div>
+                            <Button disabled={!editable || Boolean(mediaUploadProgress)} onClick={removeMediaAsset} size="sm" variant="ghost">Remove</Button>
+                          </div>
+                        ) : (
+                          <div className={`campaign-media-dropzone ${formErrors.mediaAsset ? "campaign-media-dropzone-error" : ""}`.trim()}>
+                            <div>
+                              <strong>No image uploaded</strong>
+                              <span>The file is verified and stored by WA Runtime before this draft can be saved.</span>
+                            </div>
+                            <Button
+                              disabled={!editable || !mediaPolicy || Boolean(mediaUploadProgress)}
+                              loading={mediaPolicyLoading}
+                              onClick={() => mediaFileInputRef.current?.click()}
+                              size="sm"
+                            >Choose file</Button>
+                          </div>
+                        )}
+                        {mediaUploadProgress && (
+                          <div className="campaign-media-progress" role="status">
+                            <div><span>{mediaUploadProgress.phase === "optimizing" ? "Optimizing without quality loss" : mediaUploadProgress.phase === "hashing" ? "Preparing file" : mediaUploadProgress.phase === "verifying" ? "Verifying upload" : "Uploading"}</span>{mediaUploadProgress.phase !== "optimizing" && <span>{Math.round((mediaUploadProgress.bytesCompleted / mediaUploadProgress.bytesTotal) * 100)}%</span>}</div>
+                            <progress max={mediaUploadProgress.bytesTotal} value={mediaUploadProgress.phase === "optimizing" ? undefined : mediaUploadProgress.bytesCompleted} />
+                            <Button onClick={() => mediaUploadAbortRef.current?.abort()} size="sm" variant="ghost">Cancel upload</Button>
+                          </div>
+                        )}
+                        {formErrors.mediaAsset && <span className="text-field-error campaign-media-error" role="alert">{formErrors.mediaAsset}</span>}
+                        {mediaUploadError && <InlineAlert action={!mediaPolicy && !mediaPolicyLoading ? <Button onClick={() => setMediaPolicyRequest((value) => value + 1)} size="sm">Retry</Button> : undefined} title="Image upload failed">{mediaUploadError}</InlineAlert>}
+                        <TextAreaField description={<span className="campaign-message-description"><span>Optional text shown with the attachment.</span><span>{form.text.length} / 1,024</span></span>} disabled={!editable} error={formErrors.text} label="Caption · Optional" maxLength={1_024} onChange={(event) => updateForm("text", event.target.value)} rows={3} value={form.text} />
+                      </div>
+                    )}
+                    </section>
+                    <section aria-labelledby="campaign-timing-title" className="campaign-delivery-panel campaign-workspace-section">
+                      <div className="campaign-delivery-layout">
+                        <header className="campaign-form-section-heading">
+                          <div>
+                            <span>Delivery</span>
+                            <h4 id="campaign-timing-title">Delivery timing</h4>
+                            <p>Choose when Runtime may begin this campaign.</p>
+                          </div>
+                        </header>
+                        <SegmentedControl disabled={!editable} label="Schedule" onChange={(scheduleType) => updateForm("scheduleType", scheduleType)} options={SCHEDULE_OPTIONS} value={form.scheduleType} />
+                        {form.scheduleType === "ONCE" && <TextField description="Shown in local time and stored by Runtime in UTC." disabled={!editable} error={formErrors.scheduledAt} label="Run at" min={new Date().toISOString().slice(0, 16)} onChange={(event) => updateForm("scheduledAt", event.target.value)} type="datetime-local" value={form.scheduledAt} />}
+                      </div>
+                    </section>
                   </div>
-                </section>
+                  <CampaignMessagePreview
+                    form={form}
+                    mediaPreview={mediaPreview}
+                    mediaPreviewError={mediaPreviewError}
+                    mediaPreviewLoading={mediaPreviewLoading}
+                    onRetryPreview={() => setMediaPreviewRequest((value) => value + 1)}
+                  />
+                </div>
               </div>
             </section>}
 
@@ -1945,7 +2230,6 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
 
             {editorTab === "preflight" && <section aria-labelledby="campaign-editor-preflight-tab" className="campaign-step-panel campaign-tab-panel" id="campaign-editor-preflight-panel" role="tabpanel">
               <WorkspaceSectionHeader
-                action={preflight && <Badge tone={reportStale ? "warning" : reportTone(preflight.status)} variant="status">{reportStale ? "Stale" : statusLabel(preflight.status)}</Badge>}
                 description="Evaluate saved revisions, inspect Runtime evidence, then explicitly create a dry or live run."
                 kicker="Safety gate"
                 title="Review & launch"
@@ -1955,31 +2239,33 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
                 {(detailsDirty || targetsDirty) && <InlineAlert title="Save before preflight" tone="warning">Preflight reads persisted Runtime state, not unsaved edits.</InlineAlert>}
                 {revisionRefreshRequired && <InlineAlert title="Revision refresh required" tone="warning">Reopen this campaign before running preflight.</InlineAlert>}
                 {runError && !liveLaunchConfirmationOpen && <InlineAlert title="Campaign run update">{runError}</InlineAlert>}
-                <div className="campaign-review-grid">
+                <div className="campaign-review-flow">
+                  <section aria-labelledby="campaign-review-snapshot-title" className="campaign-review-plan">
+                    <div className="campaign-review-plan-copy">
+                      <span className="campaign-review-eyebrow">Saved snapshot</span>
+                      <h4 id="campaign-review-snapshot-title">Campaign r{campaign.revision} · targets r{targetsRevision ?? campaign.targetsRevision}</h4>
+                      <p>{targetIds.length.toLocaleString()} saved {targetIds.length === 1 ? "target" : "targets"} · {statusLabel(campaign.status)}</p>
+                    </div>
+                    <div className="campaign-review-mode">
+                      <span className="campaign-review-eyebrow">Execution mode</span>
+                      <SegmentedControl disabled={preflightLoading || campaignMutationBusy} label="Execution mode" labelHidden onChange={changePreflightMode} options={PREFLIGHT_MODE_OPTIONS} value={preflightMode} />
+                    </div>
+                    <div className="campaign-review-gate" data-tone={reviewGate.tone}>
+                      <header>
+                        <div className="campaign-review-gate-heading">
+                          <div className="campaign-review-gate-label"><AppIcon className="campaign-review-gate-icon" name={reviewGate.icon} size="sm" /><span className="campaign-review-eyebrow">Safety gate</span></div>
+                          <h4>{reviewGate.title}</h4>
+                        </div>
+                        <Badge tone={reviewGate.tone} variant="status">{reviewGate.badge}</Badge>
+                      </header>
+                      <p>{reviewGate.description}</p>
+                    </div>
+                  </section>
                   <div className="campaign-review-report stack stack-md">
                     {preflightError && <InlineAlert title="Preflight failed">{preflightError}</InlineAlert>}
                     {preflight && <PreflightReport report={preflight} stale={reportStale} />}
-                    {!preflight && !preflightError && <WorkspaceEmptyState className="campaign-preflight-empty" icon="activity" title="Ready for evaluation">Run preflight to receive Runtime's authoritative readiness decision for the persisted revisions.</WorkspaceEmptyState>}
+                    {!preflight && !preflightError && <WorkspaceEmptyState className="campaign-preflight-empty" icon="activity" title="No Runtime decision yet">Choose an execution mode, then run preflight against the saved snapshot.</WorkspaceEmptyState>}
                   </div>
-                  <aside className="campaign-review-rail">
-                    <section aria-labelledby="preflight-configuration-title" className="campaign-preflight-setup campaign-workspace-section">
-                      <header className="campaign-form-section-heading">
-                        <div><span>Runtime policy</span><h4 id="preflight-configuration-title">Run control</h4><p>Choose the policy context for this persisted snapshot.</p></div>
-                      </header>
-                      <div className="campaign-preflight-mode"><DecisionGroup disabled={preflightLoading || campaignMutationBusy} label="Preflight mode" onChange={changePreflightMode} options={PREFLIGHT_MODE_OPTIONS} value={preflightMode} /></div>
-                      <div className="campaign-preflight-basis" aria-label="Persisted revisions under review"><span>Review basis</span><strong>Campaign r{campaign.revision} · targets r{targetsRevision ?? campaign.targetsRevision}</strong></div>
-                    </section>
-                    <section aria-labelledby="campaign-launch-readiness-title" className="campaign-launch-readiness campaign-workspace-section" data-ready={canLaunchReviewedRun || undefined}>
-                      <header>
-                        <AppIcon className="campaign-launch-icon" name={canLaunchReviewedRun ? "check" : preflight?.status === "BLOCK" ? "triangle-alert" : "runs"} size="sm" />
-                        <div><span>Launch eligibility</span><h4 id="campaign-launch-readiness-title">{canLaunchReviewedRun ? preflight?.executionMode === "DRY_RUN" ? "Eligible for a dry run" : "Ready for live confirmation" : preflight?.status === "BLOCK" ? "Launch blocked" : reportStale ? "Review out of date" : "Awaiting Runtime decision"}</h4></div>
-                        {preflight && <Badge tone={reportTone(preflight.status)} variant="status">{statusLabel(preflight.status)}</Badge>}
-                      </header>
-                      <p>{canLaunchReviewedRun && preflight
-                        ? `Runtime will verify campaign r${preflight.campaignRevision} and targets r${preflight.targetsRevision} again before creating the run.`
-                        : "Run a current preflight against saved campaign details and targets before launch becomes available."}</p>
-                    </section>
-                  </aside>
                 </div>
                 <CampaignRunsPanel
                   campaignStatus={campaign.status}
@@ -2082,7 +2368,7 @@ function CampaignRunsPanel({
 }
 
 function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; stale: boolean }) {
-  const presentation = preflightStatusPresentation(report.status);
+  const presentation = preflightStatusPresentation(report.status, report.executionMode);
   return (
     <section aria-label="Preflight result" className="preflight-report" data-status={report.status.toLocaleLowerCase()} data-stale={stale || undefined}>
       {stale && <InlineAlert title="Preflight result is stale" tone="warning">Campaign details or targets changed. Run preflight again.</InlineAlert>}
@@ -2090,14 +2376,8 @@ function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; 
         <span className="preflight-result-icon"><AppIcon name={presentation.icon} size="lg" /></span>
         <div className="preflight-result-copy"><span>Runtime decision</span><div><h4>{presentation.title}</h4><Badge tone={reportTone(report.status)} variant="status">{statusLabel(report.status)}</Badge></div><p>{presentation.description}</p></div>
       </header>
-      <dl className="preflight-context">
-        <div><dt>Mode</dt><dd>{executionModeLabel(report.executionMode)}</dd></div>
-        <div><dt>Policy</dt><dd>Policy v{report.policyVersion}</dd></div>
-        <div><dt>Checked</dt><dd><DateTime value={report.checkedAt} /></dd></div>
-        <div><dt>Revisions</dt><dd>Campaign r{report.campaignRevision} · targets r{report.targetsRevision}</dd></div>
-      </dl>
-      <section aria-labelledby="preflight-target-assessment-title" className="preflight-evidence-panel">
-        <header><div><h4 id="preflight-target-assessment-title">Target assessment</h4><p>Authoritative counters returned by Runtime.</p></div><Badge tone="neutral">{report.totalTargets} total</Badge></header>
+      <section aria-labelledby="preflight-target-readiness-title" className="preflight-target-summary">
+        <header><div><span>Target readiness</span><h4 id="preflight-target-readiness-title">Runtime target assessment</h4></div><p>Capability state captured by this decision.</p></header>
         <dl className="preflight-metrics">
           <div><dt>Total</dt><dd>{report.totalTargets}</dd></div>
           <div data-tone="success"><dt>Allowed</dt><dd>{report.allowedTargets}</dd></div>
@@ -2105,9 +2385,55 @@ function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; 
           <div data-tone="warning"><dt>Unknown</dt><dd>{report.unknownTargets}</dd></div>
         </dl>
       </section>
-      <div className="preflight-columns">
-        <section className="preflight-evidence-panel"><header><div><h4>Policy checks</h4><p>Each check contributes to Runtime's decision.</p></div><Badge tone="neutral">{report.checks.length}</Badge></header><ul>{report.checks.map((check) => <li key={check.code}><Badge className="preflight-check-status" tone={reportTone(check.status)} variant="status">{preflightCheckStatusLabel(check.status)}</Badge><span className="preflight-evidence-copy"><strong>{PREFLIGHT_CHECK_LABELS[check.code] ?? "Runtime policy check"}</strong><code>{check.code}</code><small>{check.message}</small></span></li>)}</ul></section>
-        <section className="preflight-evidence-panel"><header><div><h4>Target issues</h4><p>Groups that require operator attention.</p></div><Badge tone={report.targetIssues.length ? "warning" : "success"}>{report.targetIssues.length}</Badge></header>{!report.targetIssues.length ? <div className="preflight-no-issues"><AppIcon name="check" size="sm" /><span>No target issues reported.</span></div> : <ul>{report.targetIssues.map((issue) => <li key={`${issue.groupId}-${issue.reason}`}><Badge tone={issue.capability === "DENIED" ? "danger" : "warning"} variant="status">{statusLabel(issue.capability)}</Badge><span className="preflight-evidence-copy"><strong>{issue.groupName}</strong><small>{PREFLIGHT_ISSUE_LABELS[issue.reason] ?? "Runtime reported a target issue"}</small><code>{issue.reason}</code></span></li>)}</ul>}</section>
+      <dl aria-label="Preflight context" className="preflight-context">
+        <div><dt>Mode</dt><dd>{executionModeLabel(report.executionMode)}</dd></div>
+        <div><dt>Policy</dt><dd>Policy v{report.policyVersion}</dd></div>
+        <div><dt>Checked</dt><dd><DateTime value={report.checkedAt} /></dd></div>
+        <div><dt>Snapshot</dt><dd>Campaign r{report.campaignRevision} · targets r{report.targetsRevision}</dd></div>
+      </dl>
+      <div className="preflight-evidence" data-has-target-issues={report.targetIssues.length > 0 || undefined}>
+        {report.targetIssues.length > 0 ? (
+          <section className="preflight-evidence-panel preflight-target-issues">
+            <header>
+              <div><h4>Target issues</h4><p>Groups that require operator attention.</p></div>
+              <Badge tone="warning">{report.targetIssues.length}</Badge>
+            </header>
+            <ul className="preflight-evidence-list">
+              {report.targetIssues.map((issue) => (
+                <li key={`${issue.groupId}-${issue.reason}`}>
+                  <Badge tone={issue.capability === "DENIED" ? "danger" : "warning"} variant="status">{statusLabel(issue.capability)}</Badge>
+                  <span className="preflight-evidence-copy">
+                    <strong>{issue.groupName}</strong>
+                    <small>{PREFLIGHT_ISSUE_LABELS[issue.reason] ?? "Runtime reported a target issue"}</small>
+                    <code>{issue.reason}</code>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : (
+          <InlineAlert indicator title="No target issues" tone="success">
+            Runtime found no groups that require operator attention.
+          </InlineAlert>
+        )}
+        <section className="preflight-evidence-panel preflight-policy-checks">
+          <header>
+            <div><h4>Policy checks</h4><p>Checks contributing to Runtime's decision.</p></div>
+            <Badge tone="neutral">{report.checks.length}</Badge>
+          </header>
+          <ul className="preflight-evidence-list">
+            {report.checks.map((check) => (
+              <li key={check.code}>
+                <Badge className="preflight-check-status" tone={reportTone(check.status)} variant="status">{preflightCheckStatusLabel(check.status)}</Badge>
+                <span className="preflight-evidence-copy">
+                  <strong>{PREFLIGHT_CHECK_LABELS[check.code] ?? "Runtime policy check"}</strong>
+                  <small>{check.message}</small>
+                  <code>{check.code}</code>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
     </section>
   );

@@ -88,6 +88,29 @@ describe("shared UI primitives", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("keeps InlineAlert copy aligned for every indicator and action combination", () => {
+    const { container } = render(<>
+      <InlineAlert title="Copy only" tone="neutral" />
+      <InlineAlert indicator title="Indicator only" tone="success">Complete</InlineAlert>
+      <InlineAlert action={<button type="button">Retry action</button>} title="Action only" tone="info" />
+      <InlineAlert action={<button type="button">Resolve action</button>} indicator title="Indicator and action" tone="warning" />
+    </>);
+
+    const alerts = container.querySelectorAll(".inline-alert");
+    expect(alerts[0]).not.toHaveAttribute("data-has-indicator");
+    expect(alerts[0]).not.toHaveAttribute("data-has-action");
+    expect(alerts[1]).toHaveAttribute("data-has-indicator", "true");
+    expect(alerts[1]).not.toHaveAttribute("data-has-action");
+    expect(alerts[2]).not.toHaveAttribute("data-has-indicator");
+    expect(alerts[2]).toHaveAttribute("data-has-action", "true");
+    expect(alerts[3]).toHaveAttribute("data-has-indicator", "true");
+    expect(alerts[3]).toHaveAttribute("data-has-action", "true");
+    expect(screen.getByText("Indicator only").closest(".inline-alert-copy")?.previousElementSibling)
+      .toHaveClass("status-dot");
+    expect(screen.getByRole("button", { name: "Resolve action" }).closest(".inline-alert-action"))
+      .toBeInTheDocument();
+  });
+
   it("composes page headings and visual badges without owning feature state", () => {
     render(
       <PageHeader

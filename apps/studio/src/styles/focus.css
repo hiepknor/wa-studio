@@ -101,7 +101,6 @@ html[data-focus-modality="keyboard"] .group-list-destination-option:has(.group-l
   outline: var(--focus-width) solid var(--focus-outer-color);
   outline-offset: var(--focus-offset);
 }
-
 /* Focus outlines must be allowed to escape clipped table action cells. */
 html[data-focus-modality="keyboard"] .data-cell-action:has(:focus-visible) {
   overflow: visible;

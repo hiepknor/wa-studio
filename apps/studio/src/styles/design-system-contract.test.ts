@@ -25,8 +25,12 @@ const appIconCss = readFileSync("src/shared/ui/app-icon.css", "utf8");
 const appIconSource = readFileSync("src/shared/ui/AppIcon.tsx", "utf8");
 const buttonCss = readFileSync("src/shared/ui/button.css", "utf8");
 const buttonSource = readFileSync("src/shared/ui/Button.tsx", "utf8");
+const dropdownMenuCss = readFileSync("src/shared/ui/dropdown-menu.css", "utf8");
+const dropdownMenuSource = readFileSync("src/shared/ui/DropdownMenu.tsx", "utf8");
 const badgeCss = readFileSync("src/shared/ui/badge.css", "utf8");
 const badgeSource = readFileSync("src/shared/ui/Badge.tsx", "utf8");
+const inlineAlertCss = readFileSync("src/shared/ui/inline-alert.css", "utf8");
+const inlineAlertSource = readFileSync("src/shared/ui/InlineAlert.tsx", "utf8");
 const modalDialogCss = readFileSync("src/shared/ui/modal-dialog.css", "utf8");
 const modalDialogSource = readFileSync("src/shared/ui/ModalDialog.tsx", "utf8");
 const confirmationDialogSource = readFileSync(
@@ -63,6 +67,7 @@ const groupSelectionTableSource = readFileSync(
 );
 const groupsTableSource = readFileSync("src/features/groups/GroupsTable.tsx", "utf8");
 const groupsCss = readFileSync("src/features/groups/groups.css", "utf8");
+const campaignsSource = readFileSync("src/features/campaigns/CampaignsScreen.tsx", "utf8");
 const campaignsCss = readFileSync("src/features/campaigns/campaigns.css", "utf8");
 const dataFilterToolbarCss = readFileSync("src/shared/ui/data-filter-toolbar.css", "utf8");
 const dataFilterToolbarSource = readFileSync("src/shared/ui/DataFilterToolbar.tsx", "utf8");
@@ -224,8 +229,23 @@ describe("WARP design-system contract", () => {
     expect(buttonCss).toContain(".button-sm { --button-height: var(--control-compact); padding-inline: var(--space-2); font-size: var(--type-caption); }");
     expect(buttonCss).toContain(".button-lg { --button-height: var(--control-large); padding-inline: var(--space-4); }");
     expect(buttonCss).toContain(".button-icon-only");
-    expect(buttonSource).toContain('size="md"');
+    expect(buttonSource).toContain("size={size}");
+    expect(buttonCss).not.toMatch(/\.button-icon-only\s*\{[^}]*--button-height:/s);
     expect(buttonSource).toContain('iconOnly ? "button-icon-only" : ""');
+  });
+
+  it("keeps action menus compact and semantically hierarchical", () => {
+    expect(dropdownMenuCss).toContain("min-width: 220px");
+    expect(dropdownMenuCss).toContain("width: min(280px, calc(100vw - var(--space-5)))");
+    expect(dropdownMenuCss).toContain("min-height: var(--control-height)");
+    expect(dropdownMenuCss).toContain("min-height: var(--row-height-relaxed)");
+    expect(dropdownMenuCss).toContain("grid-template-columns: 18px minmax(0, 1fr)");
+    expect(dropdownMenuCss).toContain("font-size: var(--type-ui)");
+    expect(dropdownMenuCss).toContain("font-size: var(--type-label)");
+    expect(dropdownMenuCss).toContain("background: var(--state-danger-surface)");
+    expect(dropdownMenuSource).toContain('className="menu-item-icon-slot"');
+    expect(dropdownMenuSource).toContain('data-tone={danger ? "danger" : "neutral"}');
+    expect(appCss).not.toContain(".menu-item-rich");
   });
 
   it("keeps modal focus ownership and backdrop semantics centralized", () => {
@@ -257,6 +277,24 @@ describe("WARP design-system contract", () => {
     for (const tone of ["neutral", "info", "success", "warning", "danger"]) {
       expect(badgeCss).toContain(`.ui-badge-${tone} {`);
     }
+  });
+
+  it("keeps Campaign preflight feedback on shared status primitives", () => {
+    expect(campaignsSource).toContain('<InlineAlert indicator title="No target issues" tone="success">');
+    expect(campaignsSource).not.toContain('className="preflight-no-issues"');
+    expect(campaignsCss).not.toContain(".preflight-no-issues");
+    expect(campaignsCss).toContain(".preflight-check-status { flex: 0 0 auto; justify-content: center; }");
+    expect(campaignsCss).not.toMatch(/\.preflight-check-status\s*\{[^}]*(?:min-width|margin-top):/s);
+  });
+
+  it("locks InlineAlert anatomy for indicator and action combinations", () => {
+    expect(inlineAlertSource).toContain("data-has-action={Boolean(action) || undefined}");
+    expect(inlineAlertSource).toContain("data-has-indicator={indicator || undefined}");
+    expect(inlineAlertCss).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(inlineAlertCss).toContain(".inline-alert[data-has-indicator] { grid-template-columns: auto minmax(0, 1fr); }");
+    expect(inlineAlertCss).toContain(".inline-alert[data-has-action] { grid-template-columns: minmax(0, 1fr) auto; }");
+    expect(inlineAlertCss).toContain(".inline-alert[data-has-indicator][data-has-action] { grid-template-columns: auto minmax(0, 1fr) auto; }");
+    expect(inlineAlertCss).not.toContain("justify-content: space-between");
   });
 
   it("keeps icons optically consistent across the shared size matrix", () => {
@@ -444,6 +482,12 @@ describe("WARP design-system contract", () => {
   it("keeps the Campaign Workspace hierarchy flat and operational", () => {
     expect(campaignsCss).toContain(".campaign-workspace-section {");
     expect(campaignsCss).toContain("border-top: var(--border-width) solid var(--divider)");
+    expect(campaignsCss).toContain(".campaign-content-layout { min-width: 0; display: grid;");
+    expect(campaignsCss).toContain("grid-template-columns: minmax(0, 1.7fr) minmax(280px, .8fr)");
+    expect(campaignsCss).toMatch(/\.campaign-message-preview-media img\s*\{[^}]*object-fit: contain;/s);
+    expect(campaignsCss).toContain(".campaign-message-preview-sticky { position: sticky;");
+    expect(campaignsCss).toContain(".campaign-review-eyebrow {");
+    expect(campaignsCss).toContain("line-height: var(--icon-sm)");
     expect(campaignsCss).not.toContain(".campaign-editor-panel");
     expect(campaignsCss).not.toContain(".campaign-snapshot-panel");
     expect(campaignsCss).not.toContain(".campaign-target-overview-icon");
@@ -455,8 +499,12 @@ describe("WARP design-system contract", () => {
     expect(segmentedControlCss).toContain("height: var(--field-control-height)");
     expect(segmentedControlCss).toContain("grid-auto-flow: column");
     expect(decisionGroupSource).toContain('role="radiogroup"');
+    expect(decisionGroupSource).toContain('aria-orientation="horizontal"');
     expect(decisionGroupSource).toContain('className="decision-group-copy"');
-    expect(decisionGroupCss).toContain("min-height: 52px");
+    expect(decisionGroupSource).toContain("data-selected={selected || undefined}");
+    expect(decisionGroupCss).toContain("min-height: 68px");
+    expect(decisionGroupCss).toContain("grid-auto-flow: column");
+    expect(decisionGroupCss).toContain('.decision-group-option[data-selected="true"] { background: var(--surface-selected);');
     expect(searchSelectSource).toContain('searchLabel = "Search options"');
     expect(searchSelectSource).toContain('role="listbox"');
     expect(searchSelectCss).toContain("height: var(--field-control-height)");
