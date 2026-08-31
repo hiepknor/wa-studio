@@ -179,6 +179,11 @@ deletes the ingress, clears its session override, removes the active session, di
 worker and overwrites the merge-only base config with a non-secret retired tombstone before revoking
 Event Inbox ownership.
 
+Legacy schema-2 desktop profiles have no connector identity. They remain readable for local data
+access, but their effective live-send policy is forced off. Saving such a profile, including against
+the same OpenWA origin, always enters staged provisioning and upgrades it to schema 3; the ordinary
+same-origin API-key fast path is available only after a connector has been provisioned.
+
 ## Desktop workspace state
 
 After authentication, `RuntimeConnectionProvider` holds the normalized WA Runtime origin, API key, typed API client, initial sessions, and selected session in process memory. The session list returned during credential verification is reused when the workspace opens, so entering the shell does not duplicate `GET /sessions`.

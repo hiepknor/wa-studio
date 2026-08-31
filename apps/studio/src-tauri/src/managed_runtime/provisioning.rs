@@ -159,7 +159,7 @@ pub fn load() -> Result<Option<ProvisionedRuntimeSettings>, String> {
     };
     validate_stored_credentials(&credentials)?;
     clear_completed_intent(&credentials)?;
-    let connector_configured = credentials.connector.is_some();
+    let allow_live_sends = connector_protected_live_sends(&credentials);
     Ok(Some(ProvisionedRuntimeSettings {
         runtime_api_key: credentials.runtime_api_key,
         device_id: credentials.device_id,
@@ -167,7 +167,7 @@ pub fn load() -> Result<Option<ProvisionedRuntimeSettings>, String> {
         openwa_api_key: credentials.openwa_api_key,
         openwa_webhook_secret: credentials.openwa_webhook_secret,
         openwa_allowed_session_ids: credentials.openwa_allowed_session_ids,
-        allow_live_sends: credentials.allow_live_sends && connector_configured,
+        allow_live_sends,
         event_inbox: ProvisionedEventInboxSettings {
             base_url: credentials.event_inbox_base_url,
             device_token: credentials.event_inbox_device_token,
@@ -254,7 +254,7 @@ pub fn reconfigure(
         }
     }
 
-    if current.openwa_base_url == normalized.openwa_base_url {
+    if can_reconfigure_in_place(&current, &normalized) {
         assert_stored_session_access(&normalized, &current.openwa_allowed_session_ids)?;
         let mut updated = current;
         updated.openwa_api_key = normalized.openwa_api_key;
@@ -270,6 +270,17 @@ pub fn reconfigure(
     execute_cleanup(&mut cleanup, Some(&replacement))?;
     secret_store::clear_managed_runtime_cleanup_intent()?;
     Ok(profile_from_credentials(&replacement))
+}
+
+fn connector_protected_live_sends(credentials: &secret_store::ManagedRuntimeCredentials) -> bool {
+    credentials.allow_live_sends && credentials.connector.is_some()
+}
+
+fn can_reconfigure_in_place(
+    current: &secret_store::ManagedRuntimeCredentials,
+    input: &ManagedRuntimeProvisioningInput,
+) -> bool {
+    current.connector.is_some() && current.openwa_base_url == input.openwa_base_url
 }
 
 pub fn deprovision() -> Result<(), String> {
@@ -1538,7 +1549,8 @@ mod tests {
     };
 
     use super::{
-        cleanup_openwa_resources, connector_config, connector_secret, ensure_connector_plugin,
+        can_reconfigure_in_place, cleanup_openwa_resources, connector_config,
+        connector_protected_live_sends, connector_secret, ensure_connector_plugin,
         ensure_ingress_instance, normalize, preflight_connector_plugin,
         put_prepared_connector_credential, revoke_event_inbox_connector, revoke_event_inbox_device,
         sha256_hex, supports_event_inbox_protocol, validate_connector_plugin,
@@ -1565,6 +1577,31 @@ mod tests {
         assert_eq!(normalized.openwa_base_url, "https://openwa.example.test");
         assert_eq!(normalized.openwa_api_key, "openwa-key");
         assert!(!normalized.allow_live_sends);
+    }
+
+    #[test]
+    fn legacy_profile_fails_closed_and_requires_staged_connector_migration() {
+        let session_id = "00000000-0000-4000-8000-000000000001";
+        let connector_id = "00000000-0000-4000-8000-000000000003";
+        let mut legacy =
+            stored_credentials("https://openwa.example.test", session_id, connector_id);
+        legacy.schema_version = 2;
+        legacy.connector = None;
+        legacy.allow_live_sends = true;
+        let normalized = ManagedRuntimeProvisioningInput {
+            openwa_base_url: legacy.openwa_base_url.clone(),
+            openwa_api_key: "rotated-openwa-key".to_string(),
+            allow_live_sends: true,
+        };
+
+        assert!(!connector_protected_live_sends(&legacy));
+        assert!(!can_reconfigure_in_place(&legacy, &normalized));
+
+        legacy.schema_version = 3;
+        legacy.connector =
+            stored_credentials(&legacy.openwa_base_url, session_id, connector_id).connector;
+        assert!(connector_protected_live_sends(&legacy));
+        assert!(can_reconfigure_in_place(&legacy, &normalized));
     }
 
     #[test]

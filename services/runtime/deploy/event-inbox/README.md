@@ -113,6 +113,22 @@ mode-0600 `event-inbox.env` with the exact accepted digest, converge `migrate` a
 verify readiness on 34200, switch Caddy back to 34200, and only then stop the canary profile. This
 restores the fail-safe default without an exposed service gap.
 
+After Studio provisions the connector, verify the complete cross-system identity from the canary
+Mac without exporting its credentials from Keychain:
+
+~~~bash
+npm run openwa:connector:verify -- --managed-profile
+~~~
+
+The verifier is read-only and fails unless the reviewed OpenWA release, one-session API scope,
+release-pinned enabled plugin, exact single ingress, local connector identity, Event Inbox binding,
+credential and binding generations, protocol and journal versions, heartbeat freshness, blocked
+state, and storage pressure all agree. For non-Keychain automation, provide `OPENWA_BASE_URL`,
+`OPENWA_API_KEY`, `EVENT_INBOX_DEVICE_TOKEN`, `WA_STUDIO_CONNECTOR_ID`,
+`WA_STUDIO_CONNECTOR_INSTANCE_ID`, `WA_STUDIO_SESSION_ID`, and
+`WA_STUDIO_CONNECTOR_TOKEN_GENERATION` through the secret runner environment; never place them in a
+command argument, checked-in env file, or artifact.
+
 ## Bounded storage
 
 The default profile enforces seven-day expiry, 500,000 stored events, 2 GiB aggregate payloads,

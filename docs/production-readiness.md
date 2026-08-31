@@ -47,11 +47,16 @@ from any failures recorded before or after it. Before the canary clock starts:
 ## Canary UAT and 24-hour gate
 
 - [ ] Install the notarized 0.2.0 canary DMG and connect through production discovery protocol v2.
+- [ ] If the Mac has a legacy schema-2 profile, save the connection again and confirm it migrates to
+      connector schema 3; live sends must remain effectively disabled until that migration and its
+      heartbeat quorum complete.
 - [ ] Verify the installed WA Studio Connector ZIP digest and provenance against the same release;
       confirm exactly one enabled, session-scoped connector instance and no foreign disabled instance;
       confirm base lifecycle, session and ingress config resolve to the same connector identity, plus
       the expected protocol/journal versions, current credential generation, current binding
       generation, and a healthy heartbeat.
+- [ ] Run `npm run openwa:connector:verify -- --managed-profile` on the canary Mac and retain only its
+      secret-free JSON result with the release evidence.
 - [ ] Create a backup before UAT; verify R2 readback checksum and complete an isolated restore drill.
 - [ ] Confirm the selected session reports OpenWA Safety policy version 5, effective state `READY`,
       profile `CANARY`, no unexpired recovery lease, and zero unexplained unknown Message Jobs.
