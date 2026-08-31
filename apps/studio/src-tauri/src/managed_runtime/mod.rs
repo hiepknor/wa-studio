@@ -22,8 +22,9 @@ use std::{
 use age::secrecy::SecretString;
 use config::{DesktopDatabaseConfig, DesktopRuntimeConfig};
 use model::{
-    ManagedRuntimeConnection, ManagedRuntimeMaintenance, ManagedRuntimeMaintenanceKind,
-    ManagedRuntimePhase, ManagedRuntimeStorageDiagnostics, ProtectionFreshness, StoragePressure,
+    ManagedRuntimeConnection, ManagedRuntimeLifecycleStatus, ManagedRuntimeMaintenance,
+    ManagedRuntimeMaintenanceKind, ManagedRuntimePhase, ManagedRuntimeStorageDiagnostics,
+    ProtectionFreshness, StoragePressure,
 };
 use provisioning::{ManagedRuntimeProvisioningInput, ManagedRuntimeProvisioningProfile};
 use release::{OPENWA_CONTRACT_SHA256, OPENWA_RELEASE_TAG};
@@ -130,6 +131,14 @@ pub fn get_managed_runtime_state(
     state: State<'_, ManagedRuntimeState>,
 ) -> Result<ManagedRuntimeSnapshot, String> {
     state.snapshot()
+}
+
+#[tauri::command]
+pub async fn get_managed_runtime_lifecycle_status(
+) -> Result<Option<ManagedRuntimeLifecycleStatus>, String> {
+    tauri::async_runtime::spawn_blocking(lifecycle::status)
+        .await
+        .map_err(|error| format!("Managed Runtime lifecycle status task failed: {error}"))?
 }
 
 #[tauri::command]

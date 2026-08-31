@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
+    model::{
+        ManagedRuntimeLifecycleOperation as PublicLifecycleOperation,
+        ManagedRuntimeLifecyclePhase as PublicLifecyclePhase, ManagedRuntimeLifecycleStatus,
+    },
     provisioning::{ManagedRuntimeProvisioningInput, ProvisionedRuntimeSettings},
     secret_store::{
         self, ManagedRuntimeLifecycleIntent, ManagedRuntimeLifecycleOperation,
@@ -21,6 +25,35 @@ const DEFAULT_DRAIN_TIMEOUT: Duration = Duration::from_secs(180);
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const CONNECTOR_PROTOCOL_VERSION: u8 = 1;
 const CONNECTOR_JOURNAL_SCHEMA_VERSION: u8 = 1;
+
+pub fn status() -> Result<Option<ManagedRuntimeLifecycleStatus>, String> {
+    let Some(intent) = secret_store::load_managed_runtime_lifecycle_intent()? else {
+        return Ok(None);
+    };
+    Ok(Some(ManagedRuntimeLifecycleStatus {
+        operation: match intent.operation {
+            ManagedRuntimeLifecycleOperation::Reconfigure => PublicLifecycleOperation::Reconfigure,
+            ManagedRuntimeLifecycleOperation::Reset => PublicLifecycleOperation::Reset,
+            ManagedRuntimeLifecycleOperation::RotateConnectorCredential => {
+                PublicLifecycleOperation::RotateConnectorCredential
+            }
+        },
+        phase: match intent.phase {
+            ManagedRuntimeLifecyclePhase::Prepared => PublicLifecyclePhase::Prepared,
+            ManagedRuntimeLifecyclePhase::WorkspaceBlocked => {
+                PublicLifecyclePhase::WorkspaceBlocked
+            }
+            ManagedRuntimeLifecyclePhase::RuntimeDrained => PublicLifecyclePhase::RuntimeDrained,
+            ManagedRuntimeLifecyclePhase::RuntimeStopped => PublicLifecyclePhase::RuntimeStopped,
+            ManagedRuntimeLifecyclePhase::RemoteMutated => PublicLifecyclePhase::RemoteMutated,
+            ManagedRuntimeLifecyclePhase::RuntimeRestarted => {
+                PublicLifecyclePhase::RuntimeRestarted
+            }
+            ManagedRuntimeLifecyclePhase::Verified => PublicLifecyclePhase::Verified,
+            ManagedRuntimeLifecyclePhase::Resumed => PublicLifecyclePhase::Resumed,
+        },
+    }))
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

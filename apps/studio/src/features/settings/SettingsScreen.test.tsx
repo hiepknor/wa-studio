@@ -288,6 +288,7 @@ describe("SettingsScreen", () => {
           <WorkspaceNavigationGuardProvider onGuardChange={onGuardChange}>
             <SettingsScreen
               getDiagnostics={getDiagnostics}
+              getLifecycleStatus={vi.fn().mockResolvedValue(null)}
               getProvisioningProfile={vi.fn().mockResolvedValue({
                 allowLiveSends: false,
                 eventInboxBaseUrl: "https://wa-events.onio.cc",

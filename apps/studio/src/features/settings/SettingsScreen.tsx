@@ -18,11 +18,14 @@ import {
   createManagedRuntimeBackup,
   exportManagedRuntimeRecoveryArchive,
   getManagedRuntimeDiagnostics,
+  getManagedRuntimeLifecycleStatus,
   getManagedRuntimeProvisioningProfile,
   listManagedRuntimeBackups,
   reconfigureManagedRuntime,
+  resetManagedRuntimeConnection,
   restoreManagedRuntimeBackup,
   restoreManagedRuntimeRecoveryArchive,
+  rotateManagedRuntimeConnectorCredential,
   type ManagedRuntimeBackup,
   type ManagedRuntimeDiagnostics,
 } from "@/shared/native/managed-runtime";
@@ -46,12 +49,15 @@ interface SettingsScreenProps {
   createBackup?: typeof createManagedRuntimeBackup;
   exportRecoveryArchive?: typeof exportManagedRuntimeRecoveryArchive;
   getDiagnostics?: typeof getManagedRuntimeDiagnostics;
+  getLifecycleStatus?: typeof getManagedRuntimeLifecycleStatus;
   getUpdateState?: typeof getAppUpdateState;
   installUpdate?: typeof installAppUpdate;
   getProvisioningProfile?: typeof getManagedRuntimeProvisioningProfile;
   listBackups?: typeof listManagedRuntimeBackups;
   restoreBackup?: typeof restoreManagedRuntimeBackup;
   restoreRecoveryArchive?: typeof restoreManagedRuntimeRecoveryArchive;
+  resetConnection?: typeof resetManagedRuntimeConnection;
+  rotateCredential?: typeof rotateManagedRuntimeConnectorCredential;
   saveProvisioningProfile?: typeof reconfigureManagedRuntime;
   subscribeUpdateProgress?: typeof subscribeAppUpdateProgress;
 }
@@ -107,12 +113,15 @@ export function SettingsScreen({
   createBackup = createManagedRuntimeBackup,
   exportRecoveryArchive = exportManagedRuntimeRecoveryArchive,
   getDiagnostics = getManagedRuntimeDiagnostics,
+  getLifecycleStatus = getManagedRuntimeLifecycleStatus,
   getUpdateState = getAppUpdateState,
   installUpdate = installAppUpdate,
   getProvisioningProfile = getManagedRuntimeProvisioningProfile,
   listBackups = listManagedRuntimeBackups,
   restoreBackup = restoreManagedRuntimeBackup,
   restoreRecoveryArchive = restoreManagedRuntimeRecoveryArchive,
+  resetConnection = resetManagedRuntimeConnection,
+  rotateCredential = rotateManagedRuntimeConnectorCredential,
   saveProvisioningProfile = reconfigureManagedRuntime,
   subscribeUpdateProgress = subscribeAppUpdateProgress,
 }: SettingsScreenProps = {}) {
@@ -351,9 +360,12 @@ export function SettingsScreen({
             )}
             {activeTab === "connection" && (
               <ManagedRuntimeConfigurationPanel
+                getLifecycleStatus={getLifecycleStatus}
                 getProfile={getProvisioningProfile}
                 onNavigationStateChange={setConnectionNavigation}
                 phase={managedRuntime.phase}
+                resetConnection={resetConnection}
+                rotateCredential={rotateCredential}
                 saveProfile={saveProvisioningProfile}
               />
             )}

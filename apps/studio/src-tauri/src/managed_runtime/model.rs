@@ -47,6 +47,34 @@ pub enum ManagedRuntimePhase {
     Stopping,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ManagedRuntimeLifecycleOperation {
+    Reconfigure,
+    Reset,
+    RotateConnectorCredential,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ManagedRuntimeLifecyclePhase {
+    Prepared,
+    WorkspaceBlocked,
+    RuntimeDrained,
+    RuntimeStopped,
+    RemoteMutated,
+    RuntimeRestarted,
+    Verified,
+    Resumed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedRuntimeLifecycleStatus {
+    pub operation: ManagedRuntimeLifecycleOperation,
+    pub phase: ManagedRuntimeLifecyclePhase,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ManagedRuntimeAvailability {

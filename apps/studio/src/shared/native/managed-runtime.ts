@@ -73,6 +73,19 @@ export interface ManagedRuntimeSnapshot {
   error: string | null;
 }
 
+export interface ManagedRuntimeLifecycleStatus {
+  operation: "reconfigure" | "reset" | "rotateConnectorCredential";
+  phase:
+    | "prepared"
+    | "workspaceBlocked"
+    | "runtimeDrained"
+    | "runtimeStopped"
+    | "remoteMutated"
+    | "runtimeRestarted"
+    | "verified"
+    | "resumed";
+}
+
 export interface ManagedRuntimeConnection {
   baseUrl: string;
   transport: "native";
@@ -133,6 +146,10 @@ export function getManagedRuntimeState(): Promise<ManagedRuntimeSnapshot> {
 
 export function getManagedRuntimeDiagnostics(): Promise<ManagedRuntimeDiagnostics> {
   return invoke<ManagedRuntimeDiagnostics>("get_managed_runtime_diagnostics");
+}
+
+export function getManagedRuntimeLifecycleStatus(): Promise<ManagedRuntimeLifecycleStatus | null> {
+  return invoke<ManagedRuntimeLifecycleStatus | null>("get_managed_runtime_lifecycle_status");
 }
 
 export function provisionManagedRuntime(

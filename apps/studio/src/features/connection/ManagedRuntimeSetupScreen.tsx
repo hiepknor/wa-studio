@@ -54,6 +54,10 @@ function progressCopy(
       return ["Starting WA Runtime", "Starting the API, worker, and scheduler processes…"];
     case "reconfiguring":
       return ["Applying connection settings", "Restarting local services with the new OpenWA configuration…"];
+    case "rotatingCredentials":
+      return ["Rotating connector credential", "Draining delivery work and verifying the new connector generation…"];
+    case "resetting":
+      return ["Disconnecting OpenWA", "Retiring WA Studio's remote connector resources while preserving local data…"];
     case "restoring":
       return ["Restoring local data", "Authenticating and restoring the selected recovery point…"];
     case "updating":

@@ -25,6 +25,7 @@ pub fn run() {
             app_updates::get_app_update_state,
             app_updates::install_app_update,
             managed_runtime::get_managed_runtime_diagnostics,
+            managed_runtime::get_managed_runtime_lifecycle_status,
             managed_runtime::get_managed_runtime_state,
             managed_runtime::get_managed_runtime_provisioning_profile,
             managed_runtime::create_managed_runtime_backup,

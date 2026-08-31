@@ -7,6 +7,7 @@ import { ManagedRuntimeConfigurationPanel } from "./ManagedRuntimeConfigurationP
 
 const profile = {
   allowLiveSends: false,
+  connectorPluginVersion: "0.1.0",
   openwaAllowedSessionIds: ["00000000-0000-4000-8000-000000000001"],
   openwaBaseUrl: "https://openwa.onio.cc",
   eventInboxBaseUrl: "https://wa-events.onio.cc",
@@ -27,6 +28,7 @@ describe("ManagedRuntimeConfigurationPanel", () => {
     render(
       <ToastProvider>
         <ManagedRuntimeConfigurationPanel
+          getLifecycleStatus={vi.fn().mockResolvedValue(null)}
           getProfile={getProfile}
           phase="ready"
           saveProfile={saveProfile}
@@ -60,6 +62,7 @@ describe("ManagedRuntimeConfigurationPanel", () => {
     render(
       <ToastProvider>
         <ManagedRuntimeConfigurationPanel
+          getLifecycleStatus={vi.fn().mockResolvedValue(null)}
           getProfile={vi.fn().mockResolvedValue(profile)}
           phase="ready"
           saveProfile={saveProfile}
@@ -85,6 +88,7 @@ describe("ManagedRuntimeConfigurationPanel", () => {
     render(
       <ToastProvider>
         <ManagedRuntimeConfigurationPanel
+          getLifecycleStatus={vi.fn().mockResolvedValue(null)}
           getProfile={vi.fn().mockResolvedValue(profile)}
           onNavigationStateChange={onNavigationStateChange}
           phase="ready"
@@ -128,6 +132,7 @@ describe("ManagedRuntimeConfigurationPanel", () => {
     render(
       <ToastProvider>
         <ManagedRuntimeConfigurationPanel
+          getLifecycleStatus={vi.fn().mockResolvedValue(null)}
           getProfile={vi.fn().mockResolvedValue(profile)}
           phase="ready"
           saveProfile={saveProfile}
@@ -154,6 +159,7 @@ describe("ManagedRuntimeConfigurationPanel", () => {
     render(
       <ToastProvider>
         <ManagedRuntimeConfigurationPanel
+          getLifecycleStatus={vi.fn().mockResolvedValue(null)}
           getProfile={vi.fn().mockResolvedValue(profile)}
           phase="ready"
           saveProfile={saveProfile}
@@ -176,5 +182,67 @@ describe("ManagedRuntimeConfigurationPanel", () => {
       pendingSave.resolve(profile);
       await pendingSave.promise;
     });
+  });
+
+  it("rotates one connector generation through an explicit single-flight confirmation", async () => {
+    const user = userEvent.setup();
+    const pendingRotation = deferred<typeof profile>();
+    const rotateCredential = vi.fn().mockReturnValue(pendingRotation.promise);
+    render(
+      <ToastProvider>
+        <ManagedRuntimeConfigurationPanel
+          getLifecycleStatus={vi.fn().mockResolvedValue(null)}
+          getProfile={vi.fn().mockResolvedValue(profile)}
+          phase="ready"
+          rotateCredential={rotateCredential}
+        />
+      </ToastProvider>,
+    );
+
+    await screen.findByDisplayValue(profile.openwaBaseUrl);
+    await user.click(screen.getByRole("button", { name: "Rotate credential" }));
+    const dialog = screen.getByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: "Rotate credential" });
+    act(() => {
+      confirm.click();
+      confirm.click();
+    });
+
+    expect(rotateCredential).toHaveBeenCalledTimes(1);
+    expect(dialog).toHaveTextContent("fresh healthy connector heartbeat");
+    await act(async () => {
+      pendingRotation.resolve(profile);
+      await pendingRotation.promise;
+    });
+    expect(await screen.findByText("Connector credential rotated")).toBeInTheDocument();
+  });
+
+  it("surfaces a durable interrupted reset and resumes only that recorded operation", async () => {
+    const user = userEvent.setup();
+    const resetConnection = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ToastProvider>
+        <ManagedRuntimeConfigurationPanel
+          getLifecycleStatus={vi.fn().mockResolvedValue({
+            operation: "reset",
+            phase: "remoteMutated",
+          })}
+          getProfile={vi.fn().mockResolvedValue(profile)}
+          phase="ready"
+          resetConnection={resetConnection}
+        />
+      </ToastProvider>,
+    );
+
+    expect(await screen.findByText("Connection maintenance requires recovery")).toBeInTheDocument();
+    expect(screen.getByText(/OpenWA disconnect stopped during remote mutated/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rotate credential" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Disconnect OpenWA" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("PostgreSQL data are preserved");
+    await user.click(within(dialog).getByRole("button", { name: "Disconnect OpenWA" }));
+
+    expect(resetConnection).toHaveBeenCalledOnce();
+    expect(await screen.findByText("OpenWA disconnected")).toBeInTheDocument();
   });
 });

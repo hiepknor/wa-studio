@@ -1,8 +1,12 @@
 import { type FormEvent, useEffect, useState } from "react";
 
 import {
+  getManagedRuntimeLifecycleStatus,
   getManagedRuntimeProvisioningProfile,
   reconfigureManagedRuntime,
+  resetManagedRuntimeConnection,
+  rotateManagedRuntimeConnectorCredential,
+  type ManagedRuntimeLifecycleStatus,
   type ManagedRuntimePhase,
   type ManagedRuntimeProvisioningInput,
   type ManagedRuntimeProvisioningProfile,
@@ -21,16 +25,36 @@ import { SettingsSection } from "./SettingsSection";
 import type { SettingsTaskNavigationState } from "./settings-types";
 
 interface ManagedRuntimeConfigurationPanelProps {
+  getLifecycleStatus?: typeof getManagedRuntimeLifecycleStatus;
   getProfile?: typeof getManagedRuntimeProvisioningProfile;
   onNavigationStateChange?: (state: SettingsTaskNavigationState) => void;
   phase: ManagedRuntimePhase;
+  resetConnection?: typeof resetManagedRuntimeConnection;
+  rotateCredential?: typeof rotateManagedRuntimeConnectorCredential;
   saveProfile?: typeof reconfigureManagedRuntime;
 }
 
+type MaintenanceIntent = "reset" | "rotate" | null;
+
+function lifecycleRecoveryCopy(status: ManagedRuntimeLifecycleStatus): string {
+  const phase = status.phase.replace(/([A-Z])/g, " $1").toLocaleLowerCase();
+  switch (status.operation) {
+    case "reconfigure":
+      return `Connection update stopped during ${phase}. Re-enter the intended API key and save the same settings to resume safely.`;
+    case "reset":
+      return `OpenWA disconnect stopped during ${phase}. Choose Disconnect OpenWA again to resume the recorded cleanup.`;
+    case "rotateConnectorCredential":
+      return `Credential rotation stopped during ${phase}. Choose Rotate credential again to resume the same generation.`;
+  }
+}
+
 export function ManagedRuntimeConfigurationPanel({
+  getLifecycleStatus = getManagedRuntimeLifecycleStatus,
   getProfile = getManagedRuntimeProvisioningProfile,
   onNavigationStateChange,
   phase,
+  resetConnection = resetManagedRuntimeConnection,
+  rotateCredential = rotateManagedRuntimeConnectorCredential,
   saveProfile = reconfigureManagedRuntime,
 }: ManagedRuntimeConfigurationPanelProps) {
   const { notify } = useToast();
@@ -41,14 +65,20 @@ export function ManagedRuntimeConfigurationPanel({
   const [allowLiveSends, setAllowLiveSends] = useState(false);
   const [candidate, setCandidate] = useState<ManagedRuntimeProvisioningInput | null>(null);
   const [saving, setSaving] = useState(false);
+  const [lifecycleStatus, setLifecycleStatus] = useState<ManagedRuntimeLifecycleStatus | null>(null);
+  const [maintenanceIntent, setMaintenanceIntent] = useState<MaintenanceIntent>(null);
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+  const [maintenanceError, setMaintenanceError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const saveOperation = useSingleFlightOperation();
+  const maintenanceOperation = useSingleFlightOperation();
 
   useEffect(() => {
     let disposed = false;
-    void getProfile()
-      .then(next => {
+    void Promise.all([getProfile(), getLifecycleStatus()])
+      .then(([next, lifecycle]) => {
         if (disposed) return;
+        setLifecycleStatus(lifecycle);
         setProfile(next);
         if (next) {
           setBaseUrl(next.openwaBaseUrl);
@@ -62,7 +92,7 @@ export function ManagedRuntimeConfigurationPanel({
       })
       .finally(() => { if (!disposed) setLoading(false); });
     return () => { disposed = true; };
-  }, [getProfile]);
+  }, [getLifecycleStatus, getProfile]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -88,6 +118,7 @@ export function ManagedRuntimeConfigurationPanel({
       setAllowLiveSends(saved.allowLiveSends);
       setApiKey("");
       setCandidate(null);
+      setLifecycleStatus(null);
       notify({
         description: "The credentials were verified. WA Runtime is restarting with the updated connection.",
         title: "Connection updated",
@@ -106,7 +137,56 @@ export function ManagedRuntimeConfigurationPanel({
     }
   }
 
-  const editable = profile !== null && (phase === "ready" || phase === "degraded");
+  async function confirmMaintenance() {
+    if (!maintenanceIntent) return;
+    const token = maintenanceOperation.begin();
+    if (token === null) return;
+    setMaintenanceBusy(true);
+    setMaintenanceError(null);
+    try {
+      if (maintenanceIntent === "rotate") {
+        const saved = await rotateCredential();
+        if (!maintenanceOperation.isCurrent(token)) return;
+        setProfile(saved);
+        notify({
+          description: "The new connector generation published a healthy heartbeat before delivery resumed.",
+          title: "Connector credential rotated",
+          tone: "success",
+        });
+      } else {
+        await resetConnection();
+        if (!maintenanceOperation.isCurrent(token)) return;
+        setProfile(null);
+        notify({
+          description: "Remote WA Studio connector resources were retired. Local Runtime data was preserved.",
+          title: "OpenWA disconnected",
+          tone: "success",
+        });
+      }
+      setLifecycleStatus(null);
+      setMaintenanceIntent(null);
+    } catch (caught) {
+      if (maintenanceOperation.isCurrent(token)) {
+        setMaintenanceError(userFacingErrorMessage(
+          caught,
+          maintenanceIntent === "rotate"
+            ? "Could not rotate the connector credential."
+            : "Could not disconnect OpenWA.",
+        ));
+        try {
+          setLifecycleStatus(await getLifecycleStatus());
+        } catch {
+          // The operation error remains authoritative if lifecycle status cannot be refreshed.
+        }
+      }
+    } finally {
+      if (maintenanceOperation.complete(token)) setMaintenanceBusy(false);
+    }
+  }
+
+  const editable = profile !== null
+    && phase === "ready"
+    && (!lifecycleStatus || lifecycleStatus.operation === "reconfigure");
   const dirty = profile !== null && (
     baseUrl !== profile.openwaBaseUrl
     || allowLiveSends !== profile.allowLiveSends
@@ -114,9 +194,9 @@ export function ManagedRuntimeConfigurationPanel({
   );
 
   useEffect(() => {
-    onNavigationStateChange?.({ busy: saving, dirty });
+    onNavigationStateChange?.({ busy: saving || maintenanceBusy, dirty });
     return () => onNavigationStateChange?.({ busy: false, dirty: false });
-  }, [dirty, onNavigationStateChange, saving]);
+  }, [dirty, maintenanceBusy, onNavigationStateChange, saving]);
 
   function discardChanges() {
     if (!profile || saving) return;
@@ -130,6 +210,11 @@ export function ManagedRuntimeConfigurationPanel({
   return (
     <div className="settings-panel-stack">
       {!candidate && error && <InlineAlert className="settings-notice" title="Connection settings failed">{error}</InlineAlert>}
+      {lifecycleStatus && (
+        <InlineAlert className="settings-notice" title="Connection maintenance requires recovery" tone="warning">
+          {lifecycleRecoveryCopy(lifecycleStatus)} Runtime delivery remains blocked until verification and resume complete.
+        </InlineAlert>
+      )}
 
       <SettingsSection
         action={<Badge tone={profile ? "success" : "neutral"} variant={loading ? "label" : "status"}>{loading ? "Loading" : profile ? "Connected" : "Developer managed"}</Badge>}
@@ -236,6 +321,60 @@ export function ManagedRuntimeConfigurationPanel({
         </form>
       </SettingsSection>
 
+      {profile && (
+        <SettingsSection
+          description="Lifecycle operations drain Runtime work, preserve a durable recovery intent, and resume delivery only after verification."
+          kicker="Operations"
+          title="Connection maintenance"
+          titleId="runtime-maintenance-title"
+        >
+          <SettingsRow
+            action={(
+              <Button
+                disabled={
+                  phase !== "ready"
+                  || saving
+                  || maintenanceBusy
+                  || !profile.connectorPluginVersion
+                  || (lifecycleStatus !== null
+                    && lifecycleStatus.operation !== "rotateConnectorCredential")
+                }
+                onClick={() => {
+                  setMaintenanceError(null);
+                  setMaintenanceIntent("rotate");
+                }}
+                variant="secondary"
+              >
+                Rotate credential
+              </Button>
+            )}
+            description="Advance the connector token generation, update the OpenWA plugin, then require a fresh matching heartbeat."
+            label="Connector credential"
+          />
+          <SettingsRow
+            action={(
+              <Button
+                disabled={
+                  phase !== "ready"
+                  || saving
+                  || maintenanceBusy
+                  || (lifecycleStatus !== null && lifecycleStatus.operation !== "reset")
+                }
+                onClick={() => {
+                  setMaintenanceError(null);
+                  setMaintenanceIntent("reset");
+                }}
+                variant="danger"
+              >
+                Disconnect OpenWA
+              </Button>
+            )}
+            description="Retire only WA Studio's connector, ingress, and device scope. Campaigns, runs, and local PostgreSQL data remain on this Mac."
+            label="OpenWA connection"
+          />
+        </SettingsSection>
+      )}
+
       <ConfirmationDialog
         body={candidate?.allowLiveSends ? (
           <>
@@ -258,6 +397,37 @@ export function ManagedRuntimeConfigurationPanel({
         onConfirm={() => void confirmSave()}
         open={candidate !== null}
         title={candidate?.allowLiveSends ? "Enable live sends?" : "Update Runtime connection?"}
+      />
+
+      <ConfirmationDialog
+        body={maintenanceIntent === "rotate" ? (
+          <>
+            WA Studio will block new OpenWA work, drain Runtime and the connector journal, rotate
+            to the next credential generation, restart Runtime, then require a fresh healthy
+            connector heartbeat before resuming delivery.
+          </>
+        ) : (
+          <>
+            WA Studio will block and drain delivery, retire only its OpenWA connector resources,
+            and return to connection setup. Local campaigns, runs, evidence, and PostgreSQL data
+            are preserved.
+          </>
+        )}
+        busy={maintenanceBusy}
+        busyLabel={maintenanceIntent === "rotate" ? "Rotating…" : "Disconnecting…"}
+        confirmLabel={maintenanceIntent === "rotate" ? "Rotate credential" : "Disconnect OpenWA"}
+        confirmVariant={maintenanceIntent === "rotate" ? "primary" : "danger"}
+        error={maintenanceError}
+        errorTitle={maintenanceIntent === "rotate" ? "Credential rotation failed" : "Disconnect failed"}
+        onCancel={() => {
+          if (!maintenanceBusy) {
+            setMaintenanceIntent(null);
+            setMaintenanceError(null);
+          }
+        }}
+        onConfirm={() => void confirmMaintenance()}
+        open={maintenanceIntent !== null}
+        title={maintenanceIntent === "rotate" ? "Rotate connector credential?" : "Disconnect OpenWA?"}
       />
     </div>
   );
