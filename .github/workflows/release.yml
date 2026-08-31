@@ -221,7 +221,8 @@ jobs:
     permissions:
       contents: write
       packages: read
-      attestations: read
+      attestations: write
+      id-token: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -241,9 +242,31 @@ jobs:
         with:
           name: wa-studio-connector-${{ github.ref_name }}
           path: dist/connector-plugin
+      - name: Create coordinated deployment manifest
+        run: |
+          node tooling/release/deployment-release.mjs create \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --git-commit "$GITHUB_SHA" \
+            --image-file dist/release-metadata/event-inbox-image.txt \
+            --connector-directory dist/connector-plugin \
+            --updater-directory dist/updater-release \
+            --output dist/release-metadata/wa-studio-deployment.json
+      - name: Attest coordinated deployment manifest
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: dist/release-metadata/wa-studio-deployment.json
       - name: Verify release payload
         run: |
           npm run release:verify-updater -- --directory dist/updater-release --repository "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"
+          node tooling/release/deployment-release.mjs verify \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --git-commit "$GITHUB_SHA" \
+            --image-file dist/release-metadata/event-inbox-image.txt \
+            --connector-directory dist/connector-plugin \
+            --updater-directory dist/updater-release \
+            --manifest dist/release-metadata/wa-studio-deployment.json
           image="$(tr -d '\r\n' < dist/release-metadata/event-inbox-image.txt)"
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           [[ "$image" =~ ^ghcr\.io/${owner}/wa-event-inbox@sha256:[0-9a-f]{64}$ ]]
@@ -252,6 +275,10 @@ jobs:
           test -n "$connector_zip" -a -f "$connector_checksum"
           (cd dist/connector-plugin && shasum -a 256 -c "$(basename "$connector_checksum")")
           gh attestation verify "$connector_zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$GITHUB_SHA"
+          gh attestation verify dist/release-metadata/wa-studio-deployment.json \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$GITHUB_SHA"
@@ -285,8 +312,8 @@ jobs:
           fi
       - name: Upload and verify draft assets
         run: |
-          gh release upload "$GITHUB_REF_NAME" dist/updater-release/* dist/release-metadata/event-inbox-image.txt dist/connector-plugin/* --clobber
-          test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 10
+          gh release upload "$GITHUB_REF_NAME" dist/updater-release/* dist/release-metadata/* dist/connector-plugin/* --clobber
+          test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 11
           mkdir -p dist/published-verification
           gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir dist/published-verification
           cmp dist/updater-release/latest.json dist/published-verification/latest.json

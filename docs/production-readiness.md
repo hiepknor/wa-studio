@@ -87,8 +87,8 @@ from any failures recorded before or after it. Before the canary clock starts:
 
 ## Go/no-go record
 
-Record candidate commit, desktop checksums, Event Inbox digest, connector ZIP digest and provenance,
-OpenWA reviewed tag, connector/binding generations, canary start/end UTC, R2 backup key/checksum,
+Retain the attested `wa-studio-deployment.json` as the authoritative candidate identity. Record its
+digest, desktop checksums, connector/binding generations, canary start/end UTC, R2 backup key/checksum,
 restore-drill result, UAT run ID, test-group ID, alert test timestamps, operator acknowledgement, and
 the final go/no-go decision. Store identifiers only in the private release record; never add customer
 or credential data to Git.
