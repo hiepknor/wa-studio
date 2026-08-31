@@ -127,7 +127,8 @@ perform this check because they intentionally contain no update channel or publi
    to the stable updater endpoint.
 2. Verify all eleven release assets, attestations, checksums, the updater signature, connector package,
    and Event Inbox image digest. Stage that image digest with the Event Inbox `canary` Compose
-   profile on port 34201.
+   profile on port 34201, then run `npm run event-inbox:candidate:verify` against the attested
+   deployment manifest and the actual canary container before routing traffic.
 3. Confirm private readiness, switch only `wa-events.onio.cc` to the candidate with
    `WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201`, and keep the accepted primary live on 34200 throughout
    the observation window.

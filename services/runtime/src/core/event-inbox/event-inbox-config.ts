@@ -90,6 +90,12 @@ const schema = z.object({
       message: 'EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS cannot exceed EVENT_INBOX_HTTP_REQUEST_TIMEOUT_MS',
     });
   }
+  if (value.EVENT_INBOX_OPENWA_RELEASE_TAG !== OPENWA_RELEASE_TAG) {
+    context.addIssue({
+      code: 'custom', path: ['EVENT_INBOX_OPENWA_RELEASE_TAG'],
+      message: `EVENT_INBOX_OPENWA_RELEASE_TAG must match reviewed release ${OPENWA_RELEASE_TAG}`,
+    });
+  }
   for (const [name, origin] of [
     ['EVENT_INBOX_PUBLIC_BASE_URL', value.EVENT_INBOX_PUBLIC_BASE_URL],
     ['EVENT_INBOX_OPENWA_BASE_URL', value.EVENT_INBOX_OPENWA_BASE_URL],

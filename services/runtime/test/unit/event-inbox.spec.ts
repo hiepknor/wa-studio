@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { OPENWA_RELEASE_TAG } from '../../src/contracts/release/openwa-release.generated';
 import { parseEventInboxConfig, type EventInboxConfig } from '../../src/core/event-inbox/event-inbox-config';
 import { EventInboxTokenService } from '../../src/core/event-inbox/event-inbox-token.service';
 import type { EventInboxOpenWAClient } from '../../src/integrations/openwa/event-inbox-openwa.client';
@@ -67,6 +68,10 @@ describe('Event Inbox boundary', () => {
       ...configEnvironment(),
       EVENT_INBOX_MAX_STORED_EVENTS: '5000001',
     })).toThrow();
+    expect(() => parseEventInboxConfig({
+      ...configEnvironment(),
+      EVENT_INBOX_OPENWA_RELEASE_TAG: 'unreviewed-release',
+    })).toThrow(`must match reviewed release ${OPENWA_RELEASE_TAG}`);
   });
 
   it('requires an independent metrics credential for production', () => {

@@ -103,12 +103,22 @@ Stage an attested candidate digest and confirm private readiness before changing
 export WA_EVENT_INBOX_CANARY_IMAGE='ghcr.io/hiepknor/wa-event-inbox@sha256:<digest>'
 docker compose --env-file event-inbox.env --profile canary up -d event-inbox-canary
 curl --fail http://127.0.0.1:34201/api/v1/health/ready
+container="$(docker compose --env-file event-inbox.env --profile canary ps -q event-inbox-canary)"
+npm run event-inbox:candidate:verify -- \
+  --manifest ./wa-studio-deployment.json \
+  --readiness-url http://127.0.0.1:34201 \
+  --container "$container"
 sudo env WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201 \
   caddy validate --config /etc/caddy/Caddyfile
 sudo env WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201 \
   caddy reload --config /etc/caddy/Caddyfile
 curl --fail https://wa-events.onio.cc/api/v1/health/live
 ~~~
+
+Verify the downloaded deployment manifest's GitHub attestation before this command. The verifier is
+read-only and refuses the cutover unless the container's configured digest, serving process release,
+reviewed OpenWA tag, connector protocol/journal schema, and applied Event Inbox migration head/count
+all match that one manifest. A generic `ready` response is not sufficient release evidence.
 
 The committed Caddy route defaults to 34200, so an ordinary reload or restart without the explicit
 environment value fails back to the accepted primary. For immediate rollback, reload Caddy with

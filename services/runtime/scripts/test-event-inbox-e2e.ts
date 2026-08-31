@@ -5,9 +5,14 @@ import { once } from 'node:events';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { Pool } from 'pg';
+import {
+  OPENWA_CONNECTOR_JOURNAL_SCHEMA_VERSION,
+  OPENWA_CONNECTOR_PROTOCOL_VERSION,
+} from '../src/contracts/openwa-connector';
+import { OPENWA_RELEASE_TAG } from '../src/contracts/release/openwa-release.generated';
 import { migrateEventInboxDatabase } from '../src/core/event-inbox/event-inbox-migrations';
 import { parseEventInboxConfig } from '../src/core/event-inbox/event-inbox-config';
-import { OPENWA_RELEASE_TAG } from '../src/contracts/release/openwa-release.generated';
+import { RUNTIME_VERSION } from '../src/core/release/runtime-release';
 
 const sessionId = '00000000-0000-4000-8000-000000000001';
 const apiKey = 'event-inbox-e2e-openwa-key';
@@ -364,6 +369,15 @@ async function main(): Promise<void> {
     const empty = await claim(eventInboxBaseUrl, pairing.deviceToken);
     assert(empty.data.length === 0, 'dead event continued starving the queue');
     const health = await publicRequest(`${eventInboxBaseUrl}/api/v1/health/ready`);
+    assert(
+      health.release?.runtimeVersion === RUNTIME_VERSION
+        && health.release?.openwaReleaseTag === OPENWA_RELEASE_TAG
+        && health.release?.connectorProtocolVersion === OPENWA_CONNECTOR_PROTOCOL_VERSION
+        && health.release?.connectorJournalSchemaVersion === OPENWA_CONNECTOR_JOURNAL_SCHEMA_VERSION
+        && health.release?.migrationHead === '011_legacy_primary_compatibility.sql'
+        && health.release?.migrationCount === 11,
+      'health did not expose the coordinated release identity',
+    );
     assert(health.pendingEvents === 0 && health.deadEvents === 1, 'health did not expose poison isolation');
     assert(
       health.activeDevices === 1 && health.legacyDevices === 1 && health.ownedSessions === 1,

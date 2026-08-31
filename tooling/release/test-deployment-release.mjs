@@ -56,6 +56,7 @@ try {
   const manifest = createDeploymentManifest({ ...common, outputPath });
   assert.equal(manifest.components.eventInbox.imageDigest, `sha256:${imageDigest}`);
   assert.equal(manifest.components.eventInbox.migrationHead.name, "011_legacy_primary_compatibility.sql");
+  assert.equal(manifest.components.eventInbox.migrationHead.count, 11);
   assert.match(manifest.components.eventInbox.migrationHead.setSha256, /^[0-9a-f]{64}$/u);
   assert.equal(manifest.components.connector.artifact.sha256, connectorDigest);
   assert.match(manifest.components.studio.releaseChecksumsSha256, /^[0-9a-f]{64}$/u);

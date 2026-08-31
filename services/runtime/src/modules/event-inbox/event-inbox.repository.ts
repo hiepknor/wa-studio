@@ -28,6 +28,8 @@ export interface EventInboxEnvelope {
 }
 
 export interface EventInboxReadiness {
+  migrationHead: string;
+  migrationCount: number;
   storedEvents: number;
   storedBytes: number;
   pendingEvents: number;
@@ -450,6 +452,8 @@ export class EventInboxRepository implements OnModuleDestroy {
       owned_sessions: string;
       active_rate_limit_buckets: string;
       rate_limited_pairing_attempts: string;
+      migration_head: string | null;
+      migration_count: string;
     }>(
       `SELECT usage.stored_events::text, usage.stored_bytes::text,
          count(event.*) FILTER (WHERE event.dead_at IS NULL)::text AS pending_events,
@@ -478,15 +482,23 @@ export class EventInboxRepository implements OnModuleDestroy {
          (SELECT count(*)::text FROM event_inbox_rate_limits
           WHERE expires_at > now()) AS active_rate_limit_buckets,
          (SELECT COALESCE(sum(blocked_attempts), 0)::text FROM event_inbox_rate_limits
-          WHERE expires_at > now()) AS rate_limited_pairing_attempts
+          WHERE expires_at > now()) AS rate_limited_pairing_attempts,
+         (SELECT name FROM schema_migrations
+          WHERE name LIKE '%.sql' ORDER BY name DESC LIMIT 1) AS migration_head,
+         (SELECT count(*)::text FROM schema_migrations
+          WHERE name LIKE '%.sql') AS migration_count
        FROM event_inbox_usage AS usage
        LEFT JOIN event_inbox_events AS event ON true
        WHERE usage.singleton = true
        GROUP BY usage.stored_events, usage.stored_bytes`,
     );
     const usage = result.rows[0];
-    if (!usage) throw new Error('Event Inbox usage ledger is unavailable');
+    if (!usage || !usage.migration_head) {
+      throw new Error('Event Inbox usage or migration ledger is unavailable');
+    }
     return {
+      migrationHead: usage.migration_head,
+      migrationCount: Number(usage.migration_count),
       storedEvents: Number(usage.stored_events),
       storedBytes: Number(usage.stored_bytes),
       pendingEvents: Number(usage.pending_events),

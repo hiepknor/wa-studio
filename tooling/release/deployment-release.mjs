@@ -112,6 +112,7 @@ function readMigrationHead(workspaceRoot) {
   }
   return {
     name,
+    count: migrations.length,
     sha256: sha256(resolve(directory, name)),
     setSha256: setHash.digest("hex"),
   };

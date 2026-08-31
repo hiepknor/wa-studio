@@ -26,9 +26,15 @@ import {
   eventInboxPairingRequestSchema,
   openWAWebhookEnvelopeSchema,
 } from '../../contracts/event-inbox';
+import {
+  OPENWA_CONNECTOR_JOURNAL_SCHEMA_VERSION,
+  OPENWA_CONNECTOR_PROTOCOL_VERSION,
+} from '../../contracts/openwa-connector';
+import { OPENWA_RELEASE_TAG } from '../../contracts/release/openwa-release.generated';
 import { EVENT_INBOX_CONFIG } from '../../core/event-inbox/event-inbox-config.module';
 import { eventInboxConfig, type EventInboxConfig } from '../../core/event-inbox/event-inbox-config';
 import { EventInboxTokenService } from '../../core/event-inbox/event-inbox-token.service';
+import { RUNTIME_VERSION } from '../../core/release/runtime-release';
 import { verifySha256Hmac } from '../../core/security/hmac-signature';
 import { EventInboxOpenWAClient } from '../../integrations/openwa/event-inbox-openwa.client';
 import {
@@ -237,11 +243,20 @@ export class EventInboxHealthController {
 
   @Get('ready')
   async ready() {
+    const readiness = await this.repository.readiness();
     return {
       status: 'ready',
       service: 'wa-event-inbox',
       protocolVersion: 2,
-      ...await this.repository.readiness(),
+      release: {
+        runtimeVersion: RUNTIME_VERSION,
+        openwaReleaseTag: OPENWA_RELEASE_TAG,
+        connectorProtocolVersion: OPENWA_CONNECTOR_PROTOCOL_VERSION,
+        connectorJournalSchemaVersion: OPENWA_CONNECTOR_JOURNAL_SCHEMA_VERSION,
+        migrationHead: readiness.migrationHead,
+        migrationCount: readiness.migrationCount,
+      },
+      ...readiness,
     };
   }
 }
