@@ -212,6 +212,10 @@ export async function verifyConnectorDeployment({
   const health = object(healthValue, "OpenWA health");
   expect(health.status === "ok", "OpenWA health is not ok.");
   expect(
+    typeof health.version === "string" && health.version.length > 0,
+    "OpenWA did not disclose its release; verify the API key and source-IP permission.",
+  );
+  expect(
     health.version === versions.openwaReleaseTag,
     `OpenWA release must be ${versions.openwaReleaseTag}.`,
   );

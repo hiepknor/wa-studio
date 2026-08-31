@@ -8,6 +8,10 @@ or retries a send after the `SEND_STARTED` ambiguity boundary.
 
 1. Package the plugin with `npm -w @wa/openwa-connector-plugin run package`.
 2. Install the generated ZIP from OpenWA **Plugins**.
+   Automated Studio provisioning requires an OpenWA API key with the `ADMIN` role and no API-key
+   session restriction because OpenWA protects plugin and integration-instance administration as
+   unscoped control-plane operations. The OpenWA deployment itself must contain exactly one visible
+   session; connector protocol v1 rejects a multi-session result.
 3. Provision a connector credential from the Event Inbox control plane. Write the same origin, token
    and session UUID to the plugin base config, its one managed-session override and the ingress
    instance config. OpenWA supplies only base config during `onEnable`; omitting that layer prevents

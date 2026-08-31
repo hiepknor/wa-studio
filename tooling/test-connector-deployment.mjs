@@ -204,6 +204,14 @@ function input(fetchImpl) {
   );
 }
 
+{
+  const { fetchImpl } = fixture({ health: { status: "ok" } });
+  await assert.rejects(
+    verifyConnectorDeployment(input(fetchImpl)),
+    /OpenWA did not disclose its release/u,
+  );
+}
+
 process.stdout.write(
   "Connector deployment verifier test passed: identity, exclusivity, release and heartbeat gates fail closed.\n",
 );

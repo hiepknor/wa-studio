@@ -67,7 +67,8 @@ pub struct ManagedRuntimeProvisioningProfile {
 
 #[derive(Debug, Deserialize)]
 struct OpenWaHealth {
-    version: String,
+    #[serde(default)]
+    version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -988,9 +989,9 @@ fn assert_exclusive_connector_instance(
         .send()
         .map_err(|error| format!("Could not inspect WA Studio Connector ownership: {error}"))?;
     if !response.status().is_success() {
-        return Err(format!(
-            "OpenWA connector ownership inspection returned HTTP {}.",
-            response.status()
+        return Err(openwa_control_plane_http_error(
+            response.status(),
+            "connector ownership inspection",
         ));
     }
     let instances: Vec<OpenWaIntegrationInstance> = response.json().map_err(|error| {
@@ -1055,15 +1056,27 @@ fn get_openwa_plugin(
         return Ok(None);
     }
     if !response.status().is_success() {
-        return Err(format!(
-            "OpenWA connector inspection returned HTTP {}.",
-            response.status()
+        return Err(openwa_control_plane_http_error(
+            response.status(),
+            "connector inspection",
         ));
     }
     response
         .json()
         .map(Some)
         .map_err(|error| format!("OpenWA returned invalid connector metadata: {error}"))
+}
+
+fn openwa_control_plane_http_error(status: reqwest::StatusCode, operation: &str) -> String {
+    if matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    ) {
+        return format!(
+            "OpenWA {operation} requires a valid unscoped API key with the ADMIN role."
+        );
+    }
+    format!("OpenWA {operation} returned HTTP {status}.")
 }
 
 fn validate_connector_plugin(plugin: &OpenWaPlugin) -> Result<(), String> {
@@ -1353,10 +1366,13 @@ fn assert_compatible_release_with_client(
     let health: OpenWaHealth = health
         .json()
         .map_err(|error| format!("OpenWA returned an invalid health response: {error}"))?;
-    if health.version != expected_release {
+    let version = health.version.ok_or_else(|| {
+        "OpenWA did not disclose its release. Verify that the API key is valid and permitted from this device."
+            .to_string()
+    })?;
+    if version != expected_release {
         return Err(format!(
-            "OpenWA release mismatch: expected {expected_release}, received {}.",
-            health.version
+            "OpenWA release mismatch: expected {expected_release}, received {version}."
         ));
     }
     Ok(())
@@ -1871,6 +1887,48 @@ mod tests {
         assert!(requests.recv().unwrap().starts_with(&format!(
             "GET /api/integration/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/instances "
         )));
+        assert!(requests.try_recv().is_err());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn preflight_reports_an_api_key_that_cannot_disclose_the_release() {
+        let connector_id = "00000000-0000-4000-8000-000000000003";
+        let (base_url, requests, server) = mock_http_server(vec![(
+            200,
+            "{\"status\":\"ok\",\"timestamp\":\"2026-08-31T12:00:00.000Z\"}".to_string(),
+        )]);
+        let mut request = input();
+        request.openwa_base_url = base_url;
+
+        let error =
+            preflight_connector_plugin(&request, &format!("wa-studio-{connector_id}")).unwrap_err();
+
+        assert!(error.contains("did not disclose its release"));
+        assert!(requests.recv().unwrap().starts_with("GET /api/health "));
+        assert!(requests.try_recv().is_err());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn preflight_reports_missing_openwa_admin_permission() {
+        let connector_id = "00000000-0000-4000-8000-000000000003";
+        let (base_url, requests, server) = mock_http_server(vec![
+            (200, format!("{{\"version\":\"{OPENWA_RELEASE_TAG}\"}}")),
+            (403, "{\"message\":\"forbidden\"}".to_string()),
+        ]);
+        let mut request = input();
+        request.openwa_base_url = base_url;
+
+        let error =
+            preflight_connector_plugin(&request, &format!("wa-studio-{connector_id}")).unwrap_err();
+
+        assert!(error.contains("unscoped API key with the ADMIN role"));
+        assert!(requests.recv().unwrap().starts_with("GET /api/health "));
+        assert!(requests
+            .recv()
+            .unwrap()
+            .starts_with(&format!("GET /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID} ")));
         assert!(requests.try_recv().is_err());
         server.join().unwrap();
     }
