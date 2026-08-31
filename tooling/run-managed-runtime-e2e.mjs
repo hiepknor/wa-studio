@@ -164,13 +164,13 @@ async function main() {
 
     await exerciseOpenWaOfflineRecovery(openwa, profile.runtimeApiKey);
 
-    nativeQuitStudio();
+    nativeQuitStudio(app.pid);
     await waitForChildExit(app, 30_000, "WA Studio did not exit after the native quit request");
     app = spawn(appBinary, [], { env: appEnvironment, stdio: "inherit" });
     await waitForRuntimeOperational(profile.runtimeApiKey);
     await waitForRuntimeReady(profile.runtimeApiKey);
     await waitForManagedBackupCreated();
-    nativeQuitStudio();
+    nativeQuitStudio(app.pid);
     await waitForChildExit(
       app,
       30_000,
@@ -187,7 +187,7 @@ async function main() {
     if (app?.exitCode === null && app?.signalCode === null) {
       if (oneShot) {
         try {
-          nativeQuitStudio();
+          nativeQuitStudio(app.pid);
           await waitForChildExit(app, 30_000, "WA Studio did not exit during E2E cleanup");
         } catch {
           await terminateChild(app, "WA Studio");
@@ -842,19 +842,30 @@ function cleanManagedPostgresData() {
   rmSync(managedBackupRoot, { recursive: true, force: true });
 }
 
-function nativeQuitStudio() {
+function nativeQuitStudio(pid) {
   if (process.platform !== "darwin") {
     throw new Error("Packaged native quit verification is currently implemented for macOS only.");
   }
-  const attempts = [
-    'tell application id "dev.hiepknor.wastudio" to quit',
-    'tell application "WA Studio" to quit',
-  ];
-  for (const script of attempts) {
-    const result = spawnSync("osascript", ["-e", script], { encoding: "utf8" });
-    if (!result.error && result.status === 0) return;
+  if (!Number.isInteger(pid) || pid <= 1) {
+    throw new Error("Packaged WA Studio process does not have a valid PID.");
   }
-  throw new Error("Could not ask the packaged WA Studio application to quit natively.");
+  // Target the child process rather than the shared bundle identifier. A developer may have
+  // `tauri dev` open while this gate runs; asking LaunchServices to quit by bundle identifier can
+  // terminate that unrelated workspace instead of the packaged artifact under test.
+  const script = [
+    "import AppKit",
+    "import Darwin",
+    `let pid: pid_t = ${pid}`,
+    "guard let app = NSRunningApplication(processIdentifier: pid) else { exit(65) }",
+    "exit(app.terminate() ? 0 : 66)",
+  ].join("\n");
+  const result = spawnSync("xcrun", ["swift", "-e", script], { encoding: "utf8" });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `Could not ask packaged WA Studio process ${pid} to quit natively (status ${result.status}).`,
+    );
+  }
 }
 
 async function waitForChildExit(child, timeoutMs, message) {
