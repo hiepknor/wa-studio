@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 import type { EventInboxEvent, EventInboxNack } from '../../contracts/event-inbox';
 import { EVENT_INBOX_CONFIG } from '../../core/event-inbox/event-inbox-config.module';
@@ -17,7 +17,7 @@ const ACTIVE_DEVICE_OWNERSHIP_SQL = `EXISTS (
     AND owner.device_id = $4::uuid AND owner.token_generation = $5
 )`;
 
-export type EventInboxInsertResult = 'created' | 'duplicate' | 'capacity';
+export type EventInboxInsertResult = 'created' | 'duplicate' | 'conflict' | 'capacity';
 
 export interface EventInboxEnvelope {
   event: string;
@@ -33,6 +33,7 @@ export interface EventInboxReadiness {
   pendingEvents: number;
   leasedEvents: number;
   deadEvents: number;
+  retainedReceipts: number;
   oldestPendingAgeSeconds: number | null;
   activeDevices: number;
   legacyDevices: number;
@@ -64,10 +65,20 @@ export class EventInboxRepository implements OnModuleDestroy {
     envelope: EventInboxEnvelope,
   ): Promise<EventInboxInsertResult> {
     const storageBytes = rawBody.length + Buffer.byteLength(signature, 'utf8');
+    const hash = payloadHash(rawBody);
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
       const usage = await lockUsage(client);
+      const receipt = await client.query<{ payload_hash: Buffer }>(
+        `SELECT payload_hash FROM event_inbox_receipts
+         WHERE idempotency_key = $1 AND expires_at > now()`,
+        [envelope.idempotencyKey],
+      );
+      if (receipt.rowCount) {
+        await client.query('COMMIT');
+        return receipt.rows[0]!.payload_hash.equals(hash) ? 'duplicate' : 'conflict';
+      }
       const inserted = await client.query(
         `INSERT INTO event_inbox_events
            (idempotency_key, delivery_id, event_type, session_id, raw_body, signature,
@@ -88,8 +99,14 @@ export class EventInboxRepository implements OnModuleDestroy {
         ],
       );
       if (!inserted.rowCount) {
+        const existing = await client.query<{ raw_body: Buffer }>(
+          'SELECT raw_body FROM event_inbox_events WHERE idempotency_key = $1',
+          [envelope.idempotencyKey],
+        );
         await client.query('COMMIT');
-        return 'duplicate';
+        return existing.rows[0] && payloadHash(existing.rows[0].raw_body).equals(hash)
+          ? 'duplicate'
+          : 'conflict';
       }
       if (usage.storedEvents + 1 > this.config.EVENT_INBOX_MAX_STORED_EVENTS
         || usage.storedBytes + storageBytes > this.config.EVENT_INBOX_MAX_STORED_BYTES) {
@@ -226,11 +243,17 @@ export class EventInboxRepository implements OnModuleDestroy {
     try {
       await client.query('BEGIN');
       await lockUsage(client);
-      const result = await client.query<{ storage_bytes: string }>(
-        `DELETE FROM event_inbox_events AS event
-         USING unnest($1::text[], $2::uuid[]) AS receipt(idempotency_key, lease_id)
+      const selected = await client.query<{
+        idempotency_key: string;
+        session_id: string;
+        raw_body: Buffer;
+      }>(
+        `SELECT event.idempotency_key, event.session_id::text, event.raw_body
+         FROM event_inbox_events AS event
+         JOIN unnest($1::text[], $2::uuid[]) AS receipt(idempotency_key, lease_id)
+           ON event.idempotency_key = receipt.idempotency_key
+          AND event.lease_id = receipt.lease_id
          WHERE event.idempotency_key = receipt.idempotency_key
-           AND event.lease_id = receipt.lease_id
            AND event.lease_owner = $3::uuid
            AND event.lease_generation = $4
            AND EXISTS (
@@ -243,13 +266,41 @@ export class EventInboxRepository implements OnModuleDestroy {
              WHERE owner.session_id = event.session_id
                AND owner.device_id = $3::uuid AND owner.token_generation = $4
            )
-         RETURNING event.storage_bytes::text`,
+         FOR UPDATE OF event`,
         [
           receipts.map(receipt => receipt.idempotencyKey),
           receipts.map(receipt => receipt.leaseId),
           deviceId,
           tokenGeneration,
         ],
+      );
+      if (selected.rowCount) {
+        await client.query(
+          `INSERT INTO event_inbox_receipts
+             (idempotency_key, session_id, payload_hash, expires_at)
+           SELECT receipt.idempotency_key, receipt.session_id, receipt.payload_hash,
+             now() + ($4::text || ' days')::interval
+           FROM unnest($1::text[], $2::uuid[], $3::bytea[])
+             AS receipt(idempotency_key, session_id, payload_hash)
+           ON CONFLICT (idempotency_key) DO UPDATE SET
+             session_id = EXCLUDED.session_id,
+             payload_hash = EXCLUDED.payload_hash,
+             accepted_at = now(),
+             expires_at = EXCLUDED.expires_at
+           WHERE event_inbox_receipts.expires_at <= now()`,
+          [
+            selected.rows.map(row => row.idempotency_key),
+            selected.rows.map(row => row.session_id),
+            selected.rows.map(row => payloadHash(row.raw_body)),
+            this.config.EVENT_INBOX_RECEIPT_RETENTION_DAYS,
+          ],
+        );
+      }
+      const result = await client.query<{ storage_bytes: string }>(
+        `DELETE FROM event_inbox_events
+         WHERE idempotency_key = ANY($1::text[])
+         RETURNING storage_bytes::text`,
+        [selected.rows.map(row => row.idempotency_key)],
       );
       await decrementUsage(client, result.rows);
       await client.query('COMMIT');
@@ -367,6 +418,20 @@ export class EventInboxRepository implements OnModuleDestroy {
     return result.rowCount ?? 0;
   }
 
+  async removeExpiredReceipts(limit: number): Promise<number> {
+    const result = await this.pool.query(
+      `DELETE FROM event_inbox_receipts
+       WHERE idempotency_key IN (
+         SELECT idempotency_key FROM event_inbox_receipts
+         WHERE expires_at <= now()
+         ORDER BY expires_at, idempotency_key
+         LIMIT $1
+       )`,
+      [limit],
+    );
+    return result.rowCount ?? 0;
+  }
+
   async readiness(): Promise<EventInboxReadiness> {
     const result = await this.pool.query<{
       stored_events: string;
@@ -374,6 +439,7 @@ export class EventInboxRepository implements OnModuleDestroy {
       pending_events: string;
       leased_events: string;
       dead_events: string;
+      retained_receipts: string;
       oldest_pending_age_seconds: string | null;
       active_devices: string;
       legacy_devices: string;
@@ -385,6 +451,8 @@ export class EventInboxRepository implements OnModuleDestroy {
          count(event.*) FILTER (WHERE event.dead_at IS NULL)::text AS pending_events,
          count(event.*) FILTER (WHERE event.dead_at IS NULL AND event.lease_expires_at > now())::text AS leased_events,
          count(event.*) FILTER (WHERE event.dead_at IS NOT NULL)::text AS dead_events,
+         (SELECT count(*)::text FROM event_inbox_receipts
+          WHERE expires_at > now()) AS retained_receipts,
          EXTRACT(EPOCH FROM now() - min(event.received_at) FILTER (WHERE event.dead_at IS NULL))::text
            AS oldest_pending_age_seconds,
          (SELECT count(*)::text FROM event_inbox_devices AS device
@@ -420,6 +488,7 @@ export class EventInboxRepository implements OnModuleDestroy {
       pendingEvents: Number(usage.pending_events),
       leasedEvents: Number(usage.leased_events),
       deadEvents: Number(usage.dead_events),
+      retainedReceipts: Number(usage.retained_receipts),
       oldestPendingAgeSeconds: usage.oldest_pending_age_seconds === null
         ? null : Math.max(0, Math.round(Number(usage.oldest_pending_age_seconds))),
       activeDevices: Number(usage.active_devices),
@@ -464,4 +533,8 @@ async function decrementUsage(
 
 async function rollback(client: PoolClient): Promise<void> {
   try { await client.query('ROLLBACK'); } catch {}
+}
+
+function payloadHash(rawBody: Buffer): Buffer {
+  return createHash('sha256').update(rawBody).digest();
 }

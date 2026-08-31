@@ -11,6 +11,11 @@ import { OpenWASafetyRepository } from './safety/openwa-safety.repository';
     OpenWASafetyRepository,
     OpenWASafetyGovernorService,
   ],
-  exports: [OpenWACompatibilityService, OpenWAClient, OpenWASafetyGovernorService],
+  exports: [
+    OpenWACompatibilityService,
+    OpenWAClient,
+    OpenWASafetyGovernorService,
+    OpenWASafetyRepository,
+  ],
 })
 export class OpenWAModule {}

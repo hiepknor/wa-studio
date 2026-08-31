@@ -22,6 +22,8 @@ import { ContactProjectionTick } from '../contacts/contact-projection.tick';
 import { SchedulerLeadershipService } from './scheduler-leadership.service';
 import { ContactMessageObservationTick } from '../contacts/contact-message-observation.tick';
 import { MessageStatusProjectionService } from '../messages/message-status-projection.service';
+import { EventInboxConnectorHealthTick } from '../webhooks/event-inbox-connector-health.tick';
+import { OpenWAConnectorCommandDispatcherService } from '../messages/openwa-connector-command-dispatcher.service';
 
 @Injectable()
 export class SchedulerRunnerService {
@@ -48,6 +50,8 @@ export class SchedulerRunnerService {
     private readonly leadership: SchedulerLeadershipService,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
     @Optional() private readonly messageStatusProjections?: MessageStatusProjectionService,
+    @Optional() private readonly connectorHealth?: EventInboxConnectorHealthTick,
+    @Optional() private readonly connectorCommands?: OpenWAConnectorCommandDispatcherService,
   ) {}
 
   async run(): Promise<void> {
@@ -118,6 +122,20 @@ export class SchedulerRunnerService {
         2 * 60_000,
         () => this.webhookRegistrations.run(),
       ),
+      ...(this.config.EVENT_INBOX_BASE_URL && this.connectorHealth ? [this.tick(
+        'event-inbox-connector-health',
+        this.config.EVENT_INBOX_CONNECTOR_POLL_INTERVAL_MS,
+        Math.min(30_000, this.config.EVENT_INBOX_CONNECTOR_STALE_AFTER_MS),
+        () => this.connectorHealth!.run(),
+      )] : []),
+      ...(this.config.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS && this.connectorCommands
+        ? [this.tick(
+          'openwa-connector-commands',
+          1_000,
+          Math.max(30_000, this.config.OPENWA_CONNECTOR_DISPATCH_LEASE_MS),
+          () => this.connectorCommands!.run(),
+        )]
+        : []),
       ...(this.messageStatusProjections ? [this.tick(
         'message-status-projections',
         5_000,

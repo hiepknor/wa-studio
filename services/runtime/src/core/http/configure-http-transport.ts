@@ -4,6 +4,8 @@ import type { NextFunction, Request, Response } from 'express';
 
 interface HttpTransportOptions {
   maximumJsonBodyBytes: number;
+  maximumRawBodyBytes?: number;
+  rawBodyTypes?: string[];
   requestTimeoutMs: number;
   headersTimeoutMs: number;
 }
@@ -27,6 +29,12 @@ export function configureHttpTransport(
     limit: options.maximumJsonBodyBytes,
     strict: true,
   });
+  if (options.maximumRawBodyBytes && options.rawBodyTypes?.length) {
+    app.useBodyParser('raw', {
+      limit: options.maximumRawBodyBytes,
+      type: options.rawBodyTypes,
+    });
+  }
 
   const server = app.getHttpServer() as Server;
   server.requestTimeout = options.requestTimeoutMs;

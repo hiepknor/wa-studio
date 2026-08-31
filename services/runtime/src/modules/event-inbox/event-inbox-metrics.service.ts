@@ -107,7 +107,9 @@ export class EventInboxMetricsService {
     this.maxStoredEvents.set(config.EVENT_INBOX_MAX_STORED_EVENTS);
     this.maxStoredBytes.set(config.EVENT_INBOX_MAX_STORED_BYTES);
     this.snapshotUp.set(0);
-    for (const state of ['dead', 'leased', 'pending', 'stored']) this.events.set({ state }, 0);
+    for (const state of ['dead', 'leased', 'pending', 'receipts', 'stored']) {
+      this.events.set({ state }, 0);
+    }
     for (const state of ['active', 'legacy']) this.devices.set({ state }, 0);
   }
 
@@ -131,6 +133,7 @@ export class EventInboxMetricsService {
       this.events.set({ state: 'pending' }, snapshot.pendingEvents);
       this.events.set({ state: 'leased' }, snapshot.leasedEvents);
       this.events.set({ state: 'dead' }, snapshot.deadEvents);
+      this.events.set({ state: 'receipts' }, snapshot.retainedReceipts);
       this.storedBytes.set(snapshot.storedBytes);
       this.oldestPendingAge.set(snapshot.oldestPendingAgeSeconds ?? 0);
       this.devices.set({ state: 'active' }, snapshot.activeDevices);

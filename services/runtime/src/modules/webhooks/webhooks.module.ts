@@ -11,6 +11,9 @@ import type { RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { WebhookRegistrationReconciliationTick } from './webhook-registration-reconciliation.tick';
 import { WebhookIngressService } from './webhook-ingress.service';
+import { EventInboxConnectorClient } from './event-inbox-connector.client';
+import { OpenWAConnectorHealthRepository } from './openwa-connector-health.repository';
+import { EventInboxConnectorHealthTick } from './event-inbox-connector-health.tick';
 
 @Module({
   imports: [GatewayModule, MessagesModule, ContactsModule, OpenWAModule],
@@ -19,17 +22,26 @@ import { WebhookIngressService } from './webhook-ingress.service';
     RuntimeEventRepository,
     WebhookProcessorService,
     WebhookIngressService,
+    EventInboxConnectorClient,
+    OpenWAConnectorHealthRepository,
+    EventInboxConnectorHealthTick,
     {
       provide: WebhookRegistrationReconciliationTick,
-      useFactory: (openwa: OpenWAClient, config: RuntimeConfig) => {
+      useFactory: (
+        openwa: OpenWAClient,
+        config: RuntimeConfig,
+        connector: EventInboxConnectorClient,
+        connectorHealth: OpenWAConnectorHealthRepository,
+      ) => {
         return new WebhookRegistrationReconciliationTick(openwa, {
           enabled: config.OPENWA_WEBHOOK_RECONCILIATION_ENABLED,
           callbackUrl: config.OPENWA_WEBHOOK_CALLBACK_URL ?? null,
           secret: config.OPENWA_WEBHOOK_SECRET,
           allowedSessionIds: config.OPENWA_ALLOWED_SESSION_IDS,
-        });
+        }, config.EVENT_INBOX_BASE_URL ? connector : undefined,
+        config.EVENT_INBOX_BASE_URL ? connectorHealth : undefined);
       },
-      inject: [OpenWAClient, RUNTIME_CONFIG],
+      inject: [OpenWAClient, RUNTIME_CONFIG, EventInboxConnectorClient, OpenWAConnectorHealthRepository],
     },
   ],
   exports: [
@@ -38,6 +50,8 @@ import { WebhookIngressService } from './webhook-ingress.service';
     WebhookProcessorService,
     WebhookIngressService,
     WebhookRegistrationReconciliationTick,
+    EventInboxConnectorHealthTick,
+    OpenWAConnectorHealthRepository,
   ],
 })
 export class WebhooksModule {}

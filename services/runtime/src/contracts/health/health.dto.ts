@@ -62,9 +62,61 @@ export class OpenWAComponentHealthDto {
   reason!: 'not_checked' | 'network_error' | 'http_error' | 'invalid_response' | 'release_mismatch' | null;
 }
 
+export class OpenWAConnectorSessionHealthDto {
+  @ApiProperty({ format: 'uuid' })
+  sessionId!: string;
+
+  @ApiProperty({
+    enum: [
+      'NOT_CONFIGURED', 'AWAITING_PLUGIN', 'RECOVERING', 'HEALTHY', 'STALE',
+      'BLOCKED', 'BINDING_MISMATCH', 'UNAVAILABLE',
+    ],
+  })
+  state!: 'NOT_CONFIGURED' | 'AWAITING_PLUGIN' | 'RECOVERING' | 'HEALTHY'
+    | 'STALE' | 'BLOCKED' | 'BINDING_MISMATCH' | 'UNAVAILABLE';
+
+  @ApiProperty({ type: String, nullable: true })
+  reason!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  pluginVersion!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' })
+  heartbeatObservedAt!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' })
+  leaseExpiresAt!: string | null;
+
+  @ApiProperty({ type: Number, nullable: true, minimum: 0 })
+  pendingCount!: number | null;
+
+  @ApiProperty({ type: Number, nullable: true, minimum: 0, maximum: 1 })
+  storageUtilization!: number | null;
+}
+
+export class OpenWAConnectorComponentHealthDto {
+  @ApiProperty({ enum: ['DISABLED', 'HEALTHY', 'DEGRADED'] })
+  status!: 'DISABLED' | 'HEALTHY' | 'DEGRADED';
+
+  @ApiProperty()
+  requiredForLiveSends!: boolean;
+
+  @ApiProperty({ minimum: 0 })
+  healthySessionCount!: number;
+
+  @ApiProperty({ minimum: 0 })
+  sessionCount!: number;
+
+  @ApiProperty({ type: [OpenWAConnectorSessionHealthDto] })
+  sessions!: OpenWAConnectorSessionHealthDto[];
+}
+
 export class RuntimeComponentHealthDto {
   @ApiProperty({ type: OpenWAComponentHealthDto })
   openwa!: OpenWAComponentHealthDto;
+
+  @ApiProperty({ type: OpenWAConnectorComponentHealthDto })
+  connector!: OpenWAConnectorComponentHealthDto;
 }
 
 export class HealthReadyDto {
@@ -124,8 +176,10 @@ export class HealthOperationalDto {
       'upstream_status_unknown',
       'upstream_unavailable',
       'upstream_incompatible',
+      'connector_unhealthy',
     ],
   })
   reason?: 'dependency_unavailable' | 'background_process_degraded'
-    | 'upstream_status_unknown' | 'upstream_unavailable' | 'upstream_incompatible';
+    | 'upstream_status_unknown' | 'upstream_unavailable' | 'upstream_incompatible'
+    | 'connector_unhealthy';
 }

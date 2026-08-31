@@ -29,6 +29,30 @@ export class OpenWASafetyService {
     return this.governor.sessionSnapshot(sessionId);
   }
 
+  quiescence(sessionId: string) {
+    this.assertVisible(sessionId);
+    return this.governor.sessionQuiescence(sessionId);
+  }
+
+  workspaceQuiescence() {
+    this.configuredSessionId();
+    return this.governor.workspaceQuiescence();
+  }
+
+  mutateWorkspaceControl(
+    idempotencyKey: string | undefined,
+    input: OpenWASafetyControlDto,
+  ) {
+    const sessionId = this.configuredSessionId();
+    const operationType = input.action === OpenWASafetyControlActionDto.BLOCK
+      ? 'OPENWA_WORKSPACE_BLOCK' as const
+      : 'OPENWA_WORKSPACE_RESUME' as const;
+    return this.mutateWorkspace(sessionId, idempotencyKey, operationType, {
+      action: input.action,
+      reason: input.reason?.trim() || undefined,
+    });
+  }
+
   mutateControl(sessionId: string, idempotencyKey: string | undefined, input: OpenWASafetyControlDto) {
     const operationType = input.action === OpenWASafetyControlActionDto.BLOCK
       ? 'OPENWA_SESSION_BLOCK' as const
@@ -75,6 +99,38 @@ export class OpenWASafetyService {
       if (error instanceof OpenWASafetyMutationConflictError) throw new ConflictException(error.message);
       throw error;
     }
+  }
+
+  private async mutateWorkspace(
+    sessionId: string,
+    idempotencyKey: string | undefined,
+    operationType: 'OPENWA_WORKSPACE_BLOCK' | 'OPENWA_WORKSPACE_RESUME',
+    intent: { action: OpenWASafetyControlActionDto; reason?: string },
+  ) {
+    if (!idempotencyKey || !isUUID(idempotencyKey)) {
+      throw new BadRequestException('Idempotency-Key must be a UUID');
+    }
+    const requestHash = createHash('sha256').update(JSON.stringify({
+      version: 1, operationType, scope: 'WORKSPACE', ...intent,
+    })).digest('hex');
+    try {
+      return await this.governor.mutateWorkspace({
+        sessionId,
+        operationType,
+        idempotencyKey,
+        requestHash,
+        reason: intent.reason,
+      });
+    } catch (error) {
+      if (error instanceof OpenWASafetyMutationConflictError) throw new ConflictException(error.message);
+      throw error;
+    }
+  }
+
+  private configuredSessionId(): string {
+    const sessionId = this.config.OPENWA_ALLOWED_SESSION_IDS[0];
+    if (!sessionId) throw new NotFoundException('Workspace safety state not found');
+    return sessionId;
   }
 
   private assertVisible(sessionId: string): void {

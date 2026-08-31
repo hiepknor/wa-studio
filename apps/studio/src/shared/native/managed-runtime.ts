@@ -8,6 +8,8 @@ export type ManagedRuntimePhase =
   | "migrating"
   | "runtimeStarting"
   | "reconfiguring"
+  | "rotatingCredentials"
+  | "resetting"
   | "restoring"
   | "updating"
   | "ready"
@@ -87,6 +89,7 @@ export interface ManagedRuntimeProvisioningProfile {
   openwaAllowedSessionIds: string[];
   allowLiveSends: boolean;
   eventInboxBaseUrl: string;
+  connectorPluginVersion?: string | null;
 }
 
 export interface ManagedRuntimeBackup {
@@ -140,6 +143,16 @@ export function provisionManagedRuntime(
 
 export function resetManagedRuntimeDatabase(): Promise<void> {
   return invoke("reset_managed_runtime_database");
+}
+
+export function resetManagedRuntimeConnection(): Promise<void> {
+  return invoke("reset_managed_runtime_connection");
+}
+
+export function rotateManagedRuntimeConnectorCredential(): Promise<ManagedRuntimeProvisioningProfile> {
+  return invoke<ManagedRuntimeProvisioningProfile>(
+    "rotate_managed_runtime_connector_credential",
+  );
 }
 
 export function getManagedRuntimeProvisioningProfile(): Promise<ManagedRuntimeProvisioningProfile | null> {

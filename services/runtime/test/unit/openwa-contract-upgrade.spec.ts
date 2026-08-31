@@ -196,4 +196,37 @@ describe(`OpenWA ${REVIEWED_OPENWA_RELEASE} contract review`, () => {
     delete eventItems.enum;
     expect(webhookResponse).toEqual(schema(previous, 'WebhookResponseDto'));
   });
+
+  it('pins the connector ingress and plugin management control surface', () => {
+    const ingress = operation(current, '/api/ingress/{pluginId}/{instanceId}/{path}', 'post');
+    expect(ingress.security).toEqual([]);
+    expect(responseMap(ingress)).toMatchObject({
+      '200': { description: expect.stringContaining('duplicate') },
+      '202': { description: expect.stringContaining('accepted and queued') },
+      '401': { description: expect.stringContaining('Signature verification failed') },
+      '413': { description: expect.stringContaining('maxBodyBytes') },
+      '429': { description: expect.stringContaining('Rate limit exceeded') },
+    });
+
+    const createInstance = operation(
+      current,
+      '/api/integration/plugins/{pluginId}/instances',
+      'post',
+    );
+    expect(responseMap(createInstance)['201']).toMatchObject({
+      description: expect.stringContaining('revealed once'),
+    });
+
+    for (const [path, method] of [
+      ['/api/plugins/install', 'post'],
+      ['/api/plugins/{id}/enable', 'post'],
+      ['/api/plugins/{id}/disable', 'post'],
+      ['/api/plugins/{id}/health', 'get'],
+      ['/api/plugins/{id}/update', 'post'],
+    ] as const) {
+      expect(operation(current, path, method)).toBeTruthy();
+    }
+    expect(operation(current, '/api/plugins/{id}/update', 'post').summary)
+      .toContain('preserves config + enabled state');
+  });
 });

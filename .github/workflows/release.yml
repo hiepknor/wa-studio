@@ -35,6 +35,7 @@ jobs:
           expected="v$(node -p "require('./apps/studio/package.json').version")"
           test "$GITHUB_REF_NAME" = "$expected"
       - run: npm run contract:check
+      - run: npm run check:connector
       - run: npm run check:runtime
       - run: npm run test:integration
       - run: npm -w @wa/studio run check:frontend
@@ -87,8 +88,37 @@ jobs:
           path: event-inbox-image.txt
           if-no-files-found: error
 
-  desktop:
+  connector-plugin:
     needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run check:connector
+      - name: Attest installable OpenWA connector
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: packages/openwa-connector-plugin/build/*.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wa-studio-connector-${{ github.ref_name }}
+          path: |
+            packages/openwa-connector-plugin/build/*.zip
+            packages/openwa-connector-plugin/build/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  desktop:
+    needs: [verify, connector-plugin]
     runs-on: macos-26
     timeout-minutes: 90
     environment: release
@@ -119,6 +149,19 @@ jobs:
           install -m 600 /dev/null "$APPLE_API_KEY_PATH"
           printf '%s' "$APPLE_API_PRIVATE_KEY" > "$APPLE_API_KEY_PATH"
       - run: npm ci
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: wa-studio-connector-${{ github.ref_name }}
+          path: dist/connector-plugin
+      - name: Pin connector package into the desktop release
+        run: |
+          connector_zip="$(find dist/connector-plugin -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$connector_zip" -a -f "${connector_zip}.sha256"
+          expected="$(awk '{print $1}' "${connector_zip}.sha256")"
+          actual="$(shasum -a 256 "$connector_zip" | awk '{print $1}')"
+          test "$actual" = "$expected"
+          asset="$(basename "$connector_zip")"
+          printf '%s\n' "WA_STUDIO_CONNECTOR_PLUGIN_URL=https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${asset}#sha256=${actual}" >> "$GITHUB_ENV"
       - run: npm -w @wa/studio run check:native
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -172,7 +215,7 @@ jobs:
           retention-days: 14
 
   publish:
-    needs: [event-inbox-image, desktop]
+    needs: [connector-plugin, event-inbox-image, desktop]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -194,12 +237,24 @@ jobs:
         with:
           name: event-inbox-image-${{ github.ref_name }}
           path: dist/release-metadata
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: wa-studio-connector-${{ github.ref_name }}
+          path: dist/connector-plugin
       - name: Verify release payload
         run: |
           npm run release:verify-updater -- --directory dist/updater-release --repository "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"
           image="$(tr -d '\r\n' < dist/release-metadata/event-inbox-image.txt)"
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           [[ "$image" =~ ^ghcr\.io/${owner}/wa-event-inbox@sha256:[0-9a-f]{64}$ ]]
+          connector_zip="$(find dist/connector-plugin -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          connector_checksum="${connector_zip}.sha256"
+          test -n "$connector_zip" -a -f "$connector_checksum"
+          (cd dist/connector-plugin && shasum -a 256 -c "$(basename "$connector_checksum")")
+          gh attestation verify "$connector_zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$GITHUB_SHA"
           for asset in dist/updater-release/*; do
             gh attestation verify "$asset" \
               --repo "$GITHUB_REPOSITORY" \
@@ -230,8 +285,8 @@ jobs:
           fi
       - name: Upload and verify draft assets
         run: |
-          gh release upload "$GITHUB_REF_NAME" dist/updater-release/* dist/release-metadata/event-inbox-image.txt --clobber
-          test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 8
+          gh release upload "$GITHUB_REF_NAME" dist/updater-release/* dist/release-metadata/event-inbox-image.txt dist/connector-plugin/* --clobber
+          test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 10
           mkdir -p dist/published-verification
           gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir dist/published-verification
           cmp dist/updater-release/latest.json dist/published-verification/latest.json

@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { openWAConnectorEvidenceSchema } from '../../contracts/openwa-connector';
 import { DatabaseService } from '../../core/database/database.service';
 import { MessageStatusProjectionService } from '../messages/message-status-projection.service';
 import { normalizeOpenWAWebhook } from './webhook-normalizer';
 import { RuntimeEventRepository } from './runtime-event.repository';
 import { WebhookRepository } from './webhook.repository';
 import { ContactMessageObserverService } from '../contacts/contact-message-observer.service';
+import { MessageDeliveryEvidenceService } from '../messages/message-delivery-evidence.service';
 
 @Injectable()
 export class WebhookProcessorService {
@@ -14,6 +16,7 @@ export class WebhookProcessorService {
     private readonly runtimeEvents: RuntimeEventRepository,
     private readonly messageStatuses: MessageStatusProjectionService,
     private readonly contacts: ContactMessageObserverService,
+    @Optional() private readonly connectorEvidence?: MessageDeliveryEvidenceService,
   ) {}
 
   async process(idempotencyKey: string): Promise<unknown> {
@@ -43,10 +46,9 @@ export class WebhookProcessorService {
             });
           }
         }
-        const projection = await this.messageStatuses.projectEventInTransaction(
-          client,
-          envelope.idempotencyKey,
-        );
+        const projection = runtimeEvent.eventType === 'connector.delivery.evidence'
+          ? await this.projectConnectorEvidence(client, runtimeEvent.payload)
+          : await this.messageStatuses.projectEventInTransaction(client, envelope.idempotencyKey);
         if (!await this.webhooks.markProcessedInTransaction(client, envelope.idempotencyKey, leaseToken)) {
           throw new Error(`Webhook processing lease changed while locked: ${envelope.idempotencyKey}`);
         }
@@ -67,5 +69,14 @@ export class WebhookProcessorService {
       );
       throw error;
     }
+  }
+
+  private projectConnectorEvidence(
+    client: Parameters<MessageDeliveryEvidenceService['projectInTransaction']>[0],
+    payload: Record<string, unknown>,
+  ) {
+    if (!this.connectorEvidence) throw new Error('Connector evidence projector is unavailable');
+    const evidence = openWAConnectorEvidenceSchema.parse(payload);
+    return this.connectorEvidence.projectInTransaction(client, evidence);
   }
 }

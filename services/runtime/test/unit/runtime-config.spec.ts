@@ -48,10 +48,62 @@ describe('runtime worker concurrency configuration', () => {
       OPENWA_COMPATIBILITY_PROBE_INTERVAL_MS: 60_000,
       EVENT_INBOX_REQUEST_TIMEOUT_MS: 30_000,
       EVENT_INBOX_RESPONSE_MAX_BYTES: 41_943_040,
+      EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS: false,
+      EVENT_INBOX_CONNECTOR_POLL_INTERVAL_MS: 5_000,
+      EVENT_INBOX_CONNECTOR_STALE_AFTER_MS: 20_000,
+      EVENT_INBOX_CONNECTOR_RECOVERY_HEARTBEATS: 3,
+      EVENT_INBOX_CONNECTOR_BLOCK_STORAGE_UTILIZATION: 0.75,
+      OPENWA_CONNECTOR_PLUGIN_ID: 'wa-studio-connector',
+      OPENWA_CONNECTOR_COMMAND_TTL_SECONDS: 300,
+      OPENWA_CONNECTOR_DISPATCH_BATCH_SIZE: 20,
+      OPENWA_CONNECTOR_DISPATCH_LEASE_MS: 30_000,
+      OPENWA_CONNECTOR_MAX_INGRESS_ATTEMPTS: 20,
+      OPENWA_CONNECTOR_EVIDENCE_TIMEOUT_SECONDS: 900,
       RUNTIME_HTTP_BODY_MAX_BYTES: 1_048_576,
       RUNTIME_HTTP_REQUEST_TIMEOUT_MS: 30_000,
       RUNTIME_HTTP_HEADERS_TIMEOUT_MS: 10_000,
     });
+  });
+
+  it('requires Event Inbox credentials before connector health can gate live sends', () => {
+    expect(() => parseRuntimeConfig({
+      ...validEnvironment(),
+      EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS: 'true',
+    })).toThrow('requires Event Inbox configuration');
+    expect(parseRuntimeConfig({
+      ...validEnvironment(),
+      EVENT_INBOX_BASE_URL: 'https://inbox.example.test',
+      EVENT_INBOX_DEVICE_TOKEN: 'device-token-with-at-least-32-characters',
+      OPENWA_CONNECTOR_INSTANCE_ID: 'wa-studio',
+      OPENWA_CONNECTOR_INGRESS_SECRET: 'connector-ingress-secret-with-at-least-32-characters',
+      OPENWA_WEBHOOK_RECONCILIATION_ENABLED: 'true',
+      OPENWA_WEBHOOK_CALLBACK_URL: 'https://inbox.example.test/api/v1/webhooks/openwa',
+      EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS: 'true',
+    }).EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS).toBe(true);
+  });
+
+  it('fails closed when production live sends bypass the connector path', () => {
+    expect(() => parseRuntimeConfig({
+      ...validEnvironment(),
+      NODE_ENV: 'production',
+      ALLOW_LIVE_SENDS: 'true',
+    })).toThrow('Production live sends require the OpenWA connector path');
+  });
+
+  it('requires a connector stale window covering at least two health polls', () => {
+    expect(() => parseRuntimeConfig({
+      ...validEnvironment(),
+      EVENT_INBOX_CONNECTOR_POLL_INTERVAL_MS: '10000',
+      EVENT_INBOX_CONNECTOR_STALE_AFTER_MS: '19999',
+    })).toThrow('must allow at least two poll intervals');
+  });
+
+  it('keeps the connector evidence deadline at least as long as the command lifetime', () => {
+    expect(() => parseRuntimeConfig({
+      ...validEnvironment(),
+      OPENWA_CONNECTOR_COMMAND_TTL_SECONDS: '301',
+      OPENWA_CONNECTOR_EVIDENCE_TIMEOUT_SECONDS: '300',
+    })).toThrow('cannot be shorter than the command lifetime');
   });
 
   it('requires an origin-only OpenWA endpoint and a deadline covering each attempt', () => {

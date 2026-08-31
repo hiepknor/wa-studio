@@ -1,5 +1,6 @@
 mod config;
 mod config_envelope;
+mod lifecycle;
 mod model;
 pub(crate) mod observability;
 mod postgres;
@@ -249,24 +250,321 @@ pub async fn reconfigure_managed_runtime(
     let state = app.state::<ManagedRuntimeState>();
     let _maintenance = state.begin_maintenance("Runtime reconfiguration")?;
     let phase = state.snapshot()?.phase;
-    if !matches!(
-        phase,
-        ManagedRuntimePhase::Ready | ManagedRuntimePhase::Degraded
-    ) {
-        return Err(
-            "Managed Runtime must be ready or degraded before reconfiguration.".to_string(),
-        );
+    if phase != ManagedRuntimePhase::Ready {
+        return Err("Managed Runtime must be ready before reconfiguration.".to_string());
     }
-    let profile = tauri::async_runtime::spawn_blocking(move || provisioning::reconfigure(input))
+    let transport = state.runtime_transport()?;
+    let settings = tauri::async_runtime::spawn_blocking(provisioning::load)
         .await
-        .map_err(|error| format!("Managed Runtime reconfiguration task failed: {error}"))??;
+        .map_err(|error| format!("Managed Runtime configuration task failed: {error}"))??
+        .ok_or_else(|| "Managed Runtime provisioning is unavailable.".to_string())?;
+    let lifecycle_input = input.clone();
+    let mut intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::prepare_reconfiguration(&lifecycle_input)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+    let drain_transport = transport.clone();
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::block_and_drain(
+            &drain_transport,
+            &settings,
+            &mut intent,
+            "MANAGED_RUNTIME_RECONFIGURATION",
+        )?;
+        Ok::<_, String>(intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime drain task failed: {error}"))??;
+
     if let Some(manifest) = state.snapshot()?.manifest {
         publish_snapshot(
             &app,
             ManagedRuntimeSnapshot::phase(ManagedRuntimePhase::Reconfiguring, manifest),
         );
     }
-    restart_managed_runtime(&app).await?;
+    if let Err(error) = stop_runtime_stack_for_restart(&app).await {
+        state.resume_for_restart();
+        initialize(&app);
+        return Err(error);
+    }
+    let mut stopped_intent = intent.clone();
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::advance(
+            &mut stopped_intent,
+            secret_store::ManagedRuntimeLifecyclePhase::RuntimeStopped,
+        )?;
+        Ok::<_, String>(stopped_intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+
+    let profile = if intent.phase < secret_store::ManagedRuntimeLifecyclePhase::RemoteMutated {
+        let configure_input = input.clone();
+        match tauri::async_runtime::spawn_blocking(move || {
+            provisioning::reconfigure(configure_input)
+        })
+        .await
+        .map_err(|error| format!("Managed Runtime reconfiguration task failed: {error}"))?
+        {
+            Ok(profile) => profile,
+            Err(error) => {
+                state.resume_for_restart();
+                initialize(&app);
+                return Err(error);
+            }
+        }
+    } else {
+        tauri::async_runtime::spawn_blocking(provisioning::profile)
+            .await
+            .map_err(|error| format!("Managed Runtime profile task failed: {error}"))??
+            .ok_or_else(|| "Managed Runtime provisioning profile is unavailable.".to_string())?
+    };
+    let mut mutated_intent = intent.clone();
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::advance(
+            &mut mutated_intent,
+            secret_store::ManagedRuntimeLifecyclePhase::RemoteMutated,
+        )?;
+        Ok::<_, String>(mutated_intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+
+    state.resume_for_restart();
+    initialize(&app);
+    let resumed_transport = wait_for_managed_runtime_ready(&app, Duration::from_secs(180)).await?;
+    let mut restarted_intent = intent.clone();
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::advance(
+            &mut restarted_intent,
+            secret_store::ManagedRuntimeLifecyclePhase::RuntimeRestarted,
+        )?;
+        Ok::<_, String>(restarted_intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+    let replacement_settings = tauri::async_runtime::spawn_blocking(provisioning::load)
+        .await
+        .map_err(|error| format!("Managed Runtime configuration task failed: {error}"))??
+        .ok_or_else(|| "Managed Runtime replacement settings are unavailable.".to_string())?;
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::verify_connector(&replacement_settings, &mut intent)?;
+        Ok::<_, String>(intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime connector verification task failed: {error}"))??;
+    tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::resume(&resumed_transport, &mut intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime resume task failed: {error}"))??;
+    Ok(profile)
+}
+
+#[tauri::command]
+pub async fn reset_managed_runtime_connection(app: AppHandle) -> Result<(), String> {
+    if DesktopRuntimeConfig::from_environment()?.is_some() {
+        return Err(
+            "Developer environment provisioning cannot be reset from WA Studio.".to_string(),
+        );
+    }
+    let state = app.state::<ManagedRuntimeState>();
+    let _maintenance = state.begin_maintenance("Runtime connection reset")?;
+    if state.snapshot()?.phase != ManagedRuntimePhase::Ready {
+        return Err("Managed Runtime must be ready before resetting its connection.".to_string());
+    }
+    let transport = state.runtime_transport()?;
+    let settings = tauri::async_runtime::spawn_blocking(provisioning::load)
+        .await
+        .map_err(|error| format!("Managed Runtime configuration task failed: {error}"))??
+        .ok_or_else(|| "Managed Runtime provisioning is unavailable.".to_string())?;
+    let mut intent = tauri::async_runtime::spawn_blocking(lifecycle::prepare_reset)
+        .await
+        .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+    let drain_transport = transport.clone();
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::block_and_drain(
+            &drain_transport,
+            &settings,
+            &mut intent,
+            "MANAGED_RUNTIME_CONNECTION_RESET",
+        )?;
+        Ok::<_, String>(intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime drain task failed: {error}"))??;
+
+    let snapshot = state.snapshot()?;
+    let manifest = snapshot
+        .manifest
+        .ok_or_else(|| "Managed Runtime release metadata is unavailable.".to_string())?;
+    publish_snapshot(
+        &app,
+        ManagedRuntimeSnapshot::phase(ManagedRuntimePhase::Resetting, manifest.clone()),
+    );
+    if let Err(error) = stop_runtime_stack_for_restart(&app).await {
+        state.resume_for_restart();
+        initialize(&app);
+        return Err(error);
+    }
+    let mut stopped_intent = intent.clone();
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::advance(
+            &mut stopped_intent,
+            secret_store::ManagedRuntimeLifecyclePhase::RuntimeStopped,
+        )?;
+        Ok::<_, String>(stopped_intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+
+    if let Err(error) = tauri::async_runtime::spawn_blocking(provisioning::deprovision)
+        .await
+        .map_err(|error| format!("Managed Runtime deprovisioning task failed: {error}"))?
+    {
+        state.resume_for_restart();
+        initialize(&app);
+        return Err(error);
+    }
+    let mut completed_intent = intent;
+    tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::advance(
+            &mut completed_intent,
+            secret_store::ManagedRuntimeLifecyclePhase::RemoteMutated,
+        )?;
+        lifecycle::complete_without_resume(&mut completed_intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+    publish_snapshot(
+        &app,
+        ManagedRuntimeSnapshot::provisioning_required(manifest),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn rotate_managed_runtime_connector_credential(
+    app: AppHandle,
+) -> Result<ManagedRuntimeProvisioningProfile, String> {
+    if DesktopRuntimeConfig::from_environment()?.is_some() {
+        return Err(
+            "Developer environment credentials cannot be rotated from WA Studio.".to_string(),
+        );
+    }
+    let state = app.state::<ManagedRuntimeState>();
+    let _maintenance = state.begin_maintenance("connector credential rotation")?;
+    if state.snapshot()?.phase != ManagedRuntimePhase::Ready {
+        return Err(
+            "Managed Runtime must be ready before rotating connector credentials.".to_string(),
+        );
+    }
+    let transport = state.runtime_transport()?;
+    let settings = tauri::async_runtime::spawn_blocking(provisioning::load)
+        .await
+        .map_err(|error| format!("Managed Runtime configuration task failed: {error}"))??
+        .ok_or_else(|| "Managed Runtime provisioning is unavailable.".to_string())?;
+    let lifecycle_settings = settings.clone();
+    let mut intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::prepare_connector_rotation(&lifecycle_settings)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+    let drain_transport = transport.clone();
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::block_and_drain(
+            &drain_transport,
+            &settings,
+            &mut intent,
+            "MANAGED_RUNTIME_CONNECTOR_CREDENTIAL_ROTATION",
+        )?;
+        Ok::<_, String>(intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime drain task failed: {error}"))??;
+
+    let snapshot = state.snapshot()?;
+    let manifest = snapshot
+        .manifest
+        .ok_or_else(|| "Managed Runtime release metadata is unavailable.".to_string())?;
+    publish_snapshot(
+        &app,
+        ManagedRuntimeSnapshot::phase(ManagedRuntimePhase::RotatingCredentials, manifest),
+    );
+    if let Err(error) = stop_runtime_stack_for_restart(&app).await {
+        state.resume_for_restart();
+        initialize(&app);
+        return Err(error);
+    }
+    let mut stopped_intent = intent.clone();
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::advance(
+            &mut stopped_intent,
+            secret_store::ManagedRuntimeLifecyclePhase::RuntimeStopped,
+        )?;
+        Ok::<_, String>(stopped_intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+
+    let profile = if intent.phase < secret_store::ManagedRuntimeLifecyclePhase::RemoteMutated {
+        match tauri::async_runtime::spawn_blocking(provisioning::rotate_connector_credential)
+            .await
+            .map_err(|error| format!("Managed Runtime credential rotation task failed: {error}"))?
+        {
+            Ok(profile) => profile,
+            Err(error) => {
+                state.resume_for_restart();
+                initialize(&app);
+                return Err(error);
+            }
+        }
+    } else {
+        tauri::async_runtime::spawn_blocking(provisioning::profile)
+            .await
+            .map_err(|error| format!("Managed Runtime profile task failed: {error}"))??
+            .ok_or_else(|| "Managed Runtime provisioning profile is unavailable.".to_string())?
+    };
+    let mut mutated_intent = intent.clone();
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::advance(
+            &mut mutated_intent,
+            secret_store::ManagedRuntimeLifecyclePhase::RemoteMutated,
+        )?;
+        Ok::<_, String>(mutated_intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+
+    state.resume_for_restart();
+    initialize(&app);
+    let resumed_transport = wait_for_managed_runtime_ready(&app, Duration::from_secs(180)).await?;
+    let mut restarted_intent = intent.clone();
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::advance(
+            &mut restarted_intent,
+            secret_store::ManagedRuntimeLifecyclePhase::RuntimeRestarted,
+        )?;
+        Ok::<_, String>(restarted_intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime lifecycle task failed: {error}"))??;
+    let replacement_settings = tauri::async_runtime::spawn_blocking(provisioning::load)
+        .await
+        .map_err(|error| format!("Managed Runtime configuration task failed: {error}"))??
+        .ok_or_else(|| "Managed Runtime rotated settings are unavailable.".to_string())?;
+    intent = tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::verify_connector(&replacement_settings, &mut intent)?;
+        Ok::<_, String>(intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime connector verification task failed: {error}"))??;
+    tauri::async_runtime::spawn_blocking(move || {
+        lifecycle::resume(&resumed_transport, &mut intent)
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime resume task failed: {error}"))??;
     Ok(profile)
 }
 
@@ -928,6 +1226,42 @@ async fn restart_managed_runtime(app: &AppHandle) -> Result<(), String> {
     result
 }
 
+async fn wait_for_managed_runtime_ready(
+    app: &AppHandle,
+    timeout: Duration,
+) -> Result<state::RuntimeTransportCredentials, String> {
+    let wait_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let state = wait_app.state::<ManagedRuntimeState>();
+            let snapshot = state.snapshot()?;
+            match snapshot.phase {
+                ManagedRuntimePhase::Ready => return state.runtime_transport(),
+                ManagedRuntimePhase::Degraded => {
+                    return Err(snapshot.error.unwrap_or_else(|| {
+                        "Managed Runtime became degraded during restart.".to_string()
+                    }));
+                }
+                ManagedRuntimePhase::ProvisioningRequired => {
+                    return Err(
+                        "Managed Runtime lost its provisioning state during restart.".to_string(),
+                    );
+                }
+                _ if Instant::now() >= deadline => {
+                    return Err(format!(
+                        "Managed Runtime did not become ready before the restart deadline (last phase: {:?}).",
+                        snapshot.phase,
+                    ));
+                }
+                _ => thread::sleep(Duration::from_millis(250)),
+            }
+        }
+    })
+    .await
+    .map_err(|error| format!("Managed Runtime readiness task failed: {error}"))?
+}
+
 async fn stop_runtime_stack_for_restart(app: &AppHandle) -> Result<(), String> {
     let restart_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -942,6 +1276,9 @@ async fn stop_runtime_stack_for_restart(app: &AppHandle) -> Result<(), String> {
 
 async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
     let manifest = inspect_sidecar(app).await?;
+    tauri::async_runtime::spawn_blocking(lifecycle::recover_completed_reset)
+        .await
+        .map_err(|error| format!("Managed Runtime lifecycle recovery task failed: {error}"))??;
     let Some(config) = tauri::async_runtime::spawn_blocking(DesktopRuntimeConfig::load)
         .await
         .map_err(|error| format!("Managed Runtime configuration task failed: {error}"))??
@@ -1677,6 +2014,8 @@ async fn handle_runtime_termination(
                 ManagedRuntimePhase::Stopping
                     | ManagedRuntimePhase::Restoring
                     | ManagedRuntimePhase::Reconfiguring
+                    | ManagedRuntimePhase::RotatingCredentials
+                    | ManagedRuntimePhase::Resetting
                     | ManagedRuntimePhase::Updating
                     | ManagedRuntimePhase::Degraded
             )

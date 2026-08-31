@@ -34,14 +34,29 @@ describe('WebhookRegistrationReconciliationTick', () => {
 
   it('delegates one bounded desired-state reconciliation per session', async () => {
     const openwa = client();
-    openwa.reconcileWebhookRegistration.mockResolvedValue({ created: 1, updated: 0, deleted: 0 });
+    openwa.reconcileWebhookRegistration.mockResolvedValue({
+      created: 1, updated: 0, deleted: 0, webhookId: 'webhook-one',
+    });
+    const connectorId = '00000000-0000-4000-8000-000000000002';
+    const connector = {
+      status: vi.fn().mockResolvedValue({
+        sessions: [{ sessionId: 'session-one', connector: { connectorId } }],
+      }),
+      setBinding: vi.fn().mockResolvedValue({ connectorId, webhookId: 'webhook-one', generation: 1 }),
+    };
+    const connectorHealth = {
+      stageBinding: vi.fn().mockResolvedValue({
+        sessionId: 'session-one', connectorId, webhookId: 'webhook-one', generation: 1,
+      }),
+      markBindingSynced: vi.fn().mockResolvedValue(undefined),
+    };
 
     await new WebhookRegistrationReconciliationTick(openwa as unknown as OpenWAClient, {
       enabled: true,
       callbackUrl,
       secret,
       allowedSessionIds: ['session-one'],
-    }).run();
+    }, connector as never, connectorHealth as never).run();
 
     expect(openwa.reconcileWebhookRegistration).toHaveBeenCalledWith({
       sessionId: 'session-one',
@@ -50,13 +65,20 @@ describe('WebhookRegistrationReconciliationTick', () => {
       secret,
       retryCount: 3,
     });
+    expect(connectorHealth.stageBinding).toHaveBeenCalledWith(
+      'session-one', connectorId, 'webhook-one',
+    );
+    expect(connector.setBinding).toHaveBeenCalledWith({
+      sessionId: 'session-one', connectorId, webhookId: 'webhook-one', generation: 1,
+    });
+    expect(connectorHealth.markBindingSynced).toHaveBeenCalledTimes(1);
   });
 
   it('isolates a session failure, converges the next session and logs only aggregate data', async () => {
     const openwa = client();
     openwa.reconcileWebhookRegistration
       .mockRejectedValueOnce(new Error('failure containing sensitive-session-one'))
-      .mockResolvedValueOnce({ created: 1, updated: 0, deleted: 0 });
+      .mockResolvedValueOnce({ created: 1, updated: 0, deleted: 0, webhookId: 'webhook-two' });
     const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
     const tick = new WebhookRegistrationReconciliationTick(openwa as unknown as OpenWAClient, {

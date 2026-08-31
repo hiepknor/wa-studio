@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
@@ -24,7 +25,13 @@ import type {
   OpenWAMessagePermit,
   OpenWAOperationOutcome,
 } from '../../integrations/openwa/safety/openwa-safety.types';
+import {
+  EventInboxMediaClient,
+  EventInboxMediaHttpError,
+} from '../../core/event-inbox/event-inbox-media.client';
+import { encodeOpenWAConnectorCommand } from './openwa-connector-command';
 import type { MessageJob } from './message-job.types';
+import { OpenWAConnectorCommandDispatcherService } from './openwa-connector-command-dispatcher.service';
 
 const isDefinitiveUpstreamRejection = (error: unknown): boolean =>
   error instanceof OpenWAHttpError
@@ -52,6 +59,8 @@ export class MessageJobProcessorService {
     @Optional() private readonly statusProjections?: MessageStatusProjectionService,
     @Optional() private readonly openwaCompatibility?: OpenWACompatibilityService,
     @Optional() private readonly safety?: OpenWASafetyGovernorService,
+    @Optional() private readonly eventInboxMedia?: EventInboxMediaClient,
+    @Optional() private readonly connectorCommands?: OpenWAConnectorCommandDispatcherService,
   ) {}
 
   async process(payload: MessageSendQueuePayload): Promise<unknown> {
@@ -174,6 +183,9 @@ export class MessageJobProcessorService {
         return { safetyDeferred: true, notBefore, reason: decision.reason };
       }
       onState({ permit: decision.permit });
+      if (this.config.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS) {
+        return this.processWithConnector(job, decision.permit, onState);
+      }
       const imageRequest = job.payload.type === CampaignContentType.TEXT
         ? null
         : await this.prepareImageRequest(job, job.payload);
@@ -205,6 +217,121 @@ export class MessageJobProcessorService {
         }
       },
     });
+  }
+
+  private async processWithConnector(
+    job: MessageJob,
+    permit: OpenWAMessagePermit,
+    onState: (state: {
+      permit?: OpenWAMessagePermit;
+      committed?: CommittedOpenWAMessagePermit;
+    }) => void,
+  ): Promise<unknown> {
+    if (!this.eventInboxMedia || !this.connectorCommands) {
+      throw new Error('Live send blocked: OpenWA connector command path is unavailable');
+    }
+    let bindingGeneration: number;
+    try {
+      bindingGeneration = await this.safety!.requireHealthyConnectorBindingGeneration(job.sessionId);
+    } catch {
+      await this.safety!.release(permit);
+      const notBefore = new Date(Date.now() + this.config.EVENT_INBOX_CONNECTOR_POLL_INTERVAL_MS);
+      await this.messages.deferProcessing(
+        job.id,
+        'OpenWA connector binding is not healthy',
+        notBefore,
+      );
+      return { connectorDeferred: true, notBefore, reason: 'CONNECTOR_UNHEALTHY' };
+    }
+    const attemptId = randomUUID();
+    const commandId = randomUUID();
+    const createdAt = new Date();
+    const expiresAt = new Date(
+      createdAt.valueOf() + this.config.OPENWA_CONNECTOR_COMMAND_TTL_SECONDS * 1_000,
+    );
+    let content: Record<string, unknown>;
+    if (job.payload.type === CampaignContentType.TEXT) {
+      content = { type: 'TEXT', text: job.payload.text };
+    } else {
+      const asset = await this.resolveMedia(job.sessionId, job.payload);
+      const mimeType = connectorImageMimeType(asset.mimeType);
+      let lease;
+      try {
+        lease = await this.eventInboxMedia.put({
+          attemptId,
+          sessionId: job.sessionId,
+          filename: asset.filename,
+          mimeType,
+          sha256: asset.sha256,
+          expiresAt,
+          content: asset.content,
+        });
+      } catch (error) {
+        if (!isRetryableMediaRelayFailure(error)) throw error;
+        await this.safety!.release(permit);
+        const notBefore = new Date(Date.now() + mediaRelayRetryDelayMs(error));
+        await this.messages.deferProcessing(
+          job.id,
+          'Event Inbox media relay is temporarily unavailable',
+          notBefore,
+        );
+        return { connectorDeferred: true, notBefore, reason: 'MEDIA_RELAY_UNAVAILABLE' };
+      }
+      content = {
+        type: 'IMAGE',
+        filename: asset.filename,
+        mimeType,
+        byteSize: asset.byteSize,
+        sha256: asset.sha256,
+        mediaUrl: lease.mediaUrl,
+        caption: job.payload.caption ?? '',
+      };
+    }
+    const encoded = encodeOpenWAConnectorCommand({
+      protocolVersion: 1,
+      commandId,
+      attemptId,
+      sessionId: job.sessionId,
+      recipientId: job.recipientId,
+      safetyPermitId: permit.permitToken,
+      bindingGeneration,
+      createdAt: createdAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      operation: job.payload.type === CampaignContentType.TEXT ? 'SEND_TEXT' : 'SEND_IMAGE',
+      content,
+    });
+    const committed = await this.safety!.commitMessageStart(permit, {
+      attemptId,
+      commandId,
+      bindingGeneration,
+      payloadSha256: encoded.sha256,
+      commandBody: encoded.body,
+      expiresAt,
+    });
+    if (!committed) {
+      await this.safety!.release(permit);
+      const notBefore = new Date(Date.now() + 60_000);
+      await this.messages.deferProcessing(
+        job.id,
+        'Final send fence rejected current connector, session, recipient, campaign, or cancellation state',
+        notBefore,
+      );
+      return { safetyDeferred: true, notBefore, reason: 'FINAL_SEND_FENCE_REJECTED' };
+    }
+    onState({ permit, committed });
+    let dispatched = false;
+    try {
+      dispatched = await this.connectorCommands.dispatchAttempt(attemptId);
+    } catch (error) {
+      this.logger.error({
+        event: 'openwa_connector.command.fast_dispatch_failed',
+        messageJobId: job.id,
+        attemptId,
+        commandId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return { queued: true, attemptId, commandId, dispatched };
   }
 
   private async prepareImageRequest(
@@ -277,4 +404,23 @@ export class MessageJobProcessorService {
       }
     });
   }
+}
+
+type ConnectorImageMimeType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+function connectorImageMimeType(value: string): ConnectorImageMimeType {
+  if (value === 'image/jpeg' || value === 'image/png' || value === 'image/webp') return value;
+  throw new Error(`Campaign image MIME type is not supported by the connector: ${value}`);
+}
+
+function isRetryableMediaRelayFailure(error: unknown): boolean {
+  if (error instanceof EventInboxMediaHttpError) {
+    return error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500;
+  }
+  return error instanceof TypeError
+    || (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name));
+}
+
+function mediaRelayRetryDelayMs(error: unknown): number {
+  return error instanceof EventInboxMediaHttpError && error.status === 429 ? 30_000 : 5_000;
 }

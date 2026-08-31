@@ -17,12 +17,18 @@ describe('HTTP transport policy', () => {
 
     configureHttpTransport(app, {
       maximumJsonBodyBytes: 1_048_576,
+      maximumRawBodyBytes: 8_388_608,
+      rawBodyTypes: ['image/jpeg', 'image/png', 'image/webp'],
       requestTimeoutMs: 30_000,
       headersTimeoutMs: 10_000,
     });
 
     expect(disable).toHaveBeenCalledWith('x-powered-by');
     expect(useBodyParser).toHaveBeenCalledWith('json', { limit: 1_048_576, strict: true });
+    expect(useBodyParser).toHaveBeenCalledWith('raw', {
+      limit: 8_388_608,
+      type: ['image/jpeg', 'image/png', 'image/webp'],
+    });
     expect(server).toMatchObject({
       requestTimeout: 30_000,
       headersTimeout: 10_000,

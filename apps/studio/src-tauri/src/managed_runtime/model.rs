@@ -38,6 +38,8 @@ pub enum ManagedRuntimePhase {
     Migrating,
     RuntimeStarting,
     Reconfiguring,
+    RotatingCredentials,
+    Resetting,
     Restoring,
     Updating,
     Ready,
@@ -218,6 +220,8 @@ fn availability_for_phase(phase: ManagedRuntimePhase) -> ManagedRuntimeAvailabil
         ManagedRuntimePhase::ProvisioningRequired => ManagedRuntimeAvailability::NeedsSetup,
         ManagedRuntimePhase::Ready => ManagedRuntimeAvailability::Online,
         ManagedRuntimePhase::Reconfiguring
+        | ManagedRuntimePhase::RotatingCredentials
+        | ManagedRuntimePhase::Resetting
         | ManagedRuntimePhase::Restoring
         | ManagedRuntimePhase::Updating => ManagedRuntimeAvailability::Busy,
         ManagedRuntimePhase::Degraded => ManagedRuntimeAvailability::Degraded,

@@ -16,6 +16,13 @@ import {
   EventInboxMetricsTokenGuard,
 } from './event-inbox-metrics.controller';
 import { EventInboxMetricsService } from './event-inbox-metrics.service';
+import { EventInboxConnectorController } from './event-inbox-connector.controller';
+import { EventInboxConnectorRepository } from './event-inbox-connector.repository';
+import {
+  EventInboxMediaDownloadController,
+  EventInboxMediaUploadController,
+} from './event-inbox-media.controller';
+import { EventInboxMediaRepository } from './event-inbox-media.repository';
 
 @Module({
   imports: [EventInboxConfigModule],
@@ -24,6 +31,9 @@ import { EventInboxMetricsService } from './event-inbox-metrics.service';
     EventInboxController,
     EventInboxHealthController,
     EventInboxMetricsController,
+    EventInboxConnectorController,
+    EventInboxMediaUploadController,
+    EventInboxMediaDownloadController,
   ],
   providers: [
     EventInboxRepository,
@@ -34,6 +44,8 @@ import { EventInboxMetricsService } from './event-inbox-metrics.service';
     EventInboxMaintenanceService,
     EventInboxTokenService,
     EventInboxOpenWAClient,
+    EventInboxConnectorRepository,
+    EventInboxMediaRepository,
   ],
 })
 export class EventInboxModule {}

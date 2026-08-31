@@ -24,6 +24,8 @@ function validateComponents() {
   const tauri = readJson("apps/studio/src-tauri/tauri.conf.json");
   const runtimePackage = readJson("services/runtime/package.json");
   const contractPackage = readJson("packages/runtime-contract/package.json");
+  const connectorPackage = readJson("packages/openwa-connector-plugin/package.json");
+  const connectorManifest = readJson("packages/openwa-connector-plugin/manifest.json");
   const cargo = readFileSync(resolve(workspaceRoot, "apps/studio/src-tauri/Cargo.toml"), "utf8");
   const runtimeRelease = readFileSync(
     resolve(workspaceRoot, "services/runtime/src/core/release/runtime-release.ts"),
@@ -38,6 +40,7 @@ function validateComponents() {
   assert.equal(studioPackage.name, "@wa/studio");
   assert.equal(runtimePackage.name, "@wa/runtime");
   assert.equal(contractPackage.name, "@wa/runtime-contract");
+  assert.equal(connectorPackage.name, "@wa/openwa-connector-plugin");
   assert.equal(tauri.productName, "WA Studio");
   assert.equal(tauri.identifier, "dev.hiepknor.wastudio");
   assert(tauri.bundle.externalBin.includes("binaries/wa-runtime"));
@@ -56,6 +59,13 @@ function validateComponents() {
     captured(cargo, /^version = "([^"]+)"/mu, "Cargo package version"),
   );
   assert.equal(components.runtimeVersion, runtimePackage.version);
+  assert.equal(components.connectorPluginVersion, connectorPackage.version);
+  assert.equal(components.connectorPluginVersion, connectorManifest.version);
+  assert.equal(components.connectorProtocolVersion, connectorManifest.waStudioProtocolVersion);
+  assert.equal(components.connectorJournalSchemaVersion, connectorManifest.waStudioJournalSchemaVersion);
+  assert.equal(connectorManifest.id, "wa-studio-connector");
+  assert.equal(connectorManifest.minOpenWAVersion, components.openwaReleaseTag);
+  assert.equal(connectorManifest.testedOpenWAVersion, components.openwaReleaseTag);
   assert.equal(
     components.runtimeVersion,
     captured(runtimeRelease, /RUNTIME_VERSION = '([^']+)'/u, "Runtime release version"),

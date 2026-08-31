@@ -26,6 +26,14 @@ struct DesktopEventInboxConfig {
 }
 
 #[derive(Clone, Debug)]
+struct DesktopOpenWaConnectorConfig {
+    _connector_id: String,
+    _plugin_version: String,
+    instance_id: String,
+    ingress_secret: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct DesktopRuntimeConfig {
     pub port: u16,
     pub api_key: String,
@@ -39,6 +47,7 @@ pub struct DesktopRuntimeConfig {
     openwa_compatibility_probe_interval_ms: Option<u64>,
     allow_live_sends: bool,
     event_inbox: DesktopEventInboxConfig,
+    connector: Option<DesktopOpenWaConnectorConfig>,
 }
 
 impl DesktopRuntimeConfig {
@@ -49,6 +58,14 @@ impl DesktopRuntimeConfig {
         let Some(settings) = provisioning::load()? else {
             return Ok(None);
         };
+        let connector = settings
+            .connector
+            .map(|connector| DesktopOpenWaConnectorConfig {
+                _connector_id: connector.connector_id,
+                _plugin_version: connector.plugin_version,
+                instance_id: connector.instance_id,
+                ingress_secret: connector.ingress_secret,
+            });
         Ok(Some(Self {
             port: 34_100,
             api_key: settings.runtime_api_key,
@@ -71,6 +88,7 @@ impl DesktopRuntimeConfig {
                 device_token: settings.event_inbox.device_token,
                 callback_url: settings.event_inbox.callback_url,
             },
+            connector,
         }))
     }
 
@@ -200,6 +218,44 @@ impl DesktopRuntimeConfig {
                     .to_string(),
             );
         }
+        let connector_values = [
+            optional_environment("WA_DESKTOP_OPENWA_CONNECTOR_ID")?,
+            optional_environment("WA_DESKTOP_OPENWA_CONNECTOR_PLUGIN_VERSION")?,
+            optional_environment("WA_DESKTOP_OPENWA_CONNECTOR_INSTANCE_ID")?,
+            optional_environment("WA_DESKTOP_OPENWA_CONNECTOR_INGRESS_SECRET")?,
+        ];
+        let connector = match connector_values {
+            [None, None, None, None] => None,
+            [Some(connector_id), Some(plugin_version), Some(instance_id), Some(ingress_secret)] => {
+                if uuid::Uuid::parse_str(&connector_id).is_err()
+                    || plugin_version.is_empty()
+                    || instance_id.is_empty()
+                    || ingress_secret.len() < 32
+                {
+                    return Err(
+                        "Managed Runtime developer connector provisioning is invalid.".to_string(),
+                    );
+                }
+                Some(DesktopOpenWaConnectorConfig {
+                    _connector_id: connector_id,
+                    _plugin_version: plugin_version,
+                    instance_id,
+                    ingress_secret,
+                })
+            }
+            _ => {
+                return Err(
+                    "Managed Runtime developer connector provisioning is incomplete.".to_string(),
+                )
+            }
+        };
+        let allow_live_sends =
+            std::env::var("WA_DESKTOP_ALLOW_LIVE_SENDS").ok().as_deref() == Some("true");
+        if node_environment == "production" && allow_live_sends && connector.is_none() {
+            return Err(
+                "Production live sends require a fully provisioned OpenWA connector.".to_string(),
+            );
+        }
 
         Ok(Some(Self {
             port,
@@ -212,13 +268,13 @@ impl DesktopRuntimeConfig {
             openwa_allowed_session_ids: value(&values, "WA_DESKTOP_OPENWA_ALLOWED_SESSION_IDS")?,
             openwa_compatibility_freshness_ms,
             openwa_compatibility_probe_interval_ms,
-            allow_live_sends: std::env::var("WA_DESKTOP_ALLOW_LIVE_SENDS").ok().as_deref()
-                == Some("true"),
+            allow_live_sends,
             event_inbox: DesktopEventInboxConfig {
                 base_url: value(&values, "WA_DESKTOP_EVENT_INBOX_BASE_URL")?,
                 device_token: event_inbox_device_token,
                 callback_url: value(&values, "WA_DESKTOP_EVENT_INBOX_CALLBACK_URL")?,
             },
+            connector,
         }))
     }
 
@@ -286,7 +342,23 @@ impl DesktopRuntimeConfig {
                 "OPENWA_WEBHOOK_CALLBACK_URL".to_string(),
                 self.event_inbox.callback_url.clone(),
             ),
+            (
+                "EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS".to_string(),
+                self.connector.is_some().to_string(),
+            ),
         ];
+        if let Some(connector) = self.connector.as_ref() {
+            environment.extend([
+                (
+                    "OPENWA_CONNECTOR_INSTANCE_ID".to_string(),
+                    connector.instance_id.clone(),
+                ),
+                (
+                    "OPENWA_CONNECTOR_INGRESS_SECRET".to_string(),
+                    connector.ingress_secret.clone(),
+                ),
+            ]);
+        }
         if let Some(freshness_ms) = self.openwa_compatibility_freshness_ms {
             environment.push((
                 "OPENWA_COMPATIBILITY_FRESHNESS_MS".to_string(),
@@ -347,7 +419,10 @@ fn optional_environment(name: &str) -> Result<Option<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DesktopDatabaseConfig, DesktopEventInboxConfig, DesktopRuntimeConfig};
+    use super::{
+        DesktopDatabaseConfig, DesktopEventInboxConfig, DesktopOpenWaConnectorConfig,
+        DesktopRuntimeConfig,
+    };
 
     fn config(allow_live_sends: bool) -> DesktopRuntimeConfig {
         DesktopRuntimeConfig {
@@ -372,6 +447,12 @@ mod tests {
                 device_token: "device-token-with-at-least-thirty-two-characters".to_string(),
                 callback_url: "https://events.example.test/api/v1/webhooks/openwa".to_string(),
             },
+            connector: Some(DesktopOpenWaConnectorConfig {
+                _connector_id: "00000000-0000-4000-8000-000000000002".to_string(),
+                _plugin_version: "0.1.0".to_string(),
+                instance_id: "wa-studio-connector-1".to_string(),
+                ingress_secret: "connector-ingress-secret-with-at-least-32-characters".to_string(),
+            }),
         }
     }
 
@@ -411,6 +492,18 @@ mod tests {
         assert!(environment.contains(&(
             "OPENWA_WEBHOOK_CALLBACK_URL".to_string(),
             "https://events.example.test/api/v1/webhooks/openwa".to_string()
+        )));
+        assert!(environment.contains(&(
+            "EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS".to_string(),
+            "true".to_string()
+        )));
+        assert!(environment.contains(&(
+            "OPENWA_CONNECTOR_INSTANCE_ID".to_string(),
+            "wa-studio-connector-1".to_string()
+        )));
+        assert!(environment.contains(&(
+            "OPENWA_CONNECTOR_INGRESS_SECRET".to_string(),
+            "connector-ingress-secret-with-at-least-32-characters".to_string()
         )));
         assert!(!environment.iter().any(|(name, _)| name == "REDIS_URL"));
         assert!(!environment

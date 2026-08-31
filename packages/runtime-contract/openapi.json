@@ -1,6 +1,80 @@
 {
   "openapi": "3.0.0",
   "paths": {
+    "/api/v1/openwa-safety/workspace/quiescence": {
+      "get": {
+        "operationId": "OpenWASafetyController_workspaceQuiescence",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenWASafetyQuiescenceDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Check whether the managed workspace has drained all in-flight OpenWA work",
+        "tags": [
+          "openwa-safety"
+        ]
+      }
+    },
+    "/api/v1/openwa-safety/workspace/control": {
+      "post": {
+        "operationId": "OpenWASafetyController_workspaceControl",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenWASafetyControlDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenWASafetyScopeDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Block or resume every OpenWA operation in the managed workspace",
+        "tags": [
+          "openwa-safety"
+        ]
+      }
+    },
     "/api/v1/openwa-safety/sessions/{sessionId}": {
       "get": {
         "operationId": "OpenWASafetyController_snapshot",
@@ -32,6 +106,42 @@
           }
         ],
         "summary": "Read the durable OpenWA safety state for one session",
+        "tags": [
+          "openwa-safety"
+        ]
+      }
+    },
+    "/api/v1/openwa-safety/sessions/{sessionId}/quiescence": {
+      "get": {
+        "operationId": "OpenWASafetyController_quiescence",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenWASafetyQuiescenceDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Check whether one session has drained all in-flight OpenWA work",
         "tags": [
           "openwa-safety"
         ]
@@ -4371,6 +4481,54 @@
       }
     },
     "schemas": {
+      "OpenWASafetyQuiescenceDto": {
+        "type": "object",
+        "properties": {
+          "drained": {
+            "type": "boolean"
+          },
+          "processingMessageJobs": {
+            "type": "number"
+          },
+          "unsettledConnectorCommands": {
+            "type": "number"
+          },
+          "activeSafetyLeases": {
+            "type": "number"
+          },
+          "checkedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "drained",
+          "processingMessageJobs",
+          "unsettledConnectorCommands",
+          "activeSafetyLeases",
+          "checkedAt"
+        ]
+      },
+      "OpenWASafetyControlDto": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "BLOCK",
+              "RESUME"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
       "OpenWASafetyScopeDto": {
         "type": "object",
         "properties": {
@@ -4467,26 +4625,6 @@
           "lastSuccessAt",
           "lastFailureAt",
           "updatedAt"
-        ]
-      },
-      "OpenWASafetyControlDto": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": [
-              "BLOCK",
-              "RESUME"
-            ]
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          }
-        },
-        "required": [
-          "action"
         ]
       },
       "OpenWASafetyProfileChangeDto": {
@@ -7006,15 +7144,117 @@
           "reason"
         ]
       },
+      "OpenWAConnectorSessionHealthDto": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "NOT_CONFIGURED",
+              "AWAITING_PLUGIN",
+              "RECOVERING",
+              "HEALTHY",
+              "STALE",
+              "BLOCKED",
+              "BINDING_MISMATCH",
+              "UNAVAILABLE"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "pluginVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "heartbeatObservedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "leaseExpiresAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "pendingCount": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 0
+          },
+          "storageUtilization": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "sessionId",
+          "state",
+          "reason",
+          "pluginVersion",
+          "heartbeatObservedAt",
+          "leaseExpiresAt",
+          "pendingCount",
+          "storageUtilization"
+        ]
+      },
+      "OpenWAConnectorComponentHealthDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "DISABLED",
+              "HEALTHY",
+              "DEGRADED"
+            ]
+          },
+          "requiredForLiveSends": {
+            "type": "boolean"
+          },
+          "healthySessionCount": {
+            "type": "number",
+            "minimum": 0
+          },
+          "sessionCount": {
+            "type": "number",
+            "minimum": 0
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenWAConnectorSessionHealthDto"
+            }
+          }
+        },
+        "required": [
+          "status",
+          "requiredForLiveSends",
+          "healthySessionCount",
+          "sessionCount",
+          "sessions"
+        ]
+      },
       "RuntimeComponentHealthDto": {
         "type": "object",
         "properties": {
           "openwa": {
             "$ref": "#/components/schemas/OpenWAComponentHealthDto"
+          },
+          "connector": {
+            "$ref": "#/components/schemas/OpenWAConnectorComponentHealthDto"
           }
         },
         "required": [
-          "openwa"
+          "openwa",
+          "connector"
         ]
       },
       "HealthOperationalDto": {
@@ -7063,7 +7303,8 @@
               "background_process_degraded",
               "upstream_status_unknown",
               "upstream_unavailable",
-              "upstream_incompatible"
+              "upstream_incompatible",
+              "connector_unhealthy"
             ]
           }
         },

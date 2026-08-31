@@ -178,6 +178,20 @@ export function ManagedRuntimeConfigurationPanel({
                 label="Event Inbox"
               />
               <SettingsRow
+                action={(
+                  <Badge
+                    tone={profile.connectorPluginVersion ? "success" : "warning"}
+                    variant="status"
+                  >
+                    {profile.connectorPluginVersion ? "Provisioned" : "Required"}
+                  </Badge>
+                )}
+                description={profile.connectorPluginVersion
+                  ? `WA Studio Connector ${profile.connectorPluginVersion}`
+                  : "Live sends remain disabled until the connector is provisioned."}
+                label="OpenWA connector"
+              />
+              <SettingsRow
                 action={<span className="settings-row-value">{profile.openwaAllowedSessionIds.length} session(s)</span>}
                 description="Renewed when the connection changes."
                 label="Session scope"

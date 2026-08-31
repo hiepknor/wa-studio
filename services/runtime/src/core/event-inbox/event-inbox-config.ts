@@ -36,10 +36,19 @@ const schema = z.object({
     .transform(value => value.split(',').map(item => item.trim()).filter(Boolean))
     .pipe(z.array(z.uuid()).min(1).max(1000)),
   EVENT_INBOX_RETENTION_DAYS: z.coerce.number().int().min(1).max(90).default(7),
+  EVENT_INBOX_RECEIPT_RETENTION_DAYS: z.coerce.number().int().min(1).max(180).default(35),
   EVENT_INBOX_MAX_STORED_EVENTS: z.coerce.number().int().min(100).max(5_000_000).default(500_000),
   EVENT_INBOX_MAX_STORED_BYTES: z.coerce.number().int()
     .min(1_048_576).max(8_589_934_592).default(2_147_483_648),
   EVENT_INBOX_MAX_PAYLOAD_BYTES: z.coerce.number().int().min(1024).max(1_048_576).default(262_144),
+  EVENT_INBOX_MEDIA_MAX_BYTES: z.coerce.number().int()
+    .min(65_536).max(8_388_608).default(8_388_608),
+  EVENT_INBOX_MEDIA_MAX_STORED_BYTES: z.coerce.number().int()
+    .min(8_388_608).max(8_589_934_592).default(536_870_912),
+  EVENT_INBOX_MEDIA_MAX_LEASE_SECONDS: z.coerce.number().int()
+    .min(300).max(86_400).default(7_200),
+  EVENT_INBOX_MEDIA_MAX_DOWNLOADS_PER_LEASE: z.coerce.number().int()
+    .min(1).max(1_000).default(20),
   EVENT_INBOX_PAIR_RATE_LIMIT_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(5),
   EVENT_INBOX_PAIR_GLOBAL_RATE_LIMIT_MAX_ATTEMPTS: z.coerce.number().int()
     .min(1).max(10_000).default(100),

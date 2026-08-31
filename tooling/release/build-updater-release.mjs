@@ -8,6 +8,7 @@ const workspaceRoot = resolve(import.meta.dirname, "../..");
 const studioRoot = resolve(workspaceRoot, "apps/studio");
 
 const commonRequired = [
+  "WA_STUDIO_CONNECTOR_PLUGIN_URL",
   "WA_STUDIO_UPDATER_ENDPOINT",
   "WA_STUDIO_UPDATER_PUBLIC_KEY",
   "TAURI_SIGNING_PRIVATE_KEY",
@@ -66,6 +67,24 @@ export function releasePreflightErrors(environment, platform = process.platform)
   if (present(environment, "WA_STUDIO_UPDATER_PUBLIC_KEY")
     && environment.WA_STUDIO_UPDATER_PUBLIC_KEY.trim().length < 32) {
     errors.push("WA_STUDIO_UPDATER_PUBLIC_KEY is too short.");
+  }
+  if (present(environment, "WA_STUDIO_CONNECTOR_PLUGIN_URL")) {
+    try {
+      const connectorUrl = new URL(environment.WA_STUDIO_CONNECTOR_PLUGIN_URL);
+      const digest = connectorUrl.hash.match(/^#sha256=([0-9a-f]{64})$/u)?.[1];
+      if (connectorUrl.protocol !== "https:"
+        || !connectorUrl.hostname
+        || connectorUrl.username
+        || connectorUrl.password
+        || !connectorUrl.pathname.endsWith(".zip")
+        || !digest) {
+        errors.push(
+          "WA_STUDIO_CONNECTOR_PLUGIN_URL must be an HTTPS .zip URL pinned with #sha256=<64 hex>.",
+        );
+      }
+    } catch {
+      errors.push("WA_STUDIO_CONNECTOR_PLUGIN_URL must be a valid absolute URL.");
+    }
   }
 
   if (platform === "darwin") {

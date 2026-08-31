@@ -1,5 +1,6 @@
 import {
   Body,
+  ConflictException,
   Controller,
   Get,
   Headers,
@@ -18,12 +19,12 @@ import {
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { z } from 'zod';
 import {
   eventInboxAckSchema,
   eventInboxClaimSchema,
   eventInboxNackSchema,
   eventInboxPairingRequestSchema,
+  openWAWebhookEnvelopeSchema,
 } from '../../contracts/event-inbox';
 import { EVENT_INBOX_CONFIG } from '../../core/event-inbox/event-inbox-config.module';
 import { eventInboxConfig, type EventInboxConfig } from '../../core/event-inbox/event-inbox-config';
@@ -37,15 +38,6 @@ import {
 import { decodeEventInboxReceipt } from './event-inbox-receipt';
 import { EventInboxPairRateLimitService } from './event-inbox-rate-limit.service';
 import { EventInboxRepository } from './event-inbox.repository';
-
-const envelopeSchema = z.object({
-  event: z.string().min(1).max(256),
-  timestamp: z.string().min(1).max(128),
-  sessionId: z.uuid(),
-  idempotencyKey: z.string().min(1).max(512),
-  deliveryId: z.string().min(1).max(512),
-  data: z.record(z.string(), z.unknown()),
-}).passthrough();
 
 @Controller('webhooks/openwa')
 export class EventInboxIngressController {
@@ -71,11 +63,14 @@ export class EventInboxIngressController {
     if (!verifySha256Hmac(request.rawBody, signature, this.tokens.webhookSecret())) {
       throw new UnauthorizedException('Invalid OpenWA webhook signature');
     }
-    const parsed = envelopeSchema.safeParse(request.body);
+    const parsed = openWAWebhookEnvelopeSchema.safeParse(request.body);
     if (!parsed.success || !this.allowedSessions.has(parsed.data.sessionId)) {
       throw new UnprocessableEntityException('Invalid or disallowed OpenWA webhook envelope');
     }
     const result = await this.repository.insert(request.rawBody, signature!, parsed.data);
+    if (result === 'conflict') {
+      throw new ConflictException('OpenWA webhook idempotency key conflicts with a different payload');
+    }
     if (result === 'capacity') {
       throw new ServiceUnavailableException('Event Inbox storage capacity is exhausted');
     }
@@ -206,7 +201,7 @@ export class EventInboxController {
   @Post('devices/revoke')
   @HttpCode(200)
   async revoke(@Headers('authorization') authorization: string | undefined) {
-    const device = await this.authenticate(authorization);
+    const device = await this.authenticateForRetirement(authorization);
     return {
       revoked: await this.devices.revoke(device.deviceId, device.tokenGeneration),
     };
@@ -217,6 +212,15 @@ export class EventInboxController {
   ): Promise<EventInboxDeviceAuthorization> {
     const claims = this.tokens.authenticate(authorization);
     const device = await this.devices.authorize(claims);
+    if (!device) throw new UnauthorizedException('Invalid Event Inbox device token');
+    return device;
+  }
+
+  private async authenticateForRetirement(
+    authorization: string | undefined,
+  ): Promise<EventInboxDeviceAuthorization> {
+    const claims = this.tokens.authenticate(authorization);
+    const device = await this.devices.authorizeRetirement(claims);
     if (!device) throw new UnauthorizedException('Invalid Event Inbox device token');
     return device;
   }

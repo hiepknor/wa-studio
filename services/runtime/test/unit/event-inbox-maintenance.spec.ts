@@ -3,6 +3,7 @@ import type { EventInboxConfig } from '../../src/core/event-inbox/event-inbox-co
 import type { EventInboxDeviceRepository } from '../../src/modules/event-inbox/event-inbox-device.repository';
 import { EventInboxMaintenanceService } from '../../src/modules/event-inbox/event-inbox-maintenance.service';
 import type { EventInboxRepository } from '../../src/modules/event-inbox/event-inbox.repository';
+import type { EventInboxMediaRepository } from '../../src/modules/event-inbox/event-inbox-media.repository';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -25,11 +26,15 @@ describe('EventInboxMaintenanceService', () => {
     const repository = {
       removeExpired: vi.fn().mockReturnValue(firstBatch.promise),
       removeExpiredRateLimits: vi.fn().mockResolvedValue(0),
+      removeExpiredReceipts: vi.fn().mockResolvedValue(0),
     } as unknown as EventInboxRepository;
     const devices = {
       cleanupInactive: vi.fn().mockResolvedValue({ devices: 0, sessionFences: 0 }),
     } as unknown as EventInboxDeviceRepository;
-    const service = new EventInboxMaintenanceService(repository, devices, config);
+    const media = {
+      removeExpired: vi.fn().mockResolvedValue({ leases: 0, blobs: 0 }),
+    } as unknown as EventInboxMediaRepository;
+    const service = new EventInboxMaintenanceService(repository, devices, media, config);
 
     service.onModuleInit();
     expect(repository.removeExpired).toHaveBeenCalledOnce();
@@ -44,6 +49,8 @@ describe('EventInboxMaintenanceService', () => {
     firstBatch.resolve(0);
     await shutdown;
     expect(repository.removeExpiredRateLimits).toHaveBeenCalledOnce();
+    expect(repository.removeExpiredReceipts).toHaveBeenCalledOnce();
+    expect(media.removeExpired).toHaveBeenCalledOnce();
     expect(devices.cleanupInactive).toHaveBeenCalledOnce();
 
     await vi.advanceTimersByTimeAsync(3_000);

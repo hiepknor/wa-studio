@@ -141,6 +141,7 @@ export interface OpenWAWebhookReconciliationResult {
   created: number;
   updated: number;
   deleted: number;
+  webhookId: string;
 }
 
 export class OpenWAHttpError extends Error {
@@ -515,7 +516,7 @@ export class OpenWAClient implements OnModuleDestroy {
           .filter(registration => new URL(registration.url).toString() === normalizedUrl)
           .sort((left, right) => left.id.localeCompare(right.id));
         if (managed.length === 0) {
-          await this.request(
+          const registered = await this.request(
             'register_webhook',
             `/api/sessions/${encodeURIComponent(input.sessionId)}/webhooks`,
             webhookSchema,
@@ -530,7 +531,7 @@ export class OpenWAClient implements OnModuleDestroy {
               }),
             },
           );
-          return { created: 1, updated: 0, deleted: 0 };
+          return { created: 1, updated: 0, deleted: 0, webhookId: registered.id };
         }
         const retained = managed[0]!;
         await this.request(
@@ -558,7 +559,7 @@ export class OpenWAClient implements OnModuleDestroy {
             { method: 'DELETE' },
           );
         }
-        return { created: 0, updated: 1, deleted: duplicates.length };
+        return { created: 0, updated: 1, deleted: duplicates.length, webhookId: retained.id };
       },
     );
   }

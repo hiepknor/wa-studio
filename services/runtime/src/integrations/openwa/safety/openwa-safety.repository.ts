@@ -15,6 +15,7 @@ import {
 import {
   OPENWA_SAFETY_POLICY_VERSION,
   type CommittedOpenWAMessagePermit,
+  type OpenWAConnectorCommandCommit,
   type OpenWAMessageOperationClass,
   type OpenWAMessagePermit,
   type OpenWAOperationClass,
@@ -24,6 +25,7 @@ import {
   type OpenWAPermitDecision,
   type OpenWASafetyBucketPolicy,
   type OpenWASafetyProfile,
+  type OpenWASafetyQuiescenceSnapshot,
   type OpenWASafetyScopeSnapshot,
 } from './openwa-safety.types';
 
@@ -331,15 +333,41 @@ export class OpenWASafetyRepository {
     });
   }
 
-  async commitMessageStart(permit: OpenWAMessagePermit): Promise<CommittedOpenWAMessagePermit | null> {
+  async commitMessageStart(
+    permit: OpenWAMessagePermit,
+    connectorHealthRequired = false,
+    connectorCommand?: OpenWAConnectorCommandCommit,
+  ): Promise<CommittedOpenWAMessagePermit | null> {
+    if (connectorHealthRequired && !connectorCommand) {
+      throw new Error('Connector-required message commit requires a durable connector command');
+    }
     return this.database.transaction(async client => {
-      const result = await client.query<{ started_at: Date; attempt_number: number }>(
-        `WITH valid_lease AS (
+      const result = await client.query<{
+        attempt_id: string;
+        command_id: string;
+        binding_generation: string | null;
+        started_at: Date;
+        attempt_number: number;
+      }>(
+         `WITH connector AS (
+           SELECT binding_generation
+           FROM openwa_connector_sessions
+           WHERE session_id = $3
+             AND desired_webhook_id IS NOT NULL
+             AND desired_connector_id IS NOT NULL
+             AND binding_synced_at IS NOT NULL
+             AND health_state = 'HEALTHY'
+             AND health_lease_expires_at > now()
+             AND ($11::bigint IS NULL OR binding_generation = $11)
+         ), valid_lease AS (
            SELECT 1 FROM openwa_safety_leases
            WHERE scope_type = 'SESSION' AND upstream_id = $2 AND session_id = $3
              AND lane = 'ACTIVE_SESSION' AND lease_token = $4 AND lease_expires_at > now()
          ), eligible AS (
-           SELECT jobs.id FROM message_jobs jobs
+           SELECT jobs.id,
+             CASE WHEN $8::boolean THEN (SELECT binding_generation FROM connector) ELSE NULL END
+               AS binding_generation
+           FROM message_jobs jobs
            WHERE jobs.id = $1 AND jobs.status = 'PROCESSING'
              AND jobs.safety_lease_token = $4 AND jobs.cancellation_requested_at IS NULL
              AND jobs.safety_policy_version = $6
@@ -367,6 +395,10 @@ export class OpenWASafetyRepository {
                  ))
                )
              )
+             AND (
+               NOT $8::boolean
+               OR EXISTS (SELECT 1 FROM connector)
+             )
              AND EXISTS (
                SELECT 1 FROM gateway_sessions sessions
                WHERE sessions.id = jobs.session_id AND sessions.status = 'ready'
@@ -383,26 +415,133 @@ export class OpenWASafetyRepository {
                JOIN campaign_runs runs ON runs.id = deliveries.run_id
                WHERE deliveries.message_job_id = jobs.id AND runs.status <> 'RUNNING'
              )
+         ), updated AS (
+           UPDATE message_jobs jobs SET current_upstream_started_at = now(),
+             attempt_count = attempt_count + 1,
+             lease_expires_at = CASE WHEN $8::boolean THEN NULL ELSE jobs.lease_expires_at END,
+             updated_at = now()
+           FROM eligible WHERE jobs.id = eligible.id
+           RETURNING jobs.id, jobs.current_upstream_started_at AS started_at,
+             jobs.attempt_count AS attempt_number, jobs.safety_policy_version,
+             eligible.binding_generation
+         ), attempt AS (
+           INSERT INTO message_attempts
+             (message_job_id, attempt_number, outcome, upstream_started_at, safety_policy_version,
+              attempt_id, command_id, transport_state, binding_generation, safety_permit_token,
+              safety_upstream_id, safety_policy_profile, payload_sha256, command_body,
+              command_expires_at, ingress_next_attempt_at, transport_started_at)
+           SELECT id, attempt_number, 'PROCESSING', started_at, safety_policy_version,
+             COALESCE($9::uuid, gen_random_uuid()), COALESCE($10::uuid, gen_random_uuid()),
+             'DISPATCH_STARTED', binding_generation,
+             CASE WHEN $13::bytea IS NULL THEN NULL ELSE $4::uuid END,
+             CASE WHEN $13::bytea IS NULL THEN NULL ELSE $2 END,
+             CASE WHEN $13::bytea IS NULL THEN NULL ELSE $15 END,
+             $12, $13, $14,
+             CASE WHEN $13::bytea IS NULL THEN NULL ELSE now() END, started_at
+           FROM updated
+           RETURNING attempt_id, command_id, message_job_id, binding_generation
          )
-         UPDATE message_jobs jobs SET current_upstream_started_at = now(),
-           attempt_count = attempt_count + 1, updated_at = now()
-         FROM eligible WHERE jobs.id = eligible.id
-         RETURNING jobs.current_upstream_started_at AS started_at, jobs.attempt_count AS attempt_number`,
+         SELECT attempt.attempt_id, attempt.command_id, attempt.binding_generation::text,
+           updated.started_at, updated.attempt_number
+         FROM updated JOIN attempt ON attempt.message_job_id = updated.id`,
         [permit.messageJobId, permit.upstreamId, permit.sessionId, permit.leaseToken,
-          permit.recipientId, permit.policyVersion, permit.operationClass],
+          permit.recipientId, permit.policyVersion, permit.operationClass, connectorHealthRequired,
+          connectorCommand?.attemptId ?? null,
+          connectorCommand?.commandId ?? null,
+          connectorCommand?.bindingGeneration ?? null,
+          connectorCommand?.payloadSha256 ?? null,
+          connectorCommand?.commandBody ?? null,
+          connectorCommand?.expiresAt ?? null,
+          connectorCommand ? permit.policyProfile : null],
       );
       const row = result.rows[0];
       return row ? {
         ...permit,
+        attemptId: row.attempt_id,
+        commandId: row.command_id,
+        bindingGeneration: row.binding_generation === null ? null : Number(row.binding_generation),
         upstreamStartedAt: row.started_at,
         upstreamAttemptNumber: row.attempt_number,
       } as CommittedOpenWAMessagePermit : null;
     });
   }
 
+  async healthyConnectorBindingGeneration(sessionId: string): Promise<number | null> {
+    const result = await this.database.query<{ binding_generation: string }>(
+      `SELECT binding_generation::text
+       FROM openwa_connector_sessions
+       WHERE session_id = $1
+         AND desired_webhook_id IS NOT NULL
+         AND desired_connector_id IS NOT NULL
+         AND binding_synced_at IS NOT NULL
+         AND health_state = 'HEALTHY'
+         AND health_lease_expires_at > now()`,
+      [sessionId],
+    );
+    return result.rows[0] ? Number(result.rows[0].binding_generation) : null;
+  }
+
   async recordOutcome(permit: OpenWAOperationPermit, outcome: OpenWAOperationOutcome): Promise<void> {
-    await this.database.transaction(async client => {
-      const recorded = await client.query(
+    await this.database.transaction(client => this.recordOutcomeWithClient(client, permit, outcome));
+  }
+
+  async recordMessageAttemptOutcomeWithClient(
+    client: PoolClient,
+    attemptId: string,
+    outcome: OpenWAOperationOutcome,
+  ): Promise<boolean> {
+    const result = await client.query<{
+      message_job_id: string;
+      upstream_id: string;
+      session_id: string;
+      recipient_id: string;
+      message_type: 'text' | 'image';
+      lease_token: string;
+      reserved_at: Date;
+      expires_at: Date;
+      safety_policy_version: number;
+      policy_profile: OpenWASafetyProfile;
+    }>(
+      `SELECT jobs.id::text AS message_job_id, attempts.safety_upstream_id AS upstream_id,
+         jobs.session_id, jobs.recipient_id, jobs.message_type,
+         attempts.safety_permit_token::text AS lease_token,
+         attempts.upstream_started_at AS reserved_at,
+         COALESCE(attempts.command_expires_at, attempts.upstream_started_at) AS expires_at,
+         attempts.safety_policy_version, attempts.safety_policy_profile AS policy_profile
+       FROM message_attempts attempts
+       JOIN message_jobs jobs ON jobs.id = attempts.message_job_id
+       WHERE attempts.attempt_id = $1
+         AND attempts.safety_permit_token IS NOT NULL
+         AND attempts.safety_upstream_id IS NOT NULL
+         AND attempts.safety_policy_profile IS NOT NULL
+       FOR UPDATE OF attempts, jobs`,
+      [attemptId],
+    );
+    const row = result.rows[0];
+    if (!row) return false;
+    const permit: OpenWAMessagePermit = {
+      permitToken: row.lease_token,
+      leaseToken: row.lease_token,
+      upstreamId: row.upstream_id,
+      sessionId: row.session_id,
+      operationClass: row.message_type === 'text' ? 'MESSAGE_SEND_TEXT' : 'MESSAGE_SEND_IMAGE',
+      policyProfile: row.policy_profile,
+      policyVersion: row.safety_policy_version,
+      reservedAt: row.reserved_at,
+      expiresAt: row.expires_at,
+      messageJobId: row.message_job_id,
+      recipientId: row.recipient_id,
+    };
+    await this.recordOutcomeWithClient(client, permit, outcome);
+    return true;
+  }
+
+  private async recordOutcomeWithClient(
+    client: PoolClient,
+    permit: OpenWAOperationPermit,
+    outcome: OpenWAOperationOutcome,
+  ): Promise<void> {
+    const recorded = await client.query(
         `INSERT INTO openwa_safety_outcome_receipts
            (permit_token, upstream_id, session_id, operation_class, outcome_kind, policy_version)
          VALUES ($1, $2, $3, $4, $5, $6)
@@ -410,21 +549,20 @@ export class OpenWASafetyRepository {
         [permit.permitToken, permit.upstreamId, permit.sessionId, permit.operationClass,
           outcome.kind, permit.policyVersion],
       );
-      if (recorded.rowCount !== 1) {
-        await this.releaseWithClient(client, permit);
-        return;
-      }
-      if (outcome.kind === 'SUCCESS') {
-        await this.recordSuccess(client, permit);
-      } else if (outcome.kind === 'RATE_LIMITED') {
-        await this.recordRateLimit(client, permit, outcome.retryAfterMs);
-      } else if (outcome.kind === 'AMBIGUOUS' || outcome.kind === 'TRANSIENT_FAILURE') {
-        await this.recordFailure(client, permit, outcome.kind);
-      } else if (outcome.kind === 'SESSION_RESTRICTED') {
-        await this.blockSession(client, permit, 'SESSION_RESTRICTED');
-      }
+    if (recorded.rowCount !== 1) {
       await this.releaseWithClient(client, permit);
-    });
+      return;
+    }
+    if (outcome.kind === 'SUCCESS') {
+      await this.recordSuccess(client, permit);
+    } else if (outcome.kind === 'RATE_LIMITED') {
+      await this.recordRateLimit(client, permit, outcome.retryAfterMs);
+    } else if (outcome.kind === 'AMBIGUOUS' || outcome.kind === 'TRANSIENT_FAILURE') {
+      await this.recordFailure(client, permit, outcome.kind);
+    } else if (outcome.kind === 'SESSION_RESTRICTED') {
+      await this.blockSession(client, permit, 'SESSION_RESTRICTED');
+    }
+    await this.releaseWithClient(client, permit);
   }
 
   async release(permit: OpenWAOperationPermit): Promise<void> {
@@ -435,6 +573,151 @@ export class OpenWASafetyRepository {
     return this.database.transaction(async client => {
       await this.ensureScopes(client, upstreamId, sessionId);
       let scopes = await this.lockScopes(client, upstreamId, sessionId);
+      scopes = await this.transitionExpiredCircuits(client, scopes);
+      return mapEffectiveSession(scopes);
+    });
+  }
+
+  async sessionQuiescence(
+    upstreamId: string,
+    sessionId: string,
+  ): Promise<OpenWASafetyQuiescenceSnapshot> {
+    const result = await this.database.query<{
+      processing_message_jobs: number;
+      unsettled_connector_commands: number;
+      active_safety_leases: number;
+      checked_at: Date;
+    }>(
+      `SELECT
+         (SELECT count(*)::integer FROM message_jobs
+          WHERE session_id = $2 AND status = 'PROCESSING') AS processing_message_jobs,
+         (SELECT count(*)::integer
+          FROM message_attempts AS attempt
+          JOIN message_jobs AS job ON job.id = attempt.message_job_id
+          WHERE job.session_id = $2
+            AND attempt.transport_state IN (
+              'DISPATCH_STARTED', 'INGRESS_ACCEPTED', 'SEND_STARTED'
+            )) AS unsettled_connector_commands,
+         (SELECT count(*)::integer FROM openwa_safety_leases
+          WHERE upstream_id = $1 AND session_id = $2
+            AND lease_expires_at > now()) AS active_safety_leases,
+         now() AS checked_at`,
+      [upstreamId, sessionId],
+    );
+    const row = result.rows[0]!;
+    return {
+      drained: row.processing_message_jobs === 0
+        && row.unsettled_connector_commands === 0
+        && row.active_safety_leases === 0,
+      processingMessageJobs: row.processing_message_jobs,
+      unsettledConnectorCommands: row.unsettled_connector_commands,
+      activeSafetyLeases: row.active_safety_leases,
+      checkedAt: row.checked_at,
+    };
+  }
+
+  async workspaceQuiescence(): Promise<OpenWASafetyQuiescenceSnapshot> {
+    const result = await this.database.query<{
+      processing_message_jobs: number;
+      unsettled_connector_commands: number;
+      active_safety_leases: number;
+      checked_at: Date;
+    }>(
+      `SELECT
+         (SELECT count(*)::integer FROM message_jobs
+          WHERE status = 'PROCESSING') AS processing_message_jobs,
+         (SELECT count(*)::integer
+          FROM message_attempts
+          WHERE transport_state IN (
+            'DISPATCH_STARTED', 'INGRESS_ACCEPTED', 'SEND_STARTED'
+          )) AS unsettled_connector_commands,
+         (SELECT count(*)::integer FROM openwa_safety_leases
+          WHERE lease_expires_at > now()) AS active_safety_leases,
+         now() AS checked_at`,
+    );
+    const row = result.rows[0]!;
+    return {
+      drained: row.processing_message_jobs === 0
+        && row.unsettled_connector_commands === 0
+        && row.active_safety_leases === 0,
+      processingMessageJobs: row.processing_message_jobs,
+      unsettledConnectorCommands: row.unsettled_connector_commands,
+      activeSafetyLeases: row.active_safety_leases,
+      checkedAt: row.checked_at,
+    };
+  }
+
+  async mutateWorkspace(input: {
+    upstreamId: string;
+    sessionId: string;
+    operationType: Extract<RuntimeMutationType,
+      'OPENWA_WORKSPACE_BLOCK' | 'OPENWA_WORKSPACE_RESUME'>;
+    idempotencyKey: string;
+    requestHash: string;
+    reason?: string;
+  }): Promise<OpenWASafetyScopeSnapshot> {
+    const subjectId = 'managed-runtime-workspace';
+    return this.database.transaction(async client => {
+      const receipt = await this.mutationReceipts.lockAndFind(
+        client, input.operationType, input.idempotencyKey,
+      );
+      if (receipt && (receipt.requestHash !== input.requestHash
+        || receipt.sessionId !== input.sessionId
+        || receipt.subjectId !== subjectId)) {
+        throw new OpenWASafetyMutationConflictError();
+      }
+      await this.ensureScopes(client, input.upstreamId, input.sessionId);
+      if (!receipt) {
+        const result = input.operationType === 'OPENWA_WORKSPACE_BLOCK'
+          ? await client.query<ScopeRow>(
+            `UPDATE openwa_safety_scopes SET circuit_state = 'MANUAL_BLOCKED',
+               reason_code = $1, manual_blocked_at = now(), cooldown_until = NULL,
+               success_streak = 0, revision = revision + 1, updated_at = now()
+             WHERE scope_type = 'WORKSPACE' AND upstream_id = '' AND session_id = ''
+             RETURNING *`,
+            [input.reason ?? 'MANAGED_RUNTIME_MAINTENANCE'],
+          )
+          : await client.query<ScopeRow>(
+            `UPDATE openwa_safety_scopes SET circuit_state = 'CLOSED', rate_mode = 'NORMAL',
+               reason_code = NULL, cooldown_until = NULL, manual_blocked_at = NULL,
+               consecutive_rate_limits = 0, consecutive_transient_failures = 0,
+               consecutive_ambiguous_outcomes = 0, success_streak = 0,
+               revision = revision + 1, updated_at = now()
+             WHERE scope_type = 'WORKSPACE' AND upstream_id = '' AND session_id = ''
+             RETURNING *`,
+          );
+        const updated = result.rows[0]!;
+        const eventType = input.operationType === 'OPENWA_WORKSPACE_BLOCK'
+          ? 'openwa_safety.workspace_blocked'
+          : 'openwa_safety.workspace_resumed';
+        await appendActivityEvent(client, {
+          sessionId: input.sessionId,
+          eventType,
+          category: 'SESSION',
+          severity: input.operationType === 'OPENWA_WORKSPACE_BLOCK' ? 'WARNING' : 'SUCCESS',
+          origin: 'STUDIO',
+          subjectType: 'OPENWA_SAFETY_SCOPE',
+          subjectId,
+          subjectLabelSnapshot: 'Managed Runtime workspace',
+          metadata: {
+            circuitState: updated.circuit_state,
+            profile: updated.policy_profile,
+            policyVersion: updated.policy_version,
+            ...(input.reason ? { reason: input.reason } : {}),
+          },
+          dedupeKey: `openwa-safety:${input.operationType}:${input.idempotencyKey}`,
+        });
+        await this.mutationReceipts.record(client, {
+          operationType: input.operationType,
+          idempotencyKey: input.idempotencyKey,
+          requestHash: input.requestHash,
+          sessionId: input.sessionId,
+          subjectId,
+          resultId: subjectId,
+          resultRevision: Number(updated.revision),
+        });
+      }
+      let scopes = await this.lockScopes(client, input.upstreamId, input.sessionId);
       scopes = await this.transitionExpiredCircuits(client, scopes);
       return mapEffectiveSession(scopes);
     });

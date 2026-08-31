@@ -36,6 +36,14 @@ export interface OpenWASafetyScopeSnapshot {
   updatedAt: Date;
 }
 
+export interface OpenWASafetyQuiescenceSnapshot {
+  drained: boolean;
+  processingMessageJobs: number;
+  unsettledConnectorCommands: number;
+  activeSafetyLeases: number;
+  checkedAt: Date;
+}
+
 export interface OpenWASafetyBucketPolicy {
   scopeType: 'UPSTREAM' | 'SESSION';
   operationClass: OpenWAOperationClass | 'UPSTREAM_ALL' | 'MESSAGE_SEND_ALL';
@@ -66,8 +74,20 @@ export interface OpenWAMessagePermit extends OpenWAOperationPermit {
   expiresAt: Date;
 }
 
+export interface OpenWAConnectorCommandCommit {
+  attemptId: string;
+  commandId: string;
+  bindingGeneration: number;
+  payloadSha256: string;
+  commandBody: Buffer;
+  expiresAt: Date;
+}
+
 declare const committedPermitBrand: unique symbol;
 export type CommittedOpenWAMessagePermit = OpenWAMessagePermit & {
+  attemptId: string;
+  commandId: string;
+  bindingGeneration: number | null;
   upstreamStartedAt: Date;
   upstreamAttemptNumber: number;
   readonly [committedPermitBrand]: true;

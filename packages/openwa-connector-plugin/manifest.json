@@ -1,0 +1,99 @@
+{
+  "id": "wa-studio-connector",
+  "name": "WA Studio Connector",
+  "version": "0.1.0",
+  "type": "extension",
+  "main": "dist/index.js",
+  "description": "Executes safety-authorized WA Runtime commands through OpenWA and publishes durable delivery evidence to Event Inbox.",
+  "author": "WA Studio",
+  "license": "UNLICENSED",
+  "status": "canary",
+  "minOpenWAVersion": "0.23.3",
+  "testedOpenWAVersion": "0.23.3",
+  "sdkVersion": "1",
+  "waStudioProtocolVersion": 1,
+  "waStudioJournalSchemaVersion": 1,
+  "permissions": [
+    "webhook:ingress",
+    "conversation:send",
+    "net:fetch",
+    "storage:use"
+  ],
+  "net": {
+    "allow": [],
+    "allowConfigHosts": ["eventInboxBaseUrl"]
+  },
+  "sessionScoped": true,
+  "sessions": ["*"],
+  "hooks": ["message:sent", "message:ack"],
+  "ingress": [
+    {
+      "route": "commands",
+      "mode": "async",
+      "verify": "core",
+      "maxBodyBytes": 131072,
+      "signature": {
+        "scheme": "hmac-sha256",
+        "header": "X-WA-Signature",
+        "contentTemplate": "{timestamp}.{rawBody}",
+        "encoding": "hex",
+        "prefix": "sha256=",
+        "timestampHeader": "X-WA-Timestamp",
+        "toleranceSec": 300,
+        "dedupHeader": "X-Delivery"
+      },
+      "conversationId": {
+        "jsonPointer": "/recipientId"
+      },
+      "response": {
+        "preflight": [{ "type": "session-alive" }],
+        "ack": {
+          "status": 202,
+          "headers": { "content-type": "application/json" },
+          "body": "{\"accepted\":true}"
+        }
+      }
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "eventInboxBaseUrl": {
+        "type": "string",
+        "title": "Event Inbox base URL",
+        "required": true,
+        "description": "HTTPS origin of the WA Studio Event Inbox control plane."
+      },
+      "connectorToken": {
+        "type": "string",
+        "title": "Connector token",
+        "secret": true,
+        "required": true,
+        "description": "Connector-scoped bearer token provisioned by WA Studio."
+      },
+      "sessionId": {
+        "type": "string",
+        "title": "OpenWA session ID",
+        "required": true,
+        "pattern": "^[0-9a-fA-F-]{36}$",
+        "description": "The single OpenWA session bound to this connector instance."
+      },
+      "heartbeatIntervalSeconds": {
+        "type": "number",
+        "title": "Heartbeat interval",
+        "default": 10,
+        "min": 5,
+        "max": 60,
+        "description": "Seconds between connector health reports."
+      },
+      "storagePressureThreshold": {
+        "type": "number",
+        "title": "Storage pressure threshold",
+        "default": 0.75,
+        "min": 0.5,
+        "max": 0.95,
+        "description": "Block new commands when estimated journal utilization reaches this ratio."
+      }
+    }
+  }
+}

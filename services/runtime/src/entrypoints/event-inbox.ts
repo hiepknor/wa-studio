@@ -18,6 +18,8 @@ export async function runEventInbox(): Promise<void> {
   app.setGlobalPrefix('api/v1');
   configureHttpTransport(app, {
     maximumJsonBodyBytes: config.EVENT_INBOX_MAX_PAYLOAD_BYTES,
+    maximumRawBodyBytes: config.EVENT_INBOX_MEDIA_MAX_BYTES,
+    rawBodyTypes: ['image/jpeg', 'image/png', 'image/webp'],
     requestTimeoutMs: config.EVENT_INBOX_HTTP_REQUEST_TIMEOUT_MS,
     headersTimeoutMs: config.EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS,
   });

@@ -3,6 +3,7 @@ import { EVENT_INBOX_CONFIG } from '../../core/event-inbox/event-inbox-config.mo
 import { eventInboxConfig, type EventInboxConfig } from '../../core/event-inbox/event-inbox-config';
 import { EventInboxDeviceRepository } from './event-inbox-device.repository';
 import { EventInboxRepository } from './event-inbox.repository';
+import { EventInboxMediaRepository } from './event-inbox-media.repository';
 
 @Injectable()
 export class EventInboxMaintenanceService implements OnModuleInit, OnModuleDestroy {
@@ -13,6 +14,7 @@ export class EventInboxMaintenanceService implements OnModuleInit, OnModuleDestr
   constructor(
     private readonly repository: EventInboxRepository,
     private readonly devices: EventInboxDeviceRepository,
+    private readonly media: EventInboxMediaRepository,
     @Inject(EVENT_INBOX_CONFIG) private readonly config: EventInboxConfig = eventInboxConfig(),
   ) {}
 
@@ -64,6 +66,39 @@ export class EventInboxMaintenanceService implements OnModuleInit, OnModuleDestr
         this.logger.log({
           event: 'event_inbox.expired_rate_limits.deleted',
           deleted: expiredRateLimits,
+        });
+      }
+      let expiredReceipts = 0;
+      let receiptBatches = 0;
+      while (receiptBatches < this.config.EVENT_INBOX_CLEANUP_MAX_BATCHES) {
+        const batch = await this.repository.removeExpiredReceipts(
+          this.config.EVENT_INBOX_CLEANUP_BATCH_SIZE,
+        );
+        expiredReceipts += batch;
+        receiptBatches += 1;
+        if (batch < this.config.EVENT_INBOX_CLEANUP_BATCH_SIZE) break;
+      }
+      if (expiredReceipts > 0) {
+        this.logger.log({
+          event: 'event_inbox.expired_receipts.deleted',
+          deleted: expiredReceipts,
+        });
+      }
+      let expiredMediaLeases = 0;
+      let orphanedMediaBlobs = 0;
+      let mediaBatches = 0;
+      while (mediaBatches < this.config.EVENT_INBOX_CLEANUP_MAX_BATCHES) {
+        const batch = await this.media.removeExpired(this.config.EVENT_INBOX_CLEANUP_BATCH_SIZE);
+        expiredMediaLeases += batch.leases;
+        orphanedMediaBlobs += batch.blobs;
+        mediaBatches += 1;
+        if (batch.leases < this.config.EVENT_INBOX_CLEANUP_BATCH_SIZE) break;
+      }
+      if (expiredMediaLeases > 0 || orphanedMediaBlobs > 0) {
+        this.logger.log({
+          event: 'event_inbox.expired_media.deleted',
+          leases: expiredMediaLeases,
+          blobs: orphanedMediaBlobs,
         });
       }
       const inactive = await this.devices.cleanupInactive();

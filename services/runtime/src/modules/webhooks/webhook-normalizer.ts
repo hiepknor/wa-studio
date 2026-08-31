@@ -1,3 +1,5 @@
+import { BadRequestException } from '@nestjs/common';
+import { openWAConnectorEvidenceSchema } from '../../contracts/openwa-connector';
 import type { OpenWAWebhookEnvelope } from './webhook.repository';
 
 export interface RuntimeEvent {
@@ -33,6 +35,19 @@ export function normalizeOpenWAWebhook(envelope: OpenWAWebhookEnvelope): Runtime
     sessionId: envelope.sessionId,
     occurredAt: dateFrom(envelope.data.timestamp, envelope.timestamp),
   };
+
+  if (envelope.event === 'wa-studio.connector.evidence') {
+    const evidence = openWAConnectorEvidenceSchema.safeParse(envelope.data);
+    if (!evidence.success || evidence.data.sessionId !== envelope.sessionId) {
+      throw new BadRequestException('Invalid WA Studio connector evidence envelope');
+    }
+    return {
+      ...base,
+      eventType: 'connector.delivery.evidence',
+      occurredAt: new Date(evidence.data.occurredAt),
+      payload: evidence.data,
+    };
+  }
 
   if (envelope.event === 'message.received') {
     const groupId = text(envelope.data.chatId || envelope.data.from);

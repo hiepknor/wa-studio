@@ -11,11 +11,19 @@ fn main() {
     for (field, environment_name) in [
         ("openwaReleaseTag", "WA_STUDIO_OPENWA_RELEASE_TAG"),
         ("openwaContractSha256", "WA_STUDIO_OPENWA_CONTRACT_SHA256"),
+        (
+            "connectorPluginVersion",
+            "WA_STUDIO_CONNECTOR_PLUGIN_VERSION",
+        ),
     ] {
         let value = components[field]
             .as_str()
             .unwrap_or_else(|| panic!("release/components.json is missing {field}"));
         println!("cargo:rustc-env={environment_name}={value}");
+    }
+    println!("cargo:rerun-if-env-changed=WA_STUDIO_CONNECTOR_PLUGIN_URL");
+    if let Ok(value) = env::var("WA_STUDIO_CONNECTOR_PLUGIN_URL") {
+        println!("cargo:rustc-env=WA_STUDIO_CONNECTOR_PLUGIN_URL={value}");
     }
     tauri_build::build()
 }

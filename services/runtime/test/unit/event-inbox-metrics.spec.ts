@@ -40,6 +40,7 @@ describe('Event Inbox metrics', () => {
         pendingEvents: 3,
         leasedEvents: 1,
         deadEvents: 2,
+        retainedReceipts: 11,
         oldestPendingAgeSeconds: 42,
         activeDevices: 2,
         legacyDevices: 1,
@@ -61,6 +62,7 @@ describe('Event Inbox metrics', () => {
     expect(output).toContain('wa_event_inbox_nodejs_version_info');
     expect(output).toContain('wa_event_inbox_events{state="pending"} 3');
     expect(output).toContain('wa_event_inbox_events{state="dead"} 2');
+    expect(output).toContain('wa_event_inbox_events{state="receipts"} 11');
     expect(output).toContain('wa_event_inbox_storage_bytes 4096');
     expect(output).toContain('wa_event_inbox_storage_limit_bytes 1048576');
     expect(output).toContain('wa_event_inbox_oldest_pending_age_seconds 42');

@@ -34,8 +34,13 @@ describe('Event Inbox boundary', () => {
       EVENT_INBOX_MAX_STORED_EVENTS: 500_000,
       EVENT_INBOX_MAX_STORED_BYTES: 2_147_483_648,
       EVENT_INBOX_MAX_PAYLOAD_BYTES: 262_144,
+      EVENT_INBOX_MEDIA_MAX_BYTES: 8_388_608,
+      EVENT_INBOX_MEDIA_MAX_STORED_BYTES: 536_870_912,
+      EVENT_INBOX_MEDIA_MAX_LEASE_SECONDS: 7_200,
+      EVENT_INBOX_MEDIA_MAX_DOWNLOADS_PER_LEASE: 20,
       EVENT_INBOX_LEASE_SECONDS: 60,
       EVENT_INBOX_RETENTION_DAYS: 7,
+      EVENT_INBOX_RECEIPT_RETENTION_DAYS: 35,
       EVENT_INBOX_DEVICE_TOKEN_TTL_DAYS: 365,
       EVENT_INBOX_PAIR_RATE_LIMIT_MAX_ATTEMPTS: 5,
       EVENT_INBOX_PAIR_GLOBAL_RATE_LIMIT_MAX_ATTEMPTS: 100,
@@ -129,6 +134,10 @@ describe('Event Inbox boundary', () => {
       .resolves.toEqual({ accepted: true, duplicate: false });
     await expect(controller.receive({ rawBody, body: envelope } as never, 'sha256=invalid'))
       .rejects.toThrow('Invalid OpenWA webhook signature');
+
+    repository.insert.mockResolvedValueOnce('conflict');
+    await expect(controller.receive({ rawBody, body: envelope } as never, signature))
+      .rejects.toThrow('idempotency key conflicts with a different payload');
   });
 
   it('pairs from verified OpenWA credentials and scopes claim/ACK/NACK to a device token', async () => {
@@ -155,6 +164,12 @@ describe('Event Inbox boundary', () => {
         tokenGeneration: 1,
         tokenVersion: 2,
         sessionIds: [sessionId],
+      }),
+      authorizeRetirement: vi.fn().mockResolvedValue({
+        deviceId,
+        tokenGeneration: 1,
+        tokenVersion: 2,
+        sessionIds: [],
       }),
       revoke: vi.fn().mockResolvedValue(true),
     };
@@ -186,6 +201,7 @@ describe('Event Inbox boundary', () => {
       receiptHandle, disposition: 'dead', reason: 'invalid_event_payload',
     }] })).resolves.toEqual({ retried: 0, dead: 1 });
     await expect(controller.revoke(authorization)).resolves.toEqual({ revoked: true });
+    expect(devices.authorizeRetirement).toHaveBeenCalledOnce();
     await expect(controller.claim('Bearer invalid', { limit: 10, waitSeconds: 0 }))
       .rejects.toThrow('Invalid Event Inbox device token');
   });

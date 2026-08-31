@@ -67,3 +67,13 @@ export class OpenWASafetyScopeDto {
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
 }
+
+export class OpenWASafetyQuiescenceDto {
+  @ApiProperty() drained!: boolean;
+  @ApiProperty() processingMessageJobs!: number;
+  @ApiProperty() unsettledConnectorCommands!: number;
+  @ApiProperty() activeSafetyLeases!: number;
+
+  @ApiProperty({ format: 'date-time' })
+  checkedAt!: Date;
+}

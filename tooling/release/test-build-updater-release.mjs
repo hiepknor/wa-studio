@@ -5,6 +5,7 @@ import {
 } from "./build-updater-release.mjs";
 
 const updaterSecrets = {
+  WA_STUDIO_CONNECTOR_PLUGIN_URL: `https://github.com/hiepknor/wa-studio/releases/download/v1.2.3/wa-studio-connector-0.1.0.zip#sha256=${"a".repeat(64)}`,
   WA_STUDIO_UPDATER_ENDPOINT: "https://updates.example.test/wa-studio/{{target}}",
   WA_STUDIO_UPDATER_PUBLIC_KEY: "public-key-with-more-than-thirty-two-characters",
   TAURI_SIGNING_PRIVATE_KEY: "private-updater-test-value-must-not-leak",
@@ -12,6 +13,7 @@ const updaterSecrets = {
 
 const missing = releasePreflightErrors({}, "linux");
 assert.equal(missing.length, 1);
+assert.match(missing[0], /WA_STUDIO_CONNECTOR_PLUGIN_URL/u);
 assert.match(missing[0], /WA_STUDIO_UPDATER_ENDPOINT/u);
 assert.match(missing[0], /TAURI_SIGNING_PRIVATE_KEY/u);
 
@@ -21,6 +23,14 @@ const invalidEndpoint = releasePreflightErrors({
 }, "linux");
 assert.deepEqual(invalidEndpoint, [
   "WA_STUDIO_UPDATER_ENDPOINT must be HTTPS and cannot contain credentials.",
+]);
+
+const unpinnedConnector = releasePreflightErrors({
+  ...updaterSecrets,
+  WA_STUDIO_CONNECTOR_PLUGIN_URL: "https://example.test/connector.zip",
+}, "linux");
+assert.deepEqual(unpinnedConnector, [
+  "WA_STUDIO_CONNECTOR_PLUGIN_URL must be an HTTPS .zip URL pinned with #sha256=<64 hex>.",
 ]);
 
 const mismatchedPublishedEndpoint = releasePreflightErrors({

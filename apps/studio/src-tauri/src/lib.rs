@@ -33,6 +33,8 @@ pub fn run() {
             managed_runtime::provision_managed_runtime,
             managed_runtime::transport::request_managed_runtime,
             managed_runtime::reset_managed_runtime_database,
+            managed_runtime::reset_managed_runtime_connection,
+            managed_runtime::rotate_managed_runtime_connector_credential,
             managed_runtime::reconfigure_managed_runtime,
             managed_runtime::restore_managed_runtime_recovery_archive,
             managed_runtime::restore_managed_runtime_backup,

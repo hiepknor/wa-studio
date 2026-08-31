@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
 import { once } from 'node:events';
@@ -99,6 +99,194 @@ async function main(): Promise<void> {
     assert(pairing.sessionIds.join(',') === sessionId, 'pairing session scope drifted');
     assert(pairing.callbackUrl === `${eventInboxBaseUrl}/api/v1/webhooks/openwa`, 'callback drifted');
 
+    const preparedConnectorId = randomUUID();
+    const connectorSecret = randomBytes(32).toString('base64url');
+    const preparedConnector = await connectorDeviceRequest(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      `connectors/credentials/${preparedConnectorId}/generations/1`,
+      { sessionIds: [sessionId], secretSha256: sha256(connectorSecret) },
+      'PUT',
+    );
+    assert(preparedConnector.protocolVersion === 1
+      && preparedConnector.connectorId === preparedConnectorId
+      && preparedConnector.tokenGeneration === 1
+      && preparedConnector.outcome === 'CREATED',
+    'prepared connector provisioning contract drifted');
+    const replayedCredential = await connectorDeviceRequest(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      `connectors/credentials/${preparedConnectorId}/generations/1`,
+      { sessionIds: [sessionId], secretSha256: sha256(connectorSecret) },
+      'PUT',
+    );
+    assert(replayedCredential.outcome === 'UNCHANGED',
+      'prepared connector provisioning was not idempotent');
+    const conflictingCredential = await connectorDeviceResponse(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      `connectors/credentials/${preparedConnectorId}/generations/1`,
+      { sessionIds: [sessionId], secretSha256: '0'.repeat(64) },
+      'PUT',
+    );
+    assert(conflictingCredential.status === 409,
+      'a prepared connector credential generation accepted different secret material');
+    const connector = {
+      connectorId: preparedConnectorId,
+      token: connectorToken(preparedConnectorId, 1, connectorSecret),
+    };
+    const binding = await connectorDeviceRequest(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      `connectors/bindings/${sessionId}`,
+      { connectorId: connector.connectorId, webhookId: 'webhook-e2e', generation: 1 },
+      'PUT',
+    );
+    assert(binding.connectorId === connector.connectorId
+      && binding.webhookId === 'webhook-e2e' && binding.generation === 1,
+      'connector binding was not persisted');
+    const heartbeat = await inboxRequest(eventInboxBaseUrl, connector.token, 'connectors/heartbeat', {
+      pluginVersion: '1.0.0',
+      protocolVersion: 1,
+      journalSchemaVersion: 1,
+      sessions: [{
+        sessionId,
+        bindingGeneration: 1,
+        pendingCount: 0,
+        oldestPendingSeconds: null,
+        storageUtilization: 0.1,
+        blockedReason: null,
+      }],
+    });
+    assert(heartbeat.bindings[0]?.webhookId === 'webhook-e2e',
+      'connector heartbeat did not receive its desired binding');
+    const connectorEvent = connectorEnvelope('connector-event', 'webhook-e2e');
+    const connectorDelivery = await inboxRequest(eventInboxBaseUrl, connector.token, 'connectors/events', {
+      bindingGeneration: 1,
+      envelope: connectorEvent,
+    });
+    assert(connectorDelivery.accepted === true && connectorDelivery.duplicate === false,
+      'connector event was not durably accepted');
+    const connectorClaim = await claim(eventInboxBaseUrl, pairing.deviceToken);
+    assert(connectorClaim.data.length === 1, 'connector event did not enter the normal claim queue');
+    const connectorAck = await inboxRequest(eventInboxBaseUrl, pairing.deviceToken, 'events/ack', {
+      receiptHandles: [connectorClaim.data[0]!.receiptHandle],
+    });
+    assert(connectorAck.acknowledged === 1, 'connector event could not complete normal delivery');
+    const coreDuplicate = await postWebhook(pairing.callbackUrl, pairing.webhookSecret, connectorEvent);
+    assert(coreDuplicate.duplicate === true, 'core and connector paths did not share dedupe state');
+
+    const overlappingConnector = await fetch(
+      `${eventInboxBaseUrl}/api/v1/event-inbox/connectors/provision`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${pairing.deviceToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ sessionIds: [sessionId] }),
+      },
+    );
+    assert(overlappingConnector.status === 409,
+      'a second active connector was provisioned for the same session');
+    const conflictingBinding = await connectorDeviceResponse(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      `connectors/bindings/${sessionId}`,
+      {
+        connectorId: connector.connectorId,
+        webhookId: 'webhook-e2e-next',
+        generation: 1,
+      },
+      'PUT',
+    );
+    assert(conflictingBinding.status === 409,
+      'a connector reused an existing binding generation with different content');
+    const rotatedBinding = await connectorDeviceRequest(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      `connectors/bindings/${sessionId}`,
+      {
+        connectorId: connector.connectorId,
+        webhookId: 'webhook-e2e-next',
+        generation: 2,
+      },
+      'PUT',
+    );
+    assert(rotatedBinding.connectorId === connector.connectorId
+      && rotatedBinding.generation === 2,
+      'rotated webhook identity was not fenced by a new generation');
+    const lateOldEvent = connectorEnvelope('late-old-generation', 'webhook-e2e');
+    const lateOldDelivery = await inboxRequest(
+      eventInboxBaseUrl,
+      connector.token,
+      'connectors/events',
+      { bindingGeneration: 1, envelope: lateOldEvent },
+    );
+    assert(lateOldDelivery.accepted === true,
+      'late evidence from the exact historical connector binding was rejected');
+    const lateOldClaim = await claim(eventInboxBaseUrl, pairing.deviceToken);
+    assert(lateOldClaim.data.length === 1, 'late historical connector evidence was not queued');
+    await inboxRequest(eventInboxBaseUrl, pairing.deviceToken, 'events/ack', {
+      receiptHandles: [lateOldClaim.data[0]!.receiptHandle],
+    });
+    const rotatedHeartbeat = await inboxRequest(
+      eventInboxBaseUrl,
+      connector.token,
+      'connectors/heartbeat',
+      {
+        pluginVersion: '1.0.0',
+        protocolVersion: 1,
+        journalSchemaVersion: 1,
+        sessions: [{
+          sessionId,
+          bindingGeneration: 1,
+          pendingCount: 0,
+          oldestPendingSeconds: null,
+          storageUtilization: 0.1,
+          blockedReason: null,
+        }],
+      },
+    );
+    assert(rotatedHeartbeat.bindings[0]?.generation === 2,
+      'connector did not receive its rotated identity-bound desired binding');
+    const connectorStatus = await connectorDeviceRequest(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      'connectors/status',
+      undefined,
+      'GET',
+    );
+    assert(connectorStatus.sessions[0]?.connector?.pluginVersion === '1.0.0',
+      'device status did not expose the latest connector heartbeat');
+    const rotatedSecret = randomBytes(32).toString('base64url');
+    const rotatedCredential = await connectorDeviceRequest(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      `connectors/credentials/${connector.connectorId}/generations/2`,
+      { sessionIds: [sessionId], secretSha256: sha256(rotatedSecret) },
+      'PUT',
+    );
+    assert(rotatedCredential.outcome === 'ROTATED',
+      'prepared connector credential rotation was not applied');
+    const rotatedConnector = {
+      token: connectorToken(connector.connectorId, 2, rotatedSecret),
+    };
+    await expectConnectorUnauthorized(eventInboxBaseUrl, connector.token);
+    await inboxRequest(eventInboxBaseUrl, rotatedConnector.token, 'connectors/heartbeat', {
+      pluginVersion: '1.0.0',
+      protocolVersion: 1,
+      journalSchemaVersion: 1,
+      sessions: [{
+        sessionId,
+        bindingGeneration: 2,
+        pendingCount: 0,
+        oldestPendingSeconds: null,
+        storageUtilization: 0.1,
+        blockedReason: null,
+      }],
+    });
+
     const largeEnvelope = {
       ...envelope('parser-over-100-kib'),
       data: { padding: 'x'.repeat(130_000) },
@@ -153,6 +341,15 @@ async function main(): Promise<void> {
       receiptHandles: [secondReceipt],
     });
     assert(ack.acknowledged === 1, 'current receipt did not ACK the event');
+    const duplicateAfterAck = await postWebhook(pairing.callbackUrl, pairing.webhookSecret, event);
+    assert(duplicateAfterAck.duplicate === true, 'ACK removed the durable dedupe receipt');
+    const conflictingEvent = { ...event, data: { id: 'different-message' } };
+    const conflictResponse = await signedWebhookResponse(
+      pairing.callbackUrl,
+      pairing.webhookSecret,
+      conflictingEvent,
+    );
+    assert(conflictResponse.status === 409, 'payload conflict reused an accepted idempotency key');
 
     await postWebhook(pairing.callbackUrl, pairing.webhookSecret, envelope('poison-1'));
     const poison = await claim(eventInboxBaseUrl, pairing.deviceToken);
@@ -261,16 +458,32 @@ function envelope(idempotencyKey: string) {
   };
 }
 
+function connectorEnvelope(name: string, webhookId: string) {
+  const deliveryId = `delivery-${name}`;
+  return {
+    event: 'message.received',
+    timestamp: new Date().toISOString(),
+    sessionId,
+    idempotencyKey: `${deliveryId}_${webhookId}`,
+    deliveryId,
+    data: { id: `message-${name}` },
+  };
+}
+
 async function postWebhook(callbackUrl: string, secret: string, event: unknown) {
+  const response = await signedWebhookResponse(callbackUrl, secret, event);
+  if (!response.ok) throw new Error(`Event Inbox webhook returned HTTP ${response.status}`);
+  return response.json() as Promise<any>;
+}
+
+function signedWebhookResponse(callbackUrl: string, secret: string, event: unknown) {
   const rawBody = JSON.stringify(event);
   const signature = `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`;
-  const response = await fetch(callbackUrl, {
+  return fetch(callbackUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-openwa-signature': signature },
     body: rawBody,
   });
-  if (!response.ok) throw new Error(`Event Inbox webhook returned HTTP ${response.status}`);
-  return response.json() as Promise<any>;
 }
 
 function claim(baseUrl: string, token: string) {
@@ -284,6 +497,14 @@ function issueLegacyDeviceToken(secret: string, deviceId: string, sessionIds: st
     .update(`device-token:v1:${payload}`)
     .digest('base64url');
   return `${payload}.${signature}`;
+}
+
+function sha256(secret: string): string {
+  return createHash('sha256').update(secret).digest('hex');
+}
+
+function connectorToken(connectorId: string, generation: number, secret: string): string {
+  return `wac1.${connectorId}.${generation}.${secret}`;
 }
 
 async function expectUnauthorized(baseUrl: string, token: string): Promise<void> {
@@ -303,6 +524,41 @@ async function inboxRequest(baseUrl: string, token: string, path: string, body: 
   });
   if (!response.ok) throw new Error(`Event Inbox request returned HTTP ${response.status}`);
   return response.json() as Promise<any>;
+}
+
+async function connectorDeviceRequest(
+  baseUrl: string,
+  token: string,
+  path: string,
+  body: unknown,
+  method: 'GET' | 'PUT',
+) {
+  const response = await connectorDeviceResponse(baseUrl, token, path, body, method);
+  if (!response.ok) throw new Error(`Event Inbox request returned HTTP ${response.status}`);
+  return response.json() as Promise<any>;
+}
+
+function connectorDeviceResponse(
+  baseUrl: string,
+  token: string,
+  path: string,
+  body: unknown,
+  method: 'GET' | 'PUT',
+) {
+  return fetch(`${baseUrl}/api/v1/event-inbox/${path}`, {
+    method,
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+async function expectConnectorUnauthorized(baseUrl: string, token: string): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/v1/event-inbox/connectors/heartbeat`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert(response.status === 401, `stale connector token returned HTTP ${response.status}`);
 }
 
 async function publicRequest(url: string) {

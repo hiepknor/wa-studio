@@ -80,6 +80,7 @@ jobs:
             -f services/runtime/deploy/event-inbox/observability.compose.yaml \
             --profile canary config --no-interpolate --quiet
       - run: npm run contract:check
+      - run: npm run check:connector
       - run: npm run check:runtime
       - run: npm run test:integration
       - run: npm -w @wa/studio run check:frontend

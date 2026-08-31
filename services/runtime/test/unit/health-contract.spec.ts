@@ -57,6 +57,7 @@ describe('health OpenAPI contract', () => {
         'upstream_status_unknown',
         'upstream_unavailable',
         'upstream_incompatible',
+        'connector_unhealthy',
       ] },
     });
     expect(contract.components.schemas.OpenWAComponentHealthDto?.properties).toMatchObject({

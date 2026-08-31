@@ -5,6 +5,7 @@ import { WebhookProcessorService } from '../../src/modules/webhooks/webhook-proc
 import type { OpenWAWebhookEnvelope, WebhookRepository } from '../../src/modules/webhooks/webhook.repository';
 import type { ContactMessageObserverService } from '../../src/modules/contacts/contact-message-observer.service';
 import type { DatabaseService } from '../../src/core/database/database.service';
+import type { MessageDeliveryEvidenceService } from '../../src/modules/messages/message-delivery-evidence.service';
 
 const envelope: OpenWAWebhookEnvelope = {
   event: 'message.ack', timestamp: '2026-08-11T00:00:00.000Z', sessionId: 'session-1',
@@ -19,6 +20,61 @@ const databaseMock = () => ({
 });
 
 describe('WebhookProcessorService', () => {
+  it('projects connector evidence through the authoritative attempt state machine', async () => {
+    const evidence = {
+      protocolVersion: 1,
+      eventId: 'f698b26a-b23d-414d-be67-e09b127d6cc8',
+      commandId: '760ba9a3-606c-4ceb-83ba-d6ea46e73fc1',
+      attemptId: '9551a035-740f-4c01-b234-b1306de2fba8',
+      sessionId: '91f27e51-fd00-4c07-bfbf-0ddf11a02af6',
+      sequence: 1,
+      kind: 'COMMAND_RECEIVED',
+      openwaMessageId: null,
+      deliveryStatus: 'PENDING',
+      errorClass: null,
+      errorCode: null,
+      bindingGeneration: 1,
+      pluginVersion: '1.0.0',
+      occurredAt: '2026-08-31T10:00:00.000Z',
+      payloadSha256: 'b'.repeat(64),
+    };
+    const connectorEnvelope: OpenWAWebhookEnvelope = {
+      event: 'wa-studio.connector.evidence',
+      timestamp: evidence.occurredAt,
+      sessionId: evidence.sessionId,
+      idempotencyKey: `${evidence.eventId}_webhook-1`,
+      deliveryId: evidence.eventId,
+      data: evidence,
+    };
+    const database = databaseMock();
+    const webhooks = {
+      claimForProcessing: vi.fn().mockResolvedValue({ ...claim, envelope: connectorEnvelope }),
+      lockProcessingLease: vi.fn().mockResolvedValue(true),
+      markProcessedInTransaction: vi.fn().mockResolvedValue(true),
+      markFailed: vi.fn(),
+    };
+    const messageStatuses = { projectEventInTransaction: vi.fn() };
+    const connectorEvidence = {
+      projectInTransaction: vi.fn().mockResolvedValue({
+        state: 'APPLIED', statusAdvanced: false, jobId: evidence.commandId,
+      }),
+    };
+    const processor = new WebhookProcessorService(
+      database as unknown as DatabaseService,
+      webhooks as unknown as WebhookRepository,
+      { storeInTransaction: vi.fn().mockResolvedValue(true) } as unknown as RuntimeEventRepository,
+      messageStatuses as unknown as MessageStatusProjectionService,
+      {} as ContactMessageObserverService,
+      connectorEvidence as unknown as MessageDeliveryEvidenceService,
+    );
+
+    await processor.process(connectorEnvelope.idempotencyKey);
+
+    expect(connectorEvidence.projectInTransaction).toHaveBeenCalledWith(client, evidence);
+    expect(messageStatuses.projectEventInTransaction).not.toHaveBeenCalled();
+    expect(webhooks.markProcessedInTransaction).toHaveBeenCalledOnce();
+  });
+
   it('persists, reconciles and marks a claimed event processed', async () => {
     const database = databaseMock();
     const webhooks = {

@@ -105,6 +105,14 @@ export class EventInboxDeviceRepository implements OnModuleDestroy {
       : this.authorizeLegacy(claims.deviceId, claims.sessionIds);
   }
 
+  async authorizeRetirement(
+    claims: EventInboxDeviceClaims,
+  ): Promise<EventInboxDeviceAuthorization | null> {
+    return claims.version === 2
+      ? this.authorizeV2Retirement(claims.deviceId, claims.tokenGeneration, claims.expiresAt)
+      : this.authorizeLegacy(claims.deviceId, claims.sessionIds);
+  }
+
   async revoke(deviceId: string, tokenGeneration: number): Promise<boolean> {
     const client = await this.pool.connect();
     try {
@@ -206,6 +214,36 @@ export class EventInboxDeviceRepository implements OnModuleDestroy {
       tokenGeneration,
       tokenVersion: 2,
       sessionIds: result.rows.map(row => row.session_id),
+    };
+  }
+
+  private async authorizeV2Retirement(
+    deviceId: string,
+    tokenGeneration: number,
+    expiresAt: string,
+  ): Promise<EventInboxDeviceAuthorization | null> {
+    const result = await this.pool.query<{ session_id: string | null }>(
+      `SELECT owner.session_id::text
+       FROM event_inbox_devices AS device
+       LEFT JOIN event_inbox_session_owners AS owner
+         ON owner.device_id = device.device_id
+        AND owner.token_generation = device.token_generation
+       WHERE device.device_id = $1::uuid
+         AND device.token_version = 2
+         AND device.token_generation = $2
+         AND device.token_expires_at = $3::timestamptz
+         AND device.token_expires_at > now()
+         AND device.revoked_at IS NULL
+       ORDER BY owner.session_id`,
+      [deviceId, tokenGeneration, expiresAt],
+    );
+    if (result.rowCount === 0) return null;
+    await this.markAuthenticated(deviceId, tokenGeneration);
+    return {
+      deviceId,
+      tokenGeneration,
+      tokenVersion: 2,
+      sessionIds: result.rows.flatMap(row => row.session_id ? [row.session_id] : []),
     };
   }
 

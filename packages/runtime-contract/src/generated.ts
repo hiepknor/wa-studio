@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/api/v1/openwa-safety/workspace/quiescence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check whether the managed workspace has drained all in-flight OpenWA work */
+        get: operations["OpenWASafetyController_workspaceQuiescence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/openwa-safety/workspace/control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Block or resume every OpenWA operation in the managed workspace */
+        post: operations["OpenWASafetyController_workspaceControl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/openwa-safety/sessions/{sessionId}": {
         parameters: {
             query?: never;
@@ -13,6 +47,23 @@ export interface paths {
         };
         /** Read the durable OpenWA safety state for one session */
         get: operations["OpenWASafetyController_snapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/openwa-safety/sessions/{sessionId}/quiescence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check whether one session has drained all in-flight OpenWA work */
+        get: operations["OpenWASafetyController_quiescence"];
         put?: never;
         post?: never;
         delete?: never;
@@ -767,6 +818,19 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        OpenWASafetyQuiescenceDto: {
+            drained: boolean;
+            processingMessageJobs: number;
+            unsettledConnectorCommands: number;
+            activeSafetyLeases: number;
+            /** Format: date-time */
+            checkedAt: string;
+        };
+        OpenWASafetyControlDto: {
+            /** @enum {string} */
+            action: "BLOCK" | "RESUME";
+            reason?: string;
+        };
         OpenWASafetyScopeDto: {
             /** @enum {string} */
             scopeType: "WORKSPACE" | "UPSTREAM" | "SESSION";
@@ -791,11 +855,6 @@ export interface components {
             lastFailureAt: string | null;
             /** Format: date-time */
             updatedAt: string;
-        };
-        OpenWASafetyControlDto: {
-            /** @enum {string} */
-            action: "BLOCK" | "RESUME";
-            reason?: string;
         };
         OpenWASafetyProfileChangeDto: {
             /** @enum {string} */
@@ -1570,8 +1629,31 @@ export interface components {
             /** @enum {string|null} */
             reason: "not_checked" | "network_error" | "http_error" | "invalid_response" | "release_mismatch" | null;
         };
+        OpenWAConnectorSessionHealthDto: {
+            /** Format: uuid */
+            sessionId: string;
+            /** @enum {string} */
+            state: "NOT_CONFIGURED" | "AWAITING_PLUGIN" | "RECOVERING" | "HEALTHY" | "STALE" | "BLOCKED" | "BINDING_MISMATCH" | "UNAVAILABLE";
+            reason: string | null;
+            pluginVersion: string | null;
+            /** Format: date-time */
+            heartbeatObservedAt: string | null;
+            /** Format: date-time */
+            leaseExpiresAt: string | null;
+            pendingCount: number | null;
+            storageUtilization: number | null;
+        };
+        OpenWAConnectorComponentHealthDto: {
+            /** @enum {string} */
+            status: "DISABLED" | "HEALTHY" | "DEGRADED";
+            requiredForLiveSends: boolean;
+            healthySessionCount: number;
+            sessionCount: number;
+            sessions: components["schemas"]["OpenWAConnectorSessionHealthDto"][];
+        };
         RuntimeComponentHealthDto: {
             openwa: components["schemas"]["OpenWAComponentHealthDto"];
+            connector: components["schemas"]["OpenWAConnectorComponentHealthDto"];
         };
         HealthOperationalDto: {
             /** @enum {string} */
@@ -1586,7 +1668,7 @@ export interface components {
             processes: components["schemas"]["RuntimeProcessHealthDto"];
             components: components["schemas"]["RuntimeComponentHealthDto"];
             /** @enum {string} */
-            reason?: "dependency_unavailable" | "background_process_degraded" | "upstream_status_unknown" | "upstream_unavailable" | "upstream_incompatible";
+            reason?: "dependency_unavailable" | "background_process_degraded" | "upstream_status_unknown" | "upstream_unavailable" | "upstream_incompatible" | "connector_unhealthy";
         };
         InboundMessageDto: {
             /** Format: uuid */
@@ -1669,6 +1751,50 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    OpenWASafetyController_workspaceQuiescence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenWASafetyQuiescenceDto"];
+                };
+            };
+        };
+    };
+    OpenWASafetyController_workspaceControl: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenWASafetyControlDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenWASafetyScopeDto"];
+                };
+            };
+        };
+    };
     OpenWASafetyController_snapshot: {
         parameters: {
             query?: never;
@@ -1686,6 +1812,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpenWASafetyScopeDto"];
+                };
+            };
+        };
+    };
+    OpenWASafetyController_quiescence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenWASafetyQuiescenceDto"];
                 };
             };
         };

@@ -7,6 +7,7 @@ import type {
   CommittedOpenWAMessagePermit,
   OpenWAMessageOperationClass,
   OpenWAMessagePermit,
+  OpenWAConnectorCommandCommit,
   OpenWAOperationClass,
   OpenWAOperationPermit,
   OpenWAOperationPermitDecision,
@@ -35,10 +36,14 @@ export class OpenWASafetyGovernorService {
     recipientId: string;
     operationClass: OpenWAMessageOperationClass;
   }): Promise<OpenWAPermitDecision> {
+    const connectorLeaseMs = this.config.OPENWA_CONNECTOR_EVIDENCE_TIMEOUT_SECONDS * 1_000;
     return this.repository.reserveMessage({
       ...input,
       upstreamId: this.upstreamId,
-      leaseTtlMs: this.config.OPENWA_REQUEST_DEADLINE_MS + 30_000,
+      leaseTtlMs: Math.max(
+        this.config.OPENWA_REQUEST_DEADLINE_MS,
+        this.config.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS ? connectorLeaseMs : 0,
+      ) + 30_000,
     });
   }
 
@@ -56,8 +61,21 @@ export class OpenWASafetyGovernorService {
     });
   }
 
-  commitMessageStart(permit: OpenWAMessagePermit): Promise<CommittedOpenWAMessagePermit | null> {
-    return this.repository.commitMessageStart(permit);
+  commitMessageStart(
+    permit: OpenWAMessagePermit,
+    connectorCommand?: OpenWAConnectorCommandCommit,
+  ): Promise<CommittedOpenWAMessagePermit | null> {
+    return this.repository.commitMessageStart(
+      permit,
+      this.config.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS,
+      connectorCommand,
+    );
+  }
+
+  async requireHealthyConnectorBindingGeneration(sessionId: string): Promise<number> {
+    const generation = await this.repository.healthyConnectorBindingGeneration(sessionId);
+    if (generation === null) throw new Error('OpenWA connector binding is not healthy');
+    return generation;
   }
 
   recordOutcome(permit: OpenWAOperationPermit, outcome: OpenWAOperationOutcome): Promise<void> {
@@ -70,6 +88,18 @@ export class OpenWASafetyGovernorService {
 
   sessionSnapshot(sessionId: string) {
     return this.repository.sessionSnapshot(this.upstreamId, sessionId);
+  }
+
+  sessionQuiescence(sessionId: string) {
+    return this.repository.sessionQuiescence(this.upstreamId, sessionId);
+  }
+
+  workspaceQuiescence() {
+    return this.repository.workspaceQuiescence();
+  }
+
+  mutateWorkspace(input: Omit<Parameters<OpenWASafetyRepository['mutateWorkspace']>[0], 'upstreamId'>) {
+    return this.repository.mutateWorkspace({ ...input, upstreamId: this.upstreamId });
   }
 
   mutateSession(input: Omit<Parameters<OpenWASafetyRepository['mutateSession']>[0], 'upstreamId'>) {

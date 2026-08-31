@@ -10,7 +10,10 @@ function run(command, args, options = {}) {
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(' ')} failed with exit code ${result.status}`);
+    const detail = options.capture && result.stderr?.trim()
+      ? `\n${result.stderr.trim()}`
+      : '';
+    throw new Error(`${command} ${args.join(' ')} failed with exit code ${result.status}${detail}`);
   }
   return (result.stdout ?? '').trim();
 }

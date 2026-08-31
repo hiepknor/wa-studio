@@ -335,7 +335,7 @@ describe('OpenWAClient response validation', () => {
     await expect(new OpenWAClient(undefined, undefined, safety as never).reconcileWebhookRegistration({
       sessionId: 'session-1', url: webhook.url, events: webhook.events,
       secret: 'secret', retryCount: 3,
-    })).resolves.toEqual({ created: 1, updated: 0, deleted: 0 });
+    })).resolves.toEqual({ created: 1, updated: 0, deleted: 0, webhookId: 'webhook-1' });
 
     expect(safety.reserveOperation).toHaveBeenCalledOnce();
     expect(safety.reserveOperation).toHaveBeenCalledWith(expect.objectContaining({

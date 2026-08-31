@@ -3,6 +3,7 @@ import { ApiHeader, ApiOkResponse, ApiOperation, ApiSecurity, ApiTags } from '@n
 import {
   OpenWASafetyControlDto,
   OpenWASafetyProfileChangeDto,
+  OpenWASafetyQuiescenceDto,
   OpenWASafetyScopeDto,
 } from '../../contracts/safety/openwa-safety.dto';
 import { OpenWASafetyService } from './openwa-safety.service';
@@ -13,11 +14,36 @@ import { OpenWASafetyService } from './openwa-safety.service';
 export class OpenWASafetyController {
   constructor(private readonly safety: OpenWASafetyService) {}
 
+  @Get('workspace/quiescence')
+  @ApiOperation({ summary: 'Check whether the managed workspace has drained all in-flight OpenWA work' })
+  @ApiOkResponse({ type: OpenWASafetyQuiescenceDto })
+  workspaceQuiescence() {
+    return this.safety.workspaceQuiescence();
+  }
+
+  @Post('workspace/control')
+  @ApiOperation({ summary: 'Block or resume every OpenWA operation in the managed workspace' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
+  @ApiOkResponse({ type: OpenWASafetyScopeDto })
+  workspaceControl(
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() input: OpenWASafetyControlDto,
+  ) {
+    return this.safety.mutateWorkspaceControl(idempotencyKey, input);
+  }
+
   @Get('sessions/:sessionId')
   @ApiOperation({ summary: 'Read the durable OpenWA safety state for one session' })
   @ApiOkResponse({ type: OpenWASafetyScopeDto })
   snapshot(@Param('sessionId', ParseUUIDPipe) sessionId: string) {
     return this.safety.snapshot(sessionId);
+  }
+
+  @Get('sessions/:sessionId/quiescence')
+  @ApiOperation({ summary: 'Check whether one session has drained all in-flight OpenWA work' })
+  @ApiOkResponse({ type: OpenWASafetyQuiescenceDto })
+  quiescence(@Param('sessionId', ParseUUIDPipe) sessionId: string) {
+    return this.safety.quiescence(sessionId);
   }
 
   @Post('sessions/:sessionId/control')

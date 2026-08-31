@@ -218,10 +218,14 @@ export class MessageJobRepository {
     );
     if (updated.rowCount !== 1) return false;
     await client.query(
-      `INSERT INTO message_attempts
-         (message_job_id, attempt_number, outcome, error, upstream_started_at, safety_policy_version)
-       VALUES ($1, $2, 'RETRY', $3, $4, $5)
-       ON CONFLICT (message_job_id, attempt_number) DO NOTHING`,
+        `INSERT INTO message_attempts
+           (message_job_id, attempt_number, outcome, error, upstream_started_at, safety_policy_version)
+         VALUES ($1, $2, 'RETRY', $3, $4, $5)
+         ON CONFLICT (message_job_id, attempt_number) DO UPDATE SET
+           outcome = 'RETRY', error = EXCLUDED.error,
+           upstream_started_at = EXCLUDED.upstream_started_at,
+           safety_policy_version = EXCLUDED.safety_policy_version,
+           transport_state = 'FAILED_DEFINITIVE'::openwa_message_transport_state`,
       [id, before.attempt_count, error, before.current_upstream_started_at, before.safety_policy_version],
     );
     return true;
@@ -267,7 +271,11 @@ export class MessageJobRepository {
            (message_job_id, attempt_number, outcome, error, upstream_started_at, safety_policy_version)
          SELECT id, attempt_count, 'UNKNOWN', 'Processing lease expired; delivery outcome is unknown',
            current_upstream_started_at, safety_policy_version
-         FROM expired ON CONFLICT (message_job_id, attempt_number) DO NOTHING
+         FROM expired ON CONFLICT (message_job_id, attempt_number) DO UPDATE SET
+           outcome = 'UNKNOWN', error = EXCLUDED.error,
+           upstream_started_at = EXCLUDED.upstream_started_at,
+           safety_policy_version = EXCLUDED.safety_policy_version,
+           transport_state = 'INDETERMINATE'::openwa_message_transport_state
          RETURNING 1
        )
        SELECT count(*)::text AS count FROM expired`,
@@ -292,13 +300,31 @@ export class MessageJobRepository {
     const attempt = updated.rows[0]?.attempt_count;
     if (attempt !== undefined) {
       await client.query(
-        `INSERT INTO message_attempts
-           (message_job_id, attempt_number, outcome, response, error, upstream_started_at, safety_policy_version)
+         `INSERT INTO message_attempts
+           (message_job_id, attempt_number, outcome, response, error, upstream_started_at,
+            safety_policy_version)
          VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
-         ON CONFLICT (message_job_id, attempt_number) DO NOTHING`,
+         ON CONFLICT (message_job_id, attempt_number) DO UPDATE SET
+           outcome = EXCLUDED.outcome,
+           response = EXCLUDED.response,
+           error = EXCLUDED.error,
+           upstream_started_at = EXCLUDED.upstream_started_at,
+           safety_policy_version = EXCLUDED.safety_policy_version,
+           transport_state = CASE EXCLUDED.outcome
+             WHEN 'ACCEPTED' THEN 'SEND_ACCEPTED'::openwa_message_transport_state
+             WHEN 'SENT' THEN 'SENT'::openwa_message_transport_state
+             WHEN 'DELIVERED' THEN 'DELIVERED'::openwa_message_transport_state
+             WHEN 'READ' THEN 'READ'::openwa_message_transport_state
+             WHEN 'FAILED' THEN 'FAILED_DEFINITIVE'::openwa_message_transport_state
+             WHEN 'UNKNOWN' THEN 'INDETERMINATE'::openwa_message_transport_state
+             ELSE message_attempts.transport_state
+           END,
+           transport_accepted_at = CASE WHEN EXCLUDED.outcome = 'ACCEPTED'
+             THEN now() ELSE message_attempts.transport_accepted_at END,
+           openwa_message_id = COALESCE($8, message_attempts.openwa_message_id)`,
         [id, attempt, status, JSON.stringify(options.response ?? null), options.error ?? null,
           updated.rows[0]?.current_upstream_started_at ?? null,
-          updated.rows[0]?.safety_policy_version ?? null],
+          updated.rows[0]?.safety_policy_version ?? null, options.openwaMessageId ?? null],
       );
     }
   }

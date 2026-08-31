@@ -66,13 +66,37 @@ const schema = z
     OPENWA_WEBHOOK_CALLBACK_URL: z.url().optional(),
     OPENWA_WEBHOOK_RECONCILIATION_INTERVAL_MS: z.coerce.number().int()
       .min(60_000).max(86_400_000).default(300_000),
-    EVENT_INBOX_BASE_URL: z.url().optional(),
+    EVENT_INBOX_BASE_URL: originSchema.optional(),
     EVENT_INBOX_DEVICE_TOKEN: z.string().min(32).max(4096).optional(),
     EVENT_INBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(250).max(60_000).default(2_000),
     EVENT_INBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(100),
     EVENT_INBOX_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(21_000).max(120_000).default(30_000),
     EVENT_INBOX_RESPONSE_MAX_BYTES: z.coerce.number().int()
       .min(1_048_576).max(167_772_160).default(41_943_040),
+    EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS: booleanFromEnv(false),
+    EVENT_INBOX_CONNECTOR_POLL_INTERVAL_MS: z.coerce.number().int()
+      .min(1_000).max(60_000).default(5_000),
+    EVENT_INBOX_CONNECTOR_STALE_AFTER_MS: z.coerce.number().int()
+      .min(10_000).max(300_000).default(20_000),
+    EVENT_INBOX_CONNECTOR_RECOVERY_HEARTBEATS: z.coerce.number().int()
+      .min(1).max(10).default(3),
+    EVENT_INBOX_CONNECTOR_BLOCK_STORAGE_UTILIZATION: z.coerce.number()
+      .min(0.5).max(1).default(0.75),
+    OPENWA_CONNECTOR_PLUGIN_ID: z.string().trim().min(1).max(128)
+      .regex(/^[A-Za-z0-9._-]+$/u).default('wa-studio-connector'),
+    OPENWA_CONNECTOR_INSTANCE_ID: z.string().trim().min(1).max(128)
+      .regex(/^[A-Za-z0-9._-]+$/u).optional(),
+    OPENWA_CONNECTOR_INGRESS_SECRET: z.string().min(32).max(4096).optional(),
+    OPENWA_CONNECTOR_COMMAND_TTL_SECONDS: z.coerce.number().int()
+      .min(60).max(3_600).default(300),
+    OPENWA_CONNECTOR_DISPATCH_BATCH_SIZE: z.coerce.number().int()
+      .min(1).max(100).default(20),
+    OPENWA_CONNECTOR_DISPATCH_LEASE_MS: z.coerce.number().int()
+      .min(5_000).max(120_000).default(30_000),
+    OPENWA_CONNECTOR_MAX_INGRESS_ATTEMPTS: z.coerce.number().int()
+      .min(1).max(100).default(20),
+    OPENWA_CONNECTOR_EVIDENCE_TIMEOUT_SECONDS: z.coerce.number().int()
+      .min(60).max(86_400).default(900),
     OPENWA_ALLOWED_SESSION_IDS: z
       .string()
       .min(1)
@@ -228,6 +252,58 @@ const schema = z
       context.addIssue({
         code: 'custom', path: ['EVENT_INBOX_DEVICE_TOKEN'],
         message: 'EVENT_INBOX_BASE_URL and EVENT_INBOX_DEVICE_TOKEN must be configured together',
+      });
+    }
+    if (value.EVENT_INBOX_BASE_URL) {
+      const eventInbox = new URL(value.EVENT_INBOX_BASE_URL);
+      const loopback = ['127.0.0.1', '::1', 'localhost'].includes(eventInbox.hostname);
+      if (eventInbox.protocol !== 'https:' && !(value.NODE_ENV !== 'production'
+        && eventInbox.protocol === 'http:' && loopback)) {
+        context.addIssue({
+          code: 'custom', path: ['EVENT_INBOX_BASE_URL'],
+          message: 'EVENT_INBOX_BASE_URL must use HTTPS outside loopback development',
+        });
+      }
+    }
+    if (value.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS && !value.EVENT_INBOX_BASE_URL) {
+      context.addIssue({
+        code: 'custom', path: ['EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS'],
+        message: 'Requiring connector health for live sends requires Event Inbox configuration',
+      });
+    }
+    if (value.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS
+      && (!value.OPENWA_CONNECTOR_INSTANCE_ID || !value.OPENWA_CONNECTOR_INGRESS_SECRET)) {
+      context.addIssue({
+        code: 'custom', path: ['OPENWA_CONNECTOR_INSTANCE_ID'],
+        message: 'Connector-required live sends require an OpenWA connector instance and ingress secret',
+      });
+    }
+    if (value.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS
+      && !value.OPENWA_WEBHOOK_RECONCILIATION_ENABLED) {
+      context.addIssue({
+        code: 'custom', path: ['OPENWA_WEBHOOK_RECONCILIATION_ENABLED'],
+        message: 'Connector-required live sends require webhook reconciliation',
+      });
+    }
+    if (value.NODE_ENV === 'production' && value.ALLOW_LIVE_SENDS
+      && !value.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS) {
+      context.addIssue({
+        code: 'custom', path: ['EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS'],
+        message: 'Production live sends require the OpenWA connector path',
+      });
+    }
+    if (value.OPENWA_CONNECTOR_EVIDENCE_TIMEOUT_SECONDS
+      < value.OPENWA_CONNECTOR_COMMAND_TTL_SECONDS) {
+      context.addIssue({
+        code: 'custom', path: ['OPENWA_CONNECTOR_EVIDENCE_TIMEOUT_SECONDS'],
+        message: 'Connector evidence timeout cannot be shorter than the command lifetime',
+      });
+    }
+    if (value.EVENT_INBOX_CONNECTOR_STALE_AFTER_MS
+      < value.EVENT_INBOX_CONNECTOR_POLL_INTERVAL_MS * 2) {
+      context.addIssue({
+        code: 'custom', path: ['EVENT_INBOX_CONNECTOR_STALE_AFTER_MS'],
+        message: 'EVENT_INBOX_CONNECTOR_STALE_AFTER_MS must allow at least two poll intervals',
       });
     }
     if (value.EVENT_INBOX_BASE_URL) {

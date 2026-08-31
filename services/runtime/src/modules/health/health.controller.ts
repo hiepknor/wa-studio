@@ -3,6 +3,7 @@ import { ApiOkResponse, ApiSecurity, ApiServiceUnavailableResponse, ApiTags } fr
 import type { Response } from 'express';
 import { Public } from '../../core/auth/public.decorator';
 import {
+  OpenWAConnectorComponentHealthDto,
   HealthLiveDto,
   HealthNotReadyDto,
   HealthOperationalDto,
@@ -76,16 +77,18 @@ export class HealthController {
   @ApiServiceUnavailableResponse({ type: HealthOperationalDto })
   async operational(@Res({ passthrough: true }) response: Response): Promise<HealthOperationalDto> {
     const openwa = this.openwaCompatibility?.snapshot() ?? this.unknownOpenWASnapshot();
-    const base = {
+    let connector = this.unknownConnectorSnapshot();
+    const base = () => ({
       service: RUNTIME_SERVICE,
       version: RUNTIME_VERSION,
       instanceId: this.config.RUNTIME_INSTANCE_ID,
-      components: { openwa },
-    } as const;
+      components: { openwa, connector },
+    } as const);
     let dependencies: HealthOperationalDto['dependencies'];
     let processes: RuntimeProcessHealth;
     try {
       await this.database.query('SELECT 1');
+      connector = await this.connectorSnapshot();
       const queue = await this.queues.readiness();
       dependencies = {
         postgres: true,
@@ -97,7 +100,7 @@ export class HealthController {
       this.logger.error({ event: 'runtime.operational.failed', error });
       response.status(503);
       return {
-        ...base,
+        ...base(),
         status: 'degraded',
         dependencies: null,
         processes: { worker: 'degraded', scheduler: 'degraded' },
@@ -107,7 +110,7 @@ export class HealthController {
     if (processes.worker !== 'healthy' || processes.scheduler !== 'healthy') {
       response.status(503);
       return {
-        ...base,
+        ...base(),
         status: 'degraded',
         dependencies,
         processes,
@@ -116,7 +119,7 @@ export class HealthController {
     }
     if (openwa.status !== 'COMPATIBLE') {
       return {
-        ...base,
+        ...base(),
         status: 'degraded',
         dependencies,
         processes,
@@ -127,7 +130,76 @@ export class HealthController {
             : 'upstream_status_unknown',
       };
     }
-    return { ...base, status: 'operational', dependencies, processes };
+    if (connector.requiredForLiveSends && connector.status !== 'HEALTHY') {
+      return {
+        ...base(),
+        status: 'degraded',
+        dependencies,
+        processes,
+        reason: 'connector_unhealthy',
+      };
+    }
+    return { ...base(), status: 'operational', dependencies, processes };
+  }
+
+  private async connectorSnapshot(): Promise<OpenWAConnectorComponentHealthDto> {
+    if (!this.config.EVENT_INBOX_BASE_URL) return this.unknownConnectorSnapshot();
+    const result = await this.database.query<{
+      session_id: string;
+      health_state: OpenWAConnectorComponentHealthDto['sessions'][number]['state'] | null;
+      health_reason: string | null;
+      plugin_version: string | null;
+      heartbeat_observed_at: Date | null;
+      health_lease_expires_at: Date | null;
+      pending_count: string | null;
+      storage_utilization: number | null;
+    }>(
+      `SELECT allowed.session_id::text, connector.health_state, connector.health_reason,
+         connector.plugin_version, connector.heartbeat_observed_at,
+         connector.health_lease_expires_at, connector.pending_count::text,
+         connector.storage_utilization
+       FROM unnest($1::text[]) AS allowed(session_id)
+       LEFT JOIN openwa_connector_sessions connector ON connector.session_id = allowed.session_id
+       ORDER BY allowed.session_id`,
+      [this.config.OPENWA_ALLOWED_SESSION_IDS],
+    );
+    const now = Date.now();
+    const sessions = result.rows.map(row => ({
+      sessionId: row.session_id,
+      state: row.health_state === 'HEALTHY'
+        && (!row.health_lease_expires_at || row.health_lease_expires_at.valueOf() <= now)
+        ? 'STALE' as const
+        : row.health_state ?? 'NOT_CONFIGURED' as const,
+      reason: row.health_state === 'HEALTHY'
+        && (!row.health_lease_expires_at || row.health_lease_expires_at.valueOf() <= now)
+        ? 'connector_health_lease_expired'
+        : row.health_reason,
+      pluginVersion: row.plugin_version,
+      heartbeatObservedAt: row.heartbeat_observed_at?.toISOString() ?? null,
+      leaseExpiresAt: row.health_lease_expires_at?.toISOString() ?? null,
+      pendingCount: row.pending_count === null ? null : Number(row.pending_count),
+      storageUtilization: row.storage_utilization,
+    }));
+    const healthySessionCount = sessions.filter(session => session.state === 'HEALTHY').length;
+    return {
+      status: sessions.length > 0 && healthySessionCount === sessions.length ? 'HEALTHY' : 'DEGRADED',
+      requiredForLiveSends: this.config.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS,
+      healthySessionCount,
+      sessionCount: sessions.length,
+      sessions,
+    };
+  }
+
+  private unknownConnectorSnapshot(): OpenWAConnectorComponentHealthDto {
+    return {
+      status: this.config.EVENT_INBOX_BASE_URL ? 'DEGRADED' : 'DISABLED',
+      requiredForLiveSends: this.config.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS,
+      healthySessionCount: 0,
+      sessionCount: this.config.EVENT_INBOX_BASE_URL
+        ? this.config.OPENWA_ALLOWED_SESSION_IDS.length
+        : 0,
+      sessions: [],
+    };
   }
 
   private unknownOpenWASnapshot(): OpenWACompatibilitySnapshot {

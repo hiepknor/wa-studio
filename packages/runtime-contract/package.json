@@ -8,7 +8,9 @@
     ".": {
       "types": "./src/generated.ts"
     },
-    "./openapi.json": "./openapi.json"
+    "./openapi.json": "./openapi.json",
+    "./openwa-connector/v1/command.schema.json": "./openwa-connector/v1/command.schema.json",
+    "./openwa-connector/v1/evidence.schema.json": "./openwa-connector/v1/evidence.schema.json"
   },
   "scripts": {
     "generate": "openapi-typescript openapi.json -o src/generated.ts"
