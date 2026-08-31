@@ -243,6 +243,10 @@ export class EventInboxRepository implements OnModuleDestroy {
     try {
       await client.query('BEGIN');
       await lockUsage(client);
+      await lockIdempotencyKeys(
+        client,
+        receipts.map(receipt => receipt.idempotencyKey),
+      );
       const selected = await client.query<{
         idempotency_key: string;
         session_id: string;
@@ -528,6 +532,19 @@ async function decrementUsage(
        stored_bytes = GREATEST(0, stored_bytes - $2)
      WHERE singleton = true`,
     [removed.length, removedBytes],
+  );
+}
+
+async function lockIdempotencyKeys(client: PoolClient, keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  await client.query(
+    `SELECT pg_advisory_xact_lock(hashtextextended(idempotency_key, 0))
+     FROM (
+       SELECT DISTINCT idempotency_key
+       FROM unnest($1::text[]) AS requested(idempotency_key)
+       ORDER BY idempotency_key
+     ) AS ordered_keys`,
+    [keys],
   );
 }
 

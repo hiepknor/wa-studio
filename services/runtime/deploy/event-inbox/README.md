@@ -26,7 +26,7 @@ reference that digest rather than a mutable tag.
 Create a mode-0600 event-inbox.env with immutable image digests and independent secrets:
 
 ~~~dotenv
-WA_EVENT_INBOX_IMAGE=registry.example/wa-runtime@sha256:<digest>
+WA_EVENT_INBOX_IMAGE=registry.example/wa-event-inbox@sha256:<digest>
 WA_EVENT_INBOX_POSTGRES_IMAGE=postgres:17.10-alpine@sha256:<digest>
 POSTGRES_DB=wa_event_inbox
 POSTGRES_USER=wa_event_inbox
@@ -89,6 +89,13 @@ The `canary` Compose profile runs the candidate image on loopback port 34201 whi
 primary remains on 34200. Candidate migrations run from the candidate digest first. Every schema
 change used during a canary must remain readable and writable by the primary image; destructive or
 one-way migrations require a separate expand/migrate/contract release sequence.
+
+Migration `011_legacy_primary_compatibility.sql` is the rollback fence for the connector rollout.
+It makes retained receipt tombstones suppress inserts from the accepted primary binary and cascades
+connector ownership when that binary expires a device. The integration release-upgrade test starts
+from migrations 001–003, applies the complete candidate set, then exercises those legacy insert and
+cleanup statements. Do not bypass that test or deploy a candidate whose migration floor differs
+from the accepted primary.
 
 Stage an attested candidate digest and confirm private readiness before changing public traffic:
 
