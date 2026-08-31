@@ -69,6 +69,12 @@
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-technical-size);
+  line-height: var(--leading-solid);
+}
+
+.workflow-stepper-index-value {
+  display: block;
+  transform: translateY(calc(var(--space-pixel) * -0.5));
 }
 
 .workflow-stepper-trigger[aria-selected="true"] .workflow-stepper-index {

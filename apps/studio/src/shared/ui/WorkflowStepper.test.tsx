@@ -34,6 +34,7 @@ describe("WorkflowStepper", () => {
     const preflight = screen.getByRole("tab", { name: "Preflight" });
     expect(details).toHaveAttribute("aria-current", "step");
     expect(details.closest("[role='tablist']")).toHaveClass("workflow-stepper");
+    expect(details.querySelector(".workflow-stepper-index-value")).toHaveTextContent("1");
     expect(targets).toBeDisabled();
 
     details.focus();

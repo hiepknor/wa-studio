@@ -81,7 +81,7 @@ export function WorkflowStepper<T extends string>({
           type="button"
         >
           <span aria-hidden="true" className="workflow-stepper-index">
-            {step.step}
+            <span className="workflow-stepper-index-value">{step.step}</span>
           </span>
           <span className="workflow-stepper-label">{step.label}</span>
           {step.meta !== undefined && (
