@@ -39,7 +39,7 @@ the Runtime sidecar and exposes them only to the Tauri signing/build command.
    desktop job generates an SPDX 2.3 SBOM and signs GitHub provenance attestations for every staged
    release file.
 5. The publish job verifies those attestations against this repository, workflow and source commit,
-   creates or resumes a draft release, uploads exactly eight assets, downloads `latest.json` back
+   creates or resumes a draft release, uploads exactly ten assets, downloads `latest.json` back
    for comparison, and only then publishes the draft as a prerelease or latest release according to
    the reviewed release channel.
 
@@ -49,7 +49,8 @@ The release assets are:
 - the notarized `.dmg` installer;
 - the generated `WA-Studio_<version>_sbom.spdx.json` software bill of materials;
 - `latest.json`, `release-checksums.txt`, and `release-assets.json`;
-- `event-inbox-image.txt`, containing the immutable GHCR digest deployed with this product version.
+- `event-inbox-image.txt`, containing the immutable GHCR digest deployed with this product version;
+- the installable `wa-studio-connector-<version>.zip` and its `.sha256` checksum.
 
 ## Verify after publication
 
@@ -58,25 +59,33 @@ gh release view "v<version>" --json tagName,isDraft,assets
 gh release download "v<version>" --dir "release-v<version>"
 cd "release-v<version>"
 shasum -a 256 --check release-checksums.txt
-for asset in *; do
-  [[ "$asset" == "event-inbox-image.txt" ]] && continue
+for asset in WA-Studio_* latest.json release-assets.json release-checksums.txt; do
   gh attestation verify "$asset" \
     --repo hiepknor/wa-studio \
     --signer-workflow hiepknor/wa-studio/.github/workflows/release.yml \
     --source-digest "$(git rev-list -n 1 v<version>)"
 done
+connector_zip="$(find . -maxdepth 1 -type f -name 'wa-studio-connector-*.zip' -print -quit)"
+test -n "$connector_zip" -a -f "${connector_zip}.sha256"
+shasum -a 256 --check "${connector_zip}.sha256"
+gh attestation verify "$connector_zip" \
+  --repo hiepknor/wa-studio \
+  --signer-workflow hiepknor/wa-studio/.github/workflows/release.yml \
+  --source-digest "$(git rev-list -n 1 v<version>)"
 ```
 
 Confirm that:
 
-- the release is not a draft, contains exactly eight assets, and its prerelease/latest state matches
+- the release is not a draft, contains exactly ten assets, and its prerelease/latest state matches
   `release/components.json`;
 - `latest.json` reports the tagged version and a `darwin-aarch64` platform;
 - its URL points to the updater archive in the same immutable tag;
 - its inline signature equals the contents of the `.sig` asset;
 - the SPDX document reports `SPDX-2.3` and contains at least one package;
 - `event-inbox-image.txt` contains
-  `ghcr.io/hiepknor/wa-event-inbox@sha256:<64 lowercase hex characters>`.
+  `ghcr.io/hiepknor/wa-event-inbox@sha256:<64 lowercase hex characters>`;
+- the connector ZIP digest matches its adjacent checksum and its provenance identifies this release
+  workflow and tagged source commit.
 
 Authenticate to GHCR and verify the image provenance bundle separately:
 
@@ -100,8 +109,9 @@ perform this check because they intentionally contain no update channel or publi
 1. Keep `releaseChannel` set to `canary` and tag the verified `main` commit as `v0.2.0`. Install the
    published notarized DMG manually on only the canary Mac; prereleases are intentionally invisible
    to the stable updater endpoint.
-2. Verify all eight release assets, attestations, checksums, the updater signature, and the Event
-   Inbox image digest. Stage that digest with the Event Inbox `canary` Compose profile on port 34201.
+2. Verify all ten release assets, attestations, checksums, the updater signature, connector package,
+   and Event Inbox image digest. Stage that image digest with the Event Inbox `canary` Compose
+   profile on port 34201.
 3. Confirm private readiness, switch only `wa-events.onio.cc` to the candidate with
    `WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201`, and keep the accepted primary live on 34200 throughout
    the observation window.

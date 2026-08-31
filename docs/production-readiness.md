@@ -31,10 +31,12 @@ from any failures recorded before or after it. Before the canary clock starts:
       defect. Any unclassified callback blocks go-live.
 - [ ] Record the current cumulative OpenWA failure-ledger count and classify every delta outside the
       58-event slice. A stable historical slice must never be mistaken for the current source total.
-- [ ] Prove the reviewed OpenWA tag can retain and idempotently redrive terminal webhook failures.
-      The currently pinned 0.23.3 release closes queued outbox rows before delivery and does not
-      redrive its terminal failure ledger; any release with that behavior is a no-go for unattended
-      production operation.
+- [ ] Prove production does not depend on OpenWA's terminal webhook-failure ledger for command or
+      delivery recovery. The pinned 0.23.3 release closes queued outbox rows before delivery and does
+      not redrive its terminal failure ledger, so unattended operation requires the attested WA Studio
+      Connector: its durable journal must survive process restart, Event Inbox must retain evidence
+      until local ACK, and a command that crossed `SEND_STARTED` must never be automatically resent.
+      Any direct Runtime-to-OpenWA live-send fallback or unexplained connector-journal gap is a no-go.
 - [ ] Run a full authoritative OpenWA sync, allow Runtime projections to settle, and compare group,
       participant, and retained Activity totals against the authoritative server.
 - [ ] Confirm the Event Inbox has no unowned session, unexpected dead event, aged pending event, or
@@ -45,6 +47,9 @@ from any failures recorded before or after it. Before the canary clock starts:
 ## Canary UAT and 24-hour gate
 
 - [ ] Install the notarized 0.2.0 canary DMG and connect through production discovery protocol v2.
+- [ ] Verify the installed WA Studio Connector ZIP digest and provenance against the same release;
+      confirm exactly one enabled, session-scoped connector instance, the expected protocol/journal
+      versions, current credential generation, current binding generation, and a healthy heartbeat.
 - [ ] Create a backup before UAT; verify R2 readback checksum and complete an isolated restore drill.
 - [ ] Confirm the selected session reports OpenWA Safety policy version 5, effective state `READY`,
       profile `CANARY`, no unexpired recovery lease, and zero unexplained unknown Message Jobs.
@@ -52,6 +57,9 @@ from any failures recorded before or after it. Before the canary clock starts:
       app and verify persisted state after a managed Runtime restart.
 - [ ] Disconnect the desktop, generate a test callback, reconnect, and verify exactly-once drain from
       Event Inbox into local Runtime with a complete Activity trail.
+- [ ] Restart the OpenWA connector after `COMMAND_ACCEPTED` but before `SEND_STARTED`; verify the
+      journal resumes the command once. Repeat after `SEND_STARTED`; verify the result becomes
+      evidence-backed terminal or `INDETERMINATE` and no automatic resend occurs.
 - [ ] Run exactly one outbound campaign to the dedicated test group after confirming the target
       snapshot and recipient count. Verify terminal outcomes and reconcile them with OpenWA. Keep
       `CANARY`; do not promote to `STANDARD` during the acceptance window.
@@ -69,10 +77,11 @@ from any failures recorded before or after it. Before the canary clock starts:
 
 ## Go/no-go record
 
-Record candidate commit, desktop checksums, Event Inbox digest, OpenWA reviewed tag, canary start/end
-UTC, R2 backup key/checksum, restore-drill result, UAT run ID, test-group ID, alert test timestamps,
-operator acknowledgement, and the final go/no-go decision. Store identifiers only in the private
-release record; never add customer or credential data to Git.
+Record candidate commit, desktop checksums, Event Inbox digest, connector ZIP digest and provenance,
+OpenWA reviewed tag, connector/binding generations, canary start/end UTC, R2 backup key/checksum,
+restore-drill result, UAT run ID, test-group ID, alert test timestamps, operator acknowledgement, and
+the final go/no-go decision. Store identifiers only in the private release record; never add customer
+or credential data to Git.
 
 A no-go means: route Event Inbox back to 34200, stop outbound activity, preserve evidence, and
 fix-forward. A go means: prepare the reviewed 0.2.1 stable bump, converge the primary slot, verify the
