@@ -254,11 +254,10 @@ pub fn reconfigure(
         }
     }
 
-    if current.openwa_base_url == normalized.openwa_base_url
-        && current.openwa_api_key == normalized.openwa_api_key
-    {
+    if current.openwa_base_url == normalized.openwa_base_url {
         assert_stored_session_access(&normalized, &current.openwa_allowed_session_ids)?;
         let mut updated = current;
+        updated.openwa_api_key = normalized.openwa_api_key;
         updated.allow_live_sends = normalized.allow_live_sends;
         secret_store::save_managed_runtime_credentials(&updated)?;
         secret_store::clear_managed_runtime_provisioning_intent()?;
@@ -353,7 +352,15 @@ pub fn rotate_connector_credential() -> Result<ManagedRuntimeProvisioningProfile
     };
     let session_id = connector.session_id.clone();
     let connector_token = put_prepared_connector_credential(&prepared, &paired, &session_id)?;
-    ensure_connector_plugin(&input, &paired, &session_id, &connector_token)?;
+    let config = connector_config(&paired, &session_id, &connector_token);
+    ensure_connector_plugin(
+        &input,
+        &paired,
+        &session_id,
+        &connector_token,
+        &prepared.ingress_instance_id,
+    )?;
+    ensure_ingress_instance(&input, &prepared, &session_id, &config)?;
     let updated = current.connector.as_mut().ok_or_else(|| {
         "Managed Runtime connector credentials disappeared during rotation.".to_string()
     })?;
@@ -495,6 +502,24 @@ fn cleanup_openwa_resources(
                 .header("x-api-key", &credentials.openwa_api_key)
                 .send(),
             "disable the unused WA Studio Connector",
+        )?;
+    }
+    if remaining.is_empty() {
+        put_connector_config(
+            &client,
+            &input,
+            format!(
+                "{}/api/plugins/{}/config",
+                credentials.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+            ),
+            &serde_json::json!({
+                "eventInboxBaseUrl": "https://retired.invalid",
+                "connectorToken": "retired",
+                "sessionId": "00000000-0000-0000-0000-000000000000",
+                "heartbeatIntervalSeconds": 10,
+                "storagePressureThreshold": 0.75,
+            }),
+            "retired base configuration",
         )?;
     }
     Ok(())
@@ -693,6 +718,7 @@ fn finish_provisioning(
                 .to_string(),
         );
     }
+    preflight_connector_plugin(input, &intent.ingress_instance_id)?;
     let paired = probe_and_pair(input, &intent.device_id)?;
     if paired.session_ids.len() != 1 {
         return Err(
@@ -702,8 +728,15 @@ fn finish_provisioning(
     }
     let session_id = paired.session_ids[0].clone();
     let connector_token = put_prepared_connector_credential(&intent, &paired, &session_id)?;
-    ensure_connector_plugin(input, &paired, &session_id, &connector_token)?;
-    ensure_ingress_instance(input, &intent, &session_id)?;
+    let config = connector_config(&paired, &session_id, &connector_token);
+    ensure_connector_plugin(
+        input,
+        &paired,
+        &session_id,
+        &connector_token,
+        &intent.ingress_instance_id,
+    )?;
+    ensure_ingress_instance(input, &intent, &session_id, &config)?;
     let replacement = credentials(
         input,
         intent.runtime_api_key,
@@ -779,43 +812,17 @@ fn ensure_connector_plugin(
     paired: &PairingResponse,
     session_id: &str,
     connector_token: &str,
+    ingress_instance_id: &str,
 ) -> Result<(), String> {
     let client = connection_probe_client()?;
-    let mut plugin = get_openwa_plugin(&client, input)?;
-    if plugin.is_none() {
-        let package_url = validated_connector_plugin_url()?.ok_or_else(|| {
-            format!(
-                "OpenWA connector {} is not installed. Install WA Studio Connector {} before provisioning from a development build.",
-                OPENWA_CONNECTOR_PLUGIN_ID, OPENWA_CONNECTOR_PLUGIN_VERSION,
-            )
-        })?;
-        let installed = client
-            .post(format!("{}/api/plugins/install-url", input.openwa_base_url))
-            .header("x-api-key", &input.openwa_api_key)
-            .json(&serde_json::json!({ "url": package_url }))
-            .send()
-            .map_err(|error| format!("Could not install the WA Studio Connector: {error}"))?;
-        if !installed.status().is_success() {
-            return Err(format!(
-                "OpenWA rejected the WA Studio Connector package with HTTP {}.",
-                installed.status()
-            ));
-        }
-        plugin = Some(installed.json().map_err(|error| {
-            format!("OpenWA returned invalid WA Studio Connector metadata: {error}")
-        })?);
-    }
-    let plugin =
-        plugin.ok_or_else(|| "OpenWA did not return the installed connector.".to_string())?;
+    let plugin = get_or_install_connector_plugin(&client, input)?;
     validate_connector_plugin(&plugin)?;
+    assert_exclusive_connector_instance(&client, input, ingress_instance_id)?;
 
-    let mut active_sessions = plugin.active_sessions.clone().ok_or_else(|| {
+    plugin.active_sessions.as_ref().ok_or_else(|| {
         "OpenWA did not expose the connector session activation state; refusing to replace it."
             .to_string()
     })?;
-    if !active_sessions.iter().any(|active| active == session_id) {
-        active_sessions.push(session_id.to_string());
-    }
 
     require_success(
         client
@@ -824,42 +831,34 @@ fn ensure_connector_plugin(
                 input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
             ))
             .header("x-api-key", &input.openwa_api_key)
-            .json(&serde_json::json!({ "sessions": active_sessions }))
+            .json(&serde_json::json!({ "sessions": [session_id] }))
             .send(),
-        "activate the WA Studio Connector for its session",
+        "activate the WA Studio Connector exclusively for its managed session",
     )?;
-    let configured = client
-        .put(format!(
+    let connector_config = connector_config(paired, session_id, connector_token);
+    // OpenWA 0.23.3 starts one sandbox worker with the base config; per-session config is injected
+    // only while dispatching a hook or ingress delivery. Keep both layers identical so lifecycle
+    // initialization and scoped dispatch resolve the same immutable connector identity.
+    put_connector_config(
+        &client,
+        input,
+        format!(
+            "{}/api/plugins/{}/config",
+            input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+        ),
+        &connector_config,
+        "base lifecycle configuration",
+    )?;
+    put_connector_config(
+        &client,
+        input,
+        format!(
             "{}/api/plugins/{}/config/{}",
             input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID, session_id,
-        ))
-        .header("x-api-key", &input.openwa_api_key)
-        .json(&serde_json::json!({
-            "config": {
-                "eventInboxBaseUrl": paired.event_inbox_base_url,
-                "connectorToken": connector_token,
-                "sessionId": session_id,
-                "heartbeatIntervalSeconds": 10,
-                "storagePressureThreshold": 0.75,
-            }
-        }))
-        .send()
-        .map_err(|error| format!("Could not configure the WA Studio Connector: {error}"))?;
-    if !configured.status().is_success() {
-        return Err(format!(
-            "OpenWA rejected the WA Studio Connector configuration with HTTP {}.",
-            configured.status()
-        ));
-    }
-    let action: OpenWaPluginAction = configured.json().map_err(|error| {
-        format!("OpenWA returned an invalid connector configuration result: {error}")
-    })?;
-    if !action.success {
-        return Err(format!(
-            "OpenWA refused the connector configuration: {}",
-            action.message
-        ));
-    }
+        ),
+        &connector_config,
+        "managed-session configuration",
+    )?;
     if plugin.status != "enabled" {
         let enabled = client
             .post(format!(
@@ -899,6 +898,131 @@ fn ensure_connector_plugin(
             health
                 .message
                 .unwrap_or_else(|| "no reason was reported".to_string()),
+        ));
+    }
+    Ok(())
+}
+
+fn connector_config(
+    paired: &PairingResponse,
+    session_id: &str,
+    connector_token: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "eventInboxBaseUrl": paired.event_inbox_base_url,
+        "connectorToken": connector_token,
+        "sessionId": session_id,
+        "heartbeatIntervalSeconds": 10,
+        "storagePressureThreshold": 0.75,
+    })
+}
+
+fn preflight_connector_plugin(
+    input: &ManagedRuntimeProvisioningInput,
+    ingress_instance_id: &str,
+) -> Result<(), String> {
+    let client = connection_probe_client()?;
+    assert_compatible_release_with_client(
+        &client,
+        &input.openwa_base_url,
+        &input.openwa_api_key,
+        OPENWA_RELEASE_TAG,
+    )?;
+    let plugin = get_or_install_connector_plugin(&client, input)?;
+    validate_connector_plugin(&plugin)?;
+    assert_exclusive_connector_instance(&client, input, ingress_instance_id)
+}
+
+fn get_or_install_connector_plugin(
+    client: &Client,
+    input: &ManagedRuntimeProvisioningInput,
+) -> Result<OpenWaPlugin, String> {
+    if let Some(plugin) = get_openwa_plugin(client, input)? {
+        return Ok(plugin);
+    }
+    let package_url = validated_connector_plugin_url()?.ok_or_else(|| {
+        format!(
+            "OpenWA connector {} is not installed. Install WA Studio Connector {} before provisioning from a development build.",
+            OPENWA_CONNECTOR_PLUGIN_ID, OPENWA_CONNECTOR_PLUGIN_VERSION,
+        )
+    })?;
+    let installed = client
+        .post(format!("{}/api/plugins/install-url", input.openwa_base_url))
+        .header("x-api-key", &input.openwa_api_key)
+        .json(&serde_json::json!({ "url": package_url }))
+        .send()
+        .map_err(|error| format!("Could not install the WA Studio Connector: {error}"))?;
+    if !installed.status().is_success() {
+        return Err(format!(
+            "OpenWA rejected the WA Studio Connector package with HTTP {}.",
+            installed.status()
+        ));
+    }
+    installed
+        .json()
+        .map_err(|error| format!("OpenWA returned invalid WA Studio Connector metadata: {error}"))
+}
+
+fn assert_exclusive_connector_instance(
+    client: &Client,
+    input: &ManagedRuntimeProvisioningInput,
+    ingress_instance_id: &str,
+) -> Result<(), String> {
+    let response = client
+        .get(format!(
+            "{}/api/integration/plugins/{}/instances",
+            input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+        ))
+        .header("x-api-key", &input.openwa_api_key)
+        .send()
+        .map_err(|error| format!("Could not inspect WA Studio Connector ownership: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "OpenWA connector ownership inspection returned HTTP {}.",
+            response.status()
+        ));
+    }
+    let instances: Vec<OpenWaIntegrationInstance> = response.json().map_err(|error| {
+        format!("OpenWA returned invalid connector ownership metadata: {error}")
+    })?;
+    if instances
+        .iter()
+        .any(|instance| instance.instance_id != ingress_instance_id)
+    {
+        return Err(
+            "OpenWA already has a WA Studio Connector ingress owned by another workspace. Disconnect that workspace before provisioning this one."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn put_connector_config(
+    client: &Client,
+    input: &ManagedRuntimeProvisioningInput,
+    url: String,
+    config: &serde_json::Value,
+    scope: &str,
+) -> Result<(), String> {
+    let configured = client
+        .put(url)
+        .header("x-api-key", &input.openwa_api_key)
+        .json(&serde_json::json!({ "config": config }))
+        .send()
+        .map_err(|error| format!("Could not configure the WA Studio Connector {scope}: {error}"))?;
+    if !configured.status().is_success() {
+        return Err(format!(
+            "OpenWA rejected the WA Studio Connector {scope} with HTTP {}.",
+            configured.status()
+        ));
+    }
+    let action: OpenWaPluginAction = configured
+        .json()
+        .map_err(|error| format!("OpenWA returned an invalid connector {scope} result: {error}"))?;
+    if !action.success {
+        return Err(format!(
+            "OpenWA refused the connector {scope}: {}",
+            action.message
         ));
     }
     Ok(())
@@ -950,6 +1074,7 @@ fn ensure_ingress_instance(
     input: &ManagedRuntimeProvisioningInput,
     intent: &secret_store::ManagedRuntimeProvisioningIntent,
     session_id: &str,
+    config: &serde_json::Value,
 ) -> Result<(), String> {
     let client = connection_probe_client()?;
     let collection = format!(
@@ -963,6 +1088,7 @@ fn ensure_ingress_instance(
             "instanceId": intent.ingress_instance_id,
             "sessionScope": session_id,
             "secret": intent.ingress_secret,
+            "config": config,
         }))
         .send()
         .map_err(|error| format!("Could not create the OpenWA connector ingress: {error}"))?;
@@ -997,7 +1123,11 @@ fn ensure_ingress_instance(
     let enabled = client
         .patch(format!("{collection}/{}", intent.ingress_instance_id))
         .header("x-api-key", &input.openwa_api_key)
-        .json(&serde_json::json!({ "enabled": true, "sessionScope": session_id }))
+        .json(&serde_json::json!({
+            "enabled": true,
+            "sessionScope": session_id,
+            "config": config,
+        }))
         .send()
         .map_err(|error| format!("Could not enable the OpenWA connector ingress: {error}"))?;
     if !enabled.status().is_success() {
@@ -1143,13 +1273,6 @@ fn probe_and_pair(
 ) -> Result<PairingResponse, String> {
     Uuid::parse_str(device_id).map_err(|_| "Managed Runtime device ID is invalid.".to_string())?;
     let client = connection_probe_client()?;
-    assert_compatible_release_with_client(
-        &client,
-        &input.openwa_base_url,
-        &input.openwa_api_key,
-        OPENWA_RELEASE_TAG,
-    )?;
-
     let discovery = client
         .get(format!("{}/.well-known/wa-studio", input.openwa_base_url))
         .send()
@@ -1415,12 +1538,13 @@ mod tests {
     };
 
     use super::{
-        cleanup_openwa_resources, connector_secret, ensure_connector_plugin,
-        ensure_ingress_instance, normalize, put_prepared_connector_credential,
-        revoke_event_inbox_connector, revoke_event_inbox_device, sha256_hex,
-        supports_event_inbox_protocol, validate_connector_plugin, validate_ingress_instance,
-        validate_pairing, ManagedRuntimeProvisioningInput, OpenWaIntegrationInstance, OpenWaPlugin,
-        PairingResponse, OPENWA_CONNECTOR_PLUGIN_ID, OPENWA_CONNECTOR_PLUGIN_VERSION,
+        cleanup_openwa_resources, connector_config, connector_secret, ensure_connector_plugin,
+        ensure_ingress_instance, normalize, preflight_connector_plugin,
+        put_prepared_connector_credential, revoke_event_inbox_connector, revoke_event_inbox_device,
+        sha256_hex, supports_event_inbox_protocol, validate_connector_plugin,
+        validate_ingress_instance, validate_pairing, ManagedRuntimeProvisioningInput,
+        OpenWaIntegrationInstance, OpenWaPlugin, PairingResponse, OPENWA_CONNECTOR_PLUGIN_ID,
+        OPENWA_CONNECTOR_PLUGIN_VERSION, OPENWA_RELEASE_TAG,
     };
     use crate::managed_runtime::secret_store::{
         ManagedOpenWaConnectorCredentials, ManagedRuntimeCredentials,
@@ -1586,8 +1710,13 @@ mod tests {
         let intent = provisioning_intent(&base_url, connector_id, &"z".repeat(43));
         let mut request = input();
         request.openwa_base_url = base_url;
+        let config = connector_config(
+            &pairing(&request.openwa_base_url, session_id),
+            session_id,
+            &format!("wac1.{connector_id}.1.{}", "z".repeat(43)),
+        );
 
-        ensure_ingress_instance(&request, &intent, session_id).unwrap();
+        ensure_ingress_instance(&request, &intent, session_id, &config).unwrap();
 
         let create = requests.recv().unwrap();
         let recover = requests.recv().unwrap();
@@ -1596,6 +1725,7 @@ mod tests {
             "POST /api/integration/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/instances "
         )));
         assert!(create.contains(&intent.ingress_secret));
+        assert!(create.contains("connectorToken"));
         assert!(recover.starts_with(&format!(
             "GET /api/integration/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/instances/{instance_id} "
         )));
@@ -1603,21 +1733,28 @@ mod tests {
             "PATCH /api/integration/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/instances/{instance_id} "
         )));
         assert!(!enable.contains(&intent.ingress_secret));
+        assert!(enable.contains("connectorToken"));
         server.join().unwrap();
     }
 
     #[test]
-    fn configures_the_exact_plugin_before_enabling_it() {
+    fn configures_the_exclusive_plugin_base_and_session_before_enabling_it() {
         let session_id = "00000000-0000-4000-8000-000000000001";
         let other_session_id = "00000000-0000-4000-8000-000000000004";
         let connector_id = "00000000-0000-4000-8000-000000000003";
+        let ingress_instance_id = format!("wa-studio-{connector_id}");
         let connector_token = format!("wac1.{connector_id}.1.{}", "z".repeat(43));
         let plugin = format!(
             "{{\"id\":\"{OPENWA_CONNECTOR_PLUGIN_ID}\",\"version\":\"{OPENWA_CONNECTOR_PLUGIN_VERSION}\",\"status\":\"installed\",\"ingressCapable\":true,\"sessionScoped\":true,\"activeSessions\":[\"{other_session_id}\"]}}"
         );
         let (base_url, requests, server) = mock_http_server(vec![
             (200, plugin),
+            (200, "[]".to_string()),
             (200, "{}".to_string()),
+            (
+                200,
+                "{\"success\":true,\"message\":\"configured\"}".to_string(),
+            ),
             (
                 200,
                 "{\"success\":true,\"message\":\"configured\"}".to_string(),
@@ -1636,26 +1773,105 @@ mod tests {
             &pairing(&base_url, session_id),
             session_id,
             &connector_token,
+            &ingress_instance_id,
         )
         .unwrap();
 
-        let captured = (0..5).map(|_| requests.recv().unwrap()).collect::<Vec<_>>();
+        let captured = (0..7).map(|_| requests.recv().unwrap()).collect::<Vec<_>>();
         assert!(captured[0].starts_with(&format!("GET /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID} ")));
         assert!(captured[1].starts_with(&format!(
+            "GET /api/integration/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/instances "
+        )));
+        assert!(captured[2].starts_with(&format!(
             "PUT /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/sessions "
         )));
-        assert!(captured[1].contains(other_session_id));
-        assert!(captured[1].contains(session_id));
-        assert!(captured[2].starts_with(&format!(
+        assert!(!captured[2].contains(other_session_id));
+        assert!(captured[2].contains(session_id));
+        assert!(captured[3].starts_with(&format!(
+            "PUT /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/config "
+        )));
+        assert!(captured[3].contains(&connector_token));
+        assert!(captured[4].starts_with(&format!(
             "PUT /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/config/{session_id} "
         )));
-        assert!(captured[2].contains(&connector_token));
-        assert!(captured[3].starts_with(&format!(
+        assert!(captured[4].contains(&connector_token));
+        assert!(captured[5].starts_with(&format!(
             "POST /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/enable "
         )));
-        assert!(captured[4].starts_with(&format!(
+        assert!(captured[6].starts_with(&format!(
             "GET /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/health "
         )));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn preflight_rejects_foreign_connector_ownership_before_pairing() {
+        let session_id = "00000000-0000-4000-8000-000000000001";
+        let connector_id = "00000000-0000-4000-8000-000000000003";
+        let ingress_instance_id = format!("wa-studio-{connector_id}");
+        let plugin = format!(
+            "{{\"id\":\"{OPENWA_CONNECTOR_PLUGIN_ID}\",\"version\":\"{OPENWA_CONNECTOR_PLUGIN_VERSION}\",\"status\":\"installed\",\"ingressCapable\":true,\"sessionScoped\":true,\"activeSessions\":[]}}"
+        );
+        let foreign_instance = format!(
+            "[{{\"pluginId\":\"{OPENWA_CONNECTOR_PLUGIN_ID}\",\"instanceId\":\"wa-studio-foreign\",\"sessionScope\":\"{session_id}\",\"enabled\":false}}]"
+        );
+        let (base_url, requests, server) = mock_http_server(vec![
+            (200, format!("{{\"version\":\"{OPENWA_RELEASE_TAG}\"}}")),
+            (200, plugin),
+            (200, foreign_instance),
+        ]);
+        let mut request = input();
+        request.openwa_base_url = base_url;
+
+        let error = preflight_connector_plugin(&request, &ingress_instance_id).unwrap_err();
+
+        assert!(error.contains("owned by another workspace"));
+        assert!(requests.recv().unwrap().starts_with("GET /api/health "));
+        assert!(requests
+            .recv()
+            .unwrap()
+            .starts_with(&format!("GET /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID} ")));
+        assert!(requests.recv().unwrap().starts_with(&format!(
+            "GET /api/integration/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/instances "
+        )));
+        assert!(requests.try_recv().is_err());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn refuses_to_overwrite_another_connector_instance_during_reconciliation() {
+        let session_id = "00000000-0000-4000-8000-000000000001";
+        let connector_id = "00000000-0000-4000-8000-000000000003";
+        let ingress_instance_id = format!("wa-studio-{connector_id}");
+        let plugin = format!(
+            "{{\"id\":\"{OPENWA_CONNECTOR_PLUGIN_ID}\",\"version\":\"{OPENWA_CONNECTOR_PLUGIN_VERSION}\",\"status\":\"installed\",\"ingressCapable\":true,\"sessionScoped\":true,\"activeSessions\":[]}}"
+        );
+        let foreign_instance = format!(
+            "[{{\"pluginId\":\"{OPENWA_CONNECTOR_PLUGIN_ID}\",\"instanceId\":\"wa-studio-foreign\",\"sessionScope\":\"{session_id}\",\"enabled\":false}}]"
+        );
+        let (base_url, requests, server) =
+            mock_http_server(vec![(200, plugin), (200, foreign_instance)]);
+        let mut request = input();
+        request.openwa_base_url = base_url.clone();
+
+        let error = ensure_connector_plugin(
+            &request,
+            &pairing(&base_url, session_id),
+            session_id,
+            &format!("wac1.{connector_id}.1.{}", "z".repeat(43)),
+            &ingress_instance_id,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("owned by another workspace"));
+        assert!(requests
+            .recv()
+            .unwrap()
+            .starts_with(&format!("GET /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID} ")));
+        assert!(requests.recv().unwrap().starts_with(&format!(
+            "GET /api/integration/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/instances "
+        )));
+        assert!(requests.try_recv().is_err());
         server.join().unwrap();
     }
 
@@ -1699,6 +1915,48 @@ mod tests {
         assert!(captured.iter().all(|request| !request.starts_with(&format!(
             "DELETE /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID} "
         ))));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn disables_and_retires_base_config_after_removing_the_last_connector() {
+        let session_id = "00000000-0000-4000-8000-000000000001";
+        let connector_id = "00000000-0000-4000-8000-000000000003";
+        let plugin = format!(
+            "{{\"id\":\"{OPENWA_CONNECTOR_PLUGIN_ID}\",\"version\":\"{OPENWA_CONNECTOR_PLUGIN_VERSION}\",\"status\":\"enabled\",\"ingressCapable\":true,\"sessionScoped\":true,\"activeSessions\":[\"{session_id}\"]}}"
+        );
+        let (base_url, requests, server) = mock_http_server(vec![
+            (200, "{}".to_string()),
+            (200, plugin),
+            (200, "{}".to_string()),
+            (200, "{}".to_string()),
+            (200, "{}".to_string()),
+            (
+                200,
+                "{\"success\":true,\"message\":\"retired\"}".to_string(),
+            ),
+        ]);
+        let credentials = stored_credentials(&base_url, session_id, connector_id);
+
+        cleanup_openwa_resources(&credentials, None).unwrap();
+
+        let captured = (0..6).map(|_| requests.recv().unwrap()).collect::<Vec<_>>();
+        assert!(captured[2].starts_with(&format!(
+            "PUT /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/config/{session_id} "
+        )));
+        assert!(captured[3].starts_with(&format!(
+            "PUT /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/sessions "
+        )));
+        assert!(captured[3].contains("\"sessions\":[]"));
+        assert!(captured[4].starts_with(&format!(
+            "POST /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/disable "
+        )));
+        assert!(captured[5].starts_with(&format!(
+            "PUT /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/config "
+        )));
+        assert!(captured[5].contains("https://retired.invalid"));
+        assert!(captured[5].contains("\"connectorToken\":\"retired\""));
+        assert!(!captured[5].contains(&credentials.connector.unwrap().connector_token));
         server.join().unwrap();
     }
 

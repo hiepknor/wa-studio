@@ -12,7 +12,8 @@ in `release/components.json`.
 WA Studio desktop
   -> loopback WA Runtime API v1 / worker / scheduler
       -> managed PostgreSQL queue and business state
-      -> OpenWA Gateway (reviewed tag)
+      -> signed command ingress -> WA Studio Connector -> OpenWA Gateway (reviewed tag)
+      <- connector heartbeat and send evidence through the Event Inbox
       <- durable Event Inbox claim / lease / receipt ACK
 ```
 
@@ -157,11 +158,26 @@ presenting the current verified recovery points.
 ## Initial workflow
 
 1. Normalize the OpenWA origin and verify its live release against the reviewed pin.
-2. Read `/.well-known/wa-studio` from that origin.
-3. Pair a stable desktop device with the discovered Event Inbox using the supplied OpenWA API key.
-4. Persist the returned token, signing secret, callback and authorized session scope in the
-   operating-system credential store.
-5. Start managed PostgreSQL and Runtime, then reconcile the supported OpenWA webhook registration.
+2. Install or validate the release-pinned WA Studio Connector, then reject provisioning if any other
+   connector ingress instance already exists. This read-before-pair ownership gate prevents a second
+   local workspace from taking over the Event Inbox before the OpenWA conflict is visible.
+3. Read `/.well-known/wa-studio` and pair one stable desktop device with the discovered Event Inbox
+   using an API key that exposes exactly one OpenWA session.
+4. Provision one prepared connector credential. Configure the same connector identity as the OpenWA
+   plugin's base lifecycle config, managed-session override and ingress-instance config; replace the
+   plugin's active session set with that one session before enabling it.
+5. Reconcile the ingress instance and require plugin health before persisting the returned device,
+   signing, connector and session credentials in the operating-system credential store.
+6. Start managed PostgreSQL and Runtime, then require a fresh Event Inbox heartbeat whose connector,
+   credential, binding, protocol and journal generations exactly match the stored profile.
+
+The OpenWA plugin API owns one worker and supplies only base config during `onEnable`, so this release
+deliberately permits one WA Studio Connector ingress per OpenWA deployment. It does not emulate
+multi-instance lifecycle in Studio. Changing an API key for the same normalized OpenWA origin retains
+the connector identity after verifying that the new key still exposes the stored session. Disconnect
+deletes the ingress, clears its session override, removes the active session, disables the last plugin
+worker and overwrites the merge-only base config with a non-secret retired tombstone before revoking
+Event Inbox ownership.
 
 ## Desktop workspace state
 

@@ -48,8 +48,10 @@ from any failures recorded before or after it. Before the canary clock starts:
 
 - [ ] Install the notarized 0.2.0 canary DMG and connect through production discovery protocol v2.
 - [ ] Verify the installed WA Studio Connector ZIP digest and provenance against the same release;
-      confirm exactly one enabled, session-scoped connector instance, the expected protocol/journal
-      versions, current credential generation, current binding generation, and a healthy heartbeat.
+      confirm exactly one enabled, session-scoped connector instance and no foreign disabled instance;
+      confirm base lifecycle, session and ingress config resolve to the same connector identity, plus
+      the expected protocol/journal versions, current credential generation, current binding
+      generation, and a healthy heartbeat.
 - [ ] Create a backup before UAT; verify R2 readback checksum and complete an isolated restore drill.
 - [ ] Confirm the selected session reports OpenWA Safety policy version 5, effective state `READY`,
       profile `CANARY`, no unexpired recovery lease, and zero unexplained unknown Message Jobs.
@@ -68,6 +70,9 @@ from any failures recorded before or after it. Before the canary clock starts:
 - [ ] Exercise an isolated OpenWA `429` in staging and verify scope-wide throttling, cooldown,
       single-probe recovery, durable deferral, and gradual recovery without a blind message retry.
 - [ ] Exercise pairing revoke/reconnect and verify the retired device token cannot reclaim a session.
+- [ ] Disconnect an isolated canary workspace and verify the ingress and session override are gone,
+      the plugin is disabled, and its merge-only base configuration contains the retired tombstone
+      rather than the prior connector credential.
 - [ ] Verify public liveness and discovery, private readiness/metrics, TLS expiry, disk alerts, backup
       freshness, restore freshness, and Telegram firing/resolved delivery.
 - [ ] Observe the unchanged candidate digest for 24 continuous hours with no critical alert,
