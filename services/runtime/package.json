@@ -64,12 +64,12 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
-    "@types/node": "^24.3.0",
+    "@types/node": "^26.4.0",
     "@types/pg": "^8.15.5",
     "@yao-pkg/pkg": "^6.22.0",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "js-yaml": "5.2.3"

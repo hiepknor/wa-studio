@@ -21,9 +21,9 @@
     "ajv-formats": "^3.0.1"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
-    "esbuild": "^0.25.9",
-    "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "@types/node": "^26.4.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   }
 }
