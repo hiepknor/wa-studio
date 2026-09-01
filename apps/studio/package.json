@@ -35,7 +35,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-http": "^2.5.9",
     "@wa/runtime-contract": "1.0.0",
-    "lucide-react": "^1.31.0",
+    "lucide-react": "^1.37.0",
     "openapi-fetch": "^0.17.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
