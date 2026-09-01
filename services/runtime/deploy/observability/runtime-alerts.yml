@@ -46,6 +46,53 @@ groups:
           summary: WA Runtime PostgreSQL pool is saturated
           description: Requests have waited for a database connection continuously for five minutes.
 
+  - name: wa-runtime-openwa-safety
+    rules:
+      - alert: WARuntimeOpenWAUnknownMessageJobs
+        expr: sum(wa_runtime_openwa_unknown_message_jobs{job="wa-runtime"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Runtime contains an ambiguous outbound result
+          description: At least one Message Job crossed dispatch without definitive terminal evidence; stop new live campaigns and reconcile it without retrying.
+
+      - alert: WARuntimeOpenWACircuitOpen
+        expr: sum(wa_runtime_openwa_safety_scopes{job="wa-runtime",circuit_state="OPEN"}) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Runtime OpenWA safety circuit is open
+          description: Repeated upstream pressure or ambiguous failures opened a durable safety circuit; do not bypass its cooldown or recovery probe.
+
+      - alert: WARuntimeOpenWARecoveryStalled
+        expr: sum(wa_runtime_openwa_safety_scopes{job="wa-runtime",circuit_state="HALF_OPEN"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Runtime OpenWA recovery probe is stalled
+          description: A safety scope has remained half-open for five minutes; inspect the recovery lease and worker heartbeat.
+
+      - alert: WARuntimeOpenWAThrottlingPersistent
+        expr: sum(wa_runtime_openwa_safety_scopes{job="wa-runtime",rate_mode="THROTTLED"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Runtime OpenWA throttling persists
+          description: One or more durable safety scopes have remained throttled for ten minutes; stop new campaigns and inspect upstream 429 pressure.
+
+      - alert: WARuntimeOpenWADeferredQueueStalled
+        expr: sum(wa_runtime_openwa_safety_deferred_message_jobs{job="wa-runtime"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Runtime safety-deferred queue is not draining
+          description: Message Jobs have remained deferred by a safety fence or rate budget for ten minutes; inspect cooldowns, scheduler health, and database time.
+
   - name: wa-runtime-http
     rules:
       - alert: WARuntimeHighHttpErrorRate

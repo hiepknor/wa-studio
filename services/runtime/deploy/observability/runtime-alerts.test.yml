@@ -1,0 +1,75 @@
+rule_files:
+  - runtime-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'wa_runtime_openwa_unknown_message_jobs{job="wa-runtime"}'
+        values: '0 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: WARuntimeOpenWAUnknownMessageJobs
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: WA Runtime contains an ambiguous outbound result
+              description: At least one Message Job crossed dispatch without definitive terminal evidence; stop new live campaigns and reconcile it without retrying.
+
+  - interval: 1m
+    input_series:
+      - series: 'wa_runtime_openwa_safety_scopes{job="wa-runtime",circuit_state="OPEN",rate_mode="NORMAL"}'
+        values: '1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: WARuntimeOpenWACircuitOpen
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: WA Runtime OpenWA safety circuit is open
+              description: Repeated upstream pressure or ambiguous failures opened a durable safety circuit; do not bypass its cooldown or recovery probe.
+
+  - interval: 1m
+    input_series:
+      - series: 'wa_runtime_openwa_safety_scopes{job="wa-runtime",circuit_state="HALF_OPEN",rate_mode="NORMAL"}'
+        values: '1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: WARuntimeOpenWARecoveryStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: WA Runtime OpenWA recovery probe is stalled
+              description: A safety scope has remained half-open for five minutes; inspect the recovery lease and worker heartbeat.
+
+  - interval: 1m
+    input_series:
+      - series: 'wa_runtime_openwa_safety_scopes{job="wa-runtime",circuit_state="CLOSED",rate_mode="THROTTLED"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: WARuntimeOpenWAThrottlingPersistent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: WA Runtime OpenWA throttling persists
+              description: One or more durable safety scopes have remained throttled for ten minutes; stop new campaigns and inspect upstream 429 pressure.
+
+  - interval: 1m
+    input_series:
+      - series: 'wa_runtime_openwa_safety_deferred_message_jobs{job="wa-runtime"}'
+        values: '1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: WARuntimeOpenWADeferredQueueStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: WA Runtime safety-deferred queue is not draining
+              description: Message Jobs have remained deferred by a safety fence or rate budget for ten minutes; inspect cooldowns, scheduler health, and database time.

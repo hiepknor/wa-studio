@@ -61,8 +61,16 @@ Validate configuration before rollout:
 ```bash
 promtool check config services/runtime/deploy/observability/prometheus.yml
 promtool check rules services/runtime/deploy/observability/runtime-alerts.yml
+(
+  cd services/runtime/deploy/observability
+  promtool test rules runtime-alerts.test.yml
+)
 promtool check config services/runtime/deploy/observability/event-inbox-prometheus.yml
 promtool check rules services/runtime/deploy/observability/event-inbox-alerts.yml
+(
+  cd services/runtime/deploy/observability
+  promtool test rules event-inbox-alerts.test.yml
+)
 amtool check-config services/runtime/deploy/observability/alertmanager.yml
 blackbox_exporter --config.file=services/runtime/deploy/observability/blackbox.yml --config.check
 ```
@@ -109,12 +117,20 @@ gap is preferable to accepting two credentials indefinitely.
 - `wa_runtime_metrics_snapshot_failures_total` records failed dependency probes while the scrape
   itself remains available for diagnosis.
 - `wa_runtime_build_info` exposes only version, deployment profile and queue backend.
+- `wa_runtime_openwa_safety_scopes`, safety leases, deferred Message Jobs and `UNKNOWN` Message Jobs
+  expose bounded aggregate safety state without business identifiers. An `UNKNOWN` job or open circuit
+  pages immediately; stalled recovery, throttling and deferred work warn only after their bounded grace
+  period.
 - `wa_runtime_process_*` and `wa_runtime_nodejs_*` contain the standard process and Node.js
   collectors from the official Prometheus JavaScript client.
 
 Event Inbox exports only aggregate queue, storage-ledger, pending-age, device, ownership and pairing
 rate-limit gauges plus standard process metrics. No device ID, session ID, source IP, event key or
 payload becomes a label.
+
+`wa_event_inbox_webhook_admission_available` is one only while the durable ledger has both an event
+slot and enough byte headroom for a maximum-sized signed callback. Loss of that reserve is critical,
+causes private readiness to return HTTP 503, and must block candidate promotion.
 
 Prometheus adds `job` and `instance` at scrape time. Do not add business identifiers to application
 metrics. Use correlated JSON logs and retained Activity data for per-operation diagnosis.
@@ -126,8 +142,8 @@ heartbeat. Sustained pool waiting, HTTP 5xx ratio, p95 latency and snapshot fail
 Route alerts to the Runtime operator through the deployment's Alertmanager; the repository
 deliberately contains no paging destination or credentials.
 
-Event Inbox rules additionally page on snapshot failure or dead events and warn on aged pending
-events, capacity above 80 percent and sustained pairing throttling.
+Event Inbox rules additionally page on snapshot failure, dead events, or unavailable webhook
+admission and warn on aged pending events, capacity above 80 percent and sustained pairing throttling.
 
 After an availability alert, check `health/operational`, then PostgreSQL/queue reachability and the
 worker/scheduler logs. Never restart an extra scheduler to compensate for a timed-out tick, and

@@ -34,7 +34,8 @@ services:
       blackbox-exporter:
         condition: service_started
       event-inbox:
-        condition: service_healthy
+        # Monitoring must still start when admission readiness is red so it can page and diagnose.
+        condition: service_started
       node-exporter:
         condition: service_started
 

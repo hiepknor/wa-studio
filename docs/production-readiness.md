@@ -79,7 +79,9 @@ from any failures recorded before or after it. Before the canary clock starts:
       the plugin is disabled, and its merge-only base configuration contains the retired tombstone
       rather than the prior connector credential.
 - [ ] Verify public liveness and discovery, private readiness/metrics, TLS expiry, disk alerts, backup
-      freshness, restore freshness, and Telegram firing/resolved delivery.
+      freshness, restore freshness, and Telegram firing/resolved delivery. Retain synthetic firing and
+      resolution evidence for Event Inbox webhook-admission loss, Runtime `UNKNOWN` Message Jobs, an
+      open safety circuit, persistent throttling, stalled recovery, and a non-draining deferred queue.
 - [ ] Observe the unchanged candidate digest for 24 continuous hours with no critical alert,
       new OpenWA terminal webhook failure, unexplained callback loss, duplicate outbound effect,
       `UNKNOWN` delivery, recurring OpenWA cooldown, safety metric snapshot failure, or storage

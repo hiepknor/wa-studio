@@ -118,7 +118,8 @@ curl --fail https://wa-events.onio.cc/api/v1/health/live
 Verify the downloaded deployment manifest's GitHub attestation before this command. The verifier is
 read-only and refuses the cutover unless the container's configured digest, serving process release,
 reviewed OpenWA tag, connector protocol/journal schema, and applied Event Inbox migration head/count
-all match that one manifest. A generic `ready` response is not sufficient release evidence.
+all match that one manifest. It also requires one free event slot and enough byte reserve to durably
+accept a maximum-sized signed callback. A generic `ready` response is not sufficient release evidence.
 
 The committed Caddy route defaults to 34200, so an ordinary reload or restart without the explicit
 environment value fails back to the accepted primary. For immediate rollback, reload Caddy with
@@ -157,7 +158,9 @@ Before rollout, calculate the offline buffer from the highest observed callback 
 stored bytes per event. The lower of the event and byte ceilings must cover at least 24 hours at the
 observed peak, while leaving enough disk for PostgreSQL, WAL, one local encrypted backup, and the
 restore drill. Readiness reports stored, pending, leased, dead, oldest-pending, active-device,
-legacy-device, and owned-session metrics. After the fixed v1 grace expires, maintenance removes
+legacy-device, and owned-session metrics. Private readiness returns HTTP 503 when either the event
+slot reserve or maximum-callback byte reserve is exhausted; liveness remains independent so operators
+can drain and diagnose the existing ledger. After the fixed v1 grace expires, maintenance removes
 inactive ownership fences and expired device records without allowing token-generation reuse.
 
 ## Pairing abuse protection

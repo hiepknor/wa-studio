@@ -37,6 +37,7 @@ import { EventInboxTokenService } from '../../core/event-inbox/event-inbox-token
 import { RUNTIME_VERSION } from '../../core/release/runtime-release';
 import { verifySha256Hmac } from '../../core/security/hmac-signature';
 import { EventInboxOpenWAClient } from '../../integrations/openwa/event-inbox-openwa.client';
+import { eventInboxWebhookAdmission } from './event-inbox-admission';
 import {
   EventInboxDeviceRepository,
   type EventInboxDeviceAuthorization,
@@ -234,7 +235,10 @@ export class EventInboxController {
 
 @Controller('health')
 export class EventInboxHealthController {
-  constructor(private readonly repository: EventInboxRepository) {}
+  constructor(
+    private readonly repository: EventInboxRepository,
+    @Inject(EVENT_INBOX_CONFIG) private readonly config: EventInboxConfig = eventInboxConfig(),
+  ) {}
 
   @Get('live')
   live() {
@@ -242,12 +246,20 @@ export class EventInboxHealthController {
   }
 
   @Get('ready')
-  async ready() {
+  async ready(@Res({ passthrough: true }) response: Response) {
     const readiness = await this.repository.readiness();
+    const webhookAdmission = eventInboxWebhookAdmission(
+      readiness,
+      this.config.EVENT_INBOX_MAX_PAYLOAD_BYTES,
+    );
+    response.status(webhookAdmission.available
+      ? HttpStatus.OK
+      : HttpStatus.SERVICE_UNAVAILABLE);
     return {
-      status: 'ready',
+      status: webhookAdmission.available ? 'ready' : 'not_ready',
       service: 'wa-event-inbox',
       protocolVersion: 2,
+      webhookAdmission,
       release: {
         runtimeVersion: RUNTIME_VERSION,
         openwaReleaseTag: OPENWA_RELEASE_TAG,

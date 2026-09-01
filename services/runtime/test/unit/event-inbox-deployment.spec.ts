@@ -66,6 +66,7 @@ describe('Event Inbox deployment contract', () => {
     expect(compose).toContain('/etc/wa-event-inbox/telegram-bot-token');
     expect(compose).toContain('/var/lib/node-exporter/textfile:/textfile:ro');
     expect(compose).not.toMatch(/ports:\s*\n/u);
+    expect(compose).toMatch(/event-inbox:\s*\n(?:\s*#[^\n]*\n)?\s*condition: service_started/u);
   });
 
   it('wires bounded storage and pairing limits into the production Compose profile', () => {
@@ -80,6 +81,7 @@ describe('Event Inbox deployment contract', () => {
     expect(compose).toContain('migrate-canary:');
     expect(compose).toContain('WA_EVENT_INBOX_CANARY_IMAGE');
     expect(compose).toContain('127.0.0.1:34201:34200');
+    expect(compose).toContain("value.status==='ready'&&value.webhookAdmission?.available===true");
   });
 
   it('keeps detailed readiness and metrics off the public Caddy route set', () => {

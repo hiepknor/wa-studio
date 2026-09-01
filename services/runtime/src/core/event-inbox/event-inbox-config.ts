@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { OPENWA_RELEASE_TAG } from '../../contracts/release/openwa-release.generated';
+import { SHA256_HMAC_SIGNATURE_BYTES } from '../security/hmac-signature';
 
 const originSchema = z.url().transform(value => {
   const url = new URL(value);
@@ -88,6 +89,13 @@ const schema = z.object({
     context.addIssue({
       code: 'custom', path: ['EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS'],
       message: 'EVENT_INBOX_HTTP_HEADERS_TIMEOUT_MS cannot exceed EVENT_INBOX_HTTP_REQUEST_TIMEOUT_MS',
+    });
+  }
+  if (value.EVENT_INBOX_MAX_STORED_BYTES
+    < value.EVENT_INBOX_MAX_PAYLOAD_BYTES + SHA256_HMAC_SIGNATURE_BYTES) {
+    context.addIssue({
+      code: 'custom', path: ['EVENT_INBOX_MAX_STORED_BYTES'],
+      message: 'EVENT_INBOX_MAX_STORED_BYTES must reserve one maximum-sized signed webhook',
     });
   }
   if (value.EVENT_INBOX_OPENWA_RELEASE_TAG !== OPENWA_RELEASE_TAG) {

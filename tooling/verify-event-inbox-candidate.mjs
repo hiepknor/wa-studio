@@ -122,6 +122,15 @@ export function verifyEventInboxCandidate({ manifest, readiness, observedImage, 
   expectEqual(health.status, "ready", "Candidate readiness status");
   expectEqual(health.service, "wa-event-inbox", "Candidate service");
   expectEqual(health.protocolVersion, 2, "Event Inbox protocol");
+  const webhookAdmission = object(health.webhookAdmission, "Webhook admission status");
+  expectEqual(webhookAdmission.available, true, "Webhook admission availability");
+  if (!Number.isSafeInteger(webhookAdmission.eventSlotsRemaining)
+    || webhookAdmission.eventSlotsRemaining < 1
+    || !Number.isSafeInteger(webhookAdmission.byteHeadroom)
+    || !Number.isSafeInteger(webhookAdmission.requiredByteHeadroom)
+    || webhookAdmission.byteHeadroom < webhookAdmission.requiredByteHeadroom) {
+    throw new Error("Webhook admission headroom is insufficient or invalid.");
+  }
   expectEqual(release.runtimeVersion, runtime.version, "Runtime version");
   expectEqual(release.openwaReleaseTag, openwa.releaseTag, "OpenWA release");
   expectEqual(release.connectorProtocolVersion, connector.protocolVersion, "Connector protocol");

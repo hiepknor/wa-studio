@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+export const SHA256_HMAC_SIGNATURE_BYTES = Buffer.byteLength(`sha256=${'0'.repeat(64)}`, 'utf8');
+
 export function verifySha256Hmac(
   payload: Buffer,
   supplied: string | undefined,
