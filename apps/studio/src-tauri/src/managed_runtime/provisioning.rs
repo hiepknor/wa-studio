@@ -154,6 +154,8 @@ struct OpenWaPluginHealth {
     message: Option<String>,
 }
 
+const CONNECTOR_BINDING_PENDING_HEALTH: &str = "binding is not synchronized";
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OpenWaIntegrationInstance {
@@ -1105,7 +1107,13 @@ fn ensure_connector_plugin(
     let health: OpenWaPluginHealth = health.json().map_err(|error| {
         format!("OpenWA returned an invalid connector health response: {error}")
     })?;
-    if !health.healthy {
+    // The desired binding is Runtime-owned: it can only be published after the
+    // provisioning profile is committed and the local Runtime starts. Accept
+    // that one constrained bootstrap state here; Runtime readiness remains
+    // fail-closed until reconciliation and connector heartbeats make it healthy.
+    let binding_pending =
+        !health.healthy && health.message.as_deref() == Some(CONNECTOR_BINDING_PENDING_HEALTH);
+    if !health.healthy && !binding_pending {
         return Err(format!(
             "WA Studio Connector is not healthy: {}",
             health
@@ -1825,7 +1833,8 @@ mod tests {
         supports_event_inbox_protocol, validate_connector_plugin, validate_ingress_instance,
         validate_pairing_route, validate_pairing_secrets, DiscoveredEventInbox,
         ManagedRuntimeProvisioningInput, OpenWaIntegrationInstance, OpenWaPlugin, PairingResponse,
-        OPENWA_CONNECTOR_PLUGIN_ID, OPENWA_CONNECTOR_PLUGIN_VERSION, OPENWA_RELEASE_TAG,
+        CONNECTOR_BINDING_PENDING_HEALTH, OPENWA_CONNECTOR_PLUGIN_ID,
+        OPENWA_CONNECTOR_PLUGIN_VERSION, OPENWA_RELEASE_TAG,
     };
     use crate::managed_runtime::provisioning_routes::ManagedRuntimeRoute;
     use crate::managed_runtime::secret_store::{
@@ -2150,7 +2159,10 @@ mod tests {
                 200,
                 "{\"success\":true,\"message\":\"enabled\"}".to_string(),
             ),
-            (200, "{\"healthy\":true}".to_string()),
+            (
+                200,
+                format!("{{\"healthy\":false,\"message\":\"{CONNECTOR_BINDING_PENDING_HEALTH}\"}}"),
+            ),
         ]);
         let route = route(&base_url, session_id, connector_id);
 
@@ -2180,6 +2192,35 @@ mod tests {
         assert!(captured[6].starts_with(&format!(
             "GET /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID}/health "
         )));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn rejects_connector_bootstrap_health_with_any_additional_failure() {
+        let session_id = "00000000-0000-4000-8000-000000000001";
+        let connector_id = "00000000-0000-4000-8000-000000000003";
+        let connector_token = format!("wac1.{connector_id}.1.{}", "z".repeat(43));
+        let plugin = format!(
+            "{{\"id\":\"{OPENWA_CONNECTOR_PLUGIN_ID}\",\"version\":\"{OPENWA_CONNECTOR_PLUGIN_VERSION}\",\"status\":\"enabled\",\"ingressCapable\":true,\"sessionScoped\":true,\"activeSessions\":[\"{session_id}\"]}}"
+        );
+        let (base_url, _requests, server) = mock_http_server(vec![
+            (200, plugin),
+            (200, "[]".to_string()),
+            (200, "{}".to_string()),
+            (200, "{\"success\":true,\"message\":\"configured\"}".to_string()),
+            (200, "{\"success\":true,\"message\":\"configured\"}".to_string()),
+            (
+                200,
+                format!(
+                    "{{\"healthy\":false,\"message\":\"{CONNECTOR_BINDING_PENDING_HEALTH}; heartbeat is stale\"}}"
+                ),
+            ),
+        ]);
+        let route = route(&base_url, session_id, connector_id);
+
+        let error = ensure_connector_plugin(&route, "openwa-key", &connector_token).unwrap_err();
+
+        assert!(error.contains("heartbeat is stale"));
         server.join().unwrap();
     }
 

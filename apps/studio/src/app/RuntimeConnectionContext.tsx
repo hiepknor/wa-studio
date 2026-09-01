@@ -224,7 +224,12 @@ export function RuntimeConnectionProvider({
         return;
       }
       if (snapshot.phase === "provisioningRequired") {
-        if (managedConnectionFlowRef.current === "booting") setManagedConnectionFlow("configure");
+        if (
+          managedConnectionFlowRef.current !== "validating"
+          && managedConnectionFlowRef.current !== "error"
+        ) {
+          setManagedConnectionFlow("configure");
+        }
         return;
       }
       if (snapshot.phase !== "ready") {
