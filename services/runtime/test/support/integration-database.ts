@@ -8,6 +8,27 @@ export function integrationPool(): Pool {
   return new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
 }
 
+export async function dropIsolatedDatabase(pool: Pool, databaseName: string): Promise<void> {
+  if (!/^[a-z0-9_]+$/u.test(databaseName)) {
+    throw new Error(`Unsafe isolated database name: ${databaseName}`);
+  }
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ connections: string }>(
+      `SELECT count(*)::text AS connections
+       FROM pg_stat_activity
+       WHERE datname = $1 AND pid <> pg_backend_pid()`,
+      [databaseName],
+    );
+    if (result.rows[0]?.connections === '0') {
+      await pool.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for isolated database connections to close: ${databaseName}`);
+}
+
 export async function resetIntegrationDatabase(pool: Pool): Promise<void> {
   await pool.query(
     `TRUNCATE openwa_safety_leases, openwa_safety_buckets, openwa_safety_scopes,

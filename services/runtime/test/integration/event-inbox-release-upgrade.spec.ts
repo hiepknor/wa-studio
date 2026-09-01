@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { runMigrations } from '../../src/core/database/migration-runner';
 import { parseEventInboxConfig } from '../../src/core/event-inbox/event-inbox-config';
 import { EventInboxRepository } from '../../src/modules/event-inbox/event-inbox.repository';
-import { integrationPool } from '../support/integration-database';
+import { dropIsolatedDatabase, integrationPool } from '../support/integration-database';
 
 const LAST_ACCEPTED_MIGRATION = 3;
 const SESSION_ID = '00000000-0000-4000-8000-000000000001';
@@ -179,9 +179,12 @@ describe('Event Inbox release upgrade', () => {
     } finally {
       await repository?.onModuleDestroy().catch(() => undefined);
       await upgrade?.end().catch(() => undefined);
-      await admin.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
-      await admin.end();
-      await rm(oldMigrations, { recursive: true, force: true });
+      try {
+        await dropIsolatedDatabase(admin, databaseName);
+      } finally {
+        await admin.end();
+        await rm(oldMigrations, { recursive: true, force: true });
+      }
     }
   }, 30_000);
 });

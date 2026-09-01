@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 import { runMigrations } from '../../src/core/database/migration-runner';
-import { integrationPool } from '../support/integration-database';
+import { dropIsolatedDatabase, integrationPool } from '../support/integration-database';
 
 const LAST_RELEASED_MIGRATION = 51;
 const SESSION_ID = '00000000-0000-4000-8000-000000000001';
@@ -112,9 +112,12 @@ describe('release upgrade', () => {
       )).rejects.toMatchObject({ code: '23505' });
     } finally {
       await upgrade?.end().catch(() => undefined);
-      await admin.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
-      await admin.end();
-      await rm(oldMigrations, { recursive: true, force: true });
+      try {
+        await dropIsolatedDatabase(admin, databaseName);
+      } finally {
+        await admin.end();
+        await rm(oldMigrations, { recursive: true, force: true });
+      }
     }
   }, 30_000);
 });
