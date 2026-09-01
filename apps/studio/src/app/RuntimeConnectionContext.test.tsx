@@ -135,6 +135,39 @@ describe("RuntimeConnectionProvider managed mode", () => {
     expect(probeConnection).not.toHaveBeenCalled();
   });
 
+  it("opens configuration when setup becomes required after initial discovery", async () => {
+    let publishSnapshot: ((snapshot: ManagedRuntimeSnapshot) => void) | undefined;
+    const discovering: ManagedRuntimeSnapshot = {
+      ...managedReady(),
+      phase: "discovering",
+      availability: "starting",
+      manifest: null,
+      connection: null,
+    };
+    render(
+      <RuntimeConnectionProvider
+        discoverManagedRuntime={async () => discovering}
+        subscribeToManagedRuntime={async handler => {
+          publishSnapshot = handler;
+          return () => undefined;
+        }}
+      >
+        <ConnectionObserver />
+      </RuntimeConnectionProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("connection-flow")).toHaveTextContent("starting"));
+    act(() => publishSnapshot?.({
+      ...managedReady(),
+      phase: "provisioningRequired",
+      availability: "needsSetup",
+      connection: null,
+    }));
+
+    expect(screen.getByTestId("managed-phase")).toHaveTextContent("provisioningRequired");
+    expect(screen.getByTestId("connection-flow")).toHaveTextContent("configure");
+  });
+
   it("returns a managed connection to configuration mode after disconnect", async () => {
     const user = userEvent.setup();
     render(
