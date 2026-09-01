@@ -102,13 +102,13 @@ export function useGroupDirectoryQuery({
   }, [directoryRead, enabled]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || query === normalizedInputQuery) return;
     const timeout = window.setTimeout(() => {
       setOffsetState(0);
-      setQuery((current) => current === normalizedInputQuery ? current : normalizedInputQuery);
+      setQuery(normalizedInputQuery);
     }, 300);
     return () => window.clearTimeout(timeout);
-  }, [enabled, inputQuery, normalizedInputQuery]);
+  }, [enabled, normalizedInputQuery, query]);
 
   const load = useCallback(async () => {
     if (!enabled || !sessionId || !committedKey) return;
