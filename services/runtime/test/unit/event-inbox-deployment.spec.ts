@@ -84,10 +84,17 @@ describe('Event Inbox deployment contract', () => {
     expect(compose).toContain("value.status==='ready'&&value.webhookAdmission?.available===true");
   });
 
-  it('keeps detailed readiness and metrics off the public Caddy route set', () => {
+  it('exposes only the authenticated connector surface and public liveness through Caddy', () => {
     const caddy = readFileSync(resolve(deployRoot, 'Caddyfile.wa-events'), 'utf8');
     expect(caddy).toContain('path /api/v1/health/live');
     expect(caddy).toContain('{$WA_EVENT_INBOX_UPSTREAM:127.0.0.1:34200}');
+    expect(caddy).toContain('method GET POST PUT');
+    expect(caddy).toContain('path /api/v1/event-inbox/connectors/*');
+    expect(caddy).toContain('path /api/v1/event-inbox/media/*');
+    expect(caddy).toContain('path /api/v1/media/*');
+    expect(caddy).toContain('{$WA_EVENT_INBOX_CONTROL_UPSTREAM:127.0.0.1:34200}');
+    expect(caddy).toContain('max_size 1MB');
+    expect(caddy).toContain('max_size 8MB');
     expect(caddy).not.toContain('/api/v1/health/ready');
     expect(caddy).not.toContain('/api/v1/metrics');
   });

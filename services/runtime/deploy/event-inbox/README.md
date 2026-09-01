@@ -109,8 +109,10 @@ npm run event-inbox:candidate:verify -- \
   --readiness-url http://127.0.0.1:34201 \
   --container "$container"
 sudo env WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201 \
+  WA_EVENT_INBOX_CONTROL_UPSTREAM=127.0.0.1:34201 \
   caddy validate --config /etc/caddy/Caddyfile
 sudo env WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201 \
+  WA_EVENT_INBOX_CONTROL_UPSTREAM=127.0.0.1:34201 \
   caddy reload --config /etc/caddy/Caddyfile
 curl --fail https://wa-events.onio.cc/api/v1/health/live
 ~~~
@@ -121,10 +123,13 @@ reviewed OpenWA tag, connector protocol/journal schema, and applied Event Inbox 
 all match that one manifest. It also requires one free event slot and enough byte reserve to durably
 accept a maximum-sized signed callback. A generic `ready` response is not sufficient release evidence.
 
-The committed Caddy route defaults to 34200, so an ordinary reload or restart without the explicit
-environment value fails back to the accepted primary. For immediate rollback, reload Caddy with
-`WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34200`; do not stop either slot until liveness and a callback
-round trip are green through the public endpoint.
+The committed Caddy routes default to 34200, so an ordinary reload or restart without the explicit
+environment values fails back to the accepted primary. For immediate rollback, reload Caddy with
+both `WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34200` and
+`WA_EVENT_INBOX_CONTROL_UPSTREAM=127.0.0.1:34200`; do not stop either slot until liveness and a
+callback round trip are green through the public endpoint. The independent control-plane upstream
+keeps connector credentials, bindings, heartbeats, evidence, and media relay on one release during
+a staged cutover.
 
 After the 24-hour acceptance window, keep traffic on 34201, replace `WA_EVENT_INBOX_IMAGE` in the
 mode-0600 `event-inbox.env` with the exact accepted digest, converge `migrate` and `event-inbox`,
