@@ -30,6 +30,11 @@ import {
   MetricGrid,
 } from "@/shared/ui/Composition";
 import { ConfirmationDialog } from "@/shared/ui/ConfirmationDialog";
+import {
+  DataTable,
+  DataTableEmptyCell,
+  DataTableScroll,
+} from "@/shared/ui/DataTable";
 import { DateTime } from "@/shared/ui/DateTime";
 import { InlineAlert } from "@/shared/ui/InlineAlert";
 import {
@@ -580,6 +585,7 @@ export function RunsScreen({
 
 function RunOverview({ run }: { run: RuntimeCampaignRun }) {
   const resolved = resolvedTargets(run);
+  const remaining = Math.max(0, run.totalTargets - resolved);
   const progress = run.progress;
   const successful = run.executionMode === "LIVE"
     ? progress.accepted + progress.sent + progress.delivered + progress.read
@@ -593,6 +599,15 @@ function RunOverview({ run }: { run: RuntimeCampaignRun }) {
     ["Blocked", progress.blocked], ["Cancelled", progress.cancelled],
   ] as const;
   const statusReason = run.statusReason?.replace(/_/g, " ").toLocaleLowerCase();
+  const lifecycleSummary = run.completedAt
+    ? <>Completed <DateTime precision="second" value={run.completedAt} /></>
+    : run.startedAt
+      ? <>Started <DateTime precision="second" value={run.startedAt} /></>
+      : <>Scheduled <DateTime precision="second" value={run.scheduledAt} /></>;
+  const audienceSource = run.targetSource
+    ? `${run.targetSource.groupListNameSnapshot} membership r${run.targetSource.membershipRevision}`
+    : "Custom selection";
+  const launchSummary = `Campaign r${run.campaignRevision} · targets r${run.targetsRevision} · ${audienceSource}`;
   return <div aria-labelledby="run-inspector-overview-tab" className="runs-inspector" id="run-inspector-overview-panel" role="tabpanel">
     <InspectorSection
       description={statusReason ?? "Runtime-authoritative progress for this durable execution."}
@@ -605,41 +620,49 @@ function RunOverview({ run }: { run: RuntimeCampaignRun }) {
         ariaLabel="Key run progress"
         className="runs-key-metrics"
         items={[
-          { label: "Resolved", value: `${resolved}/${run.totalTargets}` },
-          { label: run.executionMode === "LIVE" ? "Advanced" : "Simulated", value: successful },
+          { label: "Remaining", value: remaining },
+          { label: run.executionMode === "LIVE" ? "Successful" : "Simulated", value: successful },
           { label: "Failed", tone: progress.failed > 0 ? "danger" : "default", value: progress.failed },
           { label: "Blocked", tone: progress.blocked > 0 ? "warning" : "default", value: progress.blocked },
         ]}
       />
     </InspectorSection>
-    <div className="runs-inspector-detail-grid">
-      <InspectorSection eyebrow="Timing" title="Lifecycle" titleId="run-lifecycle-title">
-        <DescriptionList
-          ariaLabel="Run lifecycle"
-          className="runs-detail-list"
-          items={[
-            { id: "created", label: "Created", value: <DateTime value={run.createdAt} /> },
-            { id: "scheduled", label: "Scheduled", value: <DateTime value={run.scheduledAt} /> },
-            { id: "started", label: "Started", value: <DateTime fallback="Not started" value={run.startedAt} /> },
-            { id: "completed", label: "Completed", value: <DateTime fallback="Not completed" value={run.completedAt} /> },
-            { id: "updated", label: "Last change", value: <DateTime value={run.updatedAt} /> },
-          ]}
-        />
-      </InspectorSection>
-      <InspectorSection eyebrow="Snapshot" title="Immutable launch" titleId="run-launch-snapshot-title">
-        <DescriptionList
-          ariaLabel="Immutable launch snapshot"
-          className="runs-detail-list"
-          items={[
-            { id: "run-id", label: "Run ID", value: run.id, valueClassName: "ui-technical-text" },
-            { id: "campaign-id", label: "Campaign ID", value: run.campaignId, valueClassName: "ui-technical-text" },
-            { id: "campaign-revision", label: "Campaign revision", value: `r${run.campaignRevision}` },
-            { id: "target-revision", label: "Target revision", value: `r${run.targetsRevision}` },
-            { id: "audience-source", label: "Audience source", value: run.targetSource ? `${run.targetSource.groupListNameSnapshot} · membership r${run.targetSource.membershipRevision}` : "Custom selection" },
-          ]}
-        />
-      </InspectorSection>
-    </div>
+    <InspectorDisclosure
+      className="runs-detail-disclosure"
+      description={lifecycleSummary}
+      title="Lifecycle"
+      titleId="run-lifecycle-title"
+    >
+      <DescriptionList
+        ariaLabel="Run lifecycle"
+        className="runs-detail-list"
+        items={[
+          { id: "created", label: "Created", value: <DateTime precision="second" value={run.createdAt} /> },
+          { id: "scheduled", label: "Scheduled", value: <DateTime precision="second" value={run.scheduledAt} /> },
+          { id: "started", label: "Started", value: <DateTime fallback="Not started" precision="second" value={run.startedAt} /> },
+          { id: "completed", label: "Completed", value: <DateTime fallback="Not completed" precision="second" value={run.completedAt} /> },
+          { id: "updated", label: "Last change", value: <DateTime precision="second" value={run.updatedAt} /> },
+        ]}
+      />
+    </InspectorDisclosure>
+    <InspectorDisclosure
+      className="runs-detail-disclosure"
+      description={<span title={launchSummary}>{launchSummary}</span>}
+      title="Immutable launch"
+      titleId="run-launch-snapshot-title"
+    >
+      <DescriptionList
+        ariaLabel="Immutable launch snapshot"
+        className="runs-detail-list runs-launch-list"
+        items={[
+          { id: "run-id", label: "Run ID", value: <span title={run.id}>{run.id}</span>, valueClassName: "ui-technical-text" },
+          { id: "campaign-id", label: "Campaign ID", value: <span title={run.campaignId}>{run.campaignId}</span>, valueClassName: "ui-technical-text" },
+          { id: "campaign-revision", label: "Campaign revision", value: `r${run.campaignRevision}` },
+          { id: "target-revision", label: "Target revision", value: `r${run.targetsRevision}` },
+          { id: "audience-source", label: "Audience source", value: <span title={audienceSource}>{audienceSource}</span> },
+        ]}
+      />
+    </InspectorDisclosure>
     <InspectorDisclosure
       className="runs-progress-disclosure"
       description="Every current delivery state reported by Runtime."
@@ -673,9 +696,9 @@ function RunMessageSnapshot({ run }: { run: RuntimeCampaignRun }) {
           { id: "file", label: "File", value: content.filename },
           { id: "format", label: "Format", value: `${content.mimeType} · ${formatRunBytes(content.byteSize)}` },
           { id: "integrity", label: "Integrity", value: `SHA-256 ${content.sha256.slice(0, 12)}…`, valueClassName: "ui-technical-text" },
+          { id: "caption", label: "Caption", value: content.caption || "No caption" },
         ]}
       />
-      <p>{content.caption || "No caption"}</p>
     </>}
   </InspectorDisclosure>;
 }
@@ -696,15 +719,17 @@ function RunActions({ mutation, onAction, run }: {
   onAction: (action: RunAction) => void;
   run: RuntimeCampaignRun;
 }) {
-  return <ActionFooter
-    actions={<>
-      {(run.status === "RUNNING" || run.status === "SCHEDULED") && <Button disabled={Boolean(mutation)} loading={mutation === "pause"} onClick={() => onAction("pause")}>Pause</Button>}
-      {(run.status === "PAUSED" || run.status === "BLOCKED") && <Button disabled={Boolean(mutation)} loading={mutation === "resume"} onClick={() => onAction("resume")} variant="primary">Resume</Button>}
-      <Button disabled={Boolean(mutation)} onClick={() => onAction("cancel")} variant="danger">Cancel</Button>
-    </>}
-    description={mutation ? "Runtime is applying the requested state change." : "Actions affect pending Runtime work."}
-    title={mutation ? `${mutation.charAt(0).toLocaleUpperCase()}${mutation.slice(1)} in progress…` : `${runStatusLabel(run.status)} · Runtime authoritative`}
-  />;
+  return <div className="runs-action-footer">
+    <ActionFooter
+      actions={<>
+        {(run.status === "RUNNING" || run.status === "SCHEDULED") && <Button disabled={Boolean(mutation)} loading={mutation === "pause"} onClick={() => onAction("pause")}>Pause</Button>}
+        {(run.status === "PAUSED" || run.status === "BLOCKED") && <Button disabled={Boolean(mutation)} loading={mutation === "resume"} onClick={() => onAction("resume")} variant="primary">Resume</Button>}
+        <Button disabled={Boolean(mutation)} onClick={() => onAction("cancel")} variant="danger">Cancel</Button>
+      </>}
+      description={mutation ? "Runtime is applying the requested state change." : "Actions affect pending Runtime work."}
+      title={mutation ? `${mutation.charAt(0).toLocaleUpperCase()}${mutation.slice(1)} in progress…` : `${runStatusLabel(run.status)} · Runtime authoritative`}
+    />
+  </div>;
 }
 
 function RunDeliveries({
@@ -729,50 +754,88 @@ function RunDeliveries({
   page: RuntimeCampaignDeliveryPage | null;
 }) {
   const total = page?.meta.total ?? 0;
+  const limit = page?.meta.limit ?? 20;
+  const offset = page?.meta.offset ?? 0;
+  const firstItem = total === 0 ? 0 : offset + 1;
+  const lastItem = Math.min(offset + limit, total);
+  const paginationLabel = total === 1
+    ? "1 delivery"
+    : `${firstItem}–${lastItem} of ${total.toLocaleString()} deliveries`;
+  const unavailable = Boolean(error && !page?.data.length);
   return <div aria-labelledby="run-inspector-deliveries-tab" className="run-deliveries" id="run-inspector-deliveries-panel" role="tabpanel">
     <InspectorSection
-      action={<span className="run-deliveries-count">{total.toLocaleString()} total</span>}
       description="Inspect the current Runtime state for every target group."
       eyebrow="Targets"
       title="Per-group deliveries"
       titleId="run-deliveries-title"
     >
-      <div className="run-deliveries-toolbar">
-        <SearchField label="Search deliveries" loading={loading} onChange={onQueryChange} placeholder="Search group name or ID" value={inputQuery} variant="toolbar" />
-        <SearchSelect
-          id="run-delivery-status"
-          label="Delivery status"
-          labelHidden
-          onChange={onFilterChange}
-          options={[
-            { label: "All statuses", value: "ALL" },
-            ...DELIVERY_STATUSES.map((status) => ({
-              group: deliveryStatusGroup(status),
-              keywords: status,
-              label: runStatusLabel(status),
-              value: status,
-            })),
-          ]}
-          searchLabel="Search delivery statuses"
-          searchPlaceholder="Search statuses"
-          value={deliveryFilter}
-        />
-      </div>
-      {error && <InlineAlert action={<Button onClick={onRetry} size="sm">Retry</Button>} title="Could not load deliveries">{error}</InlineAlert>}
-      <div
-        aria-busy={loading}
-        aria-label="Per-group deliveries for this run"
-        aria-live={page?.data.length ? undefined : "polite"}
-        className="run-delivery-list"
-        data-updating={(loading && Boolean(page?.data.length)) || undefined}
-        role={page?.data.length ? "list" : "status"}
+      <DataTableFrame
+        className="run-deliveries-table-frame"
+        footer={total > 0 ? <TablePagination label={paginationLabel} limit={limit} loading={loading} offset={offset} onOffsetChange={onOffsetChange} total={total} /> : undefined}
+        label="Per-group delivery states"
+        scroll={false}
+        toolbar={<div className="run-deliveries-toolbar">
+          <SearchField label="Search deliveries" loading={loading} onChange={onQueryChange} placeholder="Search group name or ID" value={inputQuery} variant="toolbar" />
+          <SearchSelect
+            id="run-delivery-status"
+            label="Delivery status"
+            labelHidden
+            onChange={onFilterChange}
+            options={[
+              { label: "All statuses", value: "ALL" },
+              ...DELIVERY_STATUSES.map((status) => ({
+                group: deliveryStatusGroup(status),
+                keywords: status,
+                label: runStatusLabel(status),
+                value: status,
+              })),
+            ]}
+            searchLabel="Search delivery statuses"
+            searchPlaceholder="Search statuses"
+            value={deliveryFilter}
+          />
+        </div>}
       >
-        {!page && loading ? <EmptyState compact icon="refresh" loading title="Loading deliveries">Runtime is returning per-group delivery state.</EmptyState>
-          : error && !page?.data.length ? <EmptyState compact icon="circle-alert" title="Deliveries unavailable">Retry when Runtime is available.</EmptyState>
-            : !page?.data.length ? <EmptyState compact icon="runs" title={inputQuery || deliveryFilter !== "ALL" ? "No matching deliveries" : "No deliveries yet"}>{inputQuery || deliveryFilter !== "ALL" ? "No deliveries match these criteria." : "No deliveries have been materialized yet."}</EmptyState>
-              : page.data.map((delivery) => <div className="run-delivery-block" key={delivery.id} role="listitem"><span className="run-delivery-identity"><strong title={delivery.groupName}>{delivery.groupName}</strong><small className="ui-technical-text" title={delivery.groupId}>{delivery.groupId}</small>{delivery.failureReason && <small className="runs-delivery-failure" title={delivery.failureReason}>{delivery.failureReason}</small>}</span><Badge tone={deliveryTone(delivery.status)} variant="status">{runStatusLabel(delivery.status)}</Badge><span className="run-delivery-updated"><DateTime relativeStyle="compact" value={delivery.updatedAt} variant="relative" /></span></div>)}
-      </div>
-      {total > 0 && <TablePagination label={`${total} ${total === 1 ? "delivery" : "deliveries"}`} limit={page?.meta.limit ?? 20} loading={loading} offset={page?.meta.offset ?? 0} onOffsetChange={onOffsetChange} total={total} />}
+        {error && <InlineAlert action={<Button onClick={onRetry} size="sm">Retry</Button>} title="Could not load deliveries">{error}</InlineAlert>}
+        {!unavailable && <DataTableScroll
+          busy={loading}
+          updating={loading && Boolean(page?.data.length)}
+        >
+          <DataTable caption="Per-group deliveries for this run" className="run-deliveries-table">
+            <colgroup>
+              <col />
+              <col className="run-delivery-state-column" />
+              <col className="run-delivery-updated-column" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th scope="col">Group</th>
+                <th scope="col">State</th>
+                <th className="data-column-time" scope="col">Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!page && loading ? <tr><DataTableEmptyCell colSpan={3}><EmptyState compact icon="refresh" loading title="Loading deliveries">Runtime is returning per-group delivery state.</EmptyState></DataTableEmptyCell></tr>
+                : !page?.data.length ? <tr><DataTableEmptyCell colSpan={3}><EmptyState compact icon="runs" title={inputQuery || deliveryFilter !== "ALL" ? "No matching deliveries" : "No deliveries yet"}>{inputQuery || deliveryFilter !== "ALL" ? "No deliveries match these criteria." : "No deliveries have been materialized yet."}</EmptyState></DataTableEmptyCell></tr>
+                  : page.data.map((delivery) => <tr key={delivery.id}>
+                    <td className="data-cell-primary">
+                      <div className="stack stack-xs run-delivery-identity">
+                        <strong className="data-primary-text" title={delivery.groupName}>{delivery.groupName}</strong>
+                        <span className="data-secondary-text" title={delivery.groupId}>{delivery.groupId}</span>
+                        {delivery.failureReason && <span className="runs-delivery-failure" title={delivery.failureReason}>{delivery.failureReason}</span>}
+                      </div>
+                    </td>
+                    <td className="data-cell-status">
+                      <div className="run-delivery-state">
+                        <Badge tone={deliveryTone(delivery.status)} variant="status">{runStatusLabel(delivery.status)}</Badge>
+                      </div>
+                    </td>
+                    <td className="data-cell-time"><DateTime relativeStyle="compact" value={delivery.updatedAt} variant="relative" /></td>
+                  </tr>)}
+            </tbody>
+          </DataTable>
+        </DataTableScroll>}
+      </DataTableFrame>
     </InspectorSection>
   </div>;
 }

@@ -94,6 +94,8 @@ const campaignsSource = readFileSync("src/features/campaigns/CampaignsScreen.tsx
 const campaignsCss = readFileSync("src/features/campaigns/campaigns.css", "utf8");
 const dataFilterToolbarCss = readFileSync("src/shared/ui/data-filter-toolbar.css", "utf8");
 const dataFilterToolbarSource = readFileSync("src/shared/ui/DataFilterToolbar.tsx", "utf8");
+const toastCss = readFileSync("src/shared/ui/toast.css", "utf8");
+const runsCss = readFileSync("src/features/runs/runs.css", "utf8");
 const publicUiSource = readFileSync("src/shared/ui/index.ts", "utf8");
 const workspaceShell = readFileSync("src/app/WorkspaceShell.tsx", "utf8");
 const searchFieldCss = readFileSync("src/shared/ui/search-field.css", "utf8");
@@ -234,6 +236,13 @@ describe("WA Design System contract", () => {
     expect(tokensCss).toContain(
       `--app-min-width: ${tauriConfig.app.windows[0]?.minWidth}px`,
     );
+  });
+
+  it("keeps feedback and compact Run metrics free of decorative edge artifacts", () => {
+    expect(toastCss).not.toContain(".toast::before");
+    expect(runsCss).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
+    expect(runsCss).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    expect(runsCss).toContain(".runs-key-metrics > dl:nth-child(even)");
   });
 
   it("binds the self-hosted type families and semantic scale", () => {
