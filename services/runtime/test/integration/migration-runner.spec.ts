@@ -8,6 +8,7 @@ import { integrationPool } from '../support/integration-database';
 
 describe('migration runner', () => {
   const migrationName = '900_migration_runner_probe.sql';
+  const onlineMigrationName = '901_migration_runner_online_probe.sql';
   let pool: Pool;
   let directory: string;
 
@@ -18,7 +19,10 @@ describe('migration runner', () => {
 
   afterAll(async () => {
     await pool.query('DROP TABLE IF EXISTS migration_runner_probe');
-    await pool.query('DELETE FROM schema_migrations WHERE name = $1', [migrationName]);
+    await pool.query(
+      'DELETE FROM schema_migrations WHERE name = ANY($1::text[])',
+      [[migrationName, onlineMigrationName]],
+    );
     await pool.end();
     await rm(directory, { recursive: true, force: true });
   });
@@ -78,6 +82,27 @@ describe('migration runner', () => {
       'SELECT checksum FROM schema_migrations WHERE name = $1', [migrationName],
     );
     expect(record.rows[0]?.checksum).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it('applies explicitly non-transactional migrations under the migration lock', async () => {
+    await writeFile(
+      resolve(directory, onlineMigrationName),
+      `-- migrate: no-transaction
+CREATE INDEX CONCURRENTLY migration_runner_probe_id_idx ON migration_runner_probe (id);
+`,
+    );
+
+    await expect(runMigrations(pool, directory)).resolves.toEqual({
+      applied: [onlineMigrationName],
+      checksumsBackfilled: [],
+    });
+    const index = await pool.query<{ valid: boolean }>(
+      `SELECT index.indisvalid AS valid
+       FROM pg_index AS index
+       JOIN pg_class AS relation ON relation.oid = index.indexrelid
+       WHERE relation.relname = 'migration_runner_probe_id_idx'`,
+    );
+    expect(index.rows).toEqual([{ valid: true }]);
   });
 
   it('fails closed when an applied migration file is removed', async () => {

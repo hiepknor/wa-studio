@@ -73,7 +73,23 @@ describe('Event Inbox release upgrade', () => {
 
       const forward = files.filter(name => Number(name.slice(0, 3)) > LAST_ACCEPTED_MIGRATION);
       expect((await runMigrations(upgrade, migrations)).applied).toEqual(forward);
-      expect(forward.at(-1)).toBe('011_legacy_primary_compatibility.sql');
+      expect(forward.at(-1)).toBe('014_event_inbox_active_lease_index.sql');
+      const hotPathIndexes = await upgrade.query<{ indexname: string }>(
+        `SELECT indexname FROM pg_indexes
+         WHERE schemaname = current_schema()
+           AND indexname = ANY($1::text[])
+         ORDER BY indexname`,
+        [[
+          'idx_event_inbox_events_lease_active',
+          'idx_event_inbox_events_received_active',
+          'idx_event_inbox_events_session_received_active',
+        ]],
+      );
+      expect(hotPathIndexes.rows.map(row => row.indexname)).toEqual([
+        'idx_event_inbox_events_lease_active',
+        'idx_event_inbox_events_received_active',
+        'idx_event_inbox_events_session_received_active',
+      ]);
       expect(await runMigrations(upgrade, migrations)).toEqual({
         applied: [],
         checksumsBackfilled: [],

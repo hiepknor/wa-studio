@@ -241,8 +241,8 @@ describe('Event Inbox boundary', () => {
 
   it('fails readiness when it cannot admit one maximum-sized webhook', async () => {
     const readiness = {
-      migrationHead: '011_legacy_primary_compatibility.sql',
-      migrationCount: 11,
+      migrationHead: '014_event_inbox_active_lease_index.sql',
+      migrationCount: 14,
       storedEvents: 99,
       storedBytes: 500,
       pendingEvents: 0,

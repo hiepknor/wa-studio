@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import type { Pool } from 'pg';
 
 const MIGRATION_LOCK_NAME = 'wa-runtime:schema-migrations';
+const NON_TRANSACTIONAL_DIRECTIVE = '-- migrate: no-transaction';
 
 export interface MigrationRunResult {
   applied: string[];
@@ -26,6 +27,9 @@ interface MigrationFile {
   checksum: string;
   contents: string;
 }
+
+const isNonTransactional = (migration: MigrationFile): boolean =>
+  migration.contents.split(/\r?\n/u, 1)[0]?.trim() === NON_TRANSACTIONAL_DIRECTIVE;
 
 const checksum = (contents: string): string => createHash('sha256').update(contents).digest('hex');
 const fingerprint = (entries: Array<{ name: string; checksum: string | null }>): string =>
@@ -151,6 +155,16 @@ export async function runMigrations(pool: Pool, directory: string): Promise<Migr
         if (recordedChecksum !== file.checksum) {
           throw new Error(`Applied migration checksum mismatch: ${file.name}`);
         }
+        continue;
+      }
+
+      if (isNonTransactional(file)) {
+        await client.query(file.contents);
+        await client.query(
+          'INSERT INTO schema_migrations (name, checksum) VALUES ($1, $2)',
+          [file.name, file.checksum],
+        );
+        result.applied.push(file.name);
         continue;
       }
 

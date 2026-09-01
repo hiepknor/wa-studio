@@ -374,8 +374,8 @@ async function main(): Promise<void> {
         && health.release?.openwaReleaseTag === OPENWA_RELEASE_TAG
         && health.release?.connectorProtocolVersion === OPENWA_CONNECTOR_PROTOCOL_VERSION
         && health.release?.connectorJournalSchemaVersion === OPENWA_CONNECTOR_JOURNAL_SCHEMA_VERSION
-        && health.release?.migrationHead === '011_legacy_primary_compatibility.sql'
-        && health.release?.migrationCount === 11,
+        && health.release?.migrationHead === '014_event_inbox_active_lease_index.sql'
+        && health.release?.migrationCount === 14,
       'health did not expose the coordinated release identity',
     );
     assert(health.pendingEvents === 0 && health.deadEvents === 1, 'health did not expose poison isolation');
