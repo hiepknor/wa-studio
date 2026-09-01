@@ -456,12 +456,12 @@ export class EventInboxRepository implements OnModuleDestroy {
       migration_count: string;
     }>(
       `SELECT usage.stored_events::text, usage.stored_bytes::text,
-         count(event.*) FILTER (WHERE event.dead_at IS NULL)::text AS pending_events,
-         count(event.*) FILTER (WHERE event.dead_at IS NULL AND event.lease_expires_at > now())::text AS leased_events,
-         count(event.*) FILTER (WHERE event.dead_at IS NOT NULL)::text AS dead_events,
+         GREATEST(0, usage.stored_events - state.dead_events)::text AS pending_events,
+         state.leased_events::text,
+         state.dead_events::text,
          (SELECT count(*)::text FROM event_inbox_receipts
           WHERE expires_at > now()) AS retained_receipts,
-         EXTRACT(EPOCH FROM now() - min(event.received_at) FILTER (WHERE event.dead_at IS NULL))::text
+         EXTRACT(EPOCH FROM now() - state.oldest_pending_at)::text
            AS oldest_pending_age_seconds,
          (SELECT count(*)::text FROM event_inbox_devices AS device
           WHERE device.revoked_at IS NULL AND device.token_expires_at > now()
@@ -488,9 +488,17 @@ export class EventInboxRepository implements OnModuleDestroy {
          (SELECT count(*)::text FROM schema_migrations
           WHERE name LIKE '%.sql') AS migration_count
        FROM event_inbox_usage AS usage
-       LEFT JOIN event_inbox_events AS event ON true
+       CROSS JOIN LATERAL (
+         SELECT
+           (SELECT count(*) FROM event_inbox_events
+            WHERE dead_at IS NOT NULL) AS dead_events,
+           (SELECT count(*) FROM event_inbox_events
+            WHERE dead_at IS NULL AND lease_expires_at > now()) AS leased_events,
+           (SELECT min(received_at) FROM event_inbox_events
+            WHERE dead_at IS NULL) AS oldest_pending_at
+       ) AS state
        WHERE usage.singleton = true
-       GROUP BY usage.stored_events, usage.stored_bytes`,
+      `,
     );
     const usage = result.rows[0];
     if (!usage || !usage.migration_head) {
