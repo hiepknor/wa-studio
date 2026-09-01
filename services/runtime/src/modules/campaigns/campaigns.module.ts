@@ -1,0 +1,23 @@
+import { Module } from '@nestjs/common';
+import { GatewayModule } from '../gateway/gateway.module';
+import { MessagesModule } from '../messages/messages.module';
+import { GroupListsModule } from '../group-lists/group-lists.module';
+import { MediaAssetsModule } from '../media-assets/media-assets.module';
+import { CampaignController } from './campaign.controller';
+import { CampaignLivePreflightTokenService } from './campaign-live-preflight-token.service';
+import { CampaignRunController } from './campaign-run.controller';
+import { CampaignRepository } from './campaign.repository';
+import { CampaignService } from './campaign.service';
+import { CampaignPreflightService } from './campaign-preflight.service';
+import { CampaignRunRepository } from './campaign-run.repository';
+import { CampaignRunService } from './campaign-run.service';
+import { CampaignRunProcessorService } from './campaign-run-processor.service';
+import { OpenWAModule } from '../../integrations/openwa/openwa.module';
+
+@Module({
+  imports: [GatewayModule, GroupListsModule, MediaAssetsModule, MessagesModule, OpenWAModule],
+  controllers: [CampaignController, CampaignRunController],
+  providers: [CampaignRepository, CampaignService, CampaignLivePreflightTokenService, CampaignPreflightService, CampaignRunRepository, CampaignRunService, CampaignRunProcessorService],
+  exports: [CampaignRepository, CampaignService, CampaignRunRepository, CampaignRunService, CampaignRunProcessorService],
+})
+export class CampaignsModule {}

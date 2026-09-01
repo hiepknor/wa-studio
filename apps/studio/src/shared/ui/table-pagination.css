@@ -1,0 +1,13 @@
+.table-pagination {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--table-cell-padding-inline);
+  border-top: var(--border-width) solid var(--border-subtle);
+  color: var(--text-tertiary);
+  font-size: var(--text-supporting-size);
+  font-variant-numeric: tabular-nums;
+}
+.table-pagination > div { display: flex; gap: var(--space-tight); }

@@ -1,0 +1,107 @@
+import {
+  Controller, Get, Headers, HttpCode, Param, ParseIntPipe, Post, Query, Res, UseFilters,
+} from '@nestjs/common';
+import {
+  ApiAcceptedResponse, ApiBadRequestResponse, ApiConflictResponse, ApiHeader, ApiNotFoundResponse, ApiOkResponse,
+  ApiOperation, ApiQuery, ApiResponse, ApiSecurity, ApiTags,
+} from '@nestjs/swagger';
+import type { Response } from 'express';
+import { RuntimeErrorDto } from '../../contracts/common/runtime-error.dto';
+import { GroupDetailDto, GroupListDto, GroupMemberListDto } from '../../contracts/groups/group.dto';
+import { GroupCapabilityRefreshDto } from '../../contracts/groups/group-capability-refresh.dto';
+import { GroupIdentityQueryDto, GroupMemberQueryDto, GroupQueryDto } from '../../contracts/groups/group-query.dto';
+import { GroupService } from './group.service';
+import { GroupHttpExceptionFilter } from './group-http-exception.filter';
+
+@ApiTags('groups')
+@ApiSecurity('runtime-key')
+@ApiBadRequestResponse({ type: RuntimeErrorDto })
+@ApiNotFoundResponse({ type: RuntimeErrorDto })
+@ApiConflictResponse({ type: RuntimeErrorDto })
+@UseFilters(GroupHttpExceptionFilter)
+@Controller('groups')
+export class GroupController {
+  constructor(private readonly groups: GroupService) {}
+
+  @Get()
+  @ApiQuery({
+    name: 'capabilityStatus',
+    required: false,
+    enum: ['ALLOWED', 'DENIED', 'UNKNOWN'],
+    isArray: true,
+    style: 'form',
+    explode: false,
+  })
+  @ApiQuery({
+    name: 'capabilityFreshness',
+    required: false,
+    enum: ['CURRENT', 'STALE'],
+    isArray: true,
+    style: 'form',
+    explode: false,
+  })
+  @ApiOperation({
+    summary: 'Search and filter synchronized groups from the Runtime read model',
+    description: 'Results are ordered deterministically by group name and group ID. Search, capability, freshness, active-state, and inclusive participant-count filters are applied before pagination; meta.total counts the filtered dataset. Omitting isActive preserves active-only behavior.',
+  })
+  @ApiOkResponse({ type: GroupListDto })
+  list(@Query() query: GroupQueryDto) {
+    return this.groups.list(query);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Read synchronized group metadata' })
+  @ApiOkResponse({ type: GroupDetailDto })
+  get(@Param('id') id: string, @Query() query: GroupIdentityQueryDto) {
+    return this.groups.get(query.sessionId, id);
+  }
+
+  @Get(':id/members')
+  @ApiOperation({
+    summary: 'List materialized synchronized group members',
+    description: 'Results use deterministic super-admin, admin, normalized display name, and participant ID ordering. resolvedPhoneNumber is nullable and phoneNumber remains a deprecated upstream compatibility value. meta.datasetRevision changes after every committed member dataset mutation.',
+  })
+  @ApiOkResponse({ type: GroupMemberListDto })
+  members(
+    @Param('id') id: string,
+    @Query() query: GroupMemberQueryDto,
+  ) {
+    return this.groups.members(query.sessionId, id, query.limit, query.offset, query.query);
+  }
+
+  @Post(':id/capability-refreshes')
+  @HttpCode(202)
+  @ApiOperation({ summary: 'Create or join a durable capability refresh operation' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
+  @ApiAcceptedResponse({ type: GroupCapabilityRefreshDto })
+  @ApiResponse({ status: 200, type: GroupCapabilityRefreshDto, description: 'Idempotent replay' })
+  async refreshCapability(
+    @Param('id') id: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Query() query: GroupIdentityQueryDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.groups.refreshCapability(query.sessionId, id, idempotencyKey);
+    response.status(result.replayed ? 200 : 202);
+    return result.operation;
+  }
+
+  @Get(':id/capability-refreshes/current')
+  @ApiOperation({ summary: 'Read the latest capability refresh operation for one group' })
+  @ApiOkResponse({ type: GroupCapabilityRefreshDto })
+  getCurrentCapabilityRefresh(@Param('id') id: string, @Query() query: GroupIdentityQueryDto) {
+    return this.groups.getCapabilityRefresh(query.sessionId, id);
+  }
+
+  @Get(':id/capability-refreshes/:revision')
+  @ApiOperation({ summary: 'Read capability refresh progress by request revision' })
+  @ApiOkResponse({ type: GroupCapabilityRefreshDto })
+  getCapabilityRefresh(
+    @Param('id') id: string,
+    @Param('revision', ParseIntPipe) revision: number,
+    @Query() query: GroupIdentityQueryDto,
+  ) {
+    return this.groups.getCapabilityRefresh(query.sessionId, id, revision);
+  }
+
+}

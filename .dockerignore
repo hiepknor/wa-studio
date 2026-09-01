@@ -1,0 +1,10 @@
+.codegraph
+.git
+.github
+**/.env
+**/coverage
+**/dist
+**/node_modules
+apps/studio/src-tauri/binaries
+apps/studio/src-tauri/target
+dist

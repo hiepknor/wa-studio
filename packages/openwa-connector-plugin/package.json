@@ -1,0 +1,29 @@
+{
+  "name": "@wa/openwa-connector-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Installable OpenWA connector for WA Studio command delivery and durable evidence",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "node scripts/package.mjs --bundle-only",
+    "package": "node scripts/package.mjs",
+    "check": "npm run typecheck && npm test && npm run package"
+  },
+  "dependencies": {
+    "@wa/runtime-contract": "1.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "esbuild": "^0.25.9",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

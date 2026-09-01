@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 4,
+  "product": "wa-studio",
+  "releaseChannel": "canary",
+  "runtimeService": "wa-runtime",
+  "studioVersion": "0.2.0",
+  "runtimeVersion": "0.1.0",
+  "runtimeContractVersion": "v1",
+  "connectorPluginVersion": "0.1.0",
+  "connectorProtocolVersion": 1,
+  "connectorJournalSchemaVersion": 1,
+  "openwaReleaseTag": "0.23.3",
+  "openwaContractSha256": "672e41d92423c99d3571c04ee54467ba45b3f707cfab3e698e5a9a053b128ea8"
+}

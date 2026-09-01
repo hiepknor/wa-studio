@@ -1,0 +1,14 @@
+.brand-mark {
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  overflow: hidden;
+  place-items: center;
+  border: var(--border-width) solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+}
+.brand-mark-sm { width: 24px; height: 24px; }
+.brand-mark-md { width: 28px; height: 28px; }
+.brand-mark-lg { width: 32px; height: 32px; }
+.brand-mark img { width: 100%; max-width: none; display: block; }

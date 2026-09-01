@@ -1,0 +1,123 @@
+groups:
+  - name: wa-event-inbox
+    rules:
+      - alert: WAEventInboxScrapeMissing
+        expr: up{job="wa-event-inbox"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Event Inbox metrics target is unavailable
+          description: Prometheus has been unable to scrape Event Inbox for two minutes.
+
+      - alert: WAEventInboxSnapshotUnavailable
+        expr: wa_event_inbox_metrics_snapshot_up{job="wa-event-inbox"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Event Inbox database snapshot is unavailable
+          description: Event Inbox has failed to read its durable readiness snapshot for two minutes.
+
+      - alert: WAEventInboxDeadEvents
+        expr: wa_event_inbox_events{job="wa-event-inbox",state="dead"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Event Inbox contains dead events
+          description: At least one poison or retry-exhausted event requires operator review.
+
+      - alert: WAEventInboxPendingAgeHigh
+        expr: wa_event_inbox_oldest_pending_age_seconds{job="wa-event-inbox"} > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Event Inbox delivery backlog is aging
+          description: The oldest pending event has remained older than five minutes for ten minutes.
+
+      - alert: WAEventInboxEventCapacityHigh
+        expr: |
+          wa_event_inbox_events{job="wa-event-inbox",state="stored"}
+          / clamp_min(wa_event_inbox_storage_limit_events{job="wa-event-inbox"}, 1) > 0.8
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Event Inbox event capacity exceeds 80 percent
+          description: Stored event count is approaching its hard admission limit.
+
+      - alert: WAEventInboxByteCapacityHigh
+        expr: |
+          wa_event_inbox_storage_bytes{job="wa-event-inbox"}
+          / clamp_min(wa_event_inbox_storage_limit_bytes{job="wa-event-inbox"}, 1) > 0.8
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Event Inbox byte capacity exceeds 80 percent
+          description: Charged payload storage is approaching its hard admission limit.
+
+      - alert: WAEventInboxPairingRateLimited
+        expr: wa_event_inbox_pairing_blocked_attempts{job="wa-event-inbox"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Event Inbox is blocking pairing attempts
+          description: Pairing abuse or a misconfigured client is exhausting a current rate-limit window.
+
+      - alert: WAProductionEndpointUnavailable
+        expr: probe_success{job=~"wa-production-endpoints|wa-studio-discovery"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: A public WA production endpoint is unavailable
+          description: Public liveness or protocol-v2 discovery has failed for two minutes.
+
+      - alert: WAProductionCertificateExpiring
+        expr: probe_ssl_earliest_cert_expiry{job=~"wa-production-endpoints|wa-studio-discovery"} - time() < 14 * 24 * 60 * 60
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: A WA production TLS certificate expires within 14 days
+          description: Renew or diagnose the public certificate before clients lose connectivity.
+
+      - alert: WAVpsDiskSpaceLow
+        expr: node_filesystem_avail_bytes{job="wa-vps",mountpoint="/"} / node_filesystem_size_bytes{job="wa-vps",mountpoint="/"} < 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA VPS disk space is below 20 percent
+          description: Database, backup, or container growth requires operator attention.
+
+      - alert: WAVpsDiskSpaceCritical
+        expr: node_filesystem_avail_bytes{job="wa-vps",mountpoint="/"} / node_filesystem_size_bytes{job="wa-vps",mountpoint="/"} < 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA VPS disk space is below 10 percent
+          description: Free space immediately before writes or database availability fail.
+
+      - alert: WAEventInboxBackupMissing
+        expr: absent(wa_event_inbox_backup_last_success_timestamp_seconds) == 1 or time() - wa_event_inbox_backup_last_success_timestamp_seconds > 26 * 60 * 60
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Event Inbox has no recent offsite backup
+          description: The last verified encrypted upload is missing or older than 26 hours.
+
+      - alert: WAEventInboxRestoreDrillOverdue
+        expr: absent(wa_event_inbox_restore_drill_last_success_timestamp_seconds) == 1 or time() - wa_event_inbox_restore_drill_last_success_timestamp_seconds > 40 * 24 * 60 * 60
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Event Inbox restore drill is overdue
+          description: No successful isolated restore has been recorded within 40 days.

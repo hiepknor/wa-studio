@@ -1,0 +1,6 @@
+.search-field { min-width: 0; }
+.search-field-toolbar { width: clamp(280px, 34vw, 420px); max-width: 100%; }
+.search-field-contained { width: 100%; }
+@media (max-width: 760px) {
+  .search-field-toolbar { width: 100%; }
+}

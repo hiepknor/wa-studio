@@ -1,0 +1,6 @@
+# Place this handle inside the openwa.onio.cc site block.
+handle /.well-known/wa-studio {
+	header Content-Type application/json
+	header Cache-Control "public, max-age=300"
+	respond `{"protocolVersion":2,"eventInboxUrl":"https://wa-events.onio.cc"}` 200
+}

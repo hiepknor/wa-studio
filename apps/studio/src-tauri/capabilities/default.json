@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "http://127.0.0.1:3100" },
+        { "url": "http://127.0.0.1:34100" },
+        { "url": "http://localhost:3100" },
+        { "url": "https://wa-events.onio.cc" }
+      ]
+    }
+  ]
+}

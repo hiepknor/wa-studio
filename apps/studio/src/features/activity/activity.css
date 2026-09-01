@@ -1,0 +1,23 @@
+.activity-table-scroll { min-width: 0; }
+.activity-table { min-width: 720px; table-layout: fixed; }
+.activity-column-event { width: auto; }
+.activity-column-subject { width: var(--activity-subject-width); }
+.activity-column-outcome { width: var(--table-state-width); }
+.activity-column-occurred { width: var(--table-date-width); }
+.activity-column-action { width: var(--table-action-width); }
+.activity-table td { overflow: hidden; }
+.activity-subject-col { overflow: hidden; }
+.activity-subject-name { display: block; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.activity-load-more { display: flex; min-height: var(--table-row-height); align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-tight) var(--space-compact); border-top: var(--border-width) solid var(--divider-strong); color: var(--text-tertiary); font-size: var(--text-supporting-size); font-variant-numeric: tabular-nums; }
+.activity-inspector { min-width: 0; }
+.activity-detail-list { display: grid; margin: 0; }
+.activity-detail-list > dl { border-bottom-color: var(--divider); }
+.activity-detail-list dt { color: var(--text-tertiary); }
+.activity-detail-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.activity-related-list { overflow: hidden; margin: 0; padding: 0; border: var(--border-width) solid var(--divider); border-radius: var(--radius-panel); list-style: none; }
+.activity-related-list li { min-width: 0; min-height: var(--table-row-height); display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-3); }
+.activity-related-list li + li { border-top: var(--border-width) solid var(--divider); }
+.activity-related-list li > span { min-width: 0; display: grid; gap: var(--space-hair); }
+.activity-related-list strong { color: var(--text-primary); font-size: var(--text-data-value-size); font-weight: var(--weight-medium); }
+.activity-related-list code { overflow: hidden; color: var(--text-tertiary); font-family: var(--font-mono); font-size: var(--text-technical-size); text-overflow: ellipsis; white-space: nowrap; }
+.activity-related-list .button { flex: 0 0 auto; }

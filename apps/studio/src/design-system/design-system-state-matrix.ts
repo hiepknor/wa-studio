@@ -1,0 +1,48 @@
+export const DESIGN_SYSTEM_STATE_MATRIX = {
+  AppIcon: ["sizes", "semantic-vocabulary"],
+  BrandMark: ["sm", "md", "lg"],
+  Button: ["secondary", "primary", "ghost", "danger", "disabled", "loading", "icon-only"],
+  Badge: ["neutral", "info", "success", "warning", "danger"],
+  StatusDot: ["neutral", "info", "success", "warning", "danger"],
+  FilterChip: ["active", "removable"],
+  DataTablePrimaryAction: ["default", "keyboard-focus"],
+  TextField: ["default", "monospace", "invalid", "disabled"],
+  TextAreaField: ["default", "long-copy"],
+  SearchField: ["contained", "toolbar", "loading"],
+  SelectMenu: ["closed", "open", "disabled", "described-option"],
+  SearchSelect: ["closed", "open", "disabled", "grouped"],
+  Checkbox: ["unchecked", "checked", "mixed", "disabled"],
+  FilterOption: ["checkbox", "radio", "checked", "unchecked"],
+  SwitchField: ["on", "off", "disabled"],
+  SegmentedControl: ["selected", "unselected", "disabled"],
+  DecisionGroup: ["selected", "unselected", "metadata"],
+  InlineAlert: ["success", "warning", "danger", "action"],
+  Toast: ["success", "warning", "danger", "dismissal"],
+  Tabs: ["selected", "unselected", "warning", "keyboard"],
+  WorkflowStepper: ["complete", "current", "upcoming", "metadata"],
+  TablePagination: ["first", "middle", "last", "empty", "loading"],
+  DateTime: ["absolute", "relative", "fallback", "exact-title"],
+  DropdownMenu: ["closed", "open", "keyboard", "danger", "disabled"],
+  ModalDialog: ["closed", "open", "focus-trap", "return-focus"],
+  ConfirmationDialog: ["closed", "open", "busy", "error"],
+  Drawer: ["closed", "overlay", "docked", "return-focus"],
+  InspectorDrawer: ["compact", "standard", "wide", "sections", "disclosure", "fixed-footer"],
+  WorkspaceDialog: ["closed", "open", "navigation", "fixed-footer"],
+  PageHeader: ["title", "description", "actions"],
+  SectionHeader: ["title", "description", "action", "divider"],
+  SurfacePanel: ["outlined", "flush", "action"],
+  DataFilterToolbar: ["default", "filters-open", "loading", "result-summary"],
+  DataTableFrame: ["outlined", "flush", "toolbar", "footer"],
+  DataTable: ["default", "selected", "updating", "empty"],
+  MetricGrid: ["neutral", "success", "warning", "danger"],
+  DescriptionList: ["plain", "technical", "wrapping"],
+  EvidenceList: ["status", "description", "technical-code"],
+  EmptyState: ["default", "compact", "action"],
+  ActionFooter: ["summary", "description", "actions"],
+} as const;
+
+export type DesignSystemComponentName = keyof typeof DESIGN_SYSTEM_STATE_MATRIX;
+
+export function designSystemStateNames(component: DesignSystemComponentName): string {
+  return DESIGN_SYSTEM_STATE_MATRIX[component].join(" ");
+}

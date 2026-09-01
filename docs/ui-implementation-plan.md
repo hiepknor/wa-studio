@@ -1,6 +1,11 @@
 # UI implementation plan
 
-WA Studio uses product-owned semantic React controls and CSS with a Warp Terminal-inspired visual language. Graphite surfaces, compact spacing, restrained violet accents, and monospace technical data support the operations-console context without importing Warp branding or assets. Feature modules own domain language, accessibility, validation, Runtime requests, server state, and workflows.
+WA Studio uses the product-owned [WA Design System](./design-system.md), with a Warp
+Terminal-inspired visual language. Warm graphite surfaces, compact spacing, quiet interaction
+states, and monospace technical data support the operations-console context without importing Warp
+branding or assets. Feature modules own domain language, validation, Runtime requests, server state,
+and workflows; the design system owns visual hierarchy, interaction anatomy, and shared
+accessibility semantics.
 
 ## Composition rules
 
@@ -12,6 +17,9 @@ WA Studio uses product-owned semantic React controls and CSS with a Warp Termina
 - Keep Runtime-generated DTOs and API logic out of UI components.
 - Keep `DataTable` controlled: Runtime query parameters and response metadata own filtering, sorting, and pagination.
 - Match failures to their scope: field errors for invalid input, panel alerts for scoped failures, persistent banners for application-wide failures, and transient notices only for non-blocking background results.
+- Treat menus, listboxes, selectors, drawers, and dialogs as a stack: `Escape` dismisses only the topmost interactive layer and restores focus to that layer's trigger.
+- Use one keyboard contract for popup controls: Down opens at the first available item, Up opens at the last available item, Tab dismisses without stealing the browser's next focus target, and disabled controls cannot retain an open popup.
+- Reset transient popup search state after outside-pointer dismissal so reopening always starts from canonical data rather than a hidden stale filter.
 
 ## Delivery slices
 
@@ -43,6 +51,55 @@ Status: completed through Runtime-backed campaign search, persisted drafts, revi
 
 Use native progress elements, status feedback, controlled delivery tables, and accessible confirmation dialogs for destructive controls. Pause, resume, and cancel remain Runtime commands; UI state is reconciled from durable Runtime responses.
 
+### 6. Settings
+
+Use a task-based overview with vertical section navigation for product status, managed connection,
+backup/recovery, and signed updates. Keep WA Studio product controls separate from WA Runtime service
+controls. Every destructive or Runtime-interrupting action stays confirmation-gated, preserves
+single-flight ownership, redacts submitted secrets, and reports a failed confirmation inside the
+active modal rather than behind its isolated background.
+
+Status: implementation and component-level accessibility coverage are complete. Every Settings
+section is named by its visible heading; each settings row exposes its label and description as one
+accessible group; vertical task navigation, draft discard, busy operations, modal error scope, and
+single-flight behavior have regression coverage. UI acceptance is based on product-task fit,
+information hierarchy, desktop-window behavior, keyboard operation, and accessibility rather than
+pixel parity with an external artifact.
+
+Connection draft protection (2026-08-27): Settings now treats an edited OpenWA endpoint, replacement
+credential, or live-send policy as one explicit draft. Switching Settings tasks or leaving the
+workspace requires a context-specific discard confirmation, while `beforeunload` remains armed at
+the shell boundary. An in-form Discard changes action restores the saved profile and clears the
+replacement credential without invoking Runtime. This tranche is frontend-only and uses Vite HMR;
+the running Tauri and managed Runtime processes are not restarted.
+
+Recovery task protection (2026-08-27): Portable archive passphrases now register as an ephemeral
+Settings draft and are cleared only after explicit cancel, successful completion, or confirmed task
+navigation. Backup/export/import work registers as a busy navigation guard, so Settings tasks,
+workspace pages, session changes, and window unload cannot silently abandon an active operation.
+Navigation confirmation remains modal and changes from a locked progress state to an explicit
+continue/discard choice after the operation settles.
+
+Update task protection (2026-08-27): Read-only update checks remain safe to leave, while an accepted
+signed installation registers as a busy Settings navigation task for its complete promise lifetime.
+Task, workspace, session, and window navigation remain locked while WA Runtime may be paused; once
+installation settles, a previously requested destination requires an explicit Continue action.
+Installation failures remain retryable inside the active confirmation dialog.
+
+Settings delivery boundary (2026-08-27): The task-based Settings slice now loads as a dedicated
+feature chunk behind an accessible shell fallback. This keeps its native update/recovery dependencies
+out of the initial workspace bundle: production output is 471.59 kB for the initial JS plus a
+31.37 kB Settings chunk, with no Vite chunk-size warning. Direct component tests still import the
+screen synchronously; shell tests cover the lazy boundary.
+
+Settings compact-window inspection (2026-08-27): The already-running macOS Tauri app was inspected
+at its configured 960×560 minimum and restored to 1100×720 without restarting Studio or Runtime.
+All four tasks—Overview, Connection, Backups & recovery, and Updates—preserve the shell, vertical
+task navigation, fixed status bar, and single vertical content scroll boundary; the backup table
+uses contained horizontal overflow. Redundant top-level notices were removed, and shared inline
+alerts now wrap both long titles and safety-critical copy instead of truncating them. No connection,
+backup, restore, export, import, update, or other staging mutation was issued.
+
 ## Quality gates per slice
 
 1. Component tests cover keyboard interaction, loading, empty, error, and success states.
@@ -50,6 +107,11 @@ Use native progress elements, status feedback, controlled delivery tables, and a
 3. Tauri development build is inspected on macOS for focus, overlays, reduced motion, compact spacing, and window resizing.
 4. Bundle-size changes are recorded when new UI dependencies or substantial styles are introduced.
 5. No feature may call OpenWA or redefine Runtime DTOs.
+
+WA Design System v1 rollout status (2026-08-30): completed across connection, shell, Sessions,
+Settings, Groups and group lists, Campaigns, Runs, and Activity. The frozen component gallery,
+canonical token contract, Axe scan, reduced-motion test, keyboard-focus checks, and Darwin visual
+baselines at 960×560, 1100×720, and 1500×850 are enforced in CI.
 
 Current Campaign Drafts, Search & Preflight baseline: 310.54 kB JavaScript (93.60 kB gzip) and 52.86 kB CSS (10.45 kB gzip), plus 106.41 kB of locally bundled variable-font subsets. The production brand mark is an inlined SVG; native bundle icons are generated from the dedicated SVG app-icon master.
 
@@ -75,6 +137,10 @@ Group List editor refinement (2026-08-15): The editor now separates List details
 
 Revision-safe resource deletion (2026-08-16): WA Studio pins WA Runtime HEAD `5642851bd0a12b58512e616abffc5b17366466be`, OpenAPI `1.0.0`, SHA-256 `39b6b5ac71937d75da32084e307c0af4b8548d317daed7bd73a482759a08e3db`. Campaign and Group List deletion are exposed through keyboard-accessible row and detail overflow menus, use the displayed revisions, wait for HTTP 204 before removing local items, preserve list criteria, and retain Runtime audit/history semantics. Pending confirmation blocks dismissal and duplicate submission. Revision conflicts refresh without retry and require a new confirmation; campaign state/run conflicts refresh campaign and run data, and missing items are removed as stale. `npm run test:e2e` passes two connected-workspace happy paths against the mocked Runtime boundary; the repository does not currently include a browser/WebDriver Tauri E2E harness. `npm run check` passes with 36 test files and 294 tests, the TypeScript/Vite production build, and Rust fmt/clippy. No destructive staging request was issued during visual audit.
 
+Overlay interaction hardening (2026-08-26): Shared menus and selectors now obey one layered dismissal contract. Portaled overflow menus consume `Escape` before a drawer can observe it; Up/Down opening intent selects the expected edge item; session and group selectors reset or close transient panels when their source becomes unavailable; outside dismissal clears hidden session search state; and portal positioning remains viewport-safe even when content is wider than the available viewport. The frontend gate passes with 68 test files and 480 tests plus TypeScript and the Vite production build. The already-running Tauri development processes were intentionally not restarted.
+
+Confirmation failure-scope audit (2026-08-27): All 11 shared confirmation call sites were classified by workflow lifetime. Short asynchronous mutations keep retryable failures inside the active modal, suppress inaccessible duplicate alerts behind modal isolation, expose one shared busy/error contract, and retain single-flight submission ownership. This covers Settings update/configuration/recovery, managed-database recovery, LIVE Campaign launch, Campaign deletion, Group List deletion, and Run cancellation. Long-running Groups synchronization intentionally hands off to its page-level durable monitor after request acceptance; synchronous discard, navigation, and disconnect confirmations do not own an asynchronous error state. The frontend gate passes with 68 test files and 488 tests plus TypeScript and the Vite production build. The already-running Tauri development processes were intentionally not restarted.
+
 ## Dependency policy
 
-The application commits `package-lock.json` for reproducible builds. Shared controls use native semantics; UI dependencies require review for accessibility, frontend bundle size, and Tauri WebView behavior. Inter Variable and JetBrains Mono Variable are self-hosted with Latin and Vietnamese subsets so the desktop shell remains consistent across platforms without a remote asset host.
+The application commits `package-lock.json` for reproducible builds. Shared controls use native semantics; UI dependencies require review for accessibility, frontend bundle size, and Tauri WebView behavior. Inter Variable and Geist Mono Variable are self-hosted with Latin and Vietnamese subsets so the desktop shell remains consistent across platforms without a remote asset host. Matter names remain optional local aliases; packaged builds deterministically fall back to the bundled Inter and Geist Mono files when those aliases are unavailable.

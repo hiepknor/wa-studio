@@ -1,0 +1,23 @@
+.ui-icon {
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+  color: currentColor;
+  fill: none;
+  shape-rendering: geometricPrecision;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: var(--icon-stroke);
+}
+.ui-icon-xs { width: var(--icon-xs); height: var(--icon-xs); }
+.ui-icon-sm { width: var(--icon-sm); height: var(--icon-sm); }
+.ui-icon-md { width: var(--icon-md); height: var(--icon-md); }
+.ui-icon-lg { width: var(--icon-lg); height: var(--icon-lg); }
+.ui-icon-spin { animation: icon-spin var(--motion-spin) var(--ease-linear) infinite; }
+
+@keyframes icon-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-icon-spin { animation: none; }
+}

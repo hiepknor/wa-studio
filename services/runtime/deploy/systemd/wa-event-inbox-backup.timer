@@ -1,0 +1,12 @@
+[Unit]
+Description=Create an encrypted WA Event Inbox backup daily
+
+[Timer]
+OnCalendar=*-*-* 01:15:00 UTC
+RandomizedDelaySec=20m
+Persistent=true
+AccuracySec=1m
+Unit=wa-event-inbox-backup.service
+
+[Install]
+WantedBy=timers.target

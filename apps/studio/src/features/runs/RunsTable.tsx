@@ -1,0 +1,112 @@
+import type { ReactNode } from "react";
+
+import type { RuntimeCampaignRunSummary } from "@/shared/api/runtime-client";
+import { Badge } from "@/shared/ui/Badge";
+import { Button } from "@/shared/ui/Button";
+import { DateTime } from "@/shared/ui/DateTime";
+import { DataTable, DataTableEmptyCell, DataTableScroll } from "@/shared/ui/DataTable";
+import { DataTablePrimaryAction } from "@/shared/ui/DataTablePrimaryAction";
+import {
+  resolvedTargets,
+  runStatusLabel,
+  runTone,
+  shortId,
+} from "./run-presentation";
+
+interface RunsTableProps {
+  emptyAction?: ReactNode;
+  emptyMessage: string;
+  loading: boolean;
+  onInspect: (run: RuntimeCampaignRunSummary, trigger: HTMLButtonElement) => void;
+  runs: readonly RuntimeCampaignRunSummary[];
+  selectedRunId: string | null;
+  updating?: boolean;
+}
+
+export function RunsTable({
+  emptyAction,
+  emptyMessage,
+  loading,
+  onInspect,
+  runs,
+  selectedRunId,
+  updating = false,
+}: RunsTableProps) {
+  const tableMessage = loading && runs.length === 0
+    ? "Loading campaign runs…"
+    : runs.length === 0
+      ? emptyMessage
+      : null;
+
+  return (
+    <DataTableScroll
+      busy={loading || updating}
+      className="runs-table-scroll"
+      updating={updating && runs.length > 0}
+    >
+      <DataTable caption="Campaign runs for the active session" className="runs-table">
+        <colgroup>
+          <col className="runs-column-campaign" />
+          <col className="runs-column-state" />
+          <col className="runs-column-progress" />
+          <col className="runs-column-mode" />
+          <col className="runs-column-updated" />
+          <col className="runs-column-action" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col">Campaign</th>
+            <th className="data-cell-status" scope="col">State</th>
+            <th scope="col">Progress</th>
+            <th className="runs-mode-col priority-low" scope="col">Mode</th>
+            <th className="data-column-time" scope="col">Updated</th>
+            <th className="data-column-actions" scope="col">
+              <span className="ui-data-table-visually-hidden">Inspect</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {tableMessage ? (
+            <tr><DataTableEmptyCell colSpan={6}>
+              <div className="ui-data-table-empty-state">
+                <span>{tableMessage}</span>
+                {!loading && emptyAction}
+              </div>
+            </DataTableEmptyCell></tr>
+          ) : runs.map((run) => {
+            const resolved = resolvedTargets(run);
+            const attention = run.progress.failed + run.progress.blocked;
+            const statusReason = run.statusReason
+              ?.replace(/_/g, " ")
+              .toLocaleLowerCase();
+            return (
+              <tr data-selected={run.id === selectedRunId || undefined} key={run.id}>
+                <td className="data-cell-primary">
+                  <div className="stack stack-xs">
+                    <DataTablePrimaryAction onClick={(event) => onInspect(run, event.currentTarget)}>{run.campaignNameSnapshot}</DataTablePrimaryAction>
+                    <span className="data-identifier">Run {shortId(run.id)} · Campaign {shortId(run.campaignId)}</span>
+                  </div>
+                </td>
+                <td className="data-cell-status">
+                  <Badge tone={runTone(run.status)} variant="status">{runStatusLabel(run.status)}</Badge>
+                  {statusReason && <span className="runs-status-reason" title={statusReason}>{statusReason}</span>}
+                </td>
+                <td>
+                  <div className="run-progress">
+                    <progress aria-label={`${resolved} of ${run.totalTargets} targets resolved`} max={Math.max(1, run.totalTargets)} value={resolved} />
+                    <span className="data-cell-value">{resolved}/{run.totalTargets}{attention ? ` · ${attention} attention` : ""}</span>
+                  </div>
+                </td>
+                <td className="data-cell-value runs-mode-col priority-low">{run.executionMode === "LIVE" ? "Live" : "Dry run"}</td>
+                <td className="data-cell-time"><DateTime relativeStyle="compact" value={run.updatedAt} variant="relative" /></td>
+                <td className="data-cell-action data-cell-action-icon focus-overflow-owner">
+                  <Button aria-label={`Inspect run ${shortId(run.id)}`} icon="chevron-right" onClick={(event) => onInspect(run, event.currentTarget)} variant="ghost" />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </DataTable>
+    </DataTableScroll>
+  );
+}

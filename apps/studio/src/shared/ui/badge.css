@@ -1,0 +1,42 @@
+.ui-badge {
+  --badge-border-color: var(--state-offline-border);
+  --badge-surface: var(--state-offline-surface);
+  --badge-text: var(--text-secondary);
+
+  min-height: var(--badge-min-height);
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: max-content;
+  padding: var(--badge-padding-block) var(--badge-padding-inline);
+  border: var(--border-width) solid var(--badge-border-color);
+  border-radius: var(--badge-radius);
+  background: var(--badge-surface);
+  color: var(--badge-text);
+  font-family: var(--font-body);
+  font-size: var(--text-compact-size);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-ui);
+  line-height: var(--leading-tight-ui);
+  text-transform: none;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.ui-badge-neutral { --badge-border-color: var(--state-offline-border); --badge-surface: var(--state-offline-surface); --badge-text: var(--text-secondary); }
+.ui-badge-info { --badge-border-color: var(--state-info-border); --badge-surface: var(--state-info-surface); --badge-text: var(--state-info); }
+.ui-badge-success { --badge-border-color: var(--state-success-border); --badge-surface: var(--state-success-surface); --badge-text: var(--state-success); }
+.ui-badge-warning { --badge-border-color: var(--state-warning-border); --badge-surface: var(--state-warning-surface); --badge-text: var(--state-warning); }
+.ui-badge-danger { --badge-border-color: var(--state-danger-border); --badge-surface: var(--state-danger-surface); --badge-text: var(--state-danger); }
+
+.ui-badge-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.ui-badge-icon { flex: 0 0 auto; }

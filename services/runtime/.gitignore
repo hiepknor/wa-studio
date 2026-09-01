@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+.DS_Store
+volumes/
+# Legacy local OpenWA config retained temporarily during migration to the OpenWA repository.
+infra/openwa-dev.env
+deploy/relay/relay.env
+deploy/relay/wa-studio-relay-pairing.json

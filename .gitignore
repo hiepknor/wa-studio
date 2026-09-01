@@ -7,10 +7,21 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+packages/openwa-connector-plugin/build/
+dist-ssr/
+**/dist-ssr/
+**/playwright-report/
+**/test-results/
 *.local
+services/runtime/deploy/observability/runtime-metrics-token
+services/runtime/deploy/observability/event-inbox-metrics-token
+apps/studio/src-tauri/binaries/*
+!apps/studio/src-tauri/binaries/.gitkeep
+apps/studio/src-tauri/resources/runtime-migrations/
 
 # Editor directories and files
 .vscode/

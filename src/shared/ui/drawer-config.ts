@@ -1,1 +1,0 @@
-export const DRAWER_DOCK_MIN_WIDTH = 1400;
