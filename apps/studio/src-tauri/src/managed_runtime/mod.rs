@@ -5,6 +5,7 @@ mod model;
 pub(crate) mod observability;
 mod postgres;
 mod provisioning;
+mod provisioning_routes;
 mod release;
 mod secret_store;
 mod state;

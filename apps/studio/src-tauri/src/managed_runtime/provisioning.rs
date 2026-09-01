@@ -10,7 +10,10 @@ use super::release::{
     OPENWA_CONNECTOR_PLUGIN_ID, OPENWA_CONNECTOR_PLUGIN_URL, OPENWA_CONNECTOR_PLUGIN_VERSION,
     OPENWA_RELEASE_TAG,
 };
-use super::secret_store;
+use super::{
+    provisioning_routes::{self, ManagedRuntimeRoute},
+    secret_store,
+};
 
 const EVENT_INBOX_PROTOCOL_V1: u8 = 1;
 const EVENT_INBOX_PROTOCOL_V2: u8 = 2;
@@ -81,6 +84,12 @@ struct OpenWaSession {
 struct StudioDiscovery {
     protocol_version: u8,
     event_inbox_url: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DiscoveredEventInbox {
+    protocol_version: u8,
+    base_url: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -215,6 +224,125 @@ fn clear_completed_intent(
     Ok(())
 }
 
+fn persist_provisioning_route(
+    openwa_base_url: &str,
+    intent: &secret_store::ManagedRuntimeProvisioningIntent,
+) -> Result<ManagedRuntimeRoute, String> {
+    let expected = ManagedRuntimeRoute {
+        openwa_base_url: openwa_base_url.to_string(),
+        event_inbox_base_url: None,
+        connector_id: intent.connector_id.clone(),
+        token_generation: intent.connector_token_generation,
+        session_scope: None,
+        ingress_instance_id: intent.ingress_instance_id.clone(),
+    };
+    provisioning_routes::save_provisioning(expected.clone())?;
+    let route = load_provisioning_route()?;
+    if route != expected {
+        return Err(
+            "Managed Runtime provisioning routing metadata changed unexpectedly.".to_string(),
+        );
+    }
+    Ok(route)
+}
+
+fn persist_active_route(
+    credentials: &secret_store::ManagedRuntimeCredentials,
+) -> Result<ManagedRuntimeRoute, String> {
+    let connector = credentials
+        .connector
+        .as_ref()
+        .ok_or_else(|| "Managed Runtime connector routing metadata is unavailable.".to_string())?;
+    let expected = ManagedRuntimeRoute {
+        openwa_base_url: credentials.openwa_base_url.clone(),
+        event_inbox_base_url: Some(credentials.event_inbox_base_url.clone()),
+        connector_id: connector.connector_id.clone(),
+        token_generation: connector.token_generation,
+        session_scope: Some(connector.session_id.clone()),
+        ingress_instance_id: connector.ingress_instance_id.clone(),
+    };
+    provisioning_routes::save_active(expected.clone())?;
+    let route = provisioning_routes::active()?.ok_or_else(|| {
+        "Managed Runtime active routing metadata could not be loaded.".to_string()
+    })?;
+    validate_complete_route(&route)?;
+    if route != expected {
+        return Err("Managed Runtime active routing metadata changed unexpectedly.".to_string());
+    }
+    Ok(route)
+}
+
+fn persist_cleanup_route(
+    credentials: &secret_store::ManagedRuntimeCredentials,
+) -> Result<ManagedRuntimeRoute, String> {
+    let connector = credentials.connector.as_ref();
+    let expected = ManagedRuntimeRoute {
+        openwa_base_url: credentials.openwa_base_url.clone(),
+        event_inbox_base_url: Some(credentials.event_inbox_base_url.clone()),
+        connector_id: connector
+            .map(|connector| connector.connector_id.clone())
+            .unwrap_or_else(|| Uuid::nil().to_string()),
+        token_generation: connector
+            .map(|connector| connector.token_generation)
+            .unwrap_or(1),
+        session_scope: connector
+            .map(|connector| connector.session_id.clone())
+            .or_else(|| credentials.openwa_allowed_session_ids.first().cloned()),
+        ingress_instance_id: connector
+            .map(|connector| connector.ingress_instance_id.clone())
+            .unwrap_or_else(|| "legacy-unprovisioned".to_string()),
+    };
+    provisioning_routes::save_cleanup(expected.clone())?;
+    let route = provisioning_routes::cleanup()?.ok_or_else(|| {
+        "Managed Runtime cleanup routing metadata could not be loaded.".to_string()
+    })?;
+    validate_complete_route(&route)?;
+    if route != expected {
+        return Err("Managed Runtime cleanup routing metadata changed unexpectedly.".to_string());
+    }
+    Ok(route)
+}
+
+fn load_provisioning_route() -> Result<ManagedRuntimeRoute, String> {
+    let route = provisioning_routes::provisioning()?.ok_or_else(|| {
+        "Managed Runtime provisioning routing metadata could not be loaded.".to_string()
+    })?;
+    validate_route(&route)?;
+    Ok(route)
+}
+
+fn validate_route(route: &ManagedRuntimeRoute) -> Result<(), String> {
+    if normalize_origin(&route.openwa_base_url, "OpenWA")? != route.openwa_base_url
+        || Uuid::parse_str(&route.connector_id).is_err()
+        || route.token_generation == 0
+        || route.ingress_instance_id.is_empty()
+        || route.ingress_instance_id.len() > 256
+    {
+        return Err("Managed Runtime routing metadata is invalid.".to_string());
+    }
+    if let Some(event_inbox_base_url) = route.event_inbox_base_url.as_deref() {
+        if normalize_origin(event_inbox_base_url, "Event Inbox")? != event_inbox_base_url {
+            return Err("Managed Runtime Event Inbox routing metadata is invalid.".to_string());
+        }
+    }
+    if route
+        .session_scope
+        .as_deref()
+        .is_some_and(|scope| Uuid::parse_str(scope).is_err())
+    {
+        return Err("Managed Runtime session routing metadata is invalid.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_complete_route(route: &ManagedRuntimeRoute) -> Result<(), String> {
+    validate_route(route)?;
+    if route.event_inbox_base_url.is_none() || route.session_scope.is_none() {
+        return Err("Managed Runtime routing metadata is incomplete.".to_string());
+    }
+    Ok(())
+}
+
 pub fn provision(input: ManagedRuntimeProvisioningInput) -> Result<(), String> {
     let normalized = normalize(input)?;
     let intent = prepare_new_or_resume_intent(&normalized)?;
@@ -251,12 +379,18 @@ pub fn reconfigure(
             }
             execute_cleanup(&mut cleanup, Some(&current))?;
             secret_store::clear_managed_runtime_cleanup_intent()?;
+            provisioning_routes::clear_cleanup()?;
             return Ok(profile_from_credentials(&current));
         }
     }
 
     if can_reconfigure_in_place(&current, &normalized) {
-        assert_stored_session_access(&normalized, &current.openwa_allowed_session_ids)?;
+        let route = persist_active_route(&current)?;
+        assert_stored_session_access(
+            &route,
+            &normalized.openwa_api_key,
+            &current.openwa_allowed_session_ids,
+        )?;
         let mut updated = current;
         updated.openwa_api_key = normalized.openwa_api_key;
         updated.allow_live_sends = normalized.allow_live_sends;
@@ -270,6 +404,7 @@ pub fn reconfigure(
     let replacement = finish_provisioning(&normalized, intent)?;
     execute_cleanup(&mut cleanup, Some(&replacement))?;
     secret_store::clear_managed_runtime_cleanup_intent()?;
+    provisioning_routes::clear_cleanup()?;
     Ok(profile_from_credentials(&replacement))
 }
 
@@ -289,7 +424,10 @@ pub fn deprovision() -> Result<(), String> {
     execute_cleanup(&mut intent, None)?;
     secret_store::clear_managed_runtime_credentials()?;
     secret_store::clear_managed_runtime_provisioning_intent()?;
-    secret_store::clear_managed_runtime_cleanup_intent()
+    secret_store::clear_managed_runtime_cleanup_intent()?;
+    provisioning_routes::clear_cleanup()?;
+    provisioning_routes::clear_provisioning()?;
+    provisioning_routes::clear_active()
 }
 
 pub fn rotate_connector_credential() -> Result<ManagedRuntimeProvisioningProfile, String> {
@@ -332,15 +470,13 @@ pub fn rotate_connector_credential() -> Result<ManagedRuntimeProvisioningProfile
         }
     };
     if connector.token_generation == intent.target_generation {
+        persist_active_route(&current)?;
+        provisioning_routes::clear_provisioning()?;
         secret_store::clear_managed_runtime_connector_rotation_intent()?;
         return Ok(profile_from_credentials(&current));
     }
 
-    let input = ManagedRuntimeProvisioningInput {
-        openwa_base_url: current.openwa_base_url.clone(),
-        openwa_api_key: current.openwa_api_key.clone(),
-        allow_live_sends: current.allow_live_sends,
-    };
+    let mut route = persist_active_route(&current)?;
     let paired = PairingResponse {
         protocol_version: EVENT_INBOX_PROTOCOL_V2,
         event_inbox_base_url: current.event_inbox_base_url.clone(),
@@ -362,23 +498,25 @@ pub fn rotate_connector_credential() -> Result<ManagedRuntimeProvisioningProfile
         ingress_instance_id: connector.ingress_instance_id.clone(),
         ingress_secret: connector.ingress_secret.clone(),
     };
-    let session_id = connector.session_id.clone();
-    let connector_token = put_prepared_connector_credential(&prepared, &paired, &session_id)?;
-    let config = connector_config(&paired, &session_id, &connector_token);
-    ensure_connector_plugin(
-        &input,
-        &paired,
-        &session_id,
-        &connector_token,
-        &prepared.ingress_instance_id,
-    )?;
-    ensure_ingress_instance(&input, &prepared, &session_id, &config)?;
+    route.token_generation = intent.target_generation;
+    provisioning_routes::save_provisioning(route.clone())?;
+    let expected_route = route;
+    let route = load_provisioning_route()?;
+    if route != expected_route {
+        return Err("Managed Runtime rotation routing metadata changed unexpectedly.".to_string());
+    }
+    let connector_token = put_prepared_connector_credential(&route, &prepared, &paired)?;
+    let config = connector_config(&route, &connector_token)?;
+    ensure_connector_plugin(&route, &current.openwa_api_key, &connector_token)?;
+    ensure_ingress_instance(&route, &current.openwa_api_key, &prepared, &config)?;
     let updated = current.connector.as_mut().ok_or_else(|| {
         "Managed Runtime connector credentials disappeared during rotation.".to_string()
     })?;
     updated.token_generation = intent.target_generation;
     updated.connector_token = connector_token;
     secret_store::save_managed_runtime_credentials(&current)?;
+    provisioning_routes::save_active(route)?;
+    provisioning_routes::clear_provisioning()?;
     secret_store::clear_managed_runtime_connector_rotation_intent()?;
     Ok(profile_from_credentials(&current))
 }
@@ -398,6 +536,7 @@ fn prepare_cleanup(
         "Managed Runtime has no stored production profile to disconnect.".to_string()
     })?;
     validate_stored_credentials(&source)?;
+    persist_cleanup_route(&source)?;
     let intent = secret_store::ManagedRuntimeCleanupIntent {
         schema_version: 1,
         operation_id: Uuid::new_v4().to_string(),
@@ -413,18 +552,19 @@ fn execute_cleanup(
     intent: &mut secret_store::ManagedRuntimeCleanupIntent,
     replacement: Option<&secret_store::ManagedRuntimeCredentials>,
 ) -> Result<(), String> {
+    let route = persist_cleanup_route(&intent.source)?;
     if intent.phase < secret_store::ManagedRuntimeCleanupPhase::OpenWaCleaned {
-        cleanup_openwa_resources(&intent.source, replacement)?;
+        cleanup_openwa_resources(&route, &intent.source, replacement)?;
         intent.phase = secret_store::ManagedRuntimeCleanupPhase::OpenWaCleaned;
         secret_store::save_managed_runtime_cleanup_intent(intent)?;
     }
     if intent.phase < secret_store::ManagedRuntimeCleanupPhase::RemoteCleaned {
-        revoke_event_inbox_connector(&intent.source)?;
+        revoke_event_inbox_connector(&route, &intent.source)?;
         intent.phase = secret_store::ManagedRuntimeCleanupPhase::RemoteCleaned;
         secret_store::save_managed_runtime_cleanup_intent(intent)?;
     }
     if intent.phase < secret_store::ManagedRuntimeCleanupPhase::DeviceRevoked {
-        revoke_event_inbox_device(&intent.source)?;
+        revoke_event_inbox_device(&route, &intent.source)?;
         intent.phase = secret_store::ManagedRuntimeCleanupPhase::DeviceRevoked;
         secret_store::save_managed_runtime_cleanup_intent(intent)?;
     }
@@ -432,6 +572,7 @@ fn execute_cleanup(
 }
 
 fn cleanup_openwa_resources(
+    route: &ManagedRuntimeRoute,
     credentials: &secret_store::ManagedRuntimeCredentials,
     replacement: Option<&secret_store::ManagedRuntimeCredentials>,
 ) -> Result<(), String> {
@@ -442,7 +583,7 @@ fn cleanup_openwa_resources(
     let instance = client
         .delete(format!(
             "{}/api/integration/plugins/{}/instances/{}",
-            credentials.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID, connector.ingress_instance_id,
+            route.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID, route.ingress_instance_id,
         ))
         .header("x-api-key", &credentials.openwa_api_key)
         .send()
@@ -465,12 +606,7 @@ fn cleanup_openwa_resources(
         return Ok(());
     }
 
-    let input = ManagedRuntimeProvisioningInput {
-        openwa_base_url: credentials.openwa_base_url.clone(),
-        openwa_api_key: credentials.openwa_api_key.clone(),
-        allow_live_sends: false,
-    };
-    let Some(plugin) = get_openwa_plugin(&client, &input)? else {
+    let Some(plugin) = get_openwa_plugin(&client, route, &credentials.openwa_api_key)? else {
         return Ok(());
     };
     validate_connector_plugin(&plugin)?;
@@ -482,7 +618,11 @@ fn cleanup_openwa_resources(
         client
             .put(format!(
                 "{}/api/plugins/{}/config/{}",
-                credentials.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID, connector.session_id,
+                route.openwa_base_url,
+                OPENWA_CONNECTOR_PLUGIN_ID,
+                route.session_scope.as_deref().ok_or_else(|| {
+                    "Managed Runtime cleanup session routing is unavailable.".to_string()
+                })?,
             ))
             .header("x-api-key", &credentials.openwa_api_key)
             .json(&serde_json::json!({ "config": {} }))
@@ -497,7 +637,7 @@ fn cleanup_openwa_resources(
         client
             .put(format!(
                 "{}/api/plugins/{}/sessions",
-                credentials.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+                route.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
             ))
             .header("x-api-key", &credentials.openwa_api_key)
             .json(&serde_json::json!({ "sessions": &remaining }))
@@ -509,7 +649,7 @@ fn cleanup_openwa_resources(
             client
                 .post(format!(
                     "{}/api/plugins/{}/disable",
-                    credentials.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+                    route.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
                 ))
                 .header("x-api-key", &credentials.openwa_api_key)
                 .send(),
@@ -519,11 +659,9 @@ fn cleanup_openwa_resources(
     if remaining.is_empty() {
         put_connector_config(
             &client,
-            &input,
-            format!(
-                "{}/api/plugins/{}/config",
-                credentials.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
-            ),
+            route,
+            &credentials.openwa_api_key,
+            ConnectorConfigScope::Base,
             &serde_json::json!({
                 "eventInboxBaseUrl": "https://retired.invalid",
                 "connectorToken": "retired",
@@ -538,6 +676,7 @@ fn cleanup_openwa_resources(
 }
 
 fn revoke_event_inbox_connector(
+    route: &ManagedRuntimeRoute,
     credentials: &secret_store::ManagedRuntimeCredentials,
 ) -> Result<(), String> {
     let Some(connector) = credentials.connector.as_ref() else {
@@ -546,7 +685,9 @@ fn revoke_event_inbox_connector(
     let response = connection_probe_client()?
         .post(format!(
             "{}/api/v1/event-inbox/connectors/revoke",
-            credentials.event_inbox_base_url,
+            route.event_inbox_base_url.as_deref().ok_or_else(|| {
+                "Managed Runtime Event Inbox cleanup routing is unavailable.".to_string()
+            })?,
         ))
         .bearer_auth(&credentials.event_inbox_device_token)
         .json(&serde_json::json!({ "connectorId": connector.connector_id }))
@@ -562,12 +703,15 @@ fn revoke_event_inbox_connector(
 }
 
 fn revoke_event_inbox_device(
+    route: &ManagedRuntimeRoute,
     credentials: &secret_store::ManagedRuntimeCredentials,
 ) -> Result<(), String> {
     let response = connection_probe_client()?
         .post(format!(
             "{}/api/v1/event-inbox/devices/revoke",
-            credentials.event_inbox_base_url,
+            route.event_inbox_base_url.as_deref().ok_or_else(|| {
+                "Managed Runtime Event Inbox cleanup routing is unavailable.".to_string()
+            })?,
         ))
         .bearer_auth(&credentials.event_inbox_device_token)
         .send()
@@ -730,56 +874,76 @@ fn finish_provisioning(
                 .to_string(),
         );
     }
-    preflight_connector_plugin(input, &intent.ingress_instance_id)?;
-    let paired = probe_and_pair(input, &intent.device_id)?;
-    if paired.session_ids.len() != 1 {
-        return Err(
-            "Connector protocol v1 requires the OpenWA API key to expose exactly one session."
-                .to_string(),
-        );
-    }
-    let session_id = paired.session_ids[0].clone();
-    let connector_token = put_prepared_connector_credential(&intent, &paired, &session_id)?;
-    let config = connector_config(&paired, &session_id, &connector_token);
-    ensure_connector_plugin(
-        input,
-        &paired,
-        &session_id,
-        &connector_token,
-        &intent.ingress_instance_id,
+    let mut route = persist_provisioning_route(&input.openwa_base_url, &intent)?;
+    preflight_connector_plugin(&route, &input.openwa_api_key)?;
+    let discovered = discover_event_inbox(&route)?;
+    let mut paired = pair_event_inbox(
+        &route,
+        &input.openwa_api_key,
+        &intent.device_id,
+        &discovered,
     )?;
-    ensure_ingress_instance(input, &intent, &session_id, &config)?;
+    let session_scope = validate_pairing_route(&paired, &discovered)?;
+    route.event_inbox_base_url = Some(discovered.base_url.clone());
+    route.session_scope = Some(session_scope);
+    provisioning_routes::save_provisioning(route.clone())?;
+    let expected_route = route;
+    let route = load_provisioning_route()?;
+    if route != expected_route {
+        return Err("Managed Runtime pairing routing metadata changed unexpectedly.".to_string());
+    }
+    paired.session_ids = vec![route.session_scope.clone().ok_or_else(|| {
+        "Managed Runtime provisioning session routing is unavailable.".to_string()
+    })?];
+    let paired = validate_pairing_secrets(paired)?;
+    let connector_token = put_prepared_connector_credential(&route, &intent, &paired)?;
+    let config = connector_config(&route, &connector_token)?;
+    ensure_connector_plugin(&route, &input.openwa_api_key, &connector_token)?;
+    ensure_ingress_instance(&route, &input.openwa_api_key, &intent, &config)?;
+    let session_scope = route.session_scope.clone().ok_or_else(|| {
+        "Managed Runtime provisioning session routing is unavailable.".to_string()
+    })?;
     let replacement = credentials(
         input,
         intent.runtime_api_key,
         intent.device_id,
         paired,
+        &route,
         secret_store::ManagedOpenWaConnectorCredentials {
             connector_id: intent.connector_id,
             token_generation: intent.connector_token_generation,
             connector_token,
-            session_id,
+            session_id: session_scope,
             plugin_version: OPENWA_CONNECTOR_PLUGIN_VERSION.to_string(),
             ingress_instance_id: intent.ingress_instance_id,
             ingress_secret: intent.ingress_secret,
         },
-    );
+    )?;
     secret_store::save_managed_runtime_credentials(&replacement)?;
+    provisioning_routes::save_active(route)?;
+    provisioning_routes::clear_provisioning()?;
     secret_store::clear_managed_runtime_provisioning_intent()?;
     Ok(replacement)
 }
 
 fn put_prepared_connector_credential(
+    route: &ManagedRuntimeRoute,
     intent: &secret_store::ManagedRuntimeProvisioningIntent,
     paired: &PairingResponse,
-    session_id: &str,
 ) -> Result<String, String> {
     let client = connection_probe_client()?;
-    let session_ids = vec![session_id.to_string()];
+    let session_ids = vec![route
+        .session_scope
+        .clone()
+        .ok_or_else(|| "Managed Runtime connector session routing is unavailable.".to_string())?];
+    let event_inbox_base_url = route
+        .event_inbox_base_url
+        .as_deref()
+        .ok_or_else(|| "Managed Runtime Event Inbox routing is unavailable.".to_string())?;
     let response = client
         .put(format!(
             "{}/api/v1/event-inbox/connectors/credentials/{}/generations/{}",
-            paired.event_inbox_base_url, intent.connector_id, intent.connector_token_generation,
+            event_inbox_base_url, route.connector_id, route.token_generation,
         ))
         .bearer_auth(&paired.device_token)
         .json(&PreparedConnectorCredentialRequest {
@@ -820,54 +984,52 @@ fn put_prepared_connector_credential(
 }
 
 fn ensure_connector_plugin(
-    input: &ManagedRuntimeProvisioningInput,
-    paired: &PairingResponse,
-    session_id: &str,
+    route: &ManagedRuntimeRoute,
+    openwa_api_key: &str,
     connector_token: &str,
-    ingress_instance_id: &str,
 ) -> Result<(), String> {
     let client = connection_probe_client()?;
-    let plugin = get_or_install_connector_plugin(&client, input)?;
+    let plugin = get_or_install_connector_plugin(&client, route, openwa_api_key)?;
     validate_connector_plugin(&plugin)?;
-    assert_exclusive_connector_instance(&client, input, ingress_instance_id)?;
+    assert_exclusive_connector_instance(&client, route, openwa_api_key)?;
 
     plugin.active_sessions.as_ref().ok_or_else(|| {
         "OpenWA did not expose the connector session activation state; refusing to replace it."
             .to_string()
     })?;
+    let session_scope = route
+        .session_scope
+        .as_deref()
+        .ok_or_else(|| "Managed Runtime connector session routing is unavailable.".to_string())?;
 
     require_success(
         client
             .put(format!(
                 "{}/api/plugins/{}/sessions",
-                input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+                route.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
             ))
-            .header("x-api-key", &input.openwa_api_key)
-            .json(&serde_json::json!({ "sessions": [session_id] }))
+            .header("x-api-key", openwa_api_key)
+            .json(&serde_json::json!({ "sessions": [session_scope] }))
             .send(),
         "activate the WA Studio Connector exclusively for its managed session",
     )?;
-    let connector_config = connector_config(paired, session_id, connector_token);
+    let connector_config = connector_config(route, connector_token)?;
     // OpenWA 0.23.3 starts one sandbox worker with the base config; per-session config is injected
     // only while dispatching a hook or ingress delivery. Keep both layers identical so lifecycle
     // initialization and scoped dispatch resolve the same immutable connector identity.
     put_connector_config(
         &client,
-        input,
-        format!(
-            "{}/api/plugins/{}/config",
-            input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
-        ),
+        route,
+        openwa_api_key,
+        ConnectorConfigScope::Base,
         &connector_config,
         "base lifecycle configuration",
     )?;
     put_connector_config(
         &client,
-        input,
-        format!(
-            "{}/api/plugins/{}/config/{}",
-            input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID, session_id,
-        ),
+        route,
+        openwa_api_key,
+        ConnectorConfigScope::Session,
         &connector_config,
         "managed-session configuration",
     )?;
@@ -875,9 +1037,9 @@ fn ensure_connector_plugin(
         let enabled = client
             .post(format!(
                 "{}/api/plugins/{}/enable",
-                input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+                route.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
             ))
-            .header("x-api-key", &input.openwa_api_key)
+            .header("x-api-key", openwa_api_key)
             .send()
             .map_err(|error| format!("Could not enable the WA Studio Connector: {error}"))?;
         if !enabled.status().is_success() {
@@ -890,9 +1052,9 @@ fn ensure_connector_plugin(
     let health = client
         .get(format!(
             "{}/api/plugins/{}/health",
-            input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+            route.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
         ))
-        .header("x-api-key", &input.openwa_api_key)
+        .header("x-api-key", openwa_api_key)
         .send()
         .map_err(|error| format!("Could not read WA Studio Connector health: {error}"))?;
     if !health.status().is_success() {
@@ -916,40 +1078,44 @@ fn ensure_connector_plugin(
 }
 
 fn connector_config(
-    paired: &PairingResponse,
-    session_id: &str,
+    route: &ManagedRuntimeRoute,
     connector_token: &str,
-) -> serde_json::Value {
-    serde_json::json!({
-        "eventInboxBaseUrl": paired.event_inbox_base_url,
+) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "eventInboxBaseUrl": route.event_inbox_base_url.as_deref().ok_or_else(|| {
+            "Managed Runtime Event Inbox routing is unavailable.".to_string()
+        })?,
         "connectorToken": connector_token,
-        "sessionId": session_id,
+        "sessionId": route.session_scope.as_deref().ok_or_else(|| {
+            "Managed Runtime connector session routing is unavailable.".to_string()
+        })?,
         "heartbeatIntervalSeconds": 10,
         "storagePressureThreshold": 0.75,
-    })
+    }))
 }
 
 fn preflight_connector_plugin(
-    input: &ManagedRuntimeProvisioningInput,
-    ingress_instance_id: &str,
+    route: &ManagedRuntimeRoute,
+    openwa_api_key: &str,
 ) -> Result<(), String> {
     let client = connection_probe_client()?;
     assert_compatible_release_with_client(
         &client,
-        &input.openwa_base_url,
-        &input.openwa_api_key,
+        &route.openwa_base_url,
+        openwa_api_key,
         OPENWA_RELEASE_TAG,
     )?;
-    let plugin = get_or_install_connector_plugin(&client, input)?;
+    let plugin = get_or_install_connector_plugin(&client, route, openwa_api_key)?;
     validate_connector_plugin(&plugin)?;
-    assert_exclusive_connector_instance(&client, input, ingress_instance_id)
+    assert_exclusive_connector_instance(&client, route, openwa_api_key)
 }
 
 fn get_or_install_connector_plugin(
     client: &Client,
-    input: &ManagedRuntimeProvisioningInput,
+    route: &ManagedRuntimeRoute,
+    openwa_api_key: &str,
 ) -> Result<OpenWaPlugin, String> {
-    if let Some(plugin) = get_openwa_plugin(client, input)? {
+    if let Some(plugin) = get_openwa_plugin(client, route, openwa_api_key)? {
         return Ok(plugin);
     }
     let package_url = validated_connector_plugin_url()?.ok_or_else(|| {
@@ -959,8 +1125,8 @@ fn get_or_install_connector_plugin(
         )
     })?;
     let installed = client
-        .post(format!("{}/api/plugins/install-url", input.openwa_base_url))
-        .header("x-api-key", &input.openwa_api_key)
+        .post(format!("{}/api/plugins/install-url", route.openwa_base_url))
+        .header("x-api-key", openwa_api_key)
         .json(&serde_json::json!({ "url": package_url }))
         .send()
         .map_err(|error| format!("Could not install the WA Studio Connector: {error}"))?;
@@ -977,15 +1143,15 @@ fn get_or_install_connector_plugin(
 
 fn assert_exclusive_connector_instance(
     client: &Client,
-    input: &ManagedRuntimeProvisioningInput,
-    ingress_instance_id: &str,
+    route: &ManagedRuntimeRoute,
+    openwa_api_key: &str,
 ) -> Result<(), String> {
     let response = client
         .get(format!(
             "{}/api/integration/plugins/{}/instances",
-            input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+            route.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
         ))
-        .header("x-api-key", &input.openwa_api_key)
+        .header("x-api-key", openwa_api_key)
         .send()
         .map_err(|error| format!("Could not inspect WA Studio Connector ownership: {error}"))?;
     if !response.status().is_success() {
@@ -999,7 +1165,7 @@ fn assert_exclusive_connector_instance(
     })?;
     if instances
         .iter()
-        .any(|instance| instance.instance_id != ingress_instance_id)
+        .any(|instance| instance.instance_id != route.ingress_instance_id)
     {
         return Err(
             "OpenWA already has a WA Studio Connector ingress owned by another workspace. Disconnect that workspace before provisioning this one."
@@ -1009,16 +1175,37 @@ fn assert_exclusive_connector_instance(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+enum ConnectorConfigScope {
+    Base,
+    Session,
+}
+
 fn put_connector_config(
     client: &Client,
-    input: &ManagedRuntimeProvisioningInput,
-    url: String,
+    route: &ManagedRuntimeRoute,
+    openwa_api_key: &str,
+    target: ConnectorConfigScope,
     config: &serde_json::Value,
     scope: &str,
 ) -> Result<(), String> {
+    let url = match target {
+        ConnectorConfigScope::Base => format!(
+            "{}/api/plugins/{}/config",
+            route.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+        ),
+        ConnectorConfigScope::Session => format!(
+            "{}/api/plugins/{}/config/{}",
+            route.openwa_base_url,
+            OPENWA_CONNECTOR_PLUGIN_ID,
+            route.session_scope.as_deref().ok_or_else(|| {
+                "Managed Runtime connector session routing is unavailable.".to_string()
+            })?,
+        ),
+    };
     let configured = client
         .put(url)
-        .header("x-api-key", &input.openwa_api_key)
+        .header("x-api-key", openwa_api_key)
         .json(&serde_json::json!({ "config": config }))
         .send()
         .map_err(|error| format!("Could not configure the WA Studio Connector {scope}: {error}"))?;
@@ -1042,14 +1229,15 @@ fn put_connector_config(
 
 fn get_openwa_plugin(
     client: &Client,
-    input: &ManagedRuntimeProvisioningInput,
+    route: &ManagedRuntimeRoute,
+    openwa_api_key: &str,
 ) -> Result<Option<OpenWaPlugin>, String> {
     let response = client
         .get(format!(
             "{}/api/plugins/{}",
-            input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+            route.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
         ))
-        .header("x-api-key", &input.openwa_api_key)
+        .header("x-api-key", openwa_api_key)
         .send()
         .map_err(|error| format!("Could not inspect the WA Studio Connector: {error}"))?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
@@ -1095,22 +1283,26 @@ fn validate_connector_plugin(plugin: &OpenWaPlugin) -> Result<(), String> {
 }
 
 fn ensure_ingress_instance(
-    input: &ManagedRuntimeProvisioningInput,
+    route: &ManagedRuntimeRoute,
+    openwa_api_key: &str,
     intent: &secret_store::ManagedRuntimeProvisioningIntent,
-    session_id: &str,
     config: &serde_json::Value,
 ) -> Result<(), String> {
     let client = connection_probe_client()?;
+    let session_scope = route
+        .session_scope
+        .as_deref()
+        .ok_or_else(|| "Managed Runtime connector session routing is unavailable.".to_string())?;
     let collection = format!(
         "{}/api/integration/plugins/{}/instances",
-        input.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
+        route.openwa_base_url, OPENWA_CONNECTOR_PLUGIN_ID,
     );
     let created = client
         .post(&collection)
-        .header("x-api-key", &input.openwa_api_key)
+        .header("x-api-key", openwa_api_key)
         .json(&serde_json::json!({
-            "instanceId": intent.ingress_instance_id,
-            "sessionScope": session_id,
+            "instanceId": route.ingress_instance_id,
+            "sessionScope": session_scope,
             "secret": intent.ingress_secret,
             "config": config,
         }))
@@ -1122,8 +1314,8 @@ fn ensure_ingress_instance(
         })?
     } else if created.status() == reqwest::StatusCode::CONFLICT {
         let existing = client
-            .get(format!("{collection}/{}", intent.ingress_instance_id))
-            .header("x-api-key", &input.openwa_api_key)
+            .get(format!("{collection}/{}", route.ingress_instance_id))
+            .header("x-api-key", openwa_api_key)
             .send()
             .map_err(|error| {
                 format!("Could not recover the existing connector ingress: {error}")
@@ -1143,13 +1335,13 @@ fn ensure_ingress_instance(
             created.status()
         ));
     };
-    validate_ingress_instance(&instance, intent, session_id)?;
+    validate_ingress_instance(&instance, intent, session_scope)?;
     let enabled = client
-        .patch(format!("{collection}/{}", intent.ingress_instance_id))
-        .header("x-api-key", &input.openwa_api_key)
+        .patch(format!("{collection}/{}", route.ingress_instance_id))
+        .header("x-api-key", openwa_api_key)
         .json(&serde_json::json!({
             "enabled": true,
-            "sessionScope": session_id,
+            "sessionScope": session_scope,
             "config": config,
         }))
         .send()
@@ -1163,7 +1355,7 @@ fn ensure_ingress_instance(
     let enabled: OpenWaIntegrationInstance = enabled
         .json()
         .map_err(|error| format!("OpenWA returned invalid enabled ingress metadata: {error}"))?;
-    validate_ingress_instance(&enabled, intent, session_id)?;
+    validate_ingress_instance(&enabled, intent, session_scope)?;
     if !enabled.enabled {
         return Err("OpenWA connector ingress remained disabled after provisioning.".to_string());
     }
@@ -1291,14 +1483,10 @@ fn non_empty_secret(name: &str, value: String, minimum: usize) -> Result<String,
     Ok(value)
 }
 
-fn probe_and_pair(
-    input: &ManagedRuntimeProvisioningInput,
-    device_id: &str,
-) -> Result<PairingResponse, String> {
-    Uuid::parse_str(device_id).map_err(|_| "Managed Runtime device ID is invalid.".to_string())?;
+fn discover_event_inbox(route: &ManagedRuntimeRoute) -> Result<DiscoveredEventInbox, String> {
     let client = connection_probe_client()?;
     let discovery = client
-        .get(format!("{}/.well-known/wa-studio", input.openwa_base_url))
+        .get(format!("{}/.well-known/wa-studio", route.openwa_base_url))
         .send()
         .map_err(|error| format!("Could not discover the WA Event Inbox: {error}"))?;
     if !discovery.status().is_success() {
@@ -1313,14 +1501,25 @@ fn probe_and_pair(
     if !supports_event_inbox_protocol(discovery.protocol_version) {
         return Err("WA Studio discovery protocol is incompatible.".to_string());
     }
-    let discovered_protocol = discovery.protocol_version;
-    let event_inbox_base_url = normalize_origin(&discovery.event_inbox_url, "Event Inbox")?;
+    Ok(DiscoveredEventInbox {
+        protocol_version: discovery.protocol_version,
+        base_url: normalize_origin(&discovery.event_inbox_url, "Event Inbox")?,
+    })
+}
 
+fn pair_event_inbox(
+    route: &ManagedRuntimeRoute,
+    openwa_api_key: &str,
+    device_id: &str,
+    discovered: &DiscoveredEventInbox,
+) -> Result<PairingResponse, String> {
+    Uuid::parse_str(device_id).map_err(|_| "Managed Runtime device ID is invalid.".to_string())?;
+    let client = connection_probe_client()?;
     let pairing = client
-        .post(format!("{event_inbox_base_url}/api/v1/event-inbox/pair"))
+        .post(format!("{}/api/v1/event-inbox/pair", discovered.base_url))
         .json(&PairingRequest {
-            openwa_base_url: &input.openwa_base_url,
-            openwa_api_key: &input.openwa_api_key,
+            openwa_base_url: &route.openwa_base_url,
+            openwa_api_key,
             device_id,
         })
         .send()
@@ -1334,7 +1533,7 @@ fn probe_and_pair(
     let pairing: PairingResponse = pairing
         .json()
         .map_err(|error| format!("WA Event Inbox pairing response is invalid: {error}"))?;
-    validate_pairing(pairing, &event_inbox_base_url, discovered_protocol)
+    Ok(pairing)
 }
 
 fn connection_probe_client() -> Result<Client, String> {
@@ -1379,19 +1578,20 @@ fn assert_compatible_release_with_client(
 }
 
 fn assert_stored_session_access(
-    input: &ManagedRuntimeProvisioningInput,
+    route: &ManagedRuntimeRoute,
+    openwa_api_key: &str,
     expected_session_ids: &[String],
 ) -> Result<(), String> {
     let client = connection_probe_client()?;
     assert_compatible_release_with_client(
         &client,
-        &input.openwa_base_url,
-        &input.openwa_api_key,
+        &route.openwa_base_url,
+        openwa_api_key,
         OPENWA_RELEASE_TAG,
     )?;
     let response = client
-        .get(format!("{}/api/sessions?limit=1000", input.openwa_base_url))
-        .header("x-api-key", &input.openwa_api_key)
+        .get(format!("{}/api/sessions?limit=1000", route.openwa_base_url))
+        .header("x-api-key", openwa_api_key)
         .send()
         .map_err(|error| format!("Could not verify the stored OpenWA session scope: {error}"))?;
     if !response.status().is_success() {
@@ -1419,33 +1619,30 @@ fn assert_stored_session_access(
     Ok(())
 }
 
-fn validate_pairing(
-    mut pairing: PairingResponse,
-    discovered_base_url: &str,
-    discovered_protocol: u8,
-) -> Result<PairingResponse, String> {
+fn validate_pairing_route(
+    pairing: &PairingResponse,
+    discovered: &DiscoveredEventInbox,
+) -> Result<String, String> {
     if !supports_event_inbox_protocol(pairing.protocol_version)
-        || pairing.protocol_version != discovered_protocol
+        || pairing.protocol_version != discovered.protocol_version
     {
         return Err("WA Event Inbox protocol is incompatible.".to_string());
     }
-    pairing.event_inbox_base_url = normalize_origin(&pairing.event_inbox_base_url, "Event Inbox")?;
-    if pairing.event_inbox_base_url != discovered_base_url {
+    let event_inbox_base_url = normalize_origin(&pairing.event_inbox_base_url, "Event Inbox")?;
+    if event_inbox_base_url != discovered.base_url {
         return Err("WA Event Inbox pairing origin does not match discovery.".to_string());
     }
-    let expected_callback = format!("{discovered_base_url}/api/v1/webhooks/openwa");
+    let expected_callback = format!("{}/api/v1/webhooks/openwa", discovered.base_url);
     if pairing.callback_url != expected_callback {
         return Err("WA Event Inbox returned an unexpected OpenWA callback URL.".to_string());
     }
-    pairing.device_token = non_empty_secret("Event Inbox device token", pairing.device_token, 32)?;
-    pairing.webhook_secret = non_empty_secret("OpenWA webhook secret", pairing.webhook_secret, 32)?;
     if pairing.session_ids.is_empty() || pairing.session_ids.len() > MAX_SESSION_COUNT {
         return Err("WA Event Inbox returned an invalid session scope.".to_string());
     }
     let mut seen = HashSet::new();
-    pairing.session_ids = pairing
+    let session_ids = pairing
         .session_ids
-        .into_iter()
+        .iter()
         .map(|value| {
             Uuid::parse_str(value.trim())
                 .map(|id| id.to_string())
@@ -1454,7 +1651,19 @@ fn validate_pairing(
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .filter(|id| seen.insert(id.clone()))
-        .collect();
+        .collect::<Vec<_>>();
+    if session_ids.len() != 1 {
+        return Err(
+            "Connector protocol v1 requires the OpenWA API key to expose exactly one session."
+                .to_string(),
+        );
+    }
+    Ok(session_ids[0].clone())
+}
+
+fn validate_pairing_secrets(mut pairing: PairingResponse) -> Result<PairingResponse, String> {
+    pairing.device_token = non_empty_secret("Event Inbox device token", pairing.device_token, 32)?;
+    pairing.webhook_secret = non_empty_secret("OpenWA webhook secret", pairing.webhook_secret, 32)?;
     Ok(pairing)
 }
 
@@ -1467,9 +1676,10 @@ fn credentials(
     runtime_api_key: String,
     device_id: String,
     paired: PairingResponse,
+    route: &ManagedRuntimeRoute,
     connector: secret_store::ManagedOpenWaConnectorCredentials,
-) -> secret_store::ManagedRuntimeCredentials {
-    secret_store::ManagedRuntimeCredentials {
+) -> Result<secret_store::ManagedRuntimeCredentials, String> {
+    Ok(secret_store::ManagedRuntimeCredentials {
         schema_version: 3,
         runtime_api_key,
         device_id,
@@ -1477,12 +1687,15 @@ fn credentials(
         openwa_api_key: input.openwa_api_key.clone(),
         openwa_webhook_secret: paired.webhook_secret,
         openwa_allowed_session_ids: paired.session_ids,
-        event_inbox_base_url: paired.event_inbox_base_url,
+        event_inbox_base_url: route
+            .event_inbox_base_url
+            .clone()
+            .ok_or_else(|| "Managed Runtime Event Inbox routing is unavailable.".to_string())?,
         event_inbox_device_token: paired.device_token,
         event_inbox_callback_url: paired.callback_url,
         allow_live_sends: input.allow_live_sends,
         connector: Some(connector),
-    }
+    })
 }
 
 fn validate_stored_credentials(
@@ -1570,10 +1783,12 @@ mod tests {
         ensure_ingress_instance, normalize, preflight_connector_plugin,
         put_prepared_connector_credential, revoke_event_inbox_connector, revoke_event_inbox_device,
         sha256_hex, supports_event_inbox_protocol, validate_connector_plugin,
-        validate_ingress_instance, validate_pairing, ManagedRuntimeProvisioningInput,
-        OpenWaIntegrationInstance, OpenWaPlugin, PairingResponse, OPENWA_CONNECTOR_PLUGIN_ID,
-        OPENWA_CONNECTOR_PLUGIN_VERSION, OPENWA_RELEASE_TAG,
+        validate_ingress_instance, validate_pairing_route, validate_pairing_secrets,
+        DiscoveredEventInbox, ManagedRuntimeProvisioningInput, OpenWaIntegrationInstance,
+        OpenWaPlugin, PairingResponse, OPENWA_CONNECTOR_PLUGIN_ID, OPENWA_CONNECTOR_PLUGIN_VERSION,
+        OPENWA_RELEASE_TAG,
     };
+    use crate::managed_runtime::provisioning_routes::ManagedRuntimeRoute;
     use crate::managed_runtime::secret_store::{
         ManagedOpenWaConnectorCredentials, ManagedRuntimeCredentials,
         ManagedRuntimeProvisioningIntent,
@@ -1643,7 +1858,12 @@ mod tests {
             webhook_secret: "webhook-secret-with-at-least-thirty-two-characters".to_string(),
             session_ids: vec!["00000000-0000-4000-8000-000000000001".to_string()],
         };
-        assert!(validate_pairing(valid, "https://events.example.test", 2).is_ok());
+        let discovered = DiscoveredEventInbox {
+            protocol_version: 2,
+            base_url: "https://events.example.test".to_string(),
+        };
+        assert!(validate_pairing_route(&valid, &discovered).is_ok());
+        assert!(validate_pairing_secrets(valid).is_ok());
 
         let wrong_origin = PairingResponse {
             protocol_version: 2,
@@ -1653,7 +1873,7 @@ mod tests {
             webhook_secret: "webhook-secret-with-at-least-thirty-two-characters".to_string(),
             session_ids: vec!["00000000-0000-4000-8000-000000000001".to_string()],
         };
-        assert!(validate_pairing(wrong_origin, "https://events.example.test", 2).is_err());
+        assert!(validate_pairing_route(&wrong_origin, &discovered).is_err());
     }
 
     #[test]
@@ -1729,9 +1949,10 @@ mod tests {
         ]);
         let intent = provisioning_intent(&base_url, connector_id, &secret);
         let pairing = pairing(&base_url, session_id);
+        let route = route(&base_url, session_id, connector_id);
 
-        let first = put_prepared_connector_credential(&intent, &pairing, session_id).unwrap();
-        let replay = put_prepared_connector_credential(&intent, &pairing, session_id).unwrap();
+        let first = put_prepared_connector_credential(&route, &intent, &pairing).unwrap();
+        let replay = put_prepared_connector_credential(&route, &intent, &pairing).unwrap();
 
         assert_eq!(first, replay);
         for _ in 0..2 {
@@ -1761,15 +1982,11 @@ mod tests {
             (200, instance(true)),
         ]);
         let intent = provisioning_intent(&base_url, connector_id, &"z".repeat(43));
-        let mut request = input();
-        request.openwa_base_url = base_url;
-        let config = connector_config(
-            &pairing(&request.openwa_base_url, session_id),
-            session_id,
-            &format!("wac1.{connector_id}.1.{}", "z".repeat(43)),
-        );
+        let route = route(&base_url, session_id, connector_id);
+        let config =
+            connector_config(&route, &format!("wac1.{connector_id}.1.{}", "z".repeat(43))).unwrap();
 
-        ensure_ingress_instance(&request, &intent, session_id, &config).unwrap();
+        ensure_ingress_instance(&route, "openwa-key", &intent, &config).unwrap();
 
         let create = requests.recv().unwrap();
         let recover = requests.recv().unwrap();
@@ -1795,7 +2012,6 @@ mod tests {
         let session_id = "00000000-0000-4000-8000-000000000001";
         let other_session_id = "00000000-0000-4000-8000-000000000004";
         let connector_id = "00000000-0000-4000-8000-000000000003";
-        let ingress_instance_id = format!("wa-studio-{connector_id}");
         let connector_token = format!("wac1.{connector_id}.1.{}", "z".repeat(43));
         let plugin = format!(
             "{{\"id\":\"{OPENWA_CONNECTOR_PLUGIN_ID}\",\"version\":\"{OPENWA_CONNECTOR_PLUGIN_VERSION}\",\"status\":\"installed\",\"ingressCapable\":true,\"sessionScoped\":true,\"activeSessions\":[\"{other_session_id}\"]}}"
@@ -1818,17 +2034,9 @@ mod tests {
             ),
             (200, "{\"healthy\":true}".to_string()),
         ]);
-        let mut request = input();
-        request.openwa_base_url = base_url.clone();
+        let route = route(&base_url, session_id, connector_id);
 
-        ensure_connector_plugin(
-            &request,
-            &pairing(&base_url, session_id),
-            session_id,
-            &connector_token,
-            &ingress_instance_id,
-        )
-        .unwrap();
+        ensure_connector_plugin(&route, "openwa-key", &connector_token).unwrap();
 
         let captured = (0..7).map(|_| requests.recv().unwrap()).collect::<Vec<_>>();
         assert!(captured[0].starts_with(&format!("GET /api/plugins/{OPENWA_CONNECTOR_PLUGIN_ID} ")));
@@ -1861,7 +2069,6 @@ mod tests {
     fn preflight_rejects_foreign_connector_ownership_before_pairing() {
         let session_id = "00000000-0000-4000-8000-000000000001";
         let connector_id = "00000000-0000-4000-8000-000000000003";
-        let ingress_instance_id = format!("wa-studio-{connector_id}");
         let plugin = format!(
             "{{\"id\":\"{OPENWA_CONNECTOR_PLUGIN_ID}\",\"version\":\"{OPENWA_CONNECTOR_PLUGIN_VERSION}\",\"status\":\"installed\",\"ingressCapable\":true,\"sessionScoped\":true,\"activeSessions\":[]}}"
         );
@@ -1873,10 +2080,9 @@ mod tests {
             (200, plugin),
             (200, foreign_instance),
         ]);
-        let mut request = input();
-        request.openwa_base_url = base_url;
+        let route = route(&base_url, session_id, connector_id);
 
-        let error = preflight_connector_plugin(&request, &ingress_instance_id).unwrap_err();
+        let error = preflight_connector_plugin(&route, "openwa-key").unwrap_err();
 
         assert!(error.contains("owned by another workspace"));
         assert!(requests.recv().unwrap().starts_with("GET /api/health "));
@@ -1898,11 +2104,13 @@ mod tests {
             200,
             "{\"status\":\"ok\",\"timestamp\":\"2026-08-31T12:00:00.000Z\"}".to_string(),
         )]);
-        let mut request = input();
-        request.openwa_base_url = base_url;
+        let route = route(
+            &base_url,
+            "00000000-0000-4000-8000-000000000001",
+            connector_id,
+        );
 
-        let error =
-            preflight_connector_plugin(&request, &format!("wa-studio-{connector_id}")).unwrap_err();
+        let error = preflight_connector_plugin(&route, "openwa-key").unwrap_err();
 
         assert!(error.contains("did not disclose its release"));
         assert!(requests.recv().unwrap().starts_with("GET /api/health "));
@@ -1917,11 +2125,13 @@ mod tests {
             (200, format!("{{\"version\":\"{OPENWA_RELEASE_TAG}\"}}")),
             (403, "{\"message\":\"forbidden\"}".to_string()),
         ]);
-        let mut request = input();
-        request.openwa_base_url = base_url;
+        let route = route(
+            &base_url,
+            "00000000-0000-4000-8000-000000000001",
+            connector_id,
+        );
 
-        let error =
-            preflight_connector_plugin(&request, &format!("wa-studio-{connector_id}")).unwrap_err();
+        let error = preflight_connector_plugin(&route, "openwa-key").unwrap_err();
 
         assert!(error.contains("unscoped API key with the ADMIN role"));
         assert!(requests.recv().unwrap().starts_with("GET /api/health "));
@@ -1937,7 +2147,6 @@ mod tests {
     fn refuses_to_overwrite_another_connector_instance_during_reconciliation() {
         let session_id = "00000000-0000-4000-8000-000000000001";
         let connector_id = "00000000-0000-4000-8000-000000000003";
-        let ingress_instance_id = format!("wa-studio-{connector_id}");
         let plugin = format!(
             "{{\"id\":\"{OPENWA_CONNECTOR_PLUGIN_ID}\",\"version\":\"{OPENWA_CONNECTOR_PLUGIN_VERSION}\",\"status\":\"installed\",\"ingressCapable\":true,\"sessionScoped\":true,\"activeSessions\":[]}}"
         );
@@ -1946,15 +2155,12 @@ mod tests {
         );
         let (base_url, requests, server) =
             mock_http_server(vec![(200, plugin), (200, foreign_instance)]);
-        let mut request = input();
-        request.openwa_base_url = base_url.clone();
+        let route = route(&base_url, session_id, connector_id);
 
         let error = ensure_connector_plugin(
-            &request,
-            &pairing(&base_url, session_id),
-            session_id,
+            &route,
+            "openwa-key",
             &format!("wac1.{connector_id}.1.{}", "z".repeat(43)),
-            &ingress_instance_id,
         )
         .unwrap_err();
 
@@ -1987,10 +2193,11 @@ mod tests {
             (401, "{\"message\":\"already revoked\"}".to_string()),
         ]);
         let credentials = stored_credentials(&base_url, session_id, connector_id);
+        let route = route(&base_url, session_id, connector_id);
 
-        cleanup_openwa_resources(&credentials, None).unwrap();
-        revoke_event_inbox_connector(&credentials).unwrap();
-        revoke_event_inbox_device(&credentials).unwrap();
+        cleanup_openwa_resources(&route, &credentials, None).unwrap();
+        revoke_event_inbox_connector(&route, &credentials).unwrap();
+        revoke_event_inbox_device(&route, &credentials).unwrap();
 
         let captured = (0..6).map(|_| requests.recv().unwrap()).collect::<Vec<_>>();
         assert!(captured[0].starts_with(&format!(
@@ -2032,8 +2239,9 @@ mod tests {
             ),
         ]);
         let credentials = stored_credentials(&base_url, session_id, connector_id);
+        let route = route(&base_url, session_id, connector_id);
 
-        cleanup_openwa_resources(&credentials, None).unwrap();
+        cleanup_openwa_resources(&route, &credentials, None).unwrap();
 
         let captured = (0..6).map(|_| requests.recv().unwrap()).collect::<Vec<_>>();
         assert!(captured[2].starts_with(&format!(
@@ -2063,8 +2271,9 @@ mod tests {
         let (base_url, requests, server) = mock_http_server(vec![(200, "{}".to_string())]);
         let source = stored_credentials(&base_url, session_id, old_connector_id);
         let replacement = stored_credentials(&base_url, session_id, new_connector_id);
+        let route = route(&base_url, session_id, old_connector_id);
 
-        cleanup_openwa_resources(&source, Some(&replacement)).unwrap();
+        cleanup_openwa_resources(&route, &source, Some(&replacement)).unwrap();
 
         let request = requests.recv().unwrap();
         assert!(request.starts_with(&format!(
@@ -2101,6 +2310,17 @@ mod tests {
             device_token: "device-token-with-at-least-thirty-two-characters".to_string(),
             webhook_secret: "webhook-secret-with-at-least-thirty-two-characters".to_string(),
             session_ids: vec![session_id.to_string()],
+        }
+    }
+
+    fn route(base_url: &str, session_scope: &str, connector_id: &str) -> ManagedRuntimeRoute {
+        ManagedRuntimeRoute {
+            openwa_base_url: base_url.to_string(),
+            event_inbox_base_url: Some(base_url.to_string()),
+            connector_id: connector_id.to_string(),
+            token_generation: 1,
+            session_scope: Some(session_scope.to_string()),
+            ingress_instance_id: format!("wa-studio-{connector_id}"),
         }
     }
 
