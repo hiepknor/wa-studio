@@ -14,6 +14,7 @@ import {
   type RuntimeCampaignRun,
   type RuntimeCampaignTarget,
   type RuntimeGroup,
+  type RuntimeGroupDirectoryInput,
   type RuntimeGroupList,
   type RuntimeSession,
 } from "@/shared/api/runtime-client";
@@ -682,9 +683,11 @@ describe("CampaignsScreen", () => {
   it("paginates synchronized groups on the server and preserves selection across pages", async () => {
     const user = userEvent.setup();
     const secondGroup = { ...unknownGroup, id: "second@g.us", name: "Second page group" };
-    const listGroups = vi.fn()
-      .mockResolvedValueOnce({ data: [unknownGroup], meta: { total: 21, limit: 20, offset: 0 } })
-      .mockResolvedValueOnce({ data: [secondGroup], meta: { total: 21, limit: 20, offset: 20 } });
+    const listGroups = vi.fn((input: RuntimeGroupDirectoryInput) => Promise.resolve(
+      input.offset === 20
+        ? { data: [secondGroup], meta: { total: 21, limit: 20, offset: 20 } }
+        : { data: [unknownGroup], meta: { total: 21, limit: 20, offset: 0 } },
+    ));
     renderCampaigns({ listGroups });
     await connect(user);
     await openCampaign(user);
