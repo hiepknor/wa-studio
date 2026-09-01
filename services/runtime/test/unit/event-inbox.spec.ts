@@ -6,6 +6,7 @@ import { EventInboxTokenService } from '../../src/core/event-inbox/event-inbox-t
 import type { EventInboxOpenWAClient } from '../../src/integrations/openwa/event-inbox-openwa.client';
 import {
   EventInboxController,
+  EventInboxHealthController,
   EventInboxIngressController,
 } from '../../src/modules/event-inbox/event-inbox.controller';
 import type { EventInboxDeviceRepository } from '../../src/modules/event-inbox/event-inbox-device.repository';
@@ -72,6 +73,11 @@ describe('Event Inbox boundary', () => {
       ...configEnvironment(),
       EVENT_INBOX_OPENWA_RELEASE_TAG: 'unreviewed-release',
     })).toThrow(`must match reviewed release ${OPENWA_RELEASE_TAG}`);
+    expect(() => parseEventInboxConfig({
+      ...configEnvironment(),
+      EVENT_INBOX_MAX_STORED_BYTES: '1048576',
+      EVENT_INBOX_MAX_PAYLOAD_BYTES: '1048576',
+    })).toThrow('must reserve one maximum-sized signed webhook');
   });
 
   it('requires an independent metrics credential for production', () => {
@@ -231,6 +237,56 @@ describe('Event Inbox boundary', () => {
     expect(pairingRateLimit.consume).toHaveBeenCalledWith('203.0.113.10');
     expect(response.setHeader).toHaveBeenCalledWith('Retry-After', '127');
     expect(openwa.validateCredentials).not.toHaveBeenCalled();
+  });
+
+  it('fails readiness when it cannot admit one maximum-sized webhook', async () => {
+    const readiness = {
+      migrationHead: '011_legacy_primary_compatibility.sql',
+      migrationCount: 11,
+      storedEvents: 99,
+      storedBytes: 500,
+      pendingEvents: 0,
+      leasedEvents: 0,
+      deadEvents: 0,
+      retainedReceipts: 0,
+      oldestPendingAgeSeconds: null,
+      activeDevices: 1,
+      legacyDevices: 0,
+      ownedSessions: 1,
+      activeRateLimitBuckets: 0,
+      rateLimitedPairingAttempts: 0,
+      maxStoredEvents: 100,
+      maxStoredBytes: 1_000,
+    };
+    const repository = { readiness: vi.fn().mockResolvedValue(readiness) };
+    const response = { status: vi.fn().mockReturnThis() };
+    const controller = new EventInboxHealthController(
+      repository as unknown as EventInboxRepository,
+      config(),
+    );
+
+    await expect(controller.ready(response as never)).resolves.toMatchObject({
+      status: 'not_ready',
+      webhookAdmission: {
+        available: false,
+        eventSlotsRemaining: 1,
+        byteHeadroom: 500,
+        requiredByteHeadroom: 262_215,
+      },
+    });
+    expect(response.status).toHaveBeenCalledWith(503);
+
+    repository.readiness.mockResolvedValueOnce({
+      ...readiness,
+      storedEvents: 0,
+      storedBytes: 0,
+      maxStoredBytes: 1_000_000,
+    });
+    await expect(controller.ready(response as never)).resolves.toMatchObject({
+      status: 'ready',
+      webhookAdmission: { available: true },
+    });
+    expect(response.status).toHaveBeenLastCalledWith(200);
   });
 
   it('uses durable global and privacy-preserving per-IP pairing buckets', async () => {

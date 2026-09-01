@@ -46,6 +46,11 @@ describe('Runtime observability deployment contract', () => {
       'WARuntimeBackgroundProcessDegraded',
       'WARuntimeMetricsSnapshotFailures',
       'WARuntimeDatabasePoolSaturated',
+      'WARuntimeOpenWAUnknownMessageJobs',
+      'WARuntimeOpenWACircuitOpen',
+      'WARuntimeOpenWARecoveryStalled',
+      'WARuntimeOpenWAThrottlingPersistent',
+      'WARuntimeOpenWADeferredQueueStalled',
       'WARuntimeHighHttpErrorRate',
       'WARuntimeHighHttpLatency',
     ]) {
@@ -61,6 +66,7 @@ describe('Runtime observability deployment contract', () => {
       'WAEventInboxPendingAgeHigh',
       'WAEventInboxEventCapacityHigh',
       'WAEventInboxByteCapacityHigh',
+      'WAEventInboxWebhookAdmissionUnavailable',
       'WAEventInboxPairingRateLimited',
       'WAProductionEndpointUnavailable',
       'WAProductionCertificateExpiring',
@@ -84,6 +90,8 @@ describe('Runtime observability deployment contract', () => {
     expect(workflow).toContain('caddy@sha256:');
     expect(workflow).toContain('deploy/observability/prometheus.yml');
     expect(workflow).toContain('deploy/observability/event-inbox-prometheus.yml');
+    expect(workflow).toContain('test rules /etc/prometheus/rules/runtime-alerts.test.yml');
+    expect(workflow).toContain('test rules /etc/prometheus/rules/event-inbox-alerts.test.yml');
     expect(workflow).toContain('check-config /etc/alertmanager/alertmanager.yml');
     expect(workflow).toContain('--config.check');
     expect(workflow).toContain('caddy validate --config /etc/caddy/Caddyfile');

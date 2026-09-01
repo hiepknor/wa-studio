@@ -1,0 +1,20 @@
+rule_files:
+  - event-inbox-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'wa_event_inbox_webhook_admission_available{job="wa-event-inbox"}'
+        values: '1 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: WAEventInboxWebhookAdmissionUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: wa-event-inbox
+              severity: critical
+            exp_annotations:
+              summary: WA Event Inbox cannot admit a maximum-sized callback
+              description: Durable webhook headroom is exhausted; restore capacity before OpenWA callback retries are lost.

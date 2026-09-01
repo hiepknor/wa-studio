@@ -32,6 +32,12 @@ const readiness = {
   protocolVersion: 2,
   migrationHead: "011_legacy_primary_compatibility.sql",
   migrationCount: 11,
+  webhookAdmission: {
+    available: true,
+    eventSlotsRemaining: 499_999,
+    byteHeadroom: 2_147_483_648,
+    requiredByteHeadroom: 262_215,
+  },
   release: {
     runtimeVersion: "0.1.0",
     openwaReleaseTag: "0.23.3",
@@ -72,6 +78,15 @@ for (const [label, input, pattern] of [
     ...readiness,
     release: { ...readiness.release, connectorProtocolVersion: 2 },
   } }, /Connector protocol/u],
+  ["admission", { readiness: {
+    ...readiness,
+    status: "not_ready",
+    webhookAdmission: { ...readiness.webhookAdmission, available: false },
+  } }, /readiness status/u],
+  ["admission headroom", { readiness: {
+    ...readiness,
+    webhookAdmission: { ...readiness.webhookAdmission, byteHeadroom: 1 },
+  } }, /admission headroom/u],
 ]) {
   assert.throws(
     () => verifyEventInboxCandidate({

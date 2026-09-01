@@ -118,7 +118,7 @@ services:
       - event-inbox-internal
       - event-inbox-edge
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:34200/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:34200/api/v1/health/ready').then(async r=>{const value=await r.json();process.exit(r.ok&&value.status==='ready'&&value.webhookAdmission?.available===true?0:1)}).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -142,7 +142,7 @@ services:
       - event-inbox-internal
       - event-inbox-edge
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:34200/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:34200/api/v1/health/ready').then(async r=>{const value=await r.json();process.exit(r.ok&&value.status==='ready'&&value.webhookAdmission?.available===true?0:1)}).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 6

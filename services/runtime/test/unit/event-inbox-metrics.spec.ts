@@ -11,6 +11,7 @@ const token = 'event-inbox-metrics-token-with-at-least-32-characters';
 const config = (metricsToken?: string): EventInboxConfig => ({
   EVENT_INBOX_MAX_STORED_BYTES: 1024 * 1024,
   EVENT_INBOX_MAX_STORED_EVENTS: 1000,
+  EVENT_INBOX_MAX_PAYLOAD_BYTES: 262_144,
   EVENT_INBOX_METRICS_TOKEN: metricsToken,
 } as EventInboxConfig);
 const executionContext = (authorization?: string) => ({
@@ -68,6 +69,7 @@ describe('Event Inbox metrics', () => {
     expect(output).toContain('wa_event_inbox_oldest_pending_age_seconds 42');
     expect(output).toContain('wa_event_inbox_devices{state="active"} 2');
     expect(output).toContain('wa_event_inbox_pairing_blocked_attempts 6');
+    expect(output).toContain('wa_event_inbox_webhook_admission_available 1');
     expect(output).toContain('wa_event_inbox_metrics_snapshot_up 1');
     expect(output).not.toContain(token);
   });

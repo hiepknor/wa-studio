@@ -8,6 +8,7 @@ import {
 } from '@prometheus-io/client';
 import { EVENT_INBOX_CONFIG } from '../../core/event-inbox/event-inbox-config.module';
 import { eventInboxConfig, type EventInboxConfig } from '../../core/event-inbox/event-inbox-config';
+import { eventInboxWebhookAdmission } from './event-inbox-admission';
 import { EventInboxRepository } from './event-inbox.repository';
 
 @Injectable()
@@ -22,6 +23,7 @@ export class EventInboxMetricsService {
   private readonly ownedSessions: Gauge;
   private readonly activeRateLimitBuckets: Gauge;
   private readonly blockedPairingAttempts: Gauge;
+  private readonly webhookAdmissionAvailable: Gauge;
   private readonly snapshotUp: Gauge;
   private readonly snapshotFailures: Counter;
   private readonly scrapeDuration: Histogram<'result'>;
@@ -86,6 +88,11 @@ export class EventInboxMetricsService {
       help: 'Pairing attempts blocked in currently active rate-limit windows.',
       registers: [this.registry],
     });
+    this.webhookAdmissionAvailable = new Gauge({
+      name: 'wa_event_inbox_webhook_admission_available',
+      help: 'Whether Event Inbox can durably admit one maximum-sized webhook callback.',
+      registers: [this.registry],
+    });
     this.snapshotUp = new Gauge({
       name: 'wa_event_inbox_metrics_snapshot_up',
       help: 'Whether the most recent Event Inbox readiness snapshot succeeded.',
@@ -107,6 +114,7 @@ export class EventInboxMetricsService {
     this.maxStoredEvents.set(config.EVENT_INBOX_MAX_STORED_EVENTS);
     this.maxStoredBytes.set(config.EVENT_INBOX_MAX_STORED_BYTES);
     this.snapshotUp.set(0);
+    this.webhookAdmissionAvailable.set(0);
     for (const state of ['dead', 'leased', 'pending', 'receipts', 'stored']) {
       this.events.set({ state }, 0);
     }
@@ -141,6 +149,10 @@ export class EventInboxMetricsService {
       this.ownedSessions.set(snapshot.ownedSessions);
       this.activeRateLimitBuckets.set(snapshot.activeRateLimitBuckets);
       this.blockedPairingAttempts.set(snapshot.rateLimitedPairingAttempts);
+      this.webhookAdmissionAvailable.set(eventInboxWebhookAdmission(
+        snapshot,
+        this.config.EVENT_INBOX_MAX_PAYLOAD_BYTES,
+      ).available ? 1 : 0);
       this.snapshotUp.set(1);
     } catch {
       result = 'degraded';

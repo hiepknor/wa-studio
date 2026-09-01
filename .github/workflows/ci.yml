@@ -47,17 +47,33 @@ jobs:
           docker run --rm \
             -v "$PWD/services/runtime/deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
             -v "$PWD/services/runtime/deploy/observability/runtime-alerts.yml:/etc/prometheus/rules/runtime-alerts.yml:ro" \
+            -v "$PWD/services/runtime/deploy/observability/runtime-alerts.test.yml:/etc/prometheus/rules/runtime-alerts.test.yml:ro" \
             -v "/dev/null:/run/secrets/wa_runtime_metrics_token:ro" \
             --entrypoint /bin/promtool \
             "$PROMTOOL_IMAGE" \
             check config /etc/prometheus/prometheus.yml
           docker run --rm \
+            -v "$PWD/services/runtime/deploy/observability/runtime-alerts.yml:/etc/prometheus/rules/runtime-alerts.yml:ro" \
+            -v "$PWD/services/runtime/deploy/observability/runtime-alerts.test.yml:/etc/prometheus/rules/runtime-alerts.test.yml:ro" \
+            --workdir /etc/prometheus/rules \
+            --entrypoint /bin/promtool \
+            "$PROMTOOL_IMAGE" \
+            test rules /etc/prometheus/rules/runtime-alerts.test.yml
+          docker run --rm \
             -v "$PWD/services/runtime/deploy/observability/event-inbox-prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
             -v "$PWD/services/runtime/deploy/observability/event-inbox-alerts.yml:/etc/prometheus/rules/event-inbox-alerts.yml:ro" \
+            -v "$PWD/services/runtime/deploy/observability/event-inbox-alerts.test.yml:/etc/prometheus/rules/event-inbox-alerts.test.yml:ro" \
             -v "/dev/null:/run/secrets/wa_event_inbox_metrics_token:ro" \
             --entrypoint /bin/promtool \
             "$PROMTOOL_IMAGE" \
             check config /etc/prometheus/prometheus.yml
+          docker run --rm \
+            -v "$PWD/services/runtime/deploy/observability/event-inbox-alerts.yml:/etc/prometheus/rules/event-inbox-alerts.yml:ro" \
+            -v "$PWD/services/runtime/deploy/observability/event-inbox-alerts.test.yml:/etc/prometheus/rules/event-inbox-alerts.test.yml:ro" \
+            --workdir /etc/prometheus/rules \
+            --entrypoint /bin/promtool \
+            "$PROMTOOL_IMAGE" \
+            test rules /etc/prometheus/rules/event-inbox-alerts.test.yml
           docker run --rm \
             -v "$PWD/services/runtime/deploy/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro" \
             -v "/dev/null:/run/secrets/telegram_bot_token:ro" \
