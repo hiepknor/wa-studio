@@ -1186,7 +1186,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     setMediaUploadError(null);
     setFormErrors((current) => ({ ...current, mediaAsset: undefined }));
     try {
-      const { asset, optimization, uploadedFile } = await uploadCampaignMedia({
+      const { asset, optimization } = await uploadCampaignMedia({
         api,
         file,
         policy: mediaPolicy,
@@ -1213,9 +1213,6 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
           },
         }
         : current);
-      if (asset.kind === "IMAGE") {
-        setMediaPreview({ assetId: asset.id, url: URL.createObjectURL(uploadedFile) });
-      }
       if (optimization.applied) {
         toast.notify({
           description: `${formatBytes(optimization.originalByteSize)} → ${formatBytes(optimization.uploadedByteSize)} · dimensions and pixels verified`,

@@ -276,12 +276,13 @@ describe('OpenWA Safety Governor', () => {
       requestHash: 'e'.repeat(64),
       reason: 'MANAGED_RUNTIME_RECONFIGURATION',
     };
-    await expect(safety.mutateWorkspace(block)).resolves.toMatchObject({
+    const blocked = await safety.mutateWorkspace(block);
+    expect(blocked).toMatchObject({
       effectiveScopeType: 'WORKSPACE',
       status: 'BLOCKED',
       reason: 'MANAGED_RUNTIME_RECONFIGURATION',
     });
-    await expect(safety.mutateWorkspace(block)).resolves.toMatchObject({ revision: 2 });
+    await expect(safety.mutateWorkspace(block)).resolves.toEqual(blocked);
 
     await expect(safety.reserveOperation({
       sessionId: randomUUID(),
@@ -440,10 +441,10 @@ describe('OpenWA Safety Governor', () => {
 
     await pool.query(
       `INSERT INTO openwa_connector_sessions
-         (session_id, desired_webhook_id, binding_generation, binding_synced_at,
+         (session_id, desired_webhook_id, desired_connector_id, binding_generation, binding_synced_at,
           health_state, health_lease_expires_at)
-       VALUES ($1, 'connector-webhook', 1, now(), 'HEALTHY', now() + interval '10 minutes')`,
-      [INTEGRATION_SESSION_ID],
+       VALUES ($1, 'connector-webhook', $2, 1, now(), 'HEALTHY', now() + interval '10 minutes')`,
+      [INTEGRATION_SESSION_ID, randomUUID()],
     );
     const attemptId = randomUUID();
     const commandId = randomUUID();

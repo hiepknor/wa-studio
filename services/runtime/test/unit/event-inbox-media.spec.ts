@@ -103,6 +103,18 @@ describe('Event Inbox connector media relay', () => {
       png,
     )).rejects.toThrow('digest does not match');
     expect(repository.store).toHaveBeenCalledTimes(1);
+
+    await expect(controller.upload(
+      attemptId,
+      `Bearer ${token}`,
+      sessionId,
+      sha256,
+      Buffer.from('watch.png').toString('base64url'),
+      expiresAt.toISOString(),
+      'image/png',
+      [png] as unknown,
+    )).rejects.toThrow('requires a binary image body');
+    expect(repository.store).toHaveBeenCalledTimes(1);
   });
 
   it('serves bounded HEAD/GET responses without exposing a listing endpoint', async () => {

@@ -79,6 +79,9 @@ function renderCampaigns(overrides: Partial<RuntimeApi> = {}, initial: RuntimeCa
     resumeCampaignRun: vi.fn(),
     cancelCampaignRun: vi.fn(),
     getCampaign: vi.fn().mockResolvedValue(campaign),
+    getCampaignMediaContent: vi.fn().mockResolvedValue(new Blob([
+      new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    ], { type: "image/png" })),
     createCampaign: vi.fn(),
     updateCampaign: vi.fn(),
     replaceCampaignTargets: vi.fn(),
@@ -406,6 +409,7 @@ describe("CampaignsScreen", () => {
     ], mediaContent.filename, { type: mediaContent.mimeType });
     await user.upload(screen.getByLabelText("Choose an image"), file);
     expect(await screen.findByText(mediaContent.filename)).toBeVisible();
+    await waitFor(() => expect(api.getCampaignMediaContent).toHaveBeenCalledWith(assetId, READ_OPTIONS));
     await user.type(screen.getByRole("textbox", { name: "Caption · Optional" }), mediaContent.caption);
     await user.click(screen.getByRole("button", { name: "Create draft" }));
     await screen.findByText("Campaign draft created");

@@ -70,7 +70,6 @@ describe("Campaign media upload", () => {
         originalByteSize: file.size,
         uploadedByteSize: file.size,
       },
-      uploadedFile: file,
     });
 
     expect(api.createCampaignMediaUpload).toHaveBeenCalledWith(
@@ -191,7 +190,6 @@ describe("Campaign media upload", () => {
     expect(result).toEqual({
       asset,
       optimization: { applied: true, originalByteSize: 11, uploadedByteSize: 8 },
-      uploadedFile: optimized,
     });
   });
 

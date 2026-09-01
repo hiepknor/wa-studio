@@ -32,7 +32,6 @@ export interface CampaignMediaUploadResult {
     originalByteSize: number;
     uploadedByteSize: number;
   };
-  uploadedFile: File;
 }
 
 type CampaignImageOptimizer = (
@@ -215,7 +214,6 @@ export async function uploadCampaignMedia({
         originalByteSize: prepared.originalByteSize,
         uploadedByteSize: prepared.uploadedByteSize,
       },
-      uploadedFile: uploadFile,
     };
   } catch (error) {
     if (uploadId) {

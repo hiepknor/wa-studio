@@ -34,6 +34,7 @@ import {
 const uuidSchema = z.uuid();
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
+const rawImageBodySchema = z.instanceof(Buffer);
 const mimeTypes = new Set<EventInboxMediaMimeType>(['image/jpeg', 'image/png', 'image/webp']);
 
 @Controller('event-inbox/media')
@@ -70,17 +71,19 @@ export class EventInboxMediaUploadController {
       throw new UnprocessableEntityException('Invalid Event Inbox media lease metadata');
     }
     if (!mimeType) throw new UnsupportedMediaTypeException('Unsupported connector image media type');
-    if (!Buffer.isBuffer(body)) {
+    const rawBody = rawImageBodySchema.safeParse(body);
+    if (!rawBody.success) {
       throw new UnsupportedMediaTypeException('Connector image upload requires a binary image body');
     }
-    if (body.length === 0) throw new UnprocessableEntityException('Connector image body is empty');
-    if (body.length > this.config.EVENT_INBOX_MEDIA_MAX_BYTES) {
+    const content = Buffer.from(rawBody.data);
+    if (content.length === 0) throw new UnprocessableEntityException('Connector image body is empty');
+    if (content.length > this.config.EVENT_INBOX_MEDIA_MAX_BYTES) {
       throw new PayloadTooLargeException('Connector image exceeds the Event Inbox media limit');
     }
-    if (detectMimeType(body) !== mimeType) {
+    if (detectMimeType(content) !== mimeType) {
       throw new UnprocessableEntityException('Connector image bytes do not match the declared media type');
     }
-    if (createHash('sha256').update(body).digest('hex') !== sha256.data) {
+    if (createHash('sha256').update(content).digest('hex') !== sha256.data) {
       throw new UnprocessableEntityException('Connector image digest does not match the uploaded bytes');
     }
     const result = await this.repository.store(device, {
@@ -90,7 +93,7 @@ export class EventInboxMediaUploadController {
       mimeType,
       sha256: sha256.data,
       expiresAt,
-      content: body,
+      content,
     });
     if (result.kind === 'unauthorized') {
       throw new UnauthorizedException('Session is not owned by this Event Inbox device');
