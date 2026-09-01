@@ -16,5 +16,15 @@ describe("userFacingErrorMessage", () => {
       .toBe("Safe fallback");
     expect(userFacingErrorMessage(new Error(""), "Safe fallback"))
       .toBe("Safe fallback");
+    expect(userFacingErrorMessage("", "Safe fallback"))
+      .toBe("Safe fallback");
+  });
+
+  it("preserves and redacts string rejections from native commands", () => {
+    expect(userFacingErrorMessage(
+      "Native rejected secret-value",
+      "Safe fallback",
+      ["secret-value"],
+    )).toBe("Native rejected [redacted]");
   });
 });
