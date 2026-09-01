@@ -88,6 +88,7 @@ jobs:
             --config.check
           docker run --rm \
             -e WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201 \
+            -e WA_EVENT_INBOX_CONTROL_UPSTREAM=127.0.0.1:34201 \
             -v "$PWD/services/runtime/deploy/event-inbox/Caddyfile.wa-events:/etc/caddy/Caddyfile:ro" \
             "$CADDY_IMAGE" \
             caddy validate --config /etc/caddy/Caddyfile

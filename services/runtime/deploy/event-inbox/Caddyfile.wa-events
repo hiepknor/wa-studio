@@ -38,6 +38,36 @@ wa-events.onio.cc {
 		}
 	}
 
+	@connector_control {
+		method GET POST PUT
+		path /api/v1/event-inbox/connectors/*
+	}
+	handle @connector_control {
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy {$WA_EVENT_INBOX_CONTROL_UPSTREAM:127.0.0.1:34200}
+	}
+
+	@media_upload {
+		method PUT
+		path /api/v1/event-inbox/media/*
+	}
+	handle @media_upload {
+		request_body {
+			max_size 8MB
+		}
+		reverse_proxy {$WA_EVENT_INBOX_CONTROL_UPSTREAM:127.0.0.1:34200}
+	}
+
+	@media_download {
+		method GET HEAD
+		path /api/v1/media/*
+	}
+	handle @media_download {
+		reverse_proxy {$WA_EVENT_INBOX_CONTROL_UPSTREAM:127.0.0.1:34200}
+	}
+
 	@health {
 		method GET
 		path /api/v1/health/live
