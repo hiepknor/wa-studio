@@ -7,7 +7,9 @@ import { resolve } from "node:path";
 
 import {
   createDeploymentManifest,
+  createServerDeploymentManifest,
   verifyDeploymentManifest,
+  verifyServerDeploymentManifest,
 } from "./deployment-release.mjs";
 
 const workspaceRoot = resolve(import.meta.dirname, "../..");
@@ -22,6 +24,7 @@ try {
   const updaterDirectory = resolve(root, "updater");
   const imageMetadataPath = resolve(root, "event-inbox-image.txt");
   const outputPath = resolve(root, "wa-studio-deployment.json");
+  const serverOutputPath = resolve(root, "wa-studio-server-deployment.json");
   const connectorName = `wa-studio-connector-${components.connectorPluginVersion}.zip`;
   const connectorPath = resolve(connectorDirectory, connectorName);
   mkdirSync(connectorDirectory);
@@ -61,9 +64,33 @@ try {
   assert.equal(manifest.components.connector.artifact.sha256, connectorDigest);
   assert.match(manifest.components.studio.releaseChecksumsSha256, /^[0-9a-f]{64}$/u);
   assert.equal(manifest.components.openwa.releaseTag, components.openwaReleaseTag);
+  assert.equal(manifest.releaseScope, "product");
   assert.deepEqual(
     verifyDeploymentManifest({ ...common, manifestPath: outputPath }),
     manifest,
+  );
+  const serverCommon = {
+    workspaceRoot,
+    repository: common.repository,
+    tag: common.tag,
+    gitCommit: common.gitCommit,
+    imageMetadataPath,
+    connectorDirectory,
+  };
+  const serverManifest = createServerDeploymentManifest({
+    ...serverCommon,
+    outputPath: serverOutputPath,
+  });
+  assert.equal(serverManifest.releaseScope, "server-candidate");
+  assert.equal(serverManifest.components.studio, undefined);
+  assert.equal(serverManifest.components.eventInbox.imageDigest, `sha256:${imageDigest}`);
+  assert.equal(serverManifest.components.connector.artifact.sha256, connectorDigest);
+  assert.deepEqual(
+    verifyServerDeploymentManifest({
+      ...serverCommon,
+      manifestPath: serverOutputPath,
+    }),
+    serverManifest,
   );
   const cliOutput = resolve(root, "wa-studio-deployment-cli.json");
   const cliArguments = [
@@ -86,6 +113,26 @@ try {
     ...cliArguments,
     "--manifest", cliOutput,
   ], { encoding: "utf8" }), /Verified coordinated deployment manifest/u);
+  const serverCliOutput = resolve(root, "wa-studio-server-deployment-cli.json");
+  const serverCliArguments = [
+    "--repository", serverCommon.repository,
+    "--tag", serverCommon.tag,
+    "--git-commit", serverCommon.gitCommit,
+    "--image-file", imageMetadataPath,
+    "--connector-directory", connectorDirectory,
+  ];
+  assert.match(execFileSync(process.execPath, [
+    resolve(import.meta.dirname, "deployment-release.mjs"),
+    "create-server",
+    ...serverCliArguments,
+    "--output", serverCliOutput,
+  ], { encoding: "utf8" }), /Created server candidate deployment manifest/u);
+  assert.match(execFileSync(process.execPath, [
+    resolve(import.meta.dirname, "deployment-release.mjs"),
+    "verify-server",
+    ...serverCliArguments,
+    "--manifest", serverCliOutput,
+  ], { encoding: "utf8" }), /Verified server candidate deployment manifest/u);
 
   const tampered = JSON.parse(readFileSync(outputPath, "utf8"));
   tampered.components.connector.protocolVersion += 1;
@@ -119,13 +166,20 @@ try {
     "utf8",
   );
   for (const gate of [
+    "needs: [connector-plugin, event-inbox-image]",
+    "Create server candidate deployment manifest",
+    "Attest server candidate deployment manifest",
+    "deployment-release.mjs verify-server",
+    "wa-studio-server-deployment.json",
+    "Create or resume server candidate draft",
     "Create coordinated deployment manifest",
     "Attest coordinated deployment manifest",
     "deployment-release.mjs verify",
     "--updater-directory dist/updater-release",
     "gh attestation verify dist/release-metadata/wa-studio-deployment.json",
-    "dist/release-metadata/* dist/connector-plugin/* --clobber",
-    "-eq 11",
+    "dist/server-release/wa-studio-server-deployment.json dist/connector-plugin/* --clobber",
+    "dist/published-server-verification",
+    "-eq 12",
   ]) {
     assert.ok(releaseWorkflow.includes(gate), `Release workflow is missing: ${gate}`);
   }
@@ -134,5 +188,5 @@ try {
 }
 
 process.stdout.write(
-  "Coordinated deployment release test passed: image, connector, migration and source identity fail closed.\n",
+  "Deployment release test passed: independent server candidate and coordinated product identities fail closed.\n",
 );

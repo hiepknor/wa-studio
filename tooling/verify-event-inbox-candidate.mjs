@@ -98,7 +98,9 @@ export function verifyEventInboxCandidate({ manifest, readiness, observedImage, 
   const tag = required(deployment.tag, "Deployment tag");
   const gitCommit = required(deployment.gitCommit, "Deployment commit");
 
-  if (deployment.schemaVersion !== 1 || deployment.product !== "wa-studio") {
+  if (deployment.schemaVersion !== 1
+    || deployment.product !== "wa-studio"
+    || !["server-candidate", "product"].includes(deployment.releaseScope)) {
     throw new Error("Deployment manifest schema is incompatible.");
   }
   if (!/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(tag)

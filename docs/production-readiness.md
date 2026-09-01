@@ -46,7 +46,7 @@ from any failures recorded before or after it. Before the canary clock starts:
 
 ## Canary UAT and 24-hour gate
 
-- [ ] Install the notarized 0.2.0 canary DMG and connect through production discovery protocol v2.
+- [ ] Install the notarized 0.2.1 canary DMG and connect through production discovery protocol v2.
 - [ ] If the Mac has a legacy schema-2 profile, save the connection again and confirm it migrates to
       connector schema 3; live sends must remain effectively disabled until that migration and its
       heartbeat quorum complete.
@@ -89,7 +89,8 @@ from any failures recorded before or after it. Before the canary clock starts:
 
 ## Go/no-go record
 
-Retain the attested `wa-studio-deployment.json` as the authoritative candidate identity. Record its
+Retain the attested `wa-studio-server-deployment.json` as the authoritative server candidate identity
+and the coordinated `wa-studio-deployment.json` once the desktop product is published. Record their
 digest, desktop checksums, connector/binding generations, canary start/end UTC, R2 backup key/checksum,
 restore-drill result, UAT run ID, test-group ID, alert test timestamps, operator acknowledgement, and
 the final go/no-go decision. Store identifiers only in the private release record; never add customer

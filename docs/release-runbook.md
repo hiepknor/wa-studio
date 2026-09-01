@@ -1,7 +1,8 @@
 # WA Studio release runbook
 
-This runbook publishes the macOS desktop updater and the Event Inbox image as one product release.
-The GitHub Actions workflow is authoritative; do not upload or replace updater assets manually.
+This runbook stages an independently deployable Event Inbox server candidate, then publishes the
+macOS updater and all components as one product release. The GitHub Actions workflow is
+authoritative; do not upload or replace release assets manually.
 
 `release/components.json` declares the release channel. A `canary` release is published as a GitHub
 prerelease and is intentionally excluded from the `releases/latest` updater endpoint. A `stable`
@@ -17,9 +18,14 @@ passes every required check; never mutate the channel of an existing tag or publ
   `https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json`.
 - Configure the matching `WA_STUDIO_UPDATER_PUBLIC_KEY`, `TAURI_SIGNING_PRIVATE_KEY` and optional
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub Actions secrets.
-- Configure the Developer ID certificate and App Store Connect notarization secrets used by
-  `.github/workflows/release.yml`.
-- Configure those credentials as secrets of the protected `release` GitHub environment. In this
+- To publish the desktop product, configure the Developer ID certificate and App Store Connect
+  notarization secrets used by `.github/workflows/release.yml`. A missing desktop credential does
+  not weaken or block the separately attested server candidate, but it must keep product publication
+  fail-closed.
+- Set the repository variable `WA_STUDIO_DESKTOP_RELEASE_ENABLED=true` only after those credentials
+  are configured and a desktop product release is intended. When absent or false, the desktop and
+  coordinated publish jobs are intentionally skipped while the server candidate remains green.
+- Configure desktop credentials as secrets of the protected `release` GitHub environment. In this
   single-maintainer repository, the protected tag, required checks, signed workflow and artifact
   verification replace a manual environment approval.
 
@@ -33,13 +39,18 @@ the Runtime sidecar and exposes them only to the Tauri signing/build command.
 
 1. Run `npm run check` and `npm run test:integration` from the release commit.
 2. Create and push the tag `v<apps/studio/package.json version>` without moving an existing tag.
-3. Watch the `Release` workflow. It must complete `verify`, `event-inbox-image`, `desktop`, then
-   `publish` in that order.
-4. The image job publishes BuildKit SBOM/provenance attestations for the immutable GHCR digest. The
+3. Watch the `Release` workflow. `verify`, `event-inbox-image`, and `connector-plugin` produce the
+   server candidate first. `publish-server-candidate` verifies provenance and stages four
+   assets in a draft GitHub Release. It does not expose a desktop update.
+4. When `WA_STUDIO_DESKTOP_RELEASE_ENABLED=true`, the independent `desktop` job must still import the
+   Developer ID identity, notarize, sign the updater, and pass the packaged Runtime drill. Only then
+   may `publish` bind all components and publish the draft.
+5. The image job publishes BuildKit SBOM/provenance attestations for the immutable GHCR digest. The
    desktop job generates an SPDX 2.3 SBOM and signs GitHub provenance attestations for every staged
    release file.
-5. The publish job verifies those attestations against this repository, workflow and source commit,
-   creates or resumes a draft release, uploads exactly eleven assets, downloads `latest.json` back
+6. The publish job verifies those attestations against this repository, workflow and source commit,
+   resumes the server-candidate draft, uploads the desktop and coordinated assets, verifies exactly
+   twelve assets, downloads `latest.json` back
    for comparison, and only then publishes the draft as a prerelease or latest release according to
    the reviewed release channel.
 
@@ -50,6 +61,8 @@ The release assets are:
 - the generated `WA-Studio_<version>_sbom.spdx.json` software bill of materials;
 - `latest.json`, `release-checksums.txt`, and `release-assets.json`;
 - `event-inbox-image.txt`, containing the immutable GHCR digest deployed with this product version;
+- `wa-studio-server-deployment.json`, the attested server-only binding used to canary Event Inbox
+  without depending on macOS signing;
 - `wa-studio-deployment.json`, the attested binding between the source commit, desktop checksum set,
   Event Inbox digest and migration set, connector digest and protocol, OpenWA pin, and component versions;
 - the installable `wa-studio-connector-<version>.zip` and its `.sha256` checksum.
@@ -88,9 +101,27 @@ gh attestation verify wa-studio-deployment.json \
   --source-digest "$(git rev-list -n 1 v<version>)"
 ```
 
+Before product publication, operators may download the four assets from the authenticated draft and
+deploy only the server candidate. Verify `wa-studio-server-deployment.json` with `verify-server` and
+verify its GitHub attestation before staging the image:
+
+```bash
+node tooling/release/deployment-release.mjs verify-server \
+  --repository hiepknor/wa-studio \
+  --tag "v<version>" \
+  --git-commit "$(git rev-list -n 1 v<version>)" \
+  --image-file event-inbox-image.txt \
+  --connector-directory . \
+  --manifest wa-studio-server-deployment.json
+gh attestation verify wa-studio-server-deployment.json \
+  --repo hiepknor/wa-studio \
+  --signer-workflow hiepknor/wa-studio/.github/workflows/release.yml \
+  --source-digest "$(git rev-list -n 1 v<version>)"
+```
+
 Confirm that:
 
-- the release is not a draft, contains exactly eleven assets, and its prerelease/latest state matches
+- the release is not a draft, contains exactly twelve assets, and its prerelease/latest state matches
   `release/components.json`;
 - `latest.json` reports the tagged version and a `darwin-aarch64` platform;
 - its URL points to the updater archive in the same immutable tag;
@@ -120,15 +151,15 @@ perform this check because they intentionally contain no update channel or publi
 
 ## 0.2 production rollout sequence
 
-### Canary 0.2.0
+### Canary 0.2.1
 
-1. Keep `releaseChannel` set to `canary` and tag the verified `main` commit as `v0.2.0`. Install the
+1. Keep `releaseChannel` set to `canary` and tag the verified `main` commit as `v0.2.1`. Install the
    published notarized DMG manually on only the canary Mac; prereleases are intentionally invisible
    to the stable updater endpoint.
-2. Verify all eleven release assets, attestations, checksums, the updater signature, connector package,
+2. Verify all twelve release assets, attestations, checksums, the updater signature, connector package,
    and Event Inbox image digest. Stage that image digest with the Event Inbox `canary` Compose
    profile on port 34201, then run `npm run event-inbox:candidate:verify` against the attested
-   deployment manifest and the actual canary container before routing traffic.
+   server deployment manifest and the actual canary container before routing traffic.
 3. Confirm private readiness reports available maximum-callback admission, switch only
    `wa-events.onio.cc` to the candidate with
    `WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201`, and keep the accepted primary live on 34200 throughout
@@ -147,23 +178,25 @@ accounted for, an outbound result is `UNKNOWN`, storage becomes critical, or a p
 Server rollback is a Caddy reload and does not mutate the database or downgrade the desktop. Stop
 further outbound UAT, retain both slots and logs for diagnosis, and ship a higher candidate version.
 
-### Stable 0.2.1
+### Stable 0.2.2
 
-After canary acceptance, create a version-bump commit that moves Studio and Tauri to 0.2.1,
+After canary acceptance, create a version-bump commit that moves Studio and Tauri to 0.2.2,
 updates Runtime metadata only when Runtime changed, regenerates the release manifest, and changes
 `releaseChannel` to `stable`. Merge it through a pull request with every required check successful,
-then tag only that commit as `v0.2.1`.
+then tag only that commit as `v0.2.2`.
 Converge the primary Event Inbox slot to the accepted immutable image,
-switch Caddy back to the fail-safe 34200 target, then publish 0.2.1 as latest. Verify an installed
-0.2.0 canary and the preceding stable build both discover 0.2.1 through the signed updater manifest.
-Do not promote or relabel the 0.2.0 prerelease.
+switch Caddy back to the fail-safe 34200 target, then publish 0.2.2 as latest. Verify an installed
+0.2.1 canary and the preceding stable build both discover 0.2.2 through the signed updater manifest.
+Do not promote or relabel the 0.2.1 prerelease.
 
 ## Failure and recovery
 
-- A failure before `publish` exposes no new desktop update. An Event Inbox image may already exist by
-  immutable digest, but it is not declared as a product release.
-- A failed asset upload leaves a draft. Re-run the same workflow; it resumes that draft and replaces
-  only its expected assets before verification.
+- A desktop or `publish` failure exposes no new desktop update. A successful
+  `publish-server-candidate` leaves an authenticated draft containing the attested server identity;
+  it may be used only by the server canary runbook and is not a published product release.
+- A failed asset upload leaves a draft. Re-run failed jobs; the server stage verifies its four
+  required assets byte-for-byte even when a prior product upload left additional expected files,
+  while final publication still refuses any set other than the exact twelve product assets.
 - The workflow refuses to replace an already-published release or a mismatched version tag.
 - Never mutate a published archive, signature, manifest or tag. If a published release is defective,
   ship a higher fix-forward version. The updater creates an encrypted pre-update Runtime backup

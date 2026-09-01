@@ -105,7 +105,7 @@ docker compose --env-file event-inbox.env --profile canary up -d event-inbox-can
 curl --fail http://127.0.0.1:34201/api/v1/health/ready
 container="$(docker compose --env-file event-inbox.env --profile canary ps -q event-inbox-canary)"
 npm run event-inbox:candidate:verify -- \
-  --manifest ./wa-studio-deployment.json \
+  --manifest ./wa-studio-server-deployment.json \
   --readiness-url http://127.0.0.1:34201 \
   --container "$container"
 sudo env WA_EVENT_INBOX_UPSTREAM=127.0.0.1:34201 \

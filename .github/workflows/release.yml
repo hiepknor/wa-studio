@@ -117,8 +117,105 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  publish-server-candidate:
+    needs: [connector-plugin, event-inbox-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: read
+      attestations: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: event-inbox-image-${{ github.ref_name }}
+          path: dist/server-release
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: wa-studio-connector-${{ github.ref_name }}
+          path: dist/connector-plugin
+      - name: Create server candidate deployment manifest
+        run: |
+          node tooling/release/deployment-release.mjs create-server \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --git-commit "$GITHUB_SHA" \
+            --image-file dist/server-release/event-inbox-image.txt \
+            --connector-directory dist/connector-plugin \
+            --output dist/server-release/wa-studio-server-deployment.json
+      - name: Attest server candidate deployment manifest
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: dist/server-release/wa-studio-server-deployment.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wa-studio-server-release-${{ github.ref_name }}
+          path: dist/server-release/**
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verify server candidate payload
+        run: |
+          node tooling/release/deployment-release.mjs verify-server \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --git-commit "$GITHUB_SHA" \
+            --image-file dist/server-release/event-inbox-image.txt \
+            --connector-directory dist/connector-plugin \
+            --manifest dist/server-release/wa-studio-server-deployment.json
+          connector_zip="$(find dist/connector-plugin -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          connector_checksum="${connector_zip}.sha256"
+          test -n "$connector_zip" -a -f "$connector_checksum"
+          (cd dist/connector-plugin && shasum -a 256 -c "$(basename "$connector_checksum")")
+          gh attestation verify "$connector_zip" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$GITHUB_SHA"
+          gh attestation verify dist/server-release/wa-studio-server-deployment.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$GITHUB_SHA"
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify Event Inbox image provenance
+        run: |
+          image="$(tr -d '\r\n' < dist/server-release/event-inbox-image.txt)"
+          gh attestation verify "oci://${image}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$GITHUB_SHA" \
+            --bundle-from-oci
+      - name: Create or resume server candidate draft
+        run: |
+          state="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [[ -z "$state" ]]; then
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "WA Studio $GITHUB_REF_NAME" --generate-notes
+          elif [[ "$state" != "true" ]]; then
+            echo "Release $GITHUB_REF_NAME is already published; refusing to replace it." >&2
+            exit 1
+          fi
+      - name: Upload and verify server candidate assets
+        run: |
+          gh release upload "$GITHUB_REF_NAME" dist/server-release/* dist/connector-plugin/* --clobber
+          mkdir -p dist/published-server-verification
+          for asset in dist/server-release/* dist/connector-plugin/*; do
+            name="$(basename "$asset")"
+            gh release download "$GITHUB_REF_NAME" --pattern "$name" --dir dist/published-server-verification
+            cmp "$asset" "dist/published-server-verification/$name"
+          done
+
   desktop:
     needs: [verify, connector-plugin]
+    if: ${{ vars.WA_STUDIO_DESKTOP_RELEASE_ENABLED == 'true' }}
     runs-on: macos-26
     timeout-minutes: 90
     environment: release
@@ -215,7 +312,7 @@ jobs:
           retention-days: 14
 
   publish:
-    needs: [connector-plugin, event-inbox-image, desktop]
+    needs: [publish-server-candidate, desktop]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -242,6 +339,10 @@ jobs:
         with:
           name: wa-studio-connector-${{ github.ref_name }}
           path: dist/connector-plugin
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: wa-studio-server-release-${{ github.ref_name }}
+          path: dist/server-release
       - name: Create coordinated deployment manifest
         run: |
           node tooling/release/deployment-release.mjs create \
@@ -259,6 +360,14 @@ jobs:
       - name: Verify release payload
         run: |
           npm run release:verify-updater -- --directory dist/updater-release --repository "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME"
+          cmp dist/release-metadata/event-inbox-image.txt dist/server-release/event-inbox-image.txt
+          node tooling/release/deployment-release.mjs verify-server \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --git-commit "$GITHUB_SHA" \
+            --image-file dist/server-release/event-inbox-image.txt \
+            --connector-directory dist/connector-plugin \
+            --manifest dist/server-release/wa-studio-server-deployment.json
           node tooling/release/deployment-release.mjs verify \
             --repository "$GITHUB_REPOSITORY" \
             --tag "$GITHUB_REF_NAME" \
@@ -279,6 +388,10 @@ jobs:
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$GITHUB_SHA"
           gh attestation verify dist/release-metadata/wa-studio-deployment.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$GITHUB_SHA"
+          gh attestation verify dist/server-release/wa-studio-server-deployment.json \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
             --source-digest "$GITHUB_SHA"
@@ -312,8 +425,8 @@ jobs:
           fi
       - name: Upload and verify draft assets
         run: |
-          gh release upload "$GITHUB_REF_NAME" dist/updater-release/* dist/release-metadata/* dist/connector-plugin/* --clobber
-          test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 11
+          gh release upload "$GITHUB_REF_NAME" dist/updater-release/* dist/release-metadata/* dist/server-release/wa-studio-server-deployment.json dist/connector-plugin/* --clobber
+          test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 12
           mkdir -p dist/published-verification
           gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir dist/published-verification
           cmp dist/updater-release/latest.json dist/published-verification/latest.json

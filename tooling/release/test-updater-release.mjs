@@ -124,8 +124,10 @@ try {
 
   const releaseWorkflow = readFileSync(resolve(import.meta.dirname, "../../.github/workflows/release.yml"), "utf8");
   for (const requiredReleaseGate of [
-    "needs: [connector-plugin, event-inbox-image, desktop]",
+    "needs: [publish-server-candidate, desktop]",
+    "needs: [connector-plugin, event-inbox-image]",
     "needs: [verify, connector-plugin]",
+    "vars.WA_STUDIO_DESKTOP_RELEASE_ENABLED == 'true'",
     "npm run check:connector",
     "packages/openwa-connector-plugin/build/*.zip",
     "WA_STUDIO_CONNECTOR_PLUGIN_URL=https://github.com/",
