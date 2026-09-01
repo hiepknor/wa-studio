@@ -744,6 +744,7 @@ fn prepare_repair_intent(
     current: &secret_store::ManagedRuntimeCredentials,
 ) -> Result<secret_store::ManagedRuntimeProvisioningIntent, String> {
     if let Some(mut intent) = secret_store::load_managed_runtime_provisioning_intent()? {
+        assert_repair_origin(input, current)?;
         if intent.openwa_base_url != input.openwa_base_url {
             return Err(
                 "An incomplete repair targets another OpenWA origin. Complete or reset it before changing servers."
@@ -755,28 +756,66 @@ fn prepare_repair_intent(
         secret_store::save_managed_runtime_provisioning_intent(&intent)?;
         return Ok(intent);
     }
-    let connector = current.connector.as_ref().ok_or_else(|| {
-        "Managed Runtime connector credentials are unavailable for repair.".to_string()
-    })?;
-    let intent = secret_store::ManagedRuntimeProvisioningIntent {
+    let intent = repair_intent_from_credentials(input, current)?;
+    secret_store::save_managed_runtime_provisioning_intent(&intent)?;
+    Ok(intent)
+}
+
+fn repair_intent_from_credentials(
+    input: &ManagedRuntimeProvisioningInput,
+    current: &secret_store::ManagedRuntimeCredentials,
+) -> Result<secret_store::ManagedRuntimeProvisioningIntent, String> {
+    assert_repair_origin(input, current)?;
+    let (connector_id, connector_secret, token_generation, ingress_instance_id, ingress_secret) =
+        match current.connector.as_ref() {
+            Some(connector) => (
+                connector.connector_id.clone(),
+                connector_secret(
+                    &connector.connector_token,
+                    &connector.connector_id,
+                    connector.token_generation,
+                )?,
+                connector.token_generation,
+                connector.ingress_instance_id.clone(),
+                connector.ingress_secret.clone(),
+            ),
+            None => {
+                let connector_id = Uuid::new_v4().to_string();
+                (
+                    connector_id.clone(),
+                    secret_store::random_connector_secret()?,
+                    1,
+                    format!("wa-studio-{connector_id}"),
+                    secret_store::random_secret(64),
+                )
+            }
+        };
+    Ok(secret_store::ManagedRuntimeProvisioningIntent {
         schema_version: 1,
         runtime_api_key: current.runtime_api_key.clone(),
         device_id: current.device_id.clone(),
         openwa_base_url: input.openwa_base_url.clone(),
         openwa_api_key: input.openwa_api_key.clone(),
         allow_live_sends: input.allow_live_sends,
-        connector_id: connector.connector_id.clone(),
-        connector_secret: connector_secret(
-            &connector.connector_token,
-            &connector.connector_id,
-            connector.token_generation,
-        )?,
-        connector_token_generation: connector.token_generation,
-        ingress_instance_id: connector.ingress_instance_id.clone(),
-        ingress_secret: connector.ingress_secret.clone(),
-    };
-    secret_store::save_managed_runtime_provisioning_intent(&intent)?;
-    Ok(intent)
+        connector_id,
+        connector_secret,
+        connector_token_generation: token_generation,
+        ingress_instance_id,
+        ingress_secret,
+    })
+}
+
+fn assert_repair_origin(
+    input: &ManagedRuntimeProvisioningInput,
+    current: &secret_store::ManagedRuntimeCredentials,
+) -> Result<(), String> {
+    if current.openwa_base_url == input.openwa_base_url {
+        return Ok(());
+    }
+    Err(
+        "A degraded Managed Runtime can only be repaired against its stored OpenWA origin. Reset the connection before changing servers."
+            .to_string(),
+    )
 }
 
 fn normalize(
@@ -1781,12 +1820,12 @@ mod tests {
         can_reconfigure_in_place, cleanup_openwa_resources, connector_config,
         connector_protected_live_sends, connector_secret, ensure_connector_plugin,
         ensure_ingress_instance, normalize, preflight_connector_plugin,
-        put_prepared_connector_credential, revoke_event_inbox_connector, revoke_event_inbox_device,
-        sha256_hex, supports_event_inbox_protocol, validate_connector_plugin,
-        validate_ingress_instance, validate_pairing_route, validate_pairing_secrets,
-        DiscoveredEventInbox, ManagedRuntimeProvisioningInput, OpenWaIntegrationInstance,
-        OpenWaPlugin, PairingResponse, OPENWA_CONNECTOR_PLUGIN_ID, OPENWA_CONNECTOR_PLUGIN_VERSION,
-        OPENWA_RELEASE_TAG,
+        put_prepared_connector_credential, repair_intent_from_credentials,
+        revoke_event_inbox_connector, revoke_event_inbox_device, sha256_hex,
+        supports_event_inbox_protocol, validate_connector_plugin, validate_ingress_instance,
+        validate_pairing_route, validate_pairing_secrets, DiscoveredEventInbox,
+        ManagedRuntimeProvisioningInput, OpenWaIntegrationInstance, OpenWaPlugin, PairingResponse,
+        OPENWA_CONNECTOR_PLUGIN_ID, OPENWA_CONNECTOR_PLUGIN_VERSION, OPENWA_RELEASE_TAG,
     };
     use crate::managed_runtime::provisioning_routes::ManagedRuntimeRoute;
     use crate::managed_runtime::secret_store::{
@@ -1833,6 +1872,85 @@ mod tests {
             stored_credentials(&legacy.openwa_base_url, session_id, connector_id).connector;
         assert!(connector_protected_live_sends(&legacy));
         assert!(can_reconfigure_in_place(&legacy, &normalized));
+    }
+
+    #[test]
+    fn degraded_legacy_profile_stages_a_new_connector_without_changing_local_identity() {
+        let session_id = "00000000-0000-4000-8000-000000000001";
+        let connector_id = "00000000-0000-4000-8000-000000000003";
+        let mut legacy =
+            stored_credentials("https://openwa.example.test", session_id, connector_id);
+        legacy.schema_version = 2;
+        legacy.connector = None;
+        legacy.allow_live_sends = true;
+        let normalized = ManagedRuntimeProvisioningInput {
+            openwa_base_url: legacy.openwa_base_url.clone(),
+            openwa_api_key: "rotated-openwa-key".to_string(),
+            allow_live_sends: false,
+        };
+
+        let intent = repair_intent_from_credentials(&normalized, &legacy).unwrap();
+
+        assert_eq!(intent.runtime_api_key, legacy.runtime_api_key);
+        assert_eq!(intent.device_id, legacy.device_id);
+        assert_eq!(intent.openwa_base_url, legacy.openwa_base_url);
+        assert!(!intent.allow_live_sends);
+        assert_eq!(intent.connector_token_generation, 1);
+        assert!(uuid::Uuid::parse_str(&intent.connector_id).is_ok());
+        assert_eq!(
+            intent.ingress_instance_id,
+            format!("wa-studio-{}", intent.connector_id),
+        );
+        assert!(!intent.connector_secret.is_empty());
+        assert!(!intent.ingress_secret.is_empty());
+    }
+
+    #[test]
+    fn degraded_connector_profile_reuses_its_remote_identity_for_repair() {
+        let session_id = "00000000-0000-4000-8000-000000000001";
+        let connector_id = "00000000-0000-4000-8000-000000000003";
+        let current = stored_credentials("https://openwa.example.test", session_id, connector_id);
+        let connector = current.connector.as_ref().unwrap();
+        let normalized = ManagedRuntimeProvisioningInput {
+            openwa_base_url: current.openwa_base_url.clone(),
+            openwa_api_key: "rotated-openwa-key".to_string(),
+            allow_live_sends: false,
+        };
+
+        let intent = repair_intent_from_credentials(&normalized, &current).unwrap();
+
+        assert_eq!(intent.connector_id, connector.connector_id);
+        assert_eq!(
+            intent.connector_token_generation,
+            connector.token_generation
+        );
+        assert_eq!(intent.ingress_instance_id, connector.ingress_instance_id);
+        assert_eq!(intent.ingress_secret, connector.ingress_secret);
+        assert_eq!(
+            intent.connector_secret,
+            connector_secret(
+                &connector.connector_token,
+                &connector.connector_id,
+                connector.token_generation,
+            )
+            .unwrap(),
+        );
+    }
+
+    #[test]
+    fn degraded_profile_repair_rejects_an_openwa_origin_change() {
+        let current = stored_credentials(
+            "https://openwa.example.test",
+            "00000000-0000-4000-8000-000000000001",
+            "00000000-0000-4000-8000-000000000003",
+        );
+        let moved = ManagedRuntimeProvisioningInput {
+            openwa_base_url: "https://other-openwa.example.test".to_string(),
+            openwa_api_key: "other-openwa-key".to_string(),
+            allow_live_sends: false,
+        };
+
+        assert!(repair_intent_from_credentials(&moved, &current).is_err());
     }
 
     #[test]
