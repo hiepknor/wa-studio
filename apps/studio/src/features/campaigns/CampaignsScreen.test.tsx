@@ -700,19 +700,26 @@ describe("CampaignsScreen", () => {
     expect(within(targetSection!).getByText("Page 1 of 2")).toBeInTheDocument();
     await user.click(within(targetSection!).getByRole("button", { name: "Next" }));
 
-    expect(listGroups).toHaveBeenLastCalledWith({
+    expect(listGroups).toHaveBeenCalledWith({
       sessionId: session.id, limit: 20, offset: 20,
     }, READ_OPTIONS);
-    expect(await screen.findByText("Second page group")).toBeInTheDocument();
+    expect(await screen.findByRole("checkbox", { name: "Select Second page group" }))
+      .not.toBeChecked();
     expect(screen.queryByRole("checkbox", { name: "Select Unknown room" })).not.toBeInTheDocument();
     expect(screen.getByText("2 outside current view")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Show selected" }));
     expect(screen.getByRole("checkbox", { name: "Select Unknown room" })).toBeChecked();
     await user.click(screen.getByRole("button", { name: "Show results" }));
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Select Second page group" }))
+        .not.toBeChecked();
+    });
     const selectPage = screen.getByRole("checkbox", { name: "Select all groups on this page" });
     expect(selectPage).not.toBeChecked();
     await user.click(selectPage);
-    expect(screen.getByRole("checkbox", { name: "Select Second page group" })).toBeChecked();
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Select Second page group" })).toBeChecked();
+    });
     expect(screen.queryByRole("checkbox", { name: "Select Unknown room" })).not.toBeInTheDocument();
     expect(screen.getByText("2 outside current view")).toBeInTheDocument();
     expect(within(targetSection!).getByText("Page 2 of 2")).toBeInTheDocument();
