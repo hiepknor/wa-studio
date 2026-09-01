@@ -243,7 +243,7 @@ function createFixtureApi(): RuntimeApi {
         id: `44444444-4444-4444-8444-44444444444${index}`,
         messageJobId: index === 3 ? null : `55555555-5555-4555-8555-55555555555${index}`,
         runId: RUN.id,
-        status: index === 3 ? "FAILED" : index < 2 ? "READ" : "SENT",
+        status: index === 0 ? "BLOCKED_CAPABILITY_CHANGED" : index === 3 ? "FAILED" : index === 1 ? "READ" : "SENT",
         updatedAt: RUN.updatedAt,
       })),
       meta: { limit: 20, offset: 0, total: 6 },

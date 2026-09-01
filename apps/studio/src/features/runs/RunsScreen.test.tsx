@@ -192,11 +192,16 @@ describe("RunsScreen", () => {
     const inspector = await screen.findByRole("dialog", { name: "Product release" });
     expect(within(inspector).getByText("Release message snapshot")).toBeInTheDocument();
     expect(within(inspector).getByText("r3")).toBeInTheDocument();
+    expect(within(inspector).getByText("Remaining")).toBeInTheDocument();
+    expect(within(inspector).getByText("Successful")).toBeInTheDocument();
+    const lifecycleTimes = inspector.querySelectorAll('[aria-label="Run lifecycle"] time');
+    expect(lifecycleTimes).toHaveLength(4);
+    lifecycleTimes.forEach((time) => expect(time).toHaveTextContent(/· \d{2}:\d{2}:\d{2}/u));
 
     await user.click(within(inspector).getByRole("tab", { name: /Deliveries/ }));
     expect(await within(inspector).findByText("Release group")).toBeInTheDocument();
-    const deliveries = within(inspector).getByRole("list", { name: "Per-group deliveries for this run" });
-    expect(within(deliveries).getAllByRole("listitem")).toHaveLength(1);
+    const deliveries = within(inspector).getByRole("table", { name: "Per-group deliveries for this run" });
+    expect(within(deliveries).getAllByRole("row")).toHaveLength(2);
     expect(within(deliveries).getByText("Sent")).toHaveClass("ui-badge-success");
     expect(within(inspector).getByText("1 delivery")).toBeInTheDocument();
     expect(within(inspector).getByRole("combobox", { name: "Delivery status" }).closest(".ui-field")).toHaveClass("ui-field-sm");
@@ -214,6 +219,27 @@ describe("RunsScreen", () => {
       expect.stringMatching(/^[0-9a-f-]{36}$/u),
     ));
     expect(await within(inspector).findByText(/Paused · Runtime authoritative/)).toBeInTheDocument();
+  });
+
+  it("shows one actionable delivery error when the initial read fails", async () => {
+    const user = userEvent.setup();
+    renderRuns({
+      listCampaignDeliveries: vi.fn().mockRejectedValue(new Error("Delivery API unavailable.")),
+    });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+
+    await user.click(within(inspector).getByRole("tab", { name: "Deliveries" }));
+
+    const alert = await within(inspector).findByRole("alert");
+    expect(alert).toHaveTextContent("Could not load deliveries");
+    expect(alert).toHaveTextContent("Delivery API unavailable.");
+    expect(within(inspector).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(within(inspector).queryByText("Deliveries unavailable")).not.toBeInTheDocument();
+    expect(within(inspector).queryByRole("table", {
+      name: "Per-group deliveries for this run",
+    })).not.toBeInTheDocument();
   });
 
   it("shows the immutable image metadata and caption in the run snapshot", async () => {
@@ -237,9 +263,11 @@ describe("RunsScreen", () => {
     const inspector = await screen.findByRole("dialog", { name: "Product release" });
 
     await user.click(within(inspector).getByText("Message snapshot"));
-    expect(within(inspector).getByText("launch.png")).toBeInTheDocument();
-    expect(within(inspector).getByText("image/png · 8 B")).toBeInTheDocument();
-    expect(within(inspector).getByText("Release image")).toBeInTheDocument();
+    const metadata = within(inspector).getByRole("group", { name: "Message metadata" });
+    expect(within(metadata).getByText("launch.png")).toBeInTheDocument();
+    expect(within(metadata).getByText("image/png · 8 B")).toBeInTheDocument();
+    expect(within(metadata).getByText("Caption")).toBeInTheDocument();
+    expect(within(metadata).getByText("Release image")).toBeInTheDocument();
   });
 
   it("reports a cancellation failure inside the active confirmation", async () => {

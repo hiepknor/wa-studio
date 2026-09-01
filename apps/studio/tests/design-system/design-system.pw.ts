@@ -132,6 +132,104 @@ test("minimum-window inspector keeps navigation outside content scrolling", asyn
   await expectNoAccessibilityViolations(page);
 });
 
+test("minimum-window Run inspector keeps metric rows balanced", async ({ page }) => {
+  await openProductFixture(page, "runs", 960, 560);
+  await page.getByRole("button", { name: "August product release" }).click();
+
+  const inspector = page.getByRole("dialog", { name: "August product release" });
+  const metrics = inspector.getByRole("group", { name: "Key run progress" }).locator("dl");
+  await expect(metrics).toHaveCount(4);
+  await expect(inspector.getByText("Remaining", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Successful", { exact: true })).toBeVisible();
+
+  const boxes = await metrics.evaluateAll((items) => items.map((item) => {
+    const box = item.getBoundingClientRect();
+    return { x: box.x, y: box.y, width: box.width };
+  }));
+  expect(boxes[0]?.x).toBe(boxes[2]?.x);
+  expect(boxes[1]?.x).toBe(boxes[3]?.x);
+  expect(boxes[2]?.y).toBeGreaterThan(boxes[0]?.y ?? 0);
+  expect(boxes[0]?.width).toBe(boxes[1]?.width);
+  const lifecycle = inspector.locator("details.runs-detail-disclosure").filter({
+    hasText: "Lifecycle",
+  });
+  await expect(lifecycle).not.toHaveAttribute("open", "");
+  await lifecycle.locator("summary").click();
+  const lifecycleRow = inspector.getByRole("group", { name: "Run lifecycle" }).locator("dl").first();
+  const [lifecycleLabel, lifecycleValue] = await Promise.all([
+    lifecycleRow.locator("dt").boundingBox(),
+    lifecycleRow.locator("dd").boundingBox(),
+  ]);
+  expect(lifecycleLabel?.y).toBe(lifecycleValue?.y);
+  expect(await lifecycleRow.locator("dd").evaluate(
+    (element) => getComputedStyle(element).textAlign,
+  )).toBe("end");
+  const launchDetails = inspector.locator("details.runs-detail-disclosure").filter({
+    hasText: "Immutable launch",
+  });
+  await launchDetails.locator("summary").click();
+  const runIdValue = inspector.getByRole("group", {
+    name: "Immutable launch snapshot",
+  }).locator("dd").first();
+  await expect(runIdValue.locator("span")).toHaveAttribute(
+    "title",
+    "22222222-2222-4222-8222-222222222222",
+  );
+  expect(await runIdValue.evaluate((element) => (
+    element.getBoundingClientRect().height <= Number.parseFloat(getComputedStyle(element).lineHeight) * 1.5
+  ))).toBe(true);
+  const progressDetails = inspector.locator("details.runs-progress-disclosure");
+  await progressDetails.locator("summary").click();
+  const progressBorders = await inspector.getByRole("group", {
+    name: "Run delivery progress",
+  }).locator("dl").evaluateAll((items) => items.slice(0, 4).map((item) => ({
+    left: getComputedStyle(item).borderLeftWidth,
+    top: getComputedStyle(item).borderTopWidth,
+  })));
+  expect(progressBorders).toEqual([
+    { left: "0px", top: "0px" },
+    { left: "1px", top: "0px" },
+    { left: "0px", top: "1px" },
+    { left: "1px", top: "1px" },
+  ]);
+  expect(await inspector.locator(".drawer-footer").evaluate(
+    (footer) => footer.getBoundingClientRect().height,
+  )).toBeLessThanOrEqual(64);
+  expect(await inspector.locator(".drawer-body").evaluate(
+    (body) => body.scrollWidth - body.clientWidth,
+  )).toBeLessThanOrEqual(0);
+
+  await inspector.getByRole("tab", { name: "Deliveries" }).click();
+  const deliveryTable = inspector.getByRole("table", {
+    name: "Per-group deliveries for this run",
+  });
+  await expect(deliveryTable).toBeVisible();
+  await expect(deliveryTable.getByRole("columnheader")).toHaveCount(3);
+  const deliveryColumnWidths = await deliveryTable.getByRole("columnheader")
+    .evaluateAll((headers) => headers.map((header) => header.getBoundingClientRect().width));
+  expect(deliveryColumnWidths[0]).toBeGreaterThanOrEqual(96);
+  expect(deliveryColumnWidths[1]).toBeGreaterThanOrEqual(200);
+  expect(deliveryColumnWidths[2]).toBeGreaterThanOrEqual(96);
+  await expect(deliveryTable.getByText("Blocked Capability Changed")).toBeVisible();
+  expect(await deliveryTable.locator("tbody td.data-cell-status").first().evaluate(
+    (cell) => cell.scrollWidth - cell.clientWidth,
+  )).toBeLessThanOrEqual(0);
+  expect(await deliveryTable.locator("tbody td.data-cell-time").first().evaluate(
+    (cell) => cell.scrollWidth - cell.clientWidth,
+  )).toBeLessThanOrEqual(0);
+  const deliveryToolbar = inspector.locator(".run-deliveries-toolbar");
+  const [deliverySearch, deliveryStatus] = await Promise.all([
+    deliveryToolbar.getByRole("searchbox", { name: "Search deliveries" }).boundingBox(),
+    deliveryToolbar.getByRole("combobox", { name: "Delivery status" }).boundingBox(),
+  ]);
+  expect(deliverySearch?.y).toBe(deliveryStatus?.y);
+  expect((deliverySearch?.x ?? 0) + (deliverySearch?.width ?? 0))
+    .toBeLessThanOrEqual(deliveryStatus?.x ?? 0);
+  expect(await inspector.locator(".drawer-body").evaluate(
+    (body) => body.scrollWidth - body.clientWidth,
+  )).toBeLessThanOrEqual(0);
+});
+
 test("@a11y reduced motion collapses transition and animation duration", async ({ page }) => {
   await openGallery(page);
   const timing = await page.getByRole("button", { name: "Primary action" }).evaluate((element) => {

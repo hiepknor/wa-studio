@@ -1,6 +1,5 @@
 .runs-list-panel { width: 100%; min-width: 0; }
 .runs-table-scroll { min-width: 0; }
-.run-delivery-list[data-updating="true"] { opacity: .48; transition: opacity var(--motion-fast) var(--ease-standard); }
 .runs-table { min-width: 680px; table-layout: fixed; }
 .runs-column-campaign { width: auto; }
 .runs-column-state { width: var(--table-state-width); }
@@ -27,30 +26,54 @@
 .runs-progress-summary { display: grid; gap: var(--space-2); }
 .runs-progress-summary strong { font-size: var(--text-data-value-size); font-weight: var(--weight-medium); }
 .runs-key-metrics,
-.runs-progress-grid { margin-top: var(--space-3); border-block: var(--border-width) solid var(--divider); }
-.runs-inspector-detail-grid { min-width: 0; display: grid; gap: var(--space-5); margin-top: var(--space-5); padding-top: var(--space-5); border-top: var(--border-width) solid var(--divider); }
-.runs-inspector-detail-grid .inspector-section + .inspector-section { margin-top: 0; padding-top: 0; border-top: 0; }
+.runs-progress-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: var(--space-3);
+  border-block: var(--border-width) solid var(--divider);
+}
+.runs-key-metrics > dl:nth-child(4n + 1),
+.runs-progress-grid > dl:nth-child(4n + 1) { border-left: 0; }
+.runs-progress-grid > dl:nth-child(n + 5) { border-top: var(--border-width) solid var(--divider); }
 .runs-detail-list { display: grid; gap: 0; margin: 0; }
 .runs-detail-list > dl { border-bottom-color: var(--divider); }
 .runs-detail-list dt { color: var(--text-tertiary); }
-.runs-detail-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.runs-detail-list dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: end;
+}
+.runs-launch-list dd,
+.runs-launch-list dd > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runs-detail-disclosure > summary small > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runs-detail-disclosure,
 .runs-progress-disclosure,
 .runs-message-snapshot { margin-top: var(--space-5); padding-top: var(--space-5); border-top: var(--border-width) solid var(--divider); }
 .runs-message-snapshot p { margin: 0; color: var(--text-secondary); white-space: pre-wrap; }
 .runs-message-metadata { margin-top: var(--space-3); }
-.run-deliveries .inspector-section-body { display: flex; flex-direction: column; gap: var(--space-3); }
-.run-deliveries-count { color: var(--text-tertiary); font-family: var(--font-mono); font-size: var(--text-technical-size); }
+.runs-action-footer { width: 100%; min-width: 0; }
+.run-deliveries .inspector-section-body { min-width: 0; }
+.run-deliveries-table-frame { min-width: 0; }
 .run-deliveries-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) var(--table-state-width); align-items: end; gap: var(--space-2); }
 .run-deliveries-toolbar .search-field { width: 100%; }
 .run-deliveries-toolbar .ui-field-label { display: none; }
-.run-delivery-list { min-width: 0; overflow: hidden; border: var(--border-width) solid var(--divider); border-radius: var(--radius-panel); }
-.run-delivery-block { min-height: var(--table-row-height); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-3); }
-.run-delivery-block + .run-delivery-block { border-top: var(--border-width) solid var(--divider); }
-.run-delivery-identity { min-width: 0; display: grid; gap: var(--space-pixel); }
-.run-delivery-block strong { overflow: hidden; color: var(--text-primary); font-size: var(--text-data-value-size); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
-.run-delivery-block > .ui-badge { flex: 0 0 auto; }
-.run-delivery-updated { grid-column: 1; color: var(--text-tertiary); font-family: var(--font-mono); font-size: var(--text-technical-size); }
-.runs-delivery-failure { display: block; overflow: hidden; color: var(--state-danger); font-size: var(--text-supporting-size); text-overflow: ellipsis; white-space: nowrap; }
+.run-deliveries-table { min-width: 0; table-layout: fixed; }
+.run-delivery-state-column { width: var(--table-long-state-width); }
+.run-delivery-updated-column { width: var(--table-date-width); }
+.run-delivery-identity { min-width: 0; }
+.run-delivery-state { min-width: 0; display: grid; justify-items: start; gap: var(--space-1); }
+.run-deliveries-table .data-cell-status { overflow: hidden; }
+.runs-delivery-failure { display: block; overflow: hidden; color: var(--state-danger); font-family: var(--font-mono); font-size: var(--text-technical-size); text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 70rem) {
   /* Keep WebKit's table grid intact while collapsing the low-priority column.
@@ -64,13 +87,24 @@
   }
 }
 
-@container inspector-drawer (min-width: 600px) {
-  .runs-inspector-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .runs-inspector-detail-grid .inspector-section + .inspector-section { padding-left: var(--space-5); border-left: var(--border-width) solid var(--divider); }
-  .run-delivery-block { grid-template-columns: minmax(0, 1fr) auto 112px; }
-  .run-delivery-updated { grid-column: auto; text-align: right; }
-}
-
 @container inspector-drawer (max-width: 520px) {
-  .run-deliveries-toolbar { grid-template-columns: 1fr; }
+  .runs-detail-list > dl {
+    grid-template-columns: minmax(var(--detail-label-width), .7fr) minmax(0, 1.3fr);
+    gap: var(--space-3);
+  }
+  .runs-action-footer .ui-action-footer {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 58px;
+  }
+  .runs-action-footer .ui-action-footer-copy span { display: none; }
+  .runs-action-footer .ui-action-footer-actions { justify-content: flex-end; }
+  .runs-action-footer .ui-action-footer-actions > * { flex: 0 0 auto; }
+  .runs-key-metrics,
+  .runs-progress-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .runs-key-metrics.ui-metric-grid > dl,
+  .runs-progress-grid.ui-metric-grid > dl { border-left: 0; }
+  .runs-key-metrics > dl:nth-child(even),
+  .runs-progress-grid > dl:nth-child(even) { border-left: var(--border-width) solid var(--divider); }
+  .runs-key-metrics > dl:nth-child(n + 3),
+  .runs-progress-grid > dl:nth-child(n + 3) { border-top: var(--border-width) solid var(--divider); }
 }
