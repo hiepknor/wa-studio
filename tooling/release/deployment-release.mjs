@@ -157,31 +157,30 @@ function expectedManifest({
     throw new Error("Connector manifest does not match release components.");
   }
   const image = readEventInboxImage(imageMetadataPath, normalizedRepository);
-  const desktop = readDesktopRelease(
-    updaterDirectory,
-    normalizedRepository,
-    normalizedTag,
-    components.studioVersion,
-  );
   const artifact = readConnectorArtifact(
     connectorDirectory,
     components.connectorPluginVersion,
   );
   const migrationHead = readMigrationHead(workspaceRoot);
-  if (![image.sha256, artifact.sha256, migrationHead.sha256, migrationHead.setSha256,
-    desktop.releaseAssetsSha256, desktop.releaseChecksumsSha256,
-    components.openwaContractSha256].every(value => digestPattern.test(value))) {
-    throw new Error("A coordinated component digest is invalid.");
+  const commonDigests = [
+    image.sha256,
+    artifact.sha256,
+    migrationHead.sha256,
+    migrationHead.setSha256,
+    components.openwaContractSha256,
+  ];
+  if (!commonDigests.every(value => digestPattern.test(value))) {
+    throw new Error("A server component digest is invalid.");
   }
-  return {
+  const manifest = {
     schemaVersion: 1,
     product: components.product,
+    releaseScope: updaterDirectory ? "product" : "server-candidate",
     releaseChannel: components.releaseChannel,
     repository: normalizedRepository,
     tag: normalizedTag,
     gitCommit: normalizedCommit,
     components: {
-      studio: { version: components.studioVersion, ...desktop },
       runtime: {
         service: components.runtimeService,
         version: components.runtimeVersion,
@@ -203,6 +202,25 @@ function expectedManifest({
         releaseTag: components.openwaReleaseTag,
         contractSha256: components.openwaContractSha256,
       },
+    },
+  };
+  if (!updaterDirectory) return manifest;
+
+  const desktop = readDesktopRelease(
+    updaterDirectory,
+    normalizedRepository,
+    normalizedTag,
+    components.studioVersion,
+  );
+  if (![desktop.releaseAssetsSha256, desktop.releaseChecksumsSha256]
+    .every(value => digestPattern.test(value))) {
+    throw new Error("A desktop component digest is invalid.");
+  }
+  return {
+    ...manifest,
+    components: {
+      studio: { version: components.studioVersion, ...desktop },
+      ...manifest.components,
     },
   };
 }
@@ -232,11 +250,23 @@ export function verifyDeploymentManifest(options) {
   return actual;
 }
 
+export function createServerDeploymentManifest(options) {
+  return createDeploymentManifest({ ...options, updaterDirectory: undefined });
+}
+
+export function verifyServerDeploymentManifest(options) {
+  return verifyDeploymentManifest({ ...options, updaterDirectory: undefined });
+}
+
 function parseArguments(argv) {
   const [command, ...values] = argv;
-  if (!["create", "verify"].includes(command)) {
-    throw new Error("Usage: deployment-release.mjs <create|verify> --repository ...");
+  if (!["create", "verify", "create-server", "verify-server"].includes(command)) {
+    throw new Error(
+      "Usage: deployment-release.mjs <create|verify|create-server|verify-server> --repository ...",
+    );
   }
+  const create = ["create", "create-server"].includes(command);
+  const server = ["create-server", "verify-server"].includes(command);
   const options = {};
   const names = new Map([
     ["--repository", "repository"],
@@ -244,8 +274,8 @@ function parseArguments(argv) {
     ["--git-commit", "gitCommit"],
     ["--image-file", "imageMetadataPath"],
     ["--connector-directory", "connectorDirectory"],
-    ["--updater-directory", "updaterDirectory"],
-    [command === "create" ? "--output" : "--manifest", command === "create" ? "outputPath" : "manifestPath"],
+    ...(server ? [] : [["--updater-directory", "updaterDirectory"]]),
+    [create ? "--output" : "--manifest", create ? "outputPath" : "manifestPath"],
   ]);
   for (let index = 0; index < values.length; index += 2) {
     const key = names.get(values[index]);
@@ -258,16 +288,16 @@ function parseArguments(argv) {
   if (Object.keys(options).length !== names.size) {
     throw new Error("Deployment manifest arguments are incomplete.");
   }
-  return { command, options };
+  return { command, create, server, options };
 }
 
 function main() {
-  const { command, options } = parseArguments(process.argv.slice(2));
-  const manifest = command === "create"
-    ? createDeploymentManifest(options)
-    : verifyDeploymentManifest(options);
+  const { create, server, options } = parseArguments(process.argv.slice(2));
+  const manifest = create
+    ? (server ? createServerDeploymentManifest(options) : createDeploymentManifest(options))
+    : (server ? verifyServerDeploymentManifest(options) : verifyDeploymentManifest(options));
   process.stdout.write(
-    `${command === "create" ? "Created" : "Verified"} coordinated deployment manifest for ${manifest.tag}.\n`,
+    `${create ? "Created" : "Verified"} ${server ? "server candidate" : "coordinated"} deployment manifest for ${manifest.tag}.\n`,
   );
 }
 

@@ -13,6 +13,7 @@ const image = `ghcr.io/hiepknor/wa-event-inbox@sha256:${"a".repeat(64)}`;
 const manifest = {
   schemaVersion: 1,
   product: "wa-studio",
+  releaseScope: "server-candidate",
   tag: "v0.2.0",
   gitCommit: "b".repeat(40),
   components: {

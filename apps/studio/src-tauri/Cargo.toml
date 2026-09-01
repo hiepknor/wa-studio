@@ -1,6 +1,6 @@
 [package]
 name = "wa-studio"
-version = "0.2.0"
+version = "0.2.1"
 description = "Desktop operations client for WA Runtime"
 authors = ["hiepknor"]
 edition = "2021"

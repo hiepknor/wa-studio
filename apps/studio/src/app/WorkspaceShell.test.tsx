@@ -208,7 +208,7 @@ describe("WorkspaceShell", () => {
       .toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: "Active session" })).toHaveFocus();
-    expect(screen.getByLabelText("Workspace build")).toHaveTextContent(/Local workspace.*v0\.2\.0/);
+    expect(screen.getByLabelText("Workspace build")).toHaveTextContent(/Local workspace.*v0\.2\.1/);
     const shell = screen.getByRole("main");
     await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
     expect(shell).toHaveAttribute("data-rail-collapsed", "true");
