@@ -13,7 +13,7 @@ export class ActivityQueryDto {
   @IsUUID()
   sessionId!: string;
 
-  @ApiPropertyOptional({ maxLength: 200, description: 'Literal search on subject label, subject ID, or correlation ID.' })
+  @ApiPropertyOptional({ maxLength: 200, description: 'Literal search on event ID, subject label, subject ID, correlation ID, or event type.' })
   @IsOptional()
   @Transform(({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() : value)
   @IsString()
@@ -59,4 +59,10 @@ export class ActivityQueryDto {
   @Min(1)
   @Max(200)
   limit: number = 50;
+}
+
+export class ActivityIdentityQueryDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  sessionId!: string;
 }

@@ -41,7 +41,7 @@ export function ActivityTable({
         <colgroup>
           <col className="activity-column-event" />
           <col className="activity-column-subject" />
-          <col className="activity-column-outcome" />
+          <col className="activity-column-severity" />
           <col className="activity-column-occurred" />
           <col className="activity-column-action" />
         </colgroup>
@@ -49,7 +49,7 @@ export function ActivityTable({
           <tr>
             <th scope="col">Event</th>
             <th className="activity-subject-col" scope="col">Subject</th>
-            <th className="data-cell-status" scope="col">Outcome</th>
+            <th className="data-cell-status" scope="col">Severity</th>
             <th className="data-column-time" scope="col">Occurred</th>
             <th className="data-column-actions" scope="col">
               <span className="ui-data-table-visually-hidden">Inspect</span>

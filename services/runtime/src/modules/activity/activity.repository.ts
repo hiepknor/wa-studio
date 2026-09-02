@@ -56,6 +56,18 @@ const mapActivityEvent = (row: ActivityEventRow): ActivityEventDto => ({
 export class ActivityRepository {
   constructor(private readonly database: DatabaseService) {}
 
+  async find(sessionId: string, id: string): Promise<ActivityEventDto | null> {
+    const result = await this.database.query<ActivityEventRow>(
+      `SELECT id, session_id, event_type, event_version, category, severity, origin,
+         subject_type, subject_id, subject_label_snapshot, campaign_id, run_id,
+         sync_run_id, group_id, correlation_id, metadata, occurred_at
+       FROM activity_events
+       WHERE session_id = $1 AND id = $2`,
+      [sessionId, id],
+    );
+    return result.rows[0] ? mapActivityEvent(result.rows[0]) : null;
+  }
+
   async list(input: {
     sessionId: string;
     query?: string;
@@ -78,7 +90,8 @@ export class ActivityRepository {
          sync_run_id, group_id, correlation_id, metadata, occurred_at
        FROM activity_events
        WHERE session_id = $1
-         AND ($2::text IS NULL OR subject_label_snapshot ILIKE $2 ESCAPE '\\'
+         AND ($2::text IS NULL OR id::text ILIKE $2 ESCAPE '\\'
+           OR subject_label_snapshot ILIKE $2 ESCAPE '\\'
            OR subject_id ILIKE $2 ESCAPE '\\' OR correlation_id ILIKE $2 ESCAPE '\\'
            OR event_type ILIKE $2 ESCAPE '\\')
          AND ($3::text[] IS NULL OR category = ANY($3))

@@ -7,7 +7,7 @@ import { useLatestRequest } from "@/shared/hooks/useLatestRequest";
 import { useRuntimeResourceRevision } from "@/shared/server-state/runtime-invalidation";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
-import { DataTableFrame, DescriptionList } from "@/shared/ui/Composition";
+import { DataTableFrame, DescriptionList, EmptyState } from "@/shared/ui/Composition";
 import { DateTime } from "@/shared/ui/DateTime";
 import {
   InspectorDisclosure,
@@ -18,13 +18,18 @@ import { InlineAlert } from "@/shared/ui/InlineAlert";
 import { PageHeader } from "@/shared/ui/PageHeader";
 import {
   ActivityToolbar,
+  activityTimeRangeStart,
   initialActivityListState,
   type ActivityListState,
 } from "./ActivityToolbar";
 import { ActivityTable } from "./ActivityTable";
 import {
   activityCategoryLabel,
+  activityMetadataLabel,
+  activityMetadataValue,
+  activityOriginLabel,
   activitySeverityLabel,
+  activitySubjectTypeLabel,
   activityTitle,
   activityTone,
 } from "./activity-presentation";
@@ -55,18 +60,24 @@ export function ActivityScreen({
   const [loadedOlder, setLoadedOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(initialEventId);
+  const [selectedEventSnapshot, setSelectedEventSnapshot] = useState<RuntimeActivityEvent | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const requestRef = useRef(0);
   const detailTriggerRef = useRef<HTMLButtonElement>(null);
+  const initialEventIdRef = useRef(initialEventId);
   const activeReadRef = useRef<"append" | "background" | "foreground" | null>(null);
   const loadedOlderRef = useRef(loadedOlder);
   const observedActivityRevisionRef = useRef(activityResourceRevision);
   const sessionRef = useRef(selectedSessionId);
   const activityRead = useLatestRequest();
+  const activityDetailRead = useLatestRequest();
   loadedOlderRef.current = loadedOlder;
 
   const selectedEvent = useMemo(
-    () => events.find((event) => event.id === selectedEventId) ?? null,
-    [events, selectedEventId],
+    () => events.find((event) => event.id === selectedEventId)
+      ?? (selectedEventSnapshot?.id === selectedEventId ? selectedEventSnapshot : null),
+    [events, selectedEventId, selectedEventSnapshot],
   );
 
   useEffect(() => {
@@ -97,12 +108,14 @@ export function ActivityScreen({
     else if (!background) setLoading(true);
     setError(null);
     try {
+      const from = activityTimeRangeStart(state.timeRange);
       const result = await api.listActivity({
         sessionId: selectedSessionId,
         limit: 50,
         query: state.query,
         categories: state.categories,
         severities: state.severities,
+        ...(from ? { from } : {}),
         cursor,
       }, { signal });
       if (request !== requestRef.current || !activityRead.isCurrent(signal)) return;
@@ -131,16 +144,39 @@ export function ActivityScreen({
         setLoadingOlder(false);
       }
     }
-  }, [activityRead, api, selectedSessionId, state.categories, state.query, state.severities]);
+  }, [activityRead, api, selectedSessionId, state.categories, state.query, state.severities, state.timeRange]);
+
+  const loadSelectedEvent = useCallback(async (eventId: string) => {
+    if (!selectedSessionId) return;
+    const signal = activityDetailRead.begin();
+    setDetailLoading(true);
+    setDetailError(null);
+    try {
+      const event = await api.getActivityEvent(selectedSessionId, eventId, { signal });
+      if (!activityDetailRead.isCurrent(signal)) return;
+      setSelectedEventSnapshot(event);
+    } catch (loadError) {
+      if (!activityDetailRead.isCurrent(signal)) return;
+      setDetailError(userFacingErrorMessage(loadError, "Could not load this activity event."));
+    } finally {
+      const current = activityDetailRead.isCurrent(signal);
+      activityDetailRead.complete(signal);
+      if (current) setDetailLoading(false);
+    }
+  }, [activityDetailRead, api, selectedSessionId]);
 
   useEffect(() => {
     if (sessionRef.current === selectedSessionId) return;
     sessionRef.current = selectedSessionId;
     activityRead.cancel();
+    activityDetailRead.cancel();
     requestRef.current += 1;
     activeReadRef.current = null;
     setEvents([]);
     setSelectedEventId(null);
+    setSelectedEventSnapshot(null);
+    setDetailLoading(false);
+    setDetailError(null);
     setNextCursor(null);
     setRetentionDays(null);
     setLoading(false);
@@ -149,7 +185,8 @@ export function ActivityScreen({
     setError(null);
     setFiltersOpen(false);
     setState(initialActivityListState());
-  }, [activityRead, selectedSessionId]);
+    onEventSelectionChange?.(null);
+  }, [activityDetailRead, activityRead, onEventSelectionChange, selectedSessionId]);
 
   useEffect(() => {
     setLoadedOlder(false);
@@ -177,22 +214,46 @@ export function ActivityScreen({
   }, [activityResourceRevision, load]);
 
   useEffect(() => {
-    if (initialEventId) setSelectedEventId(initialEventId);
-  }, [initialEventId]);
+    if (initialEventIdRef.current === initialEventId) return;
+    initialEventIdRef.current = initialEventId;
+    activityDetailRead.cancel();
+    setSelectedEventId(initialEventId);
+    setSelectedEventSnapshot((current) => current?.id === initialEventId ? current : null);
+    setDetailLoading(false);
+    setDetailError(null);
+  }, [activityDetailRead, initialEventId]);
+
+  useEffect(() => {
+    if (!selectedEventId || selectedEvent || detailLoading || detailError) return;
+    void loadSelectedEvent(selectedEventId);
+  }, [detailError, detailLoading, loadSelectedEvent, selectedEvent, selectedEventId]);
 
   function selectEvent(event: RuntimeActivityEvent, trigger: HTMLButtonElement) {
+    activityDetailRead.cancel();
     detailTriggerRef.current = trigger;
     setSelectedEventId(event.id);
+    setSelectedEventSnapshot(event);
+    setDetailLoading(false);
+    setDetailError(null);
     onEventSelectionChange?.(event.id);
   }
 
   function closeInspector() {
+    activityDetailRead.cancel();
     setSelectedEventId(null);
+    setSelectedEventSnapshot(null);
+    setDetailLoading(false);
+    setDetailError(null);
     onEventSelectionChange?.(null);
     detailTriggerRef.current = null;
   }
 
-  const hasCriteria = Boolean(state.query || state.categories.length || state.severities.length);
+  const hasCriteria = Boolean(
+    state.query
+      || state.categories.length
+      || state.severities.length
+      || state.timeRange !== "ALL",
+  );
   return <div className="activity-screen stack stack-lg">
     <PageHeader description="Review retained operational changes from Studio, Runtime, and the Gateway without exposing raw logs or message bodies." title="Activity" titleId="activity-title" />
     <DataTableFrame className="activity-list-panel data-table-container" label="Operational activity" scroll={false}>
@@ -226,7 +287,7 @@ export function ActivityScreen({
         <DateTime key="occurred" value={selectedEvent.occurredAt} />,
       ] : []}
       onClose={closeInspector}
-      open={Boolean(selectedEvent)}
+      open={Boolean(selectedEventId)}
       returnFocusRef={detailTriggerRef}
       size="compact"
       status={selectedEvent ? (
@@ -234,9 +295,24 @@ export function ActivityScreen({
           {activitySeverityLabel(selectedEvent.severity)}
         </Badge>
       ) : undefined}
-      title={selectedEvent ? activityTitle(selectedEvent) : "Activity inspector"}
+      title={selectedEvent
+        ? activityTitle(selectedEvent)
+        : detailError
+          ? "Activity event unavailable"
+          : "Loading activity event"}
     >
-      {selectedEvent && <ActivityInspector event={selectedEvent} onOpenRun={onOpenRun} />}
+      {selectedEvent
+        ? <ActivityInspector event={selectedEvent} onOpenRun={onOpenRun} />
+        : detailError
+          ? <InlineAlert
+              action={selectedEventId ? <Button onClick={() => void loadSelectedEvent(selectedEventId)} size="sm">Retry</Button> : undefined}
+              title="Could not load activity event"
+            >
+              {detailError}
+            </InlineAlert>
+          : <EmptyState compact icon="refresh" loading title="Loading activity event">
+              Reading the retained event from WA Runtime.
+            </EmptyState>}
     </InspectorDrawer>
   </div>;
 }
@@ -248,7 +324,7 @@ function ActivityInspector({
   event: RuntimeActivityEvent;
   onOpenRun?: (runId: string) => void;
 }) {
-  const metadata = Object.entries(event.metadata);
+  const metadata = Object.entries(event.metadata).sort(([left], [right]) => left.localeCompare(right));
   const related = [
     event.related.campaignId && { id: event.related.campaignId, label: "Campaign", type: "campaign" },
     event.related.runId && { id: event.related.runId, label: "Run", type: "run" },
@@ -258,7 +334,7 @@ function ActivityInspector({
 
   return <div className="activity-inspector">
     <InspectorSection
-      description={event.subject.type}
+      description={activitySubjectTypeLabel(event.subject.type)}
       eyebrow="Subject"
       title={event.subject.labelSnapshot}
       titleId="activity-subject-title"
@@ -266,7 +342,14 @@ function ActivityInspector({
       <DescriptionList
         ariaLabel="Event subject"
         className="activity-detail-list"
-        items={[{ id: "subject-id", label: "Subject ID", value: event.subject.id, valueClassName: "ui-technical-text" }]}
+        items={[
+          {
+            id: "subject-id",
+            label: "Subject ID",
+            value: <span className="activity-detail-value" title={event.subject.id}>{event.subject.id}</span>,
+            valueClassName: "ui-technical-text",
+          },
+        ]}
       />
     </InspectorSection>
     <InspectorSection
@@ -278,9 +361,9 @@ function ActivityInspector({
         ariaLabel="Event details"
         className="activity-detail-list"
         items={[
-          { id: "type", label: "Type", value: event.eventType, valueClassName: "ui-technical-text" },
-          { id: "occurred", label: "Occurred", value: <DateTime value={event.occurredAt} /> },
-          { id: "origin", label: "Origin", value: event.origin.charAt(0) + event.origin.slice(1).toLocaleLowerCase() },
+          { id: "type", label: "Type", value: <span className="activity-detail-value" title={event.eventType}>{event.eventType}</span>, valueClassName: "ui-technical-text" },
+          { id: "version", label: "Version", value: `v${event.eventVersion}`, valueClassName: "ui-technical-text" },
+          { id: "origin", label: "Source", value: activityOriginLabel(event.origin) },
         ]}
       />
     </InspectorSection>
@@ -316,8 +399,8 @@ function ActivityInspector({
         ariaLabel="Technical event identifiers"
         className="activity-detail-list"
         items={[
-          { id: "event-id", label: "Event ID", value: event.id, valueClassName: "ui-technical-text" },
-          { id: "correlation", label: "Correlation", value: event.correlationId ?? "Not available", valueClassName: "ui-technical-text" },
+          { id: "event-id", label: "Event ID", value: <span className="activity-detail-value" title={event.id}>{event.id}</span>, valueClassName: "ui-technical-text" },
+          { id: "correlation", label: "Correlation", value: <span className="activity-detail-value" title={event.correlationId ?? undefined}>{event.correlationId ?? "Not available"}</span>, valueClassName: "ui-technical-text" },
         ]}
       />
     </InspectorDisclosure>
@@ -332,8 +415,8 @@ function ActivityInspector({
           className="activity-detail-list"
           items={metadata.map(([key, value]) => ({
             id: key,
-            label: key,
-            value: typeof value === "object" ? JSON.stringify(value) : String(value),
+            label: <span title={key}>{activityMetadataLabel(key)}</span>,
+            value: <span className="activity-detail-value" title={activityMetadataValue(value)}>{activityMetadataValue(value)}</span>,
             valueClassName: "ui-technical-text",
           }))}
         />

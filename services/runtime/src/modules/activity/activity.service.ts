@@ -12,10 +12,15 @@ export class ActivityService {
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
   ) {}
 
+  async get(sessionId: string, id: string) {
+    this.assertSessionVisible(sessionId);
+    const event = await this.repository.find(sessionId, id);
+    if (!event) throw new NotFoundException('Activity event not found');
+    return event;
+  }
+
   async list(query: ActivityQueryDto) {
-    if (!this.config.OPENWA_ALLOWED_SESSION_IDS.includes(query.sessionId)) {
-      throw new NotFoundException('Session not found');
-    }
+    this.assertSessionVisible(query.sessionId);
     const cursor = query.cursor ? decodeActivityCursor(query.cursor) : undefined;
     if (query.cursor && !cursor) throw new BadRequestException('cursor is invalid');
     const from = query.from ? new Date(query.from) : undefined;
@@ -42,5 +47,11 @@ export class ActivityService {
         retentionDays: this.config.RUNTIME_ACTIVITY_RETENTION_DAYS,
       },
     };
+  }
+
+  private assertSessionVisible(sessionId: string): void {
+    if (!this.config.OPENWA_ALLOWED_SESSION_IDS.includes(sessionId)) {
+      throw new NotFoundException('Session not found');
+    }
   }
 }

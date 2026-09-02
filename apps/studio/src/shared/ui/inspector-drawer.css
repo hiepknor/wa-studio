@@ -41,7 +41,8 @@
 .inspector-section { min-width: 0; display: grid; gap: var(--space-3); }
 .inspector-section + .inspector-section,
 .inspector-section + .inspector-disclosure,
-.inspector-disclosure + .inspector-section {
+.inspector-disclosure + .inspector-section,
+.inspector-disclosure + .inspector-disclosure {
   margin-top: var(--space-5);
   padding-top: var(--space-5);
   border-top: var(--border-width) solid var(--divider);

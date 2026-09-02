@@ -4298,7 +4298,7 @@
             "name": "query",
             "required": false,
             "in": "query",
-            "description": "Literal search on subject label, subject ID, or correlation ID.",
+            "description": "Literal search on event ID, subject label, subject ID, correlation ID, or event type.",
             "schema": {
               "maxLength": 200,
               "type": "string"
@@ -4420,6 +4420,72 @@
           }
         ],
         "summary": "Read the retained operational activity timeline for one allowlisted session",
+        "tags": [
+          "activity"
+        ]
+      }
+    },
+    "/api/v1/activity/{id}": {
+      "get": {
+        "operationId": "ActivityController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityEventDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeErrorDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Read one retained operational activity event in an allowlisted session",
         "tags": [
           "activity"
         ]

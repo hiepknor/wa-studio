@@ -797,6 +797,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/activity/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one retained operational activity event in an allowlisted session */
+        get: operations["ActivityController_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/state-revisions": {
         parameters: {
             query?: never;
@@ -4378,7 +4395,7 @@ export interface operations {
         parameters: {
             query: {
                 sessionId: string;
-                /** @description Literal search on subject label, subject ID, or correlation ID. */
+                /** @description Literal search on event ID, subject label, subject ID, correlation ID, or event type. */
                 query?: string;
                 category?: ("RUN" | "CAMPAIGN" | "SYNC" | "SESSION")[];
                 severity?: ("INFO" | "SUCCESS" | "WARNING" | "ERROR")[];
@@ -4400,6 +4417,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityPageDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeErrorDto"];
+                };
+            };
+        };
+    };
+    ActivityController_get: {
+        parameters: {
+            query: {
+                sessionId: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityEventDto"];
                 };
             };
             400: {

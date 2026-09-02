@@ -171,11 +171,19 @@ const RUN: RuntimeCampaignRun = {
 
 const ACTIVITY_EVENT: RuntimeActivityEvent = {
   category: "RUN",
-  correlationId: "request-fixture-42",
+  correlationId: "request-fixture-42-with-a-deliberately-long-correlation-suffix",
   eventType: "campaign_run.completed",
   eventVersion: 1,
   id: "33333333-3333-4333-8333-333333333333",
-  metadata: { executionMode: "LIVE", status: "COMPLETED" },
+  metadata: {
+    executionMode: "LIVE",
+    policyEvidence: {
+      capabilityRevision: 18,
+      policyVersion: "openwa-safety-v4",
+      targetSnapshot: "immutable-target-revision-2",
+    },
+    status: "COMPLETED",
+  },
   occurredAt: "2026-08-30T17:30:00.000Z",
   origin: "RUNTIME",
   related: {
@@ -188,7 +196,7 @@ const ACTIVITY_EVENT: RuntimeActivityEvent = {
   severity: "SUCCESS",
   subject: {
     id: RUN.id,
-    labelSnapshot: CAMPAIGN.name,
+    labelSnapshot: "August product release for North America partner operations",
     type: "CAMPAIGN_RUN",
   },
 };
@@ -213,6 +221,7 @@ function createFixtureApi(): RuntimeApi {
   return {
     getCampaign: async () => CAMPAIGN,
     getCampaignRun: async () => RUN,
+    getActivityEvent: async () => ACTIVITY_EVENT,
     getCurrentGroupCapabilityRefresh: async () => null,
     getGroup: async (_sessionId: string, groupId: string) => (
       GROUPS.find((group) => group.id === groupId) ?? GROUPS[0]
