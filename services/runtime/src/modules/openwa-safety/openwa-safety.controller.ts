@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { ApiHeader, ApiOkResponse, ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import {
   OpenWASafetyControlDto,
@@ -22,6 +33,7 @@ export class OpenWASafetyController {
   }
 
   @Post('workspace/control')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Block or resume every OpenWA operation in the managed workspace' })
   @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
   @ApiOkResponse({ type: OpenWASafetyScopeDto })
@@ -47,6 +59,7 @@ export class OpenWASafetyController {
   }
 
   @Post('sessions/:sessionId/control')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Manually block or resume OpenWA operations for one session' })
   @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
   @ApiOkResponse({ type: OpenWASafetyScopeDto })

@@ -122,10 +122,8 @@ pub fn prepare_reconfiguration(
     input: &ManagedRuntimeProvisioningInput,
 ) -> Result<ManagedRuntimeLifecycleIntent, String> {
     let target_fingerprint = reconfiguration_fingerprint(input);
-    if let Some(intent) = secret_store::load_managed_runtime_lifecycle_intent()? {
-        if intent.operation != ManagedRuntimeLifecycleOperation::Reconfigure
-            || intent.target_fingerprint != target_fingerprint
-        {
+    if let Some(mut intent) = secret_store::load_managed_runtime_lifecycle_intent()? {
+        if intent.operation != ManagedRuntimeLifecycleOperation::Reconfigure {
             return Err(
                 "Another Managed Runtime lifecycle operation requires recovery before reconfiguration."
                     .to_string(),
@@ -133,8 +131,17 @@ pub fn prepare_reconfiguration(
         }
         if intent.phase == ManagedRuntimeLifecyclePhase::Resumed {
             secret_store::clear_managed_runtime_lifecycle_intent()?;
-        } else {
+        } else if intent.target_fingerprint == target_fingerprint {
             return Ok(intent);
+        } else if reconfiguration_target_may_change(intent.phase) {
+            intent.target_fingerprint = target_fingerprint;
+            secret_store::save_managed_runtime_lifecycle_intent(&intent)?;
+            return Ok(intent);
+        } else {
+            return Err(
+                "The Managed Runtime reconfiguration target cannot change after remote mutation."
+                    .to_string(),
+            );
         }
     }
     let intent = ManagedRuntimeLifecycleIntent {
@@ -149,6 +156,10 @@ pub fn prepare_reconfiguration(
     };
     secret_store::save_managed_runtime_lifecycle_intent(&intent)?;
     Ok(intent)
+}
+
+fn reconfiguration_target_may_change(phase: ManagedRuntimeLifecyclePhase) -> bool {
+    phase <= ManagedRuntimeLifecyclePhase::RuntimeStopped
 }
 
 pub fn prepare_reset() -> Result<ManagedRuntimeLifecycleIntent, String> {
@@ -512,10 +523,14 @@ fn connector_status(
     let status: ConnectorStatusResponse = response
         .json()
         .map_err(|error| format!("Event Inbox returned invalid connector status: {error}"))?;
-    if status.protocol_version != 2 {
+    if !connector_status_protocol_supported(status.protocol_version) {
         return Err("Event Inbox returned an unsupported connector status protocol.".to_string());
     }
     Ok(status)
+}
+
+fn connector_status_protocol_supported(protocol_version: u8) -> bool {
+    protocol_version == CONNECTOR_PROTOCOL_VERSION
 }
 
 fn connector_session_id(settings: &ProvisionedRuntimeSettings) -> &str {
@@ -557,8 +572,13 @@ fn sha256_hex(value: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::reconfiguration_fingerprint;
-    use crate::managed_runtime::provisioning::ManagedRuntimeProvisioningInput;
+    use super::{
+        connector_status_protocol_supported, reconfiguration_fingerprint,
+        reconfiguration_target_may_change,
+    };
+    use crate::managed_runtime::{
+        provisioning::ManagedRuntimeProvisioningInput, secret_store::ManagedRuntimeLifecyclePhase,
+    };
 
     #[test]
     fn reconfiguration_fingerprint_covers_credentials_and_live_policy() {
@@ -582,5 +602,27 @@ mod tests {
                 ..base
             }),
         );
+    }
+
+    #[test]
+    fn connector_status_uses_the_connector_protocol_version() {
+        assert!(connector_status_protocol_supported(1));
+        assert!(!connector_status_protocol_supported(2));
+    }
+
+    #[test]
+    fn reconfiguration_target_is_mutable_only_before_remote_mutation() {
+        assert!(reconfiguration_target_may_change(
+            ManagedRuntimeLifecyclePhase::Prepared,
+        ));
+        assert!(reconfiguration_target_may_change(
+            ManagedRuntimeLifecyclePhase::RuntimeStopped,
+        ));
+        assert!(!reconfiguration_target_may_change(
+            ManagedRuntimeLifecyclePhase::RemoteMutated,
+        ));
+        assert!(!reconfiguration_target_may_change(
+            ManagedRuntimeLifecyclePhase::Resumed,
+        ));
     }
 }
