@@ -52,7 +52,7 @@ describe("authoritative WA Runtime contract", () => {
     );
     const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(checksum)
-      .toBe("ce28e1f0f924db68d032934488a00f7f3362e24f38b60f4d3b2561b1a59a44a5");
+      .toBe("623afd37c51a085cfcdff5c7e1e5f1e74a659a8bd4dd09802cd8360a50f95664");
   });
 
   it("requires operation keys for replay-safe Runtime mutations", () => {

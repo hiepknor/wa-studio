@@ -324,6 +324,40 @@ test("@visual Activity inspector overlays at 1100px", async ({ page }) => {
   );
 });
 
+test("Activity inspector preserves compact audit density across responsive modes", async ({ page }) => {
+  for (const viewport of [
+    { height: 560, mode: "overlay", role: "dialog" as const, width: 960 },
+    { height: 1080, mode: "docked", role: "complementary" as const, width: 1920 },
+  ]) {
+    await openProductFixture(page, "activity", viewport.width, viewport.height);
+    await page.getByRole("button", { exact: true, name: "Campaign run completed" }).click();
+    const inspector = page.getByRole(viewport.role, { name: "Campaign run completed" });
+    await expect(inspector).toBeVisible();
+    await expect(page.locator(".drawer-frame")).toHaveAttribute("data-drawer-mode", viewport.mode);
+
+    const body = inspector.locator(".drawer-body");
+    const horizontalOverflow = await body.evaluate((element) => (
+      element.scrollWidth - element.clientWidth
+    ));
+    expect(horizontalOverflow).toBeLessThanOrEqual(0);
+
+    const subject = inspector.getByRole("group", { name: "Event subject" });
+    const subjectLabelBox = await subject.locator("dt").boundingBox();
+    const subjectValue = subject.locator(".activity-detail-value");
+    const subjectValueBox = await subjectValue.boundingBox();
+    expect(Math.abs((subjectLabelBox?.y ?? 0) - (subjectValueBox?.y ?? 0))).toBeLessThan(4);
+    await expect(subjectValue).toHaveAttribute("title", /22222222-/);
+    expect(await subjectValue.evaluate((element) => getComputedStyle(element).whiteSpace))
+      .toBe("nowrap");
+
+    await inspector.getByText("Allowlisted metadata").click();
+    const metadataValues = inspector.getByRole("group", { name: "Allowlisted metadata" })
+      .locator(".activity-detail-value");
+    await expect(metadataValues).toHaveCount(3);
+    await expect(metadataValues.nth(1)).toHaveAttribute("title", /openwa-safety-v4/);
+  }
+});
+
 test("@visual Group inspector docks at 1440px", async ({ page }) => {
   await openProductFixture(page, "groups", 1440, 850);
   await page.getByRole("button", { name: "View North America operations" }).click();

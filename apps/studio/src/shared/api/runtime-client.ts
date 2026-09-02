@@ -1179,6 +1179,25 @@ export class RuntimeApi {
     return result.data;
   }
 
+  async getActivityEvent(
+    sessionId: string,
+    eventId: string,
+    options: RuntimeReadOptions = {},
+  ): Promise<RuntimeActivityEvent> {
+    const result = await this.client.GET("/api/v1/activity/{id}", {
+      ...options,
+      params: { path: { id: eventId }, query: { sessionId } },
+    });
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        "Could not load activity event",
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
   async getStateRevisions(
     sessionId: string | null,
     options: RuntimeReadOptions = {},

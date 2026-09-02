@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   RuntimeConnectionProvider,
@@ -19,6 +19,8 @@ import { RuntimeInvalidationProvider } from "@/shared/server-state/runtime-inval
 import { DrawerHost, DrawerProvider } from "@/shared/ui/Drawer";
 import { ToastProvider } from "@/shared/ui/Toast";
 import { ActivityScreen } from "./ActivityScreen";
+
+afterEach(() => vi.restoreAllMocks());
 
 const session: RuntimeSession = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -166,13 +168,13 @@ describe("ActivityScreen", () => {
     expect(columns).toHaveLength(5);
     expect(columns[0]).toHaveClass("activity-column-event");
     expect(columns[1]).toHaveClass("activity-column-subject");
-    expect(columns[2]).toHaveClass("activity-column-outcome");
+    expect(columns[2]).toHaveClass("activity-column-severity");
     expect(columns[3]).toHaveClass("activity-column-occurred");
     expect(columns[4]).toHaveClass("activity-column-action");
     expect(within(table).getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
       "Event",
       "Subject",
-      "Outcome",
+      "Severity",
       "Occurred",
       "Inspect",
     ]);
@@ -237,5 +239,75 @@ describe("ActivityScreen", () => {
 
     expect(screen.queryByText("Campaign run completed")).not.toBeInTheDocument();
     expect(screen.getByText("Retention is Runtime controlled.")).toBeInTheDocument();
+  });
+
+  it("resolves a deep-linked event outside the current page and follows a cleared location", async () => {
+    const getActivityEvent = vi.fn<RuntimeApi["getActivityEvent"]>().mockResolvedValue(event);
+    const api = {
+      getActivityEvent,
+      listActivity: vi.fn<RuntimeApi["listActivity"]>().mockResolvedValue({
+        data: [],
+        meta: { limit: 50, nextCursor: null, retentionDays: 90 },
+      }),
+    } as unknown as RuntimeApi;
+    const content = (initialEventId: string | null) => (
+      <RuntimeConnectionContext.Provider value={activityContext(api, session.id)}>
+        <RuntimeInvalidationProvider>
+          <DrawerProvider>
+            <ActivityScreen initialEventId={initialEventId} />
+            <DrawerHost />
+          </DrawerProvider>
+        </RuntimeInvalidationProvider>
+      </RuntimeConnectionContext.Provider>
+    );
+    const view = render(content(event.id));
+
+    const inspector = await screen.findByRole("dialog", { name: "Campaign run completed" });
+    expect(getActivityEvent).toHaveBeenCalledWith(
+      session.id,
+      event.id,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(within(inspector).getByText("WA Runtime")).toBeInTheDocument();
+    expect(within(inspector).getByText("v1")).toBeInTheDocument();
+
+    view.rerender(content(null));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Campaign run completed" }))
+        .not.toBeInTheDocument();
+    });
+  });
+
+  it("applies a UTC start when the operator selects a retained time range", async () => {
+    const now = Date.parse("2026-09-02T12:00:00.000Z");
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
+    const listActivity = vi.fn<RuntimeApi["listActivity"]>().mockResolvedValue({
+      data: [event],
+      meta: { limit: 50, nextCursor: null, retentionDays: 90 },
+    });
+    const api = { listActivity } as unknown as RuntimeApi;
+    const user = userEvent.setup();
+    render(
+      <RuntimeConnectionContext.Provider value={activityContext(api, session.id)}>
+        <RuntimeInvalidationProvider>
+          <DrawerProvider><ActivityScreen /><DrawerHost /></DrawerProvider>
+        </RuntimeInvalidationProvider>
+      </RuntimeConnectionContext.Provider>,
+    );
+    await waitFor(() => expect(listActivity).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    await user.click(screen.getByRole("radio", { name: "Last 7 days" }));
+    await waitFor(() => expect(listActivity).toHaveBeenLastCalledWith({
+      sessionId: session.id,
+      limit: 50,
+      query: "",
+      categories: [],
+      severities: [],
+      from: "2026-08-26T12:00:00.000Z",
+      cursor: undefined,
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    expect(screen.getByText("1 applied")).toBeInTheDocument();
+    nowSpy.mockRestore();
   });
 });

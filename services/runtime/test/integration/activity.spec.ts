@@ -130,4 +130,39 @@ describe('activity ledger', () => {
     expect(second.data[0]!.id).not.toBe(first.data[0]!.id);
     expect(second.meta.nextCursor).toBeNull();
   });
+
+  it('resolves an event by its session-scoped ID and includes event IDs in literal search', async () => {
+    const eventId = randomUUID();
+    await database.transaction(client => appendActivityEvent(client, {
+      sessionId: INTEGRATION_SESSION_ID,
+      eventType: 'campaign_run.completed',
+      category: 'RUN',
+      severity: 'SUCCESS',
+      origin: 'RUNTIME',
+      subjectType: 'CAMPAIGN_RUN',
+      subjectId: randomUUID(),
+      subjectLabelSnapshot: 'Release canary',
+      dedupeKey: eventId,
+    }));
+    const stored = await pool.query<{ id: string }>(
+      'SELECT id FROM activity_events WHERE dedupe_key = $1',
+      [eventId],
+    );
+    const storedId = stored.rows[0]!.id;
+
+    await expect(service.get(INTEGRATION_SESSION_ID, storedId)).resolves.toMatchObject({
+      id: storedId,
+      sessionId: INTEGRATION_SESSION_ID,
+      eventType: 'campaign_run.completed',
+    });
+    await expect(service.get(INTEGRATION_SESSION_ID, randomUUID()))
+      .rejects.toThrow('Activity event not found');
+
+    const searched = await service.list({
+      sessionId: INTEGRATION_SESSION_ID,
+      query: storedId,
+      limit: 50,
+    });
+    expect(searched.data.map(item => item.id)).toEqual([storedId]);
+  });
 });

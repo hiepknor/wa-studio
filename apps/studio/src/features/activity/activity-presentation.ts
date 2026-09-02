@@ -43,6 +43,45 @@ export function activitySeverityLabel(severity: RuntimeActivitySeverity): string
   return severity.charAt(0) + severity.slice(1).toLocaleLowerCase();
 }
 
+export function activityOriginLabel(origin: RuntimeActivityEvent["origin"]): string {
+  if (origin === "STUDIO") return "WA Studio";
+  if (origin === "RUNTIME") return "WA Runtime";
+  return "OpenWA Gateway";
+}
+
+export function activitySubjectTypeLabel(subjectType: string): string {
+  return subjectType
+    .split(/[_\-.]+/u)
+    .filter(Boolean)
+    .map((part, index) => index === 0
+      ? part.charAt(0).toLocaleUpperCase() + part.slice(1).toLocaleLowerCase()
+      : part.toLocaleLowerCase())
+    .join(" ");
+}
+
+export function activityMetadataLabel(key: string): string {
+  const separated = key
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .replace(/[_\-.]+/gu, " ")
+    .trim();
+  if (!separated) return key;
+  return separated.charAt(0).toLocaleUpperCase() + separated.slice(1).toLocaleLowerCase();
+}
+
+export function activityMetadataValue(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value !== "object") return String(value);
+  return JSON.stringify(value, (_key, nestedValue) => {
+    if (!nestedValue || typeof nestedValue !== "object" || Array.isArray(nestedValue)) {
+      return nestedValue;
+    }
+    return Object.fromEntries(
+      Object.entries(nestedValue as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right)),
+    );
+  }) ?? String(value);
+}
+
 export function activityTone(severity: RuntimeActivitySeverity) {
   if (severity === "SUCCESS") return "success" as const;
   if (severity === "WARNING") return "warning" as const;

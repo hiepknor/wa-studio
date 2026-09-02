@@ -183,6 +183,9 @@ describe("WA Design System contract", () => {
     expect(inspectorDrawerSource).toContain('className={`inspector-drawer-content ${contentClassName}`.trim()}');
     expect(inspectorDrawerCss).toContain("container-name: inspector-drawer workspace-drawer");
     expect(inspectorDrawerCss).toContain("container-type: inline-size");
+    expect(inspectorDrawerCss).toContain(
+      ".inspector-disclosure + .inspector-disclosure",
+    );
     expect(inspectorDrawerSource).toContain("subheader={navigation && (");
     expect(inspectorDrawerCss).toContain("@container inspector-drawer (max-width: 380px)");
     expect(inspectorDrawerCss).not.toContain("position: sticky");
