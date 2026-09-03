@@ -46,6 +46,14 @@ export class RuntimeEventRepository {
   }
 
   async storeInTransaction(client: PoolClient, event: RuntimeEvent): Promise<boolean> {
+    // In compact desktop mode the durable webhook spool/receipt is the idempotency ledger for
+    // inbound messages. Persisting another runtime_events row would retain the same high-volume
+    // event indefinitely without serving a projection or operator-facing inbox.
+    if (this.config.RUNTIME_MESSAGE_STORAGE_MODE === 'disabled'
+      && event.eventType === 'message.received') {
+      return true;
+    }
+
     const ledger = runtimeEventLedgerRecord(event, this.config.RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED);
     const inserted = await client.query(
       `INSERT INTO runtime_events

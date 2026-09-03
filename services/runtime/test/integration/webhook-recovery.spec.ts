@@ -144,28 +144,27 @@ describe('durable webhook processing', () => {
 
     const stored = await pool.query<{
       processed_at: Date;
-      event_payload: Record<string, unknown>;
+      runtime_event_count: string;
       inbound_count: string;
       observation_count: string;
     }>(
-      `SELECT receipt.processed_at, re.payload AS event_payload,
-         (SELECT count(*)::text FROM inbound_messages WHERE event_id = re.event_id) AS inbound_count,
+      `SELECT receipt.processed_at,
+         (SELECT count(*)::text FROM runtime_events
+          WHERE event_id = receipt.idempotency_key) AS runtime_event_count,
+         (SELECT count(*)::text FROM inbound_messages
+          WHERE event_id = receipt.idempotency_key) AS inbound_count,
          (SELECT count(*)::text FROM contact_message_observation_intents
-          WHERE event_id = re.event_id) AS observation_count
+          WHERE event_id = receipt.idempotency_key) AS observation_count
        FROM webhook_event_receipts receipt
-       JOIN runtime_events re ON re.event_id = receipt.idempotency_key
        WHERE receipt.idempotency_key = $1`,
       [envelope.idempotencyKey],
     );
     expect(stored.rows[0]).toMatchObject({
+      runtime_event_count: '0',
       inbound_count: '0',
       observation_count: '1',
     });
     expect(stored.rows[0]!.processed_at).toBeInstanceOf(Date);
-    expect(stored.rows[0]!.event_payload).not.toHaveProperty('body');
-    expect(stored.rows[0]!.event_payload).toMatchObject({
-      bodyBytes: Buffer.byteLength('do not retain me', 'utf8'),
-    });
   });
 
   it('projects an OpenWA message status only inside the owning session', async () => {
