@@ -47,7 +47,7 @@ export function nextProjectedMessageStatus(
 ): MessageJobStatus {
   if (['FAILED', 'CANCELLED', 'DRY_RUN_COMPLETED'].includes(current)) return current;
   if (incoming === 'FAILED') {
-    return ['SCHEDULED', 'QUEUED', 'PROCESSING', 'ACCEPTED', 'UNKNOWN'].includes(current)
+    return ['SCHEDULED', 'QUEUED', 'PROCESSING', 'ACCEPTED', 'SENT', 'UNKNOWN'].includes(current)
       ? 'FAILED'
       : current;
   }
@@ -107,7 +107,10 @@ export class MessageStatusProjectionService {
     const statusAdvanced = nextStatus !== job.status;
     if (statusAdvanced) {
       await client.query(
-        `UPDATE message_jobs SET status = $2::message_job_status, updated_at = now()
+        `UPDATE message_jobs SET status = $2::message_job_status,
+           last_error = CASE WHEN $2::message_job_status = 'FAILED'
+             THEN 'OpenWA reported delivery failure' ELSE NULL END,
+           updated_at = now()
          WHERE id = $1`,
         [job.id, nextStatus],
       );

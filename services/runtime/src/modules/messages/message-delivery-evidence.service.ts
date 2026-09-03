@@ -93,7 +93,7 @@ export function nextTransportState(
       : incoming;
   }
   if (incoming === 'FAILED_DEFINITIVE') {
-    return ['DISPATCH_STARTED', 'INGRESS_ACCEPTED', 'SEND_STARTED', 'SEND_ACCEPTED'].includes(current)
+    return ['DISPATCH_STARTED', 'INGRESS_ACCEPTED', 'SEND_STARTED', 'SEND_ACCEPTED', 'SENT'].includes(current)
       ? incoming
       : current;
   }
@@ -236,7 +236,7 @@ export class MessageDeliveryEvidenceService {
       await client.query(
         `UPDATE message_jobs SET status = $2::message_job_status,
            openwa_message_id = COALESCE($3, openwa_message_id),
-           last_error = CASE WHEN $4::text IS NULL THEN last_error ELSE $4 END,
+           last_error = $4,
            updated_at = now()
          WHERE id = $1`,
         [attempt.job_id, status, evidence.openwaMessageId, projectedError],

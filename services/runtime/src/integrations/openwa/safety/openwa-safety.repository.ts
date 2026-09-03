@@ -545,7 +545,12 @@ export class OpenWASafetyRepository {
         `INSERT INTO openwa_safety_outcome_receipts
            (permit_token, upstream_id, session_id, operation_class, outcome_kind, policy_version)
          VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (permit_token) DO NOTHING`,
+         ON CONFLICT (permit_token) DO UPDATE SET
+           outcome_kind = EXCLUDED.outcome_kind, recorded_at = now()
+         WHERE openwa_safety_outcome_receipts.outcome_kind = 'SUCCESS'
+           AND EXCLUDED.outcome_kind IN (
+             'RATE_LIMITED', 'AMBIGUOUS', 'TRANSIENT_FAILURE', 'SESSION_RESTRICTED'
+           )`,
         [permit.permitToken, permit.upstreamId, permit.sessionId, permit.operationClass,
           outcome.kind, permit.policyVersion],
       );
