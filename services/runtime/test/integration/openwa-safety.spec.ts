@@ -300,6 +300,66 @@ describe('OpenWA Safety Governor', () => {
     expect(after).toEqual(before);
   });
 
+  it('pauses only message admission and rechecks the hold at the final commit fence', async () => {
+    const messageJobId = await createProcessingMessage('outbound-hold-fence', INTEGRATION_GROUP_ID);
+    const reserved = await safety.reserveMessage({
+      sessionId: INTEGRATION_SESSION_ID,
+      messageJobId,
+      recipientId: INTEGRATION_GROUP_ID,
+      operationClass: 'MESSAGE_SEND_TEXT',
+    });
+    expect(reserved.outcome).toBe('GRANTED');
+    if (reserved.outcome !== 'GRANTED') return;
+
+    await expect(safety.mutateSession({
+      sessionId: INTEGRATION_SESSION_ID,
+      operationType: 'OPENWA_OUTBOUND_PAUSE',
+      idempotencyKey: randomUUID(),
+      requestHash: '3'.repeat(64),
+      reason: 'OPERATOR_PAUSED_SENDS',
+    })).resolves.toMatchObject({
+      status: 'READY',
+      outboundState: 'PAUSED',
+      outboundPauseReason: 'OPERATOR_PAUSED_SENDS',
+    });
+
+    await expect(safety.commitMessageStart(reserved.permit)).resolves.toBeNull();
+    await safety.release(reserved.permit);
+    expect((await pool.query(
+      'SELECT attempt_count, current_upstream_started_at FROM message_jobs WHERE id = $1',
+      [messageJobId],
+    )).rows[0]).toMatchObject({ attempt_count: 0, current_upstream_started_at: null });
+
+    const blockedJob = await createProcessingMessage('outbound-hold-admission', INTEGRATION_GROUP_ID);
+    await expect(safety.reserveMessage({
+      sessionId: INTEGRATION_SESSION_ID,
+      messageJobId: blockedJob,
+      recipientId: INTEGRATION_GROUP_ID,
+      operationClass: 'MESSAGE_SEND_TEXT',
+    })).resolves.toMatchObject({ outcome: 'BLOCKED', reason: 'OPERATOR_PAUSED_SENDS' });
+
+    await expect(safety.reserveOperation({
+      sessionId: INTEGRATION_SESSION_ID,
+      operationClass: 'GROUP_READ_TARGETED',
+      holderType: 'GROUP_REFRESH',
+      holderId: 'reads-continue-during-outbound-hold',
+    })).resolves.toMatchObject({ outcome: 'GRANTED' });
+
+    await expect(safety.mutateSession({
+      sessionId: INTEGRATION_SESSION_ID,
+      operationType: 'OPENWA_OUTBOUND_RESUME',
+      idempotencyKey: randomUUID(),
+      requestHash: '4'.repeat(64),
+    })).resolves.toMatchObject({ status: 'READY', outboundState: 'RUNNING' });
+
+    expect((await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM activity_events
+       WHERE event_type IN ('openwa_safety.outbound_paused', 'openwa_safety.outbound_resumed')
+         AND session_id = $1`,
+      [INTEGRATION_SESSION_ID],
+    )).rows[0]?.count).toBe('2');
+  });
+
   it('reports quiescence only after processing work and active safety leases drain', async () => {
     const messageJobId = await createProcessingMessage('quiescence', INTEGRATION_GROUP_ID);
     const decision = await safety.reserveMessage({

@@ -29,6 +29,9 @@ export interface OpenWASafetyScopeSnapshot {
   reason: string | null;
   cooldownUntil: Date | null;
   profile: OpenWASafetyProfile;
+  outboundState: 'RUNNING' | 'PAUSED';
+  outboundPausedAt: Date | null;
+  outboundPauseReason: string | null;
   policyVersion: number;
   revision: number;
   lastSuccessAt: Date | null;

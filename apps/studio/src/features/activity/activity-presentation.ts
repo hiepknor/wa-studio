@@ -24,6 +24,8 @@ const EVENT_TITLES: Record<string, string> = {
   "session.health_changed": "Session health changed",
   "openwa_safety.session_blocked": "OpenWA operations blocked",
   "openwa_safety.session_resumed": "OpenWA operations resumed",
+  "openwa_safety.outbound_paused": "Outbound sending paused",
+  "openwa_safety.outbound_resumed": "Outbound sending resumed",
   "openwa_safety.profile_changed": "OpenWA safety profile changed",
 };
 

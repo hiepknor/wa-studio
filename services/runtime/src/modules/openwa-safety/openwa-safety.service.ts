@@ -10,6 +10,8 @@ import { isUUID } from 'class-validator';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import {
+  OpenWAOutboundControlActionDto,
+  type OpenWAOutboundControlDto,
   OpenWASafetyControlActionDto,
   type OpenWASafetyControlDto,
   type OpenWASafetyProfileChangeDto,
@@ -63,6 +65,20 @@ export class OpenWASafetyService {
     });
   }
 
+  mutateOutboundControl(
+    sessionId: string,
+    idempotencyKey: string | undefined,
+    input: OpenWAOutboundControlDto,
+  ) {
+    const operationType = input.action === OpenWAOutboundControlActionDto.PAUSE
+      ? 'OPENWA_OUTBOUND_PAUSE' as const
+      : 'OPENWA_OUTBOUND_RESUME' as const;
+    return this.mutate(sessionId, idempotencyKey, operationType, {
+      action: input.action,
+      reason: input.reason?.trim() || undefined,
+    });
+  }
+
   mutateProfile(
     sessionId: string,
     idempotencyKey: string | undefined,
@@ -76,8 +92,13 @@ export class OpenWASafetyService {
   private async mutate(
     sessionId: string,
     idempotencyKey: string | undefined,
-    operationType: 'OPENWA_SESSION_BLOCK' | 'OPENWA_SESSION_RESUME' | 'OPENWA_SAFETY_PROFILE_CHANGE',
-    intent: { action?: OpenWASafetyControlActionDto; reason?: string; profile?: 'CANARY' | 'STANDARD' },
+    operationType: 'OPENWA_SESSION_BLOCK' | 'OPENWA_SESSION_RESUME' | 'OPENWA_SAFETY_PROFILE_CHANGE'
+      | 'OPENWA_OUTBOUND_PAUSE' | 'OPENWA_OUTBOUND_RESUME',
+    intent: {
+      action?: OpenWASafetyControlActionDto | OpenWAOutboundControlActionDto;
+      reason?: string;
+      profile?: 'CANARY' | 'STANDARD';
+    },
   ) {
     this.assertVisible(sessionId);
     if (!idempotencyKey || !isUUID(idempotencyKey)) {

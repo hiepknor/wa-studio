@@ -24,6 +24,7 @@ interface OpenWASafetySettingsProps {
 
 type PendingMutation =
   | { kind: "CONTROL"; action: "BLOCK" | "RESUME" }
+  | { kind: "OUTBOUND"; action: "PAUSE" | "RESUME" }
   | { kind: "PROFILE"; profile: RuntimeOpenWASafetyProfile };
 
 const PROFILE_OPTIONS = [
@@ -149,20 +150,33 @@ export function OpenWASafetySettings({
           crypto.randomUUID(),
           pending.action === "BLOCK" ? "OPERATOR_BLOCKED_FROM_STUDIO" : undefined,
         )
+        : pending.kind === "OUTBOUND"
+          ? await api.controlOpenWAOutbound(
+            sessionId,
+            pending.action,
+            crypto.randomUUID(),
+            pending.action === "PAUSE" ? "OPERATOR_PAUSED_SENDS_FROM_STUDIO" : undefined,
+          )
         : await api.setOpenWASafetyProfile(sessionId, pending.profile, crypto.randomUUID());
       setSnapshot(next);
       setPending(null);
       notify({
         description: pending.kind === "PROFILE"
           ? `Future operations will use the ${pending.profile.toLowerCase()} pacing profile.`
+          : pending.kind === "OUTBOUND"
+            ? pending.action === "PAUSE"
+              ? "New message commits are paused; synchronization and reconciliation continue."
+              : "New messages are admitted through the existing safety limits again."
           : pending.action === "BLOCK"
-            ? "New OpenWA operations for this session are now blocked."
-            : "The session has returned to automatic safety control.",
+              ? "All new OpenWA operations for this session are now blocked."
+              : "The session has returned to automatic safety control.",
         title: pending.kind === "PROFILE"
           ? "Safety profile updated"
+          : pending.kind === "OUTBOUND"
+            ? pending.action === "PAUSE" ? "Outbound sending paused" : "Outbound sending resumed"
           : pending.action === "BLOCK"
-            ? "Session blocked"
-            : "Session resumed",
+              ? "Session locked"
+              : "Session unlocked",
         tone: "success",
       });
     } catch (caught) {
@@ -175,6 +189,7 @@ export function OpenWASafetySettings({
   const presentation = snapshot ? STATUS_PRESENTATION[snapshot.status] : null;
   const sessionManuallyBlocked = snapshot?.circuitState === "MANUAL_BLOCKED";
   const controlAction = sessionManuallyBlocked ? "RESUME" : "BLOCK";
+  const outboundAction = snapshot?.outboundState === "PAUSED" ? "RESUME" : "PAUSE";
   const confirmation = pending?.kind === "PROFILE"
     ? {
         body: pending.profile === "STANDARD"
@@ -184,17 +199,31 @@ export function OpenWASafetySettings({
         title: "Change safety profile?",
         variant: pending.profile === "STANDARD" ? "danger" as const : "primary" as const,
       }
+    : pending?.kind === "OUTBOUND"
+      ? pending.action === "PAUSE"
+        ? {
+            body: "New message admissions and final OpenWA commits will stop for this session. Synchronization, connector health, delivery evidence, and reconciliation continue. Work already committed upstream cannot be recalled.",
+            confirmLabel: "Pause sends",
+            title: "Pause outbound sending?",
+            variant: "danger" as const,
+          }
+        : {
+            body: "New messages will be admitted through the unchanged circuit breaker, pacing budgets, and recipient limits. Existing cooldowns remain authoritative.",
+            confirmLabel: "Resume sends",
+            title: "Resume outbound sending?",
+            variant: "primary" as const,
+          }
     : pending?.action === "BLOCK"
       ? {
           body: "New sends and protected OpenWA operations for this session will stop. Work already committed upstream cannot be recalled.",
-          confirmLabel: "Block session",
-          title: "Block OpenWA operations?",
+          confirmLabel: "Lock all operations",
+          title: "Lock all OpenWA operations?",
           variant: "danger" as const,
         }
       : {
           body: "Runtime will re-enable admission through the configured pacing limits. A parent workspace or upstream cooldown may still keep operations stopped.",
-          confirmLabel: "Resume session",
-          title: "Resume automatic control?",
+          confirmLabel: "Unlock operations",
+          title: "Unlock OpenWA operations?",
           variant: "primary" as const,
         };
 
@@ -279,17 +308,51 @@ export function OpenWASafetySettings({
 
       <SettingsSection
         action={snapshot && (
+          <div className="settings-section-actions">
+            <Badge
+              tone={snapshot.outboundState === "PAUSED" ? "warning" : "success"}
+              variant="status"
+            >
+              {snapshot.outboundState === "PAUSED" ? "Paused" : "Sending"}
+            </Badge>
+            <Button
+              disabled={loading || mutating}
+              onClick={() => setPending({ kind: "OUTBOUND", action: outboundAction })}
+              variant={outboundAction === "PAUSE" ? "secondary" : "primary"}
+            >
+              {outboundAction === "PAUSE" ? "Pause sends" : "Resume sends"}
+            </Button>
+          </div>
+        )}
+        description="Stops message admission without interrupting the operational signals Runtime needs to remain safe and observable."
+        kicker="Operator control"
+        title="Outbound sending"
+        titleId="openwa-outbound-control-title"
+      >
+        <InlineAlert
+          className="settings-safety-guidance"
+          title={snapshot?.outboundState === "PAUSED" ? "New message commits are paused" : "Operational traffic stays active"}
+          tone={snapshot?.outboundState === "PAUSED" ? "warning" : "neutral"}
+        >
+          {snapshot?.outboundState === "PAUSED"
+            ? `${snapshot.outboundPauseReason ?? "Paused by an operator"}. Paused ${formatTimestamp(snapshot.outboundPausedAt)}.`
+            : "Group sync, health probes, connector evidence, and delivery reconciliation remain available when message sends are paused."}
+        </InlineAlert>
+      </SettingsSection>
+
+      <SettingsSection
+        action={snapshot && (
           <Button
             disabled={loading || mutating}
             onClick={() => setPending({ kind: "CONTROL", action: controlAction })}
             variant={controlAction === "BLOCK" ? "danger" : "primary"}
           >
-            {controlAction === "BLOCK" ? "Block session" : "Resume session"}
+            {controlAction === "BLOCK" ? "Lock all operations" : "Unlock operations"}
           </Button>
         )}
-        description="Manual control is session-scoped and durable across Runtime restarts. Parent safety controls remain authoritative."
-        kicker="Operator control"
-        title="Emergency stop"
+        description="A durable maintenance lock for every protected OpenWA operation in this session. Parent controls remain authoritative."
+        kicker="Maintenance"
+        title="OpenWA operation lock"
         titleId="openwa-safety-control-title"
       >
         <InlineAlert className="settings-safety-guidance" title="Committed work is never recalled" tone="neutral">

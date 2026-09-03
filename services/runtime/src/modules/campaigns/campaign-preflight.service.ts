@@ -48,6 +48,7 @@ export class CampaignPreflightService {
       session,
       liveSendsEnabled: this.config.ALLOW_LIVE_SENDS,
       safetyStatus: safety.status,
+      outboundState: safety.outboundState,
       campaignRevision: input.campaignRevision,
       targetsRevision: input.targetsRevision,
     });

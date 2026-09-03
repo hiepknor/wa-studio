@@ -13,5 +13,9 @@ describe('OpenWASafetyController', () => {
       HTTP_CODE_METADATA,
       OpenWASafetyController.prototype.control,
     )).toBe(HttpStatus.OK);
+    expect(Reflect.getMetadata(
+      HTTP_CODE_METADATA,
+      OpenWASafetyController.prototype.outboundControl,
+    )).toBe(HttpStatus.OK);
   });
 });

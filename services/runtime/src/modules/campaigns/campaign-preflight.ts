@@ -27,6 +27,7 @@ export function evaluateCampaignPreflight(input: {
   session: CampaignPreflightSessionState;
   liveSendsEnabled: boolean;
   safetyStatus?: OpenWASafetyStatus;
+  outboundState?: 'RUNNING' | 'PAUSED';
   campaignRevision: number;
   targetsRevision: number;
   checkedAt?: Date;
@@ -67,8 +68,8 @@ export function evaluateCampaignPreflight(input: {
       : (content.caption ?? '').length <= 1024 ? 'Image content is valid' : 'Image caption is invalid',
   });
   const safetyReady = input.executionMode !== CampaignExecutionMode.LIVE
-    || input.safetyStatus === undefined
-    || input.safetyStatus === 'READY';
+    || ((input.safetyStatus === undefined || input.safetyStatus === 'READY')
+      && input.outboundState !== 'PAUSED');
   checks.push({
     code: CampaignPreflightCheckCode.SAFETY_READY,
     status: safetyReady ? CampaignPreflightStatus.PASS : CampaignPreflightStatus.BLOCK,
@@ -76,7 +77,9 @@ export function evaluateCampaignPreflight(input: {
       ? 'Dry-run does not consume the live safety budget'
       : safetyReady
         ? 'Session safety controls are ready'
-        : `Session safety controls are ${input.safetyStatus?.toLowerCase()}`,
+        : input.outboundState === 'PAUSED'
+          ? 'Outbound sends are paused by the operator'
+          : `Session safety controls are ${input.safetyStatus?.toLowerCase()}`,
   });
   if (content.type !== CampaignContentType.TEXT) {
     checks.push({
@@ -121,7 +124,7 @@ export function evaluateCampaignPreflight(input: {
       ? CampaignPreflightStatus.WARN : CampaignPreflightStatus.PASS;
   return {
     status,
-    policyVersion: 4,
+    policyVersion: 5,
     campaignRevision: input.campaignRevision,
     targetsRevision: input.targetsRevision,
     executionMode: input.executionMode,

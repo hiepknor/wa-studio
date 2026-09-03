@@ -43,6 +43,9 @@ type ResumeRunHeaders = paths[
 type CancelRunHeaders = paths[
   "/api/v1/campaign-runs/{id}/cancel"
 ]["post"]["parameters"]["header"];
+type OutboundControlHeaders = paths[
+  "/api/v1/openwa-safety/sessions/{sessionId}/outbound-control"
+]["post"]["parameters"]["header"];
 
 describe("authoritative WA Runtime contract", () => {
   it("keeps the canonical snapshot at the pinned SHA-256", async () => {
@@ -52,7 +55,7 @@ describe("authoritative WA Runtime contract", () => {
     );
     const checksum = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(checksum)
-      .toBe("41d90d697786f23a33407e4232a916d542ff17c75c1e03b42b7ce4925353ee58");
+      .toBe("c33399d4e8dc460c0dbfe61b92ee13c314631189cb12169f429a094b7300755f");
   });
 
   it("requires operation keys for replay-safe Runtime mutations", () => {
@@ -62,11 +65,13 @@ describe("authoritative WA Runtime contract", () => {
     const pause: PauseRunHeaders = { "Idempotency-Key": key };
     const resume: ResumeRunHeaders = { "Idempotency-Key": key };
     const cancel: CancelRunHeaders = { "Idempotency-Key": key };
+    const outbound: OutboundControlHeaders = { "Idempotency-Key": key };
     expect(sync["Idempotency-Key"]).toBe(key);
     expect(capability["Idempotency-Key"]).toBe(key);
     expect(pause["Idempotency-Key"]).toBe(key);
     expect(resume["Idempotency-Key"]).toBe(key);
     expect(cancel["Idempotency-Key"]).toBe(key);
+    expect(outbound["Idempotency-Key"]).toBe(key);
   });
 
   it("generates nullable scheduledAt for UpdateCampaignDto", () => {

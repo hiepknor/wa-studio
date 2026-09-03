@@ -202,6 +202,61 @@
         ]
       }
     },
+    "/api/v1/openwa-safety/sessions/{sessionId}/outbound-control": {
+      "post": {
+        "operationId": "OpenWASafetyController_outboundControl",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenWAOutboundControlDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenWASafetyScopeDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "runtime-key": []
+          }
+        ],
+        "summary": "Pause or resume message sends for one session without stopping protected reads",
+        "tags": [
+          "openwa-safety"
+        ]
+      }
+    },
     "/api/v1/openwa-safety/sessions/{sessionId}/profile": {
       "put": {
         "operationId": "OpenWASafetyController_profile",
@@ -4656,6 +4711,22 @@
               "STANDARD"
             ]
           },
+          "outboundState": {
+            "type": "string",
+            "enum": [
+              "RUNNING",
+              "PAUSED"
+            ]
+          },
+          "outboundPausedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "outboundPauseReason": {
+            "type": "string",
+            "nullable": true
+          },
           "policyVersion": {
             "type": "number"
           },
@@ -4686,11 +4757,34 @@
           "reason",
           "cooldownUntil",
           "profile",
+          "outboundState",
+          "outboundPausedAt",
+          "outboundPauseReason",
           "policyVersion",
           "revision",
           "lastSuccessAt",
           "lastFailureAt",
           "updatedAt"
+        ]
+      },
+      "OpenWAOutboundControlDto": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "PAUSE",
+              "RESUME"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "action"
         ]
       },
       "OpenWASafetyProfileChangeDto": {
