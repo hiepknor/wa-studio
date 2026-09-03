@@ -239,6 +239,67 @@ describe('OpenWA Safety Governor', () => {
     expect(activity.rows[0]?.count).toBe('1');
   });
 
+  it('layers a manual hold over automatic cooldown and preserves rate debt when resumed', async () => {
+    const decision = await safety.reserveOperation({
+      sessionId: INTEGRATION_SESSION_ID,
+      operationClass: 'GROUP_READ_TARGETED',
+      holderType: 'GROUP_REFRESH',
+      holderId: 'rate-debt-before-hold',
+    });
+    expect(decision.outcome).toBe('GRANTED');
+    if (decision.outcome !== 'GRANTED') return;
+    await safety.recordOutcome(decision.permit, { kind: 'RATE_LIMITED', retryAfterMs: 120_000 });
+
+    const before = (await pool.query<{
+      circuit_state: string;
+      rate_mode: string;
+      reason_code: string | null;
+      cooldown_until: Date | null;
+      consecutive_rate_limits: number;
+      success_streak: number;
+      theoretical_arrival_at: Date;
+      emission_interval_ms: number;
+    }>(
+      `SELECT scopes.circuit_state, scopes.rate_mode, scopes.reason_code, scopes.cooldown_until,
+         scopes.consecutive_rate_limits, scopes.success_streak,
+         buckets.theoretical_arrival_at, buckets.emission_interval_ms
+       FROM openwa_safety_scopes scopes
+       JOIN openwa_safety_buckets buckets USING (scope_type, upstream_id, session_id)
+       WHERE scopes.scope_type = 'SESSION' AND scopes.session_id = $1
+         AND buckets.operation_class = 'GROUP_READ_TARGETED'`,
+      [INTEGRATION_SESSION_ID],
+    )).rows[0]!;
+
+    await expect(safety.mutateSession({
+      sessionId: INTEGRATION_SESSION_ID,
+      operationType: 'OPENWA_SESSION_BLOCK',
+      idempotencyKey: randomUUID(),
+      requestHash: '1'.repeat(64),
+      reason: 'OPERATOR_REVIEW',
+    })).resolves.toMatchObject({
+      circuitState: 'MANUAL_BLOCKED', status: 'BLOCKED', reason: 'OPERATOR_REVIEW',
+    });
+
+    await expect(safety.mutateSession({
+      sessionId: INTEGRATION_SESSION_ID,
+      operationType: 'OPENWA_SESSION_RESUME',
+      idempotencyKey: randomUUID(),
+      requestHash: '2'.repeat(64),
+    })).resolves.toMatchObject({ status: 'COOLDOWN', reason: 'UPSTREAM_RATE_LIMIT' });
+
+    const after = (await pool.query<typeof before>(
+      `SELECT scopes.circuit_state, scopes.rate_mode, scopes.reason_code, scopes.cooldown_until,
+         scopes.consecutive_rate_limits, scopes.success_streak,
+         buckets.theoretical_arrival_at, buckets.emission_interval_ms
+       FROM openwa_safety_scopes scopes
+       JOIN openwa_safety_buckets buckets USING (scope_type, upstream_id, session_id)
+       WHERE scopes.scope_type = 'SESSION' AND scopes.session_id = $1
+         AND buckets.operation_class = 'GROUP_READ_TARGETED'`,
+      [INTEGRATION_SESSION_ID],
+    )).rows[0]!;
+    expect(after).toEqual(before);
+  });
+
   it('reports quiescence only after processing work and active safety leases drain', async () => {
     const messageJobId = await createProcessingMessage('quiescence', INTEGRATION_GROUP_ID);
     const decision = await safety.reserveMessage({
