@@ -1496,6 +1496,10 @@ export interface components {
             /** @enum {string} */
             status: "PENDING" | "MATERIALIZED" | "PROCESSING" | "DRY_RUN_COMPLETED" | "ACCEPTED" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "UNKNOWN" | "BLOCKED_CAPABILITY_CHANGED" | "CANCELLED";
             failureReason: string | null;
+            /** @enum {string|null} */
+            waitKind: "SESSION_LANE" | "RATE_BUDGET" | "CONNECTOR" | "SAFETY_POLICY" | null;
+            /** Format: date-time */
+            nextAttemptAt: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */

@@ -6722,6 +6722,21 @@
             "type": "string",
             "nullable": true
           },
+          "waitKind": {
+            "type": "string",
+            "enum": [
+              "SESSION_LANE",
+              "RATE_BUDGET",
+              "CONNECTOR",
+              "SAFETY_POLICY"
+            ],
+            "nullable": true
+          },
+          "nextAttemptAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -6739,6 +6754,8 @@
           "messageJobId",
           "status",
           "failureReason",
+          "waitKind",
+          "nextAttemptAt",
           "createdAt",
           "updatedAt"
         ]

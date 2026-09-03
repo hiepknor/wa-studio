@@ -125,6 +125,8 @@ function renderRunsWithView(
         groupName: "Release group",
         status: "SENT",
         failureReason: null,
+        waitKind: null,
+        nextAttemptAt: null,
         messageJobId: "33333333-3333-4333-8333-333333333333",
         createdAt: run.createdAt,
         updatedAt: run.updatedAt,
@@ -240,6 +242,34 @@ describe("RunsScreen", () => {
     expect(within(inspector).queryByRole("table", {
       name: "Per-group deliveries for this run",
     })).not.toBeInTheDocument();
+  });
+
+  it("explains when a materialized delivery is waiting for the session lane", async () => {
+    const user = userEvent.setup();
+    renderRuns({
+      listCampaignDeliveries: vi.fn().mockResolvedValue({
+        data: [{
+          id: "55555555-5555-4555-8555-555555555555",
+          runId: run.id,
+          groupId: "group@g.us",
+          groupName: "Release group",
+          status: "MATERIALIZED",
+          failureReason: null,
+          messageJobId: "33333333-3333-4333-8333-333333333333",
+          waitKind: "SESSION_LANE",
+          nextAttemptAt: null,
+          createdAt: run.createdAt,
+          updatedAt: run.updatedAt,
+        }],
+        meta: { total: 1, limit: 20, offset: 0 },
+      }),
+    });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+    await user.click(within(inspector).getByRole("tab", { name: "Deliveries" }));
+
+    expect(await within(inspector).findByText("Waiting for session lane")).toBeInTheDocument();
   });
 
   it("shows the immutable image metadata and caption in the run snapshot", async () => {

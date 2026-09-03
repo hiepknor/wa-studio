@@ -2,6 +2,7 @@ import type {
   CampaignDeliveryDto,
   CampaignDeliveryStatus,
 } from '../../contracts/campaigns/campaign-delivery.dto';
+import { CampaignDeliveryWaitKind } from '../../contracts/campaigns/campaign-delivery.dto';
 import type { CampaignContentDto } from '../../contracts/campaigns/campaign-content.dto';
 import type { CampaignExecutionMode } from '../../contracts/campaigns/campaign-preflight.dto';
 import { DatabaseService } from '../../core/database/database.service';
@@ -18,6 +19,8 @@ interface DeliveryRow {
   message_job_id: string | null;
   status: CampaignDeliveryStatus;
   failure_reason: string | null;
+  wait_kind: CampaignDeliveryWaitKind | null;
+  next_attempt_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -30,6 +33,8 @@ const mapDelivery = (row: DeliveryRow): CampaignDeliveryDto => ({
   messageJobId: row.message_job_id,
   status: row.status,
   failureReason: row.failure_reason,
+  waitKind: row.wait_kind,
+  nextAttemptAt: row.next_attempt_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -110,7 +115,10 @@ export class CampaignDeliveryRepository {
          WHERE cd.run_id = $1 AND mj.status IN ('SCHEDULED','QUEUED','PROCESSING')`,
         [runId],
       );
-      const slots = Math.max(0, maxBuffered - Number(activeResult.rows[0]?.count ?? 0));
+      const effectiveMaxBuffered = run.execution_mode === 'LIVE'
+        ? Math.min(maxBuffered, 1)
+        : maxBuffered;
+      const slots = Math.max(0, effectiveMaxBuffered - Number(activeResult.rows[0]?.count ?? 0));
       if (!slots) return 0;
 
       const pending = await client.query<{
@@ -187,12 +195,27 @@ export class CampaignDeliveryRepository {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const values = [input.runId, searchPattern, statuses];
       const joins = `FROM campaign_deliveries cd
-        JOIN campaign_run_targets crt ON crt.run_id = cd.run_id AND crt.group_id = cd.group_id`;
+        JOIN campaign_run_targets crt ON crt.run_id = cd.run_id AND crt.group_id = cd.group_id
+        LEFT JOIN message_jobs mj ON mj.id = cd.message_job_id`;
       const predicate = `cd.run_id = $1
         AND ($2::text IS NULL OR crt.group_name ILIKE $2 ESCAPE '\\' OR cd.group_id ILIKE $2 ESCAPE '\\')
         AND ($3::campaign_delivery_status[] IS NULL OR cd.status = ANY($3))`;
       const rows = await client.query<DeliveryRow>(
-        `SELECT cd.*, crt.group_name ${joins} WHERE ${predicate}
+        `SELECT cd.*, crt.group_name,
+           CASE
+             WHEN mj.status <> 'SCHEDULED' OR mj.defer_reason IS NULL THEN NULL
+             WHEN mj.defer_reason = 'SESSION_OPERATION_IN_FLIGHT'
+               THEN '${CampaignDeliveryWaitKind.SESSION_LANE}'
+             WHEN mj.defer_reason IN ('RATE_BUDGET', 'RECIPIENT_FREQUENCY_LIMIT')
+               THEN '${CampaignDeliveryWaitKind.RATE_BUDGET}'
+             WHEN mj.defer_reason IN ('CONNECTOR_UNHEALTHY', 'MEDIA_RELAY_UNAVAILABLE')
+               THEN '${CampaignDeliveryWaitKind.CONNECTOR}'
+             ELSE '${CampaignDeliveryWaitKind.SAFETY_POLICY}'
+           END AS wait_kind,
+           CASE WHEN mj.status = 'SCHEDULED' AND mj.defer_reason IS NOT NULL
+               AND mj.defer_reason <> 'SESSION_OPERATION_IN_FLIGHT'
+             THEN mj.scheduled_at ELSE NULL END AS next_attempt_at
+         ${joins} WHERE ${predicate}
          ORDER BY lower(crt.group_name), cd.group_id, cd.id LIMIT $4 OFFSET $5`,
         [...values, input.limit, input.offset],
       );

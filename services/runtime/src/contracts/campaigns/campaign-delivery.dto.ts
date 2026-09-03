@@ -16,6 +16,13 @@ export enum CampaignDeliveryStatus {
   CANCELLED = 'CANCELLED',
 }
 
+export enum CampaignDeliveryWaitKind {
+  SESSION_LANE = 'SESSION_LANE',
+  RATE_BUDGET = 'RATE_BUDGET',
+  CONNECTOR = 'CONNECTOR',
+  SAFETY_POLICY = 'SAFETY_POLICY',
+}
+
 export class CampaignDeliveryDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -37,6 +44,12 @@ export class CampaignDeliveryDto {
 
   @ApiProperty({ type: String, nullable: true })
   failureReason!: string | null;
+
+  @ApiProperty({ enum: CampaignDeliveryWaitKind, nullable: true })
+  waitKind!: CampaignDeliveryWaitKind | null;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  nextAttemptAt!: Date | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

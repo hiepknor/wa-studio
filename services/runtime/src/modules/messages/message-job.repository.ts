@@ -128,27 +128,104 @@ export class MessageJobRepository {
   }
 
   async claimDue(limit: number): Promise<MessageJob[]> {
+    if (limit <= 0) return [];
     return this.database.transaction(async client => {
-      const result = await client.query<MessageJobRow>(
-        `SELECT jobs.* FROM message_jobs jobs
-         WHERE jobs.status = 'SCHEDULED' AND jobs.scheduled_at <= now()
-           AND NOT EXISTS (
-             SELECT 1 FROM campaign_deliveries deliveries
-             JOIN campaign_runs runs ON runs.id = deliveries.run_id
-             WHERE deliveries.message_job_id = jobs.id AND runs.status <> 'RUNNING'
+      await client.query(
+        `INSERT INTO message_dispatch_session_lanes (session_id)
+         SELECT DISTINCT jobs.session_id FROM message_jobs jobs
+         WHERE jobs.status = 'SCHEDULED' AND jobs.dry_run = false
+           AND (jobs.scheduled_at <= now()
+             OR jobs.defer_reason = 'SESSION_OPERATION_IN_FLIGHT')
+         ON CONFLICT (session_id) DO NOTHING`,
+      );
+
+      const live = await client.query<MessageJobRow>(
+        `WITH locked_lanes AS MATERIALIZED (
+           SELECT lanes.session_id
+           FROM message_dispatch_session_lanes lanes
+           CROSS JOIN LATERAL (
+             SELECT jobs.scheduled_at, jobs.created_at, jobs.id, jobs.defer_reason
+             FROM message_jobs jobs
+             WHERE jobs.session_id = lanes.session_id
+               AND jobs.status = 'SCHEDULED' AND jobs.dry_run = false
+               AND (jobs.scheduled_at <= now()
+                 OR jobs.defer_reason = 'SESSION_OPERATION_IN_FLIGHT')
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_deliveries deliveries
+                 JOIN campaign_runs runs ON runs.id = deliveries.run_id
+                 WHERE deliveries.message_job_id = jobs.id AND runs.status <> 'RUNNING'
+               )
+             ORDER BY (jobs.defer_reason = 'SESSION_OPERATION_IN_FLIGHT') DESC,
+               jobs.scheduled_at, jobs.created_at, jobs.id
+             LIMIT 1
+           ) due
+           WHERE NOT EXISTS (
+             SELECT 1 FROM message_jobs active
+             WHERE active.session_id = lanes.session_id AND active.dry_run = false
+               AND active.status IN ('QUEUED', 'PROCESSING')
            )
-         ORDER BY jobs.scheduled_at, jobs.created_at, jobs.id
-         FOR UPDATE OF jobs SKIP LOCKED
-         LIMIT $1`,
+             AND NOT EXISTS (
+               SELECT 1 FROM openwa_safety_leases safety
+               WHERE safety.scope_type = 'SESSION' AND safety.session_id = lanes.session_id
+                 AND safety.lane = 'ACTIVE_SESSION' AND safety.lease_expires_at > now()
+             )
+           ORDER BY (due.defer_reason = 'SESSION_OPERATION_IN_FLIGHT') DESC,
+             due.scheduled_at, due.created_at, due.id
+           FOR UPDATE OF lanes SKIP LOCKED
+           LIMIT $1
+         ), candidates AS MATERIALIZED (
+           SELECT candidate.id
+           FROM locked_lanes lanes
+           CROSS JOIN LATERAL (
+             SELECT jobs.id
+             FROM message_jobs jobs
+             WHERE jobs.session_id = lanes.session_id
+               AND jobs.status = 'SCHEDULED' AND jobs.dry_run = false
+               AND (jobs.scheduled_at <= now()
+                 OR jobs.defer_reason = 'SESSION_OPERATION_IN_FLIGHT')
+               AND NOT EXISTS (
+                 SELECT 1 FROM campaign_deliveries deliveries
+                 JOIN campaign_runs runs ON runs.id = deliveries.run_id
+                 WHERE deliveries.message_job_id = jobs.id AND runs.status <> 'RUNNING'
+               )
+             ORDER BY (jobs.defer_reason = 'SESSION_OPERATION_IN_FLIGHT') DESC,
+               jobs.scheduled_at, jobs.created_at, jobs.id
+             FOR UPDATE OF jobs SKIP LOCKED
+             LIMIT 1
+           ) candidate
+         )
+         UPDATE message_jobs jobs
+         SET status = 'QUEUED', defer_reason = NULL, updated_at = now()
+         FROM candidates
+         WHERE jobs.id = candidates.id AND jobs.status = 'SCHEDULED'
+         RETURNING jobs.*`,
         [limit],
       );
-      if (!result.rows.length) return [];
-      const ids = result.rows.map(row => row.id);
-      await client.query(
-        `UPDATE message_jobs SET status = 'QUEUED', updated_at = now() WHERE id = ANY($1::uuid[])`,
-        [ids],
+
+      const remaining = limit - live.rows.length;
+      if (remaining <= 0) return live.rows.map(map);
+      const dry = await client.query<MessageJobRow>(
+        `WITH candidates AS MATERIALIZED (
+           SELECT jobs.id FROM message_jobs jobs
+           WHERE jobs.status = 'SCHEDULED' AND jobs.dry_run = true
+             AND jobs.scheduled_at <= now()
+             AND NOT EXISTS (
+               SELECT 1 FROM campaign_deliveries deliveries
+               JOIN campaign_runs runs ON runs.id = deliveries.run_id
+               WHERE deliveries.message_job_id = jobs.id AND runs.status <> 'RUNNING'
+             )
+           ORDER BY jobs.scheduled_at, jobs.created_at, jobs.id
+           FOR UPDATE OF jobs SKIP LOCKED
+           LIMIT $1
+         )
+         UPDATE message_jobs jobs
+         SET status = 'QUEUED', defer_reason = NULL, updated_at = now()
+         FROM candidates
+         WHERE jobs.id = candidates.id AND jobs.status = 'SCHEDULED'
+         RETURNING jobs.*`,
+        [remaining],
       );
-      return result.rows.map(row => map({ ...row, status: 'QUEUED' }));
+      return [...live.rows, ...dry.rows].map(map);
     });
   }
 
@@ -231,12 +308,17 @@ export class MessageJobRepository {
     return true;
   }
 
-  async deferProcessing(id: string, error: string, notBefore: Date): Promise<boolean> {
+  async deferProcessing(
+    id: string,
+    error: string,
+    notBefore: Date,
+    reason?: string,
+  ): Promise<boolean> {
     const result = await this.database.query(
       `UPDATE message_jobs SET status = 'SCHEDULED', scheduled_at = $3, last_error = $2,
-         lease_expires_at = NULL, safety_lease_token = NULL, updated_at = now()
+         defer_reason = $4, lease_expires_at = NULL, safety_lease_token = NULL, updated_at = now()
        WHERE id = $1 AND status = 'PROCESSING' AND current_upstream_started_at IS NULL`,
-      [id, error, notBefore],
+      [id, error, notBefore, reason ?? null],
     );
     return result.rowCount === 1;
   }
