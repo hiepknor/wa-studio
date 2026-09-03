@@ -57,10 +57,15 @@ describe('data retention', () => {
     );
     await pool.query(
       `INSERT INTO webhook_events
-         (idempotency_key, event_type, payload, processing_state, processed_at, received_at)
-       VALUES ('old-webhook','message','{}','PROCESSED',$1,$1),
-              ('active-webhook','message','{}','PROCESSING',NULL,$1)`,
+         (idempotency_key, event_type, payload, processing_state, processed_at, received_at,
+          storage_bytes)
+       VALUES ('old-webhook','message','{}','PROCESSED',$1,$1,0),
+              ('active-webhook','message','{}','PROCESSING',NULL,$1,2)`,
       [old],
+    );
+    await pool.query(
+      `UPDATE runtime_webhook_spool_usage
+       SET stored_events = 1, stored_bytes = 2, updated_at = now()`,
     );
     await pool.query(
       `INSERT INTO webhook_event_receipts

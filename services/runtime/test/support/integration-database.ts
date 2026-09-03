@@ -40,6 +40,11 @@ export async function resetIntegrationDatabase(pool: Pool): Promise<void> {
        campaigns, gateway_sessions
      RESTART IDENTITY CASCADE`,
   );
+  await pool.query(
+    `UPDATE runtime_webhook_spool_usage
+     SET stored_events = 0, stored_bytes = 0, updated_at = now()
+     WHERE singleton = true`,
+  );
 }
 
 export async function seedSendableGroup(pool: Pool, sessionId = INTEGRATION_SESSION_ID): Promise<void> {

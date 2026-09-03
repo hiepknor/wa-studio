@@ -9,6 +9,7 @@ import {
 import { runtimeConfig, type RuntimeConfig } from '../config/runtime-config';
 import { RUNTIME_CONFIG } from '../config/runtime-config.module';
 import { DatabaseService } from '../database/database.service';
+import { readRuntimeWebhookSpoolSnapshot } from '../database/runtime-webhook-spool';
 import { QueueService } from '../queue/queue.service';
 import { RUNTIME_VERSION } from '../release/runtime-release';
 
@@ -51,6 +52,12 @@ export class RuntimeMetricsService {
   private readonly openWASafetyLeases: Gauge<'lane'>;
   private readonly openWADeferredJobs: Gauge;
   private readonly openWAUnknownJobs: Gauge;
+  private readonly webhookSpoolEvents: Gauge<'state'>;
+  private readonly webhookSpoolBytes: Gauge;
+  private readonly webhookSpoolLimitEvents: Gauge;
+  private readonly webhookSpoolLimitBytes: Gauge;
+  private readonly webhookSpoolOldestActiveAge: Gauge;
+  private readonly webhookSpoolAdmissionAvailable: Gauge;
   private activeScrape: Promise<string> | undefined;
 
   constructor(
@@ -149,6 +156,37 @@ export class RuntimeMetricsService {
       help: 'Message jobs with an ambiguous post-dispatch outcome.',
       registers: [this.registry],
     });
+    this.webhookSpoolEvents = new Gauge({
+      name: 'wa_runtime_webhook_spool_events',
+      help: 'Current raw Runtime webhook spool events by bounded state.',
+      labelNames: ['state'] as const,
+      registers: [this.registry],
+    });
+    this.webhookSpoolBytes = new Gauge({
+      name: 'wa_runtime_webhook_spool_storage_bytes',
+      help: 'Bytes charged to the raw Runtime webhook spool ledger.',
+      registers: [this.registry],
+    });
+    this.webhookSpoolLimitEvents = new Gauge({
+      name: 'wa_runtime_webhook_spool_limit_events',
+      help: 'Configured maximum raw Runtime webhook spool events.',
+      registers: [this.registry],
+    });
+    this.webhookSpoolLimitBytes = new Gauge({
+      name: 'wa_runtime_webhook_spool_limit_bytes',
+      help: 'Configured maximum raw Runtime webhook spool bytes.',
+      registers: [this.registry],
+    });
+    this.webhookSpoolOldestActiveAge = new Gauge({
+      name: 'wa_runtime_webhook_spool_oldest_active_age_seconds',
+      help: 'Age of the oldest pending or processing Runtime webhook.',
+      registers: [this.registry],
+    });
+    this.webhookSpoolAdmissionAvailable = new Gauge({
+      name: 'wa_runtime_webhook_spool_admission_available',
+      help: 'Whether Runtime can admit one maximum-sized webhook into its raw spool.',
+      registers: [this.registry],
+    });
 
     this.dependencyUp.set({ dependency: 'postgres' }, 0);
     this.dependencyUp.set({ dependency: 'queue' }, 0);
@@ -159,6 +197,14 @@ export class RuntimeMetricsService {
     this.databasePoolWaitingRequests.set(0);
     this.openWADeferredJobs.set(0);
     this.openWAUnknownJobs.set(0);
+    for (const state of ['active', 'dead', 'stored']) {
+      this.webhookSpoolEvents.set({ state }, 0);
+    }
+    this.webhookSpoolBytes.set(0);
+    this.webhookSpoolLimitEvents.set(config.RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS);
+    this.webhookSpoolLimitBytes.set(config.RUNTIME_WEBHOOK_SPOOL_MAX_BYTES);
+    this.webhookSpoolOldestActiveAge.set(0);
+    this.webhookSpoolAdmissionAvailable.set(0);
   }
 
   get contentType(): string {
@@ -198,12 +244,13 @@ export class RuntimeMetricsService {
   private async performScrape(): Promise<string> {
     const started = performance.now();
     this.snapshotDatabasePool();
-    const [postgres, queue, openWASafety] = await Promise.all([
+    const [postgres, queue, openWASafety, webhookSpool] = await Promise.all([
       this.probePostgres(),
       this.probeQueue(),
       this.snapshotOpenWASafety(),
+      this.snapshotWebhookSpool(),
     ]);
-    const result = postgres && queue && openWASafety ? 'complete' : 'degraded';
+    const result = postgres && queue && openWASafety && webhookSpool ? 'complete' : 'degraded';
     try {
       return await this.registry.metrics();
     } finally {
@@ -294,6 +341,23 @@ export class RuntimeMetricsService {
       return true;
     } catch {
       this.snapshotFailures.inc({ dependency: 'openwa_safety' });
+      return false;
+    }
+  }
+
+  private async snapshotWebhookSpool(): Promise<boolean> {
+    try {
+      const snapshot = await readRuntimeWebhookSpoolSnapshot(this.database, this.config);
+      this.webhookSpoolEvents.set({ state: 'stored' }, snapshot.storedEvents);
+      this.webhookSpoolEvents.set({ state: 'active' }, snapshot.activeEvents);
+      this.webhookSpoolEvents.set({ state: 'dead' }, snapshot.deadEvents);
+      this.webhookSpoolBytes.set(snapshot.storedBytes);
+      this.webhookSpoolOldestActiveAge.set(snapshot.oldestActiveAgeSeconds ?? 0);
+      this.webhookSpoolAdmissionAvailable.set(snapshot.admissionAvailable ? 1 : 0);
+      return true;
+    } catch {
+      this.webhookSpoolAdmissionAvailable.set(0);
+      this.snapshotFailures.inc({ dependency: 'webhook_spool' });
       return false;
     }
   }
