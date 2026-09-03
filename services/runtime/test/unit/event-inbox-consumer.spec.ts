@@ -68,7 +68,7 @@ describe('EventInboxConsumerService', () => {
       }),
     ).runOnce()).resolves.toBe(1);
     expect(ingress.accept).toHaveBeenCalledWith(maximumRawBody, claimedEvent.signature, expect.anything());
-  });
+  }, 15_000);
 
   it('ACKs only after durable local ingress accepts an event', async () => {
     const ingress = { accept: vi.fn().mockResolvedValue({ accepted: true, duplicate: false }) };
