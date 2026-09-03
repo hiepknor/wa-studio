@@ -82,6 +82,13 @@ function deliveryStatusGroup(status: RuntimeCampaignDeliveryStatus): string {
   return "Exceptions";
 }
 
+function deliveryWaitLabel(waitKind: "SESSION_LANE" | "RATE_BUDGET" | "CONNECTOR" | "SAFETY_POLICY"): string {
+  if (waitKind === "SESSION_LANE") return "Waiting for session lane";
+  if (waitKind === "RATE_BUDGET") return "Waiting for rate budget";
+  if (waitKind === "CONNECTOR") return "Waiting for connector";
+  return "Waiting for safety policy";
+}
+
 interface RunsScreenProps {
   initialRunId?: string | null;
   onOpenCampaigns?: () => void;
@@ -828,6 +835,10 @@ function RunDeliveries({
                     <td className="data-cell-status">
                       <div className="run-delivery-state">
                         <Badge tone={deliveryTone(delivery.status)} variant="status">{runStatusLabel(delivery.status)}</Badge>
+                        {delivery.waitKind && <span className="data-secondary-text run-delivery-wait">
+                          {deliveryWaitLabel(delivery.waitKind)}
+                          {delivery.nextAttemptAt && <> · <DateTime relativeStyle="compact" value={delivery.nextAttemptAt} variant="relative" /></>}
+                        </span>}
                       </div>
                     </td>
                     <td className="data-cell-time"><DateTime relativeStyle="compact" value={delivery.updatedAt} variant="relative" /></td>

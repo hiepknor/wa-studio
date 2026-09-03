@@ -34,7 +34,8 @@ export async function resetIntegrationDatabase(pool: Pool): Promise<void> {
     `TRUNCATE openwa_safety_leases, openwa_safety_buckets, openwa_safety_scopes,
        runtime_mutation_receipts, activity_events, runtime_queue_jobs,
        runtime_process_heartbeats, runtime_scheduler_tick_states,
-       webhook_events, runtime_events, outbound_session_leases, message_jobs,
+       webhook_events, runtime_events, outbound_session_leases,
+       message_dispatch_session_lanes, message_jobs,
        gateway_sync_items, sync_runs, gateway_sync_rate_limits, gateway_sync_fences,
        campaigns, gateway_sessions
      RESTART IDENTITY CASCADE`,

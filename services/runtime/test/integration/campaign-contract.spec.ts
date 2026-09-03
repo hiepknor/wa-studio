@@ -549,6 +549,86 @@ describe('campaign draft contract HTTP API', () => {
     )).response.status).toBe(204);
   });
 
+  it('materializes only one live delivery per campaign until acceptance frees the lane', async () => {
+    const additionalGroups = [
+      '120363000000000101@g.us',
+      '120363000000000102@g.us',
+    ];
+    await pool.query(
+      `INSERT INTO gateway_groups
+         (session_id, id, name, is_admin, is_read_only, is_announce, is_active,
+          details_synced_at, send_capability, send_capability_reason, capability_checked_at)
+       SELECT $1, group_id, 'Buffered live target', true, false, false, true,
+         now(), 'ALLOWED', 'SEND_ALLOWED', now()
+       FROM unnest($2::text[]) AS group_id`,
+      [INTEGRATION_SESSION_ID, additionalGroups],
+    );
+    const created = await createCampaign({ name: 'Single live materialization lane' });
+    const campaignId = created.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT',
+      body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID, ...additionalGroups] }),
+    });
+    const launchInput = await passingLiveLaunchInput(campaignId);
+    const run = await jsonRequest(`/campaigns/${campaignId}/runs`, {
+      method: 'POST',
+      headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify(launchInput),
+    });
+    const runId = run.body.id as string;
+    await runPreparer.prepare(runId);
+
+    expect(await runRepository.materializePending(runId, 10)).toBe(1);
+    expect((await pool.query<{ status: string; count: string }>(
+      `SELECT status::text, count(*)::text AS count FROM campaign_deliveries
+       WHERE run_id = $1 GROUP BY status ORDER BY status`,
+      [runId],
+    )).rows).toEqual([
+      { status: 'MATERIALIZED', count: '1' },
+      { status: 'PENDING', count: '2' },
+    ]);
+
+    await pool.query(
+      `UPDATE message_jobs SET scheduled_at = now() + interval '15 minutes',
+         defer_reason = 'SESSION_OPERATION_IN_FLIGHT', updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries
+         WHERE run_id = $1 AND status = 'MATERIALIZED')`,
+      [runId],
+    );
+    const waiting = await jsonRequest(`/campaign-runs/${runId}/deliveries`);
+    expect(waiting.body.data).toContainEqual(expect.objectContaining({
+      status: 'MATERIALIZED',
+      waitKind: 'SESSION_LANE',
+      nextAttemptAt: null,
+    }));
+
+    await pool.query(
+      `UPDATE message_jobs SET status = 'QUEUED', updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries
+         WHERE run_id = $1 AND status = 'MATERIALIZED')`,
+      [runId],
+    );
+    await pool.query(
+      `UPDATE message_jobs SET status = 'PROCESSING',
+         lease_expires_at = now() + interval '2 minutes', updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries
+         WHERE run_id = $1 AND status = 'MATERIALIZED')`,
+      [runId],
+    );
+    await pool.query(
+      `UPDATE message_jobs SET status = 'ACCEPTED', lease_expires_at = NULL, updated_at = now()
+       WHERE id = (SELECT message_job_id FROM campaign_deliveries
+         WHERE run_id = $1 AND status = 'MATERIALIZED')`,
+      [runId],
+    );
+    expect(await runRepository.materializePending(runId, 10)).toBe(1);
+    expect((await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM campaign_deliveries
+       WHERE run_id = $1 AND message_job_id IS NOT NULL`,
+      [runId],
+    )).rows[0]?.count).toBe('2');
+  });
+
   it('serializes deletion against LIVE launch so exactly one state transition wins', async () => {
     const created = await createCampaign();
     const campaignId = created.body.id as string;

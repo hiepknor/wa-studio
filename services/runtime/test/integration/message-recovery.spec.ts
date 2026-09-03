@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
 import { runtimeConfig } from '../../src/core/config/runtime-config';
@@ -45,12 +46,18 @@ describe('message durability and delivery', () => {
     await pool.end();
   });
 
-  const create = (key: string, text: string, dryRun = true) => messages.create({
+  const create = (
+    key: string,
+    text: string,
+    dryRun = true,
+    sessionId = INTEGRATION_SESSION_ID,
+    recipientId = INTEGRATION_GROUP_ID,
+  ) => messages.create({
     idempotencyScope: 'runtime-api', idempotencyKey: key,
     requestHash: messageRequestHash({
-      sessionId: INTEGRATION_SESSION_ID, recipientId: INTEGRATION_GROUP_ID, text, scheduledAt: null, dryRun,
+      sessionId, recipientId, text, scheduledAt: null, dryRun,
     }),
-    sessionId: INTEGRATION_SESSION_ID, recipientId: INTEGRATION_GROUP_ID,
+    sessionId, recipientId,
     text, scheduledAt: new Date(Date.now() - 1_000), dryRun,
   });
 
@@ -74,6 +81,88 @@ describe('message durability and delivery', () => {
     expect(first).toHaveLength(10);
     expect(second).toHaveLength(10);
     expect(new Set(ids).size).toBe(20);
+  });
+
+  it('claims at most one live job per session across concurrent schedulers', async () => {
+    const first = await create('live-lane-first', 'first', false);
+    const second = await create('live-lane-second', 'second', false);
+
+    const claims = await Promise.all([messages.claimDue(10), messages.claimDue(10)]);
+    const claimed = claims.flat();
+    expect(claimed).toHaveLength(1);
+    expect([first.job.id, second.job.id]).toContain(claimed[0]!.id);
+    expect((await pool.query<{ status: string; count: string }>(
+      `SELECT status, count(*)::text AS count FROM message_jobs
+       WHERE id = ANY($1::uuid[]) GROUP BY status ORDER BY status`,
+      [[first.job.id, second.job.id]],
+    )).rows).toEqual([
+      { status: 'SCHEDULED', count: '1' },
+      { status: 'QUEUED', count: '1' },
+    ]);
+
+    expect(await messages.markProcessing(claimed[0]!.id)).not.toBeNull();
+    await pool.query(
+      `UPDATE message_jobs SET status = 'ACCEPTED', lease_expires_at = NULL, updated_at = now()
+       WHERE id = $1`,
+      [claimed[0]!.id],
+    );
+    const next = await messages.claimDue(10);
+    expect(next).toHaveLength(1);
+    expect(next[0]!.id).not.toBe(claimed[0]!.id);
+  });
+
+  it('allows one live job from each session to progress concurrently', async () => {
+    const secondSessionId = randomUUID();
+    await seedSendableGroup(pool, secondSessionId);
+    const first = await create('live-session-first', 'first', false);
+    const second = await create(
+      'live-session-second',
+      'second',
+      false,
+      secondSessionId,
+    );
+
+    const claimed = await messages.claimDue(10);
+    expect(new Set(claimed.map(job => job.sessionId))).toEqual(new Set([
+      INTEGRATION_SESSION_ID,
+      secondSessionId,
+    ]));
+    expect(new Set(claimed.map(job => job.id))).toEqual(new Set([first.job.id, second.job.id]));
+  });
+
+  it('wakes a session-lease deferral as soon as the safety lane is released', async () => {
+    const holder = await create('live-lease-holder', 'lease holder', false);
+    expect((await messages.claimDue(10)).map(job => job.id)).toEqual([holder.job.id]);
+    expect(await messages.markProcessing(holder.job.id)).not.toBeNull();
+    const safety = safetyFor(database);
+    const decision = await safety.reserveMessage({
+      sessionId: INTEGRATION_SESSION_ID,
+      messageJobId: holder.job.id,
+      recipientId: INTEGRATION_GROUP_ID,
+      operationClass: 'MESSAGE_SEND_TEXT',
+    });
+    expect(decision.outcome).toBe('GRANTED');
+    if (decision.outcome !== 'GRANTED') return;
+
+    const created = await create('live-early-wake', 'wake after release', false);
+    await pool.query(
+      `UPDATE message_jobs
+       SET scheduled_at = now() + interval '15 minutes',
+         defer_reason = 'SESSION_OPERATION_IN_FLIGHT'
+       WHERE id = $1`,
+      [created.job.id],
+    );
+    await pool.query(
+      `UPDATE message_jobs SET status = 'ACCEPTED', lease_expires_at = NULL, updated_at = now()
+       WHERE id = $1`,
+      [holder.job.id],
+    );
+
+    await expect(messages.claimDue(10)).resolves.toEqual([]);
+    await safety.release(decision.permit);
+    await expect(messages.claimDue(10)).resolves.toMatchObject([
+      { id: created.job.id, status: 'QUEUED' },
+    ]);
   });
 
   it('turns an expired PROCESSING lease into audited UNKNOWN state', async () => {

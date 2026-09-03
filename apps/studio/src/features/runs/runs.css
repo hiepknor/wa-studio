@@ -72,6 +72,7 @@
 .run-delivery-updated-column { width: var(--table-date-width); }
 .run-delivery-identity { min-width: 0; }
 .run-delivery-state { min-width: 0; display: grid; justify-items: start; gap: var(--space-1); }
+.run-delivery-wait { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-deliveries-table .data-cell-status { overflow: hidden; }
 .runs-delivery-failure { display: block; overflow: hidden; color: var(--state-danger); font-family: var(--font-mono); font-size: var(--text-technical-size); text-overflow: ellipsis; white-space: nowrap; }
 

@@ -29,7 +29,7 @@ interface FakeOpenWAStats {
 }
 
 describe('live outbound load', () => {
-  it('admits only the safe paced slice of a 500-job burst across worker replicas', async () => {
+  it('claims only one live job for a session before safety processing begins', async () => {
     Logger.overrideLogger([]);
     const pool = integrationPool();
     const databases = [new DatabaseService(), new DatabaseService()];
@@ -66,7 +66,7 @@ describe('live outbound load', () => {
         });
       }));
       const claimed = await messages.claimDue(500);
-      expect(claimed).toHaveLength(500);
+      expect(claimed).toHaveLength(1);
 
       const processors = databases.map(database => {
         const processorMessages = new MessageJobRepository(database);
@@ -102,12 +102,16 @@ describe('live outbound load', () => {
         scheduled: string;
         attempts: string;
         distinct_jobs: string;
+        session_lease_deferrals: string;
       }>(
         `SELECT
            count(*) FILTER (WHERE mj.status = 'ACCEPTED')::text AS accepted,
            count(*) FILTER (WHERE mj.status = 'SCHEDULED')::text AS scheduled,
            count(ma.id)::text AS attempts,
-           count(DISTINCT ma.message_job_id)::text AS distinct_jobs
+           count(DISTINCT ma.message_job_id)::text AS distinct_jobs,
+           count(*) FILTER (
+             WHERE mj.defer_reason = 'SESSION_OPERATION_IN_FLIGHT'
+           )::text AS session_lease_deferrals
          FROM message_jobs mj LEFT JOIN message_attempts ma ON ma.message_job_id = mj.id
          WHERE mj.idempotency_scope = 'live-load'`,
       );
@@ -119,6 +123,7 @@ describe('live outbound load', () => {
       });
       expect(durable.rows[0]).toEqual({
         accepted: '1', scheduled: '499', attempts: '1', distinct_jobs: '1',
+        session_lease_deferrals: '0',
       });
       expect(durationMs).toBeLessThan(30_000);
     } finally {

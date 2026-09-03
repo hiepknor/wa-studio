@@ -161,7 +161,12 @@ export class MessageJobProcessorService {
       const blockReason = await this.policy.liveBlockReason(job.sessionId, job.recipientId);
       if (blockReason) {
         const notBefore = new Date(Date.now() + 60_000);
-        await this.messages.deferProcessing(job.id, `Live send blocked: ${blockReason}`, notBefore);
+        await this.messages.deferProcessing(
+          job.id,
+          `Live send blocked: ${blockReason}`,
+          notBefore,
+          'LIVE_POLICY_BLOCKED',
+        );
         return { safetyDeferred: true, notBefore, reason: blockReason };
       }
       await this.openwaCompatibility?.requireCompatible();
@@ -174,12 +179,22 @@ export class MessageJobProcessorService {
           : 'MESSAGE_SEND_IMAGE',
       });
       if (decision.outcome === 'DEFERRED') {
-        await this.messages.deferProcessing(job.id, `Safety deferred: ${decision.reason}`, decision.notBefore);
+        await this.messages.deferProcessing(
+          job.id,
+          `Safety deferred: ${decision.reason}`,
+          decision.notBefore,
+          decision.reason,
+        );
         return { safetyDeferred: true, notBefore: decision.notBefore, reason: decision.reason };
       }
       if (decision.outcome === 'BLOCKED') {
         const notBefore = new Date(Date.now() + 60_000);
-        await this.messages.deferProcessing(job.id, `Safety blocked: ${decision.reason}`, notBefore);
+        await this.messages.deferProcessing(
+          job.id,
+          `Safety blocked: ${decision.reason}`,
+          notBefore,
+          decision.reason,
+        );
         return { safetyDeferred: true, notBefore, reason: decision.reason };
       }
       onState({ permit: decision.permit });
@@ -197,6 +212,7 @@ export class MessageJobProcessorService {
           job.id,
           'Final send fence rejected current session, recipient, campaign, or cancellation state',
           notBefore,
+          'FINAL_SEND_FENCE_REJECTED',
         );
         return { safetyDeferred: true, notBefore, reason: 'FINAL_SEND_FENCE_REJECTED' };
       }
@@ -240,6 +256,7 @@ export class MessageJobProcessorService {
         job.id,
         'OpenWA connector binding is not healthy',
         notBefore,
+        'CONNECTOR_UNHEALTHY',
       );
       return { connectorDeferred: true, notBefore, reason: 'CONNECTOR_UNHEALTHY' };
     }
@@ -274,6 +291,7 @@ export class MessageJobProcessorService {
           job.id,
           'Event Inbox media relay is temporarily unavailable',
           notBefore,
+          'MEDIA_RELAY_UNAVAILABLE',
         );
         return { connectorDeferred: true, notBefore, reason: 'MEDIA_RELAY_UNAVAILABLE' };
       }
@@ -315,6 +333,7 @@ export class MessageJobProcessorService {
         job.id,
         'Final send fence rejected current connector, session, recipient, campaign, or cancellation state',
         notBefore,
+        'FINAL_SEND_FENCE_REJECTED',
       );
       return { safetyDeferred: true, notBefore, reason: 'FINAL_SEND_FENCE_REJECTED' };
     }

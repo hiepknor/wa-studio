@@ -247,6 +247,8 @@ function createFixtureApi(): RuntimeApi {
       data: GROUPS.slice(0, 6).map((group, index) => ({
         createdAt: RUN.createdAt,
         failureReason: index === 3 ? "GROUP_UNAVAILABLE" : null,
+        waitKind: null,
+        nextAttemptAt: null,
         groupId: group.id,
         groupName: group.name,
         id: `44444444-4444-4444-8444-44444444444${index}`,

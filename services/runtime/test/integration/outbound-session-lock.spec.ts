@@ -187,13 +187,13 @@ async function createProcessingJobs(
         recipientId: INTEGRATION_GROUP_ID,
         text,
         scheduledAt: null,
-        dryRun: false,
+        dryRun: true,
       }),
       sessionId,
       recipientId: INTEGRATION_GROUP_ID,
       text,
       scheduledAt: new Date(Date.now() - 1_000),
-      dryRun: false,
+      dryRun: true,
     });
     created.push(result.job.id);
   }
