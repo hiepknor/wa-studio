@@ -6,6 +6,11 @@ const booleanFromEnv = (defaultValue: boolean) => z
   .optional()
   .transform(value => value === undefined ? defaultValue : value === 'true');
 
+const optionalBooleanFromEnv = z
+  .enum(['true', 'false'])
+  .optional()
+  .transform(value => value === undefined ? undefined : value === 'true');
+
 const desktopLoopbackHosts = new Set(['127.0.0.1', '::1']);
 
 const originSchema = z.url().transform(value => {
@@ -20,6 +25,8 @@ const schema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     RUNTIME_PROFILE: z.enum(['server', 'desktop-managed']).default('server'),
+    RUNTIME_STORAGE_POLICY_VERSION: z.literal('1').default('1'),
+    RUNTIME_MESSAGE_STORAGE_MODE: z.enum(['disabled', 'full']).optional(),
     RUNTIME_INSTANCE_ID: z.string().trim().min(1).max(128)
       .regex(/^[A-Za-z0-9._:-]+$/u)
       .default('default'),
@@ -126,8 +133,8 @@ const schema = z
     RUNTIME_EVENT_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(30),
     RUNTIME_INBOX_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).optional(),
     RUNTIME_RAW_WEBHOOK_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(7),
-    RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: booleanFromEnv(false),
-    RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: booleanFromEnv(false),
+    RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: optionalBooleanFromEnv,
+    RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: optionalBooleanFromEnv,
     RUNTIME_RETENTION_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
     RUNTIME_RETENTION_BATCH_SIZE: z.coerce.number().int().min(100).max(10_000).default(5000),
     RUNTIME_RETENTION_MAX_BATCHES_PER_RUN: z.coerce.number().int().min(1).max(1_000).default(100),
@@ -372,10 +379,17 @@ type ParsedRuntimeConfig = z.infer<typeof schema>;
 
 export type RuntimeConfig = Omit<
   ParsedRuntimeConfig,
-  'RUNTIME_BIND_HOST' | 'RUNTIME_INBOX_RETENTION_DAYS'
+  | 'RUNTIME_BIND_HOST'
+  | 'RUNTIME_INBOX_RETENTION_DAYS'
+  | 'RUNTIME_MESSAGE_STORAGE_MODE'
+  | 'RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED'
+  | 'RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED'
 > & {
   RUNTIME_BIND_HOST: string;
   RUNTIME_INBOX_RETENTION_DAYS: number;
+  RUNTIME_MESSAGE_STORAGE_MODE: 'disabled' | 'full';
+  RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: boolean;
+  RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: boolean;
   enableRuntimeDocs: boolean;
 };
 
@@ -383,12 +397,20 @@ let cached: RuntimeConfig | undefined;
 
 export function parseRuntimeConfig(environment: NodeJS.ProcessEnv): RuntimeConfig {
   const parsed = schema.parse(environment);
+  const managedDesktop = parsed.RUNTIME_PROFILE === 'desktop-managed';
   return {
     ...parsed,
     RUNTIME_BIND_HOST: parsed.RUNTIME_BIND_HOST
-      ?? (parsed.RUNTIME_PROFILE === 'desktop-managed' ? '127.0.0.1' : '0.0.0.0'),
+      ?? (managedDesktop ? '127.0.0.1' : '0.0.0.0'),
     RUNTIME_INBOX_RETENTION_DAYS:
-      parsed.RUNTIME_INBOX_RETENTION_DAYS ?? parsed.RUNTIME_EVENT_RETENTION_DAYS,
+      parsed.RUNTIME_INBOX_RETENTION_DAYS
+      ?? (managedDesktop ? 7 : parsed.RUNTIME_EVENT_RETENTION_DAYS),
+    RUNTIME_MESSAGE_STORAGE_MODE:
+      parsed.RUNTIME_MESSAGE_STORAGE_MODE ?? (managedDesktop ? 'disabled' : 'full'),
+    RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED:
+      parsed.RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED ?? managedDesktop,
+    RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED:
+      parsed.RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED ?? managedDesktop,
     enableRuntimeDocs: parsed.ENABLE_RUNTIME_DOCS ?? parsed.NODE_ENV !== 'production',
   };
 }

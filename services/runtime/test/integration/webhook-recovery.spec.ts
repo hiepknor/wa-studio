@@ -96,6 +96,71 @@ describe('durable webhook processing', () => {
     expect(stored.rows[0]!.event_payload).toMatchObject({ bodyBytes: 5 });
   });
 
+  it('keeps contact evidence without retaining inbound message bodies when storage is disabled', async () => {
+    const envelope: OpenWAWebhookEnvelope = {
+      event: 'message.received', timestamp: '2026-08-11T00:00:00.000Z',
+      sessionId: INTEGRATION_SESSION_ID, idempotencyKey: 'compact-webhook-event',
+      deliveryId: 'compact-delivery',
+      data: {
+        id: 'compact-message', chatId: INTEGRATION_GROUP_ID, author: '84970000000@c.us',
+        body: 'do not retain me', type: 'text', fromMe: false, isGroup: true,
+        contact: { pushName: 'Observed sender' },
+      },
+    };
+    const compactConfig = {
+      ...runtimeConfig(),
+      RUNTIME_MESSAGE_STORAGE_MODE: 'disabled' as const,
+      RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: true,
+      RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: true,
+    };
+    const compactWebhooks = new WebhookRepository(database, compactConfig);
+    const processor = new WebhookProcessorService(
+      database,
+      compactWebhooks,
+      new RuntimeEventRepository(
+        database,
+        new GatewayGroupIntentRepository(database),
+        compactConfig,
+      ),
+      new MessageStatusProjectionService(database),
+      new ContactMessageObserverService(
+        new ContactRepository(database),
+        new ContactMessageObservationIntentRepository(database),
+        true,
+      ),
+    );
+
+    expect(await compactWebhooks.insert(envelope)).toBe(true);
+    await processor.process(envelope.idempotencyKey);
+
+    const stored = await pool.query<{
+      processing_state: string;
+      raw_payload: Record<string, unknown>;
+      event_payload: Record<string, unknown>;
+      inbound_count: string;
+      observation_count: string;
+    }>(
+      `SELECT we.processing_state, we.payload AS raw_payload, re.payload AS event_payload,
+         (SELECT count(*)::text FROM inbound_messages WHERE event_id = re.event_id) AS inbound_count,
+         (SELECT count(*)::text FROM contact_message_observation_intents
+          WHERE event_id = re.event_id) AS observation_count
+       FROM webhook_events we
+       JOIN runtime_events re ON re.event_id = we.idempotency_key
+       WHERE we.idempotency_key = $1`,
+      [envelope.idempotencyKey],
+    );
+    expect(stored.rows[0]).toMatchObject({
+      processing_state: 'PROCESSED',
+      raw_payload: { event: 'message.received', data: {} },
+      inbound_count: '0',
+      observation_count: '1',
+    });
+    expect(stored.rows[0]!.event_payload).not.toHaveProperty('body');
+    expect(stored.rows[0]!.event_payload).toMatchObject({
+      bodyBytes: Buffer.byteLength('do not retain me', 'utf8'),
+    });
+  });
+
   it('projects an OpenWA message status only inside the owning session', async () => {
     const otherSessionId = '00000000-0000-4000-8000-000000000099';
     const openwaMessageId = 'shared-openwa-message';

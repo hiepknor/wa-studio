@@ -24,6 +24,8 @@ describe('runtime worker concurrency configuration', () => {
       RUNTIME_ACTIVITY_RETENTION_DAYS: 90,
       RUNTIME_EVENT_RETENTION_DAYS: 30,
       RUNTIME_INBOX_RETENTION_DAYS: 30,
+      RUNTIME_STORAGE_POLICY_VERSION: '1',
+      RUNTIME_MESSAGE_STORAGE_MODE: 'full',
       RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: false,
       RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: false,
       CAMPAIGN_LIVE_PREFLIGHT_TTL_SECONDS: 120,
@@ -212,6 +214,38 @@ describe('runtime deployment profile', () => {
     });
 
     expect(config.RUNTIME_BIND_HOST).toBe('127.0.0.1');
+  });
+
+  it('applies the bounded desktop storage policy without changing server defaults', () => {
+    const config = parseRuntimeConfig({
+      ...validEnvironment(),
+      RUNTIME_PROFILE: 'desktop-managed',
+    });
+
+    expect(config).toMatchObject({
+      RUNTIME_STORAGE_POLICY_VERSION: '1',
+      RUNTIME_MESSAGE_STORAGE_MODE: 'disabled',
+      RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: true,
+      RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: true,
+      RUNTIME_INBOX_RETENTION_DAYS: 7,
+    });
+  });
+
+  it('allows an explicitly configured server storage policy', () => {
+    const config = parseRuntimeConfig({
+      ...validEnvironment(),
+      RUNTIME_MESSAGE_STORAGE_MODE: 'disabled',
+      RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: 'true',
+      RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: 'true',
+      RUNTIME_INBOX_RETENTION_DAYS: '7',
+    });
+
+    expect(config).toMatchObject({
+      RUNTIME_MESSAGE_STORAGE_MODE: 'disabled',
+      RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: true,
+      RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: true,
+      RUNTIME_INBOX_RETENTION_DAYS: 7,
+    });
   });
 
   it('allows an explicit loopback address for managed desktop', () => {

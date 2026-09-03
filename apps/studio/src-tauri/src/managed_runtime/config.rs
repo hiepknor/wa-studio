@@ -287,6 +287,23 @@ impl DesktopRuntimeConfig {
         let mut environment = vec![
             ("NODE_ENV".to_string(), self.node_environment.clone()),
             ("RUNTIME_PROFILE".to_string(), "desktop-managed".to_string()),
+            (
+                "RUNTIME_STORAGE_POLICY_VERSION".to_string(),
+                "1".to_string(),
+            ),
+            (
+                "RUNTIME_MESSAGE_STORAGE_MODE".to_string(),
+                "disabled".to_string(),
+            ),
+            (
+                "RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED".to_string(),
+                "true".to_string(),
+            ),
+            ("RUNTIME_INBOX_RETENTION_DAYS".to_string(), "7".to_string()),
             ("RUNTIME_BIND_HOST".to_string(), "127.0.0.1".to_string()),
             ("PORT".to_string(), self.port.to_string()),
             ("DATABASE_URL".to_string(), database_url.to_string()),
@@ -466,6 +483,25 @@ mod tests {
 
         assert!(
             environment.contains(&("RUNTIME_PROFILE".to_string(), "desktop-managed".to_string()))
+        );
+        assert!(environment.contains(&(
+            "RUNTIME_STORAGE_POLICY_VERSION".to_string(),
+            "1".to_string()
+        )));
+        assert!(environment.contains(&(
+            "RUNTIME_MESSAGE_STORAGE_MODE".to_string(),
+            "disabled".to_string()
+        )));
+        assert!(environment.contains(&(
+            "RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED".to_string(),
+            "true".to_string()
+        )));
+        assert!(environment.contains(&(
+            "RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED".to_string(),
+            "true".to_string()
+        )));
+        assert!(
+            environment.contains(&("RUNTIME_INBOX_RETENTION_DAYS".to_string(), "7".to_string()))
         );
         assert!(environment.contains(&("RUNTIME_BIND_HOST".to_string(), "127.0.0.1".to_string())));
         assert!(environment.contains(&("QUEUE_BACKEND".to_string(), "postgres".to_string())));

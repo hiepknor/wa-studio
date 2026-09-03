@@ -73,7 +73,10 @@ export class RuntimeEventRepository {
       return false;
     }
 
-    if (event.eventType === 'message.received' && event.payload.isGroup === true && event.payload.messageId) {
+    if (this.config.RUNTIME_MESSAGE_STORAGE_MODE === 'full'
+      && event.eventType === 'message.received'
+      && event.payload.isGroup === true
+      && event.payload.messageId) {
       await client.query(
         `INSERT INTO inbound_messages
            (session_id, message_id, group_id, sender_id, body, message_type, from_me, received_at, event_id)
