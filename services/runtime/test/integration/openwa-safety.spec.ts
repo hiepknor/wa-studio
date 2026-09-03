@@ -360,6 +360,66 @@ describe('OpenWA Safety Governor', () => {
     )).rows[0]?.count).toBe('2');
   });
 
+  it('forecasts message admission without consuming buckets or changing safety state', async () => {
+    await safety.sessionSnapshot(INTEGRATION_SESSION_ID);
+    const beforeScopes = (await pool.query(
+      `SELECT scope_type, revision FROM openwa_safety_scopes
+       WHERE scope_type IN ('WORKSPACE', 'UPSTREAM', 'SESSION') ORDER BY scope_type`,
+    )).rows;
+    expect((await pool.query('SELECT count(*)::integer AS count FROM openwa_safety_buckets')).rows[0])
+      .toEqual({ count: 0 });
+
+    const forecast = await safety.forecastMessages({
+      sessionId: INTEGRATION_SESSION_ID,
+      recipientIds: [INTEGRATION_GROUP_ID, '120363000000000099@g.us'],
+      operationClass: 'MESSAGE_SEND_TEXT',
+    });
+
+    expect(forecast).toMatchObject({
+      status: 'READY', reason: null, targetCount: 2, messageUnits: 2,
+      queuedMessagesAhead: 0, recipientDeferredTargets: 0,
+    });
+    expect(forecast.estimatedFirstAdmissionAt).not.toBeNull();
+    expect(forecast.estimatedLastAdmissionAt).not.toBeNull();
+    expect(forecast.estimatedLastAdmissionAt!.valueOf() - forecast.estimatedFirstAdmissionAt!.valueOf())
+      .toBeGreaterThanOrEqual(20_000);
+    expect(forecast.estimatedSpanSeconds).toBeGreaterThanOrEqual(20);
+    expect((await pool.query('SELECT count(*)::integer AS count FROM openwa_safety_buckets')).rows[0])
+      .toEqual({ count: 0 });
+    expect((await pool.query(
+      `SELECT scope_type, revision FROM openwa_safety_scopes
+       WHERE scope_type IN ('WORKSPACE', 'UPSTREAM', 'SESSION') ORDER BY scope_type`,
+    )).rows).toEqual(beforeScopes);
+  });
+
+  it('surfaces recipient windows and queued live work in the forecast', async () => {
+    await safety.sessionSnapshot(INTEGRATION_SESSION_ID);
+    const historicalJob = await createProcessingMessage('forecast-recipient-history', INTEGRATION_GROUP_ID);
+    await pool.query(
+      `UPDATE message_jobs SET status = 'ACCEPTED', dry_run = false,
+         current_upstream_started_at = now(), updated_at = now() WHERE id = $1`,
+      [historicalJob],
+    );
+    const queuedJob = await createQueuedMessage(
+      'forecast-queued-work',
+      '120363000000000098@g.us',
+      false,
+    );
+
+    const forecast = await safety.forecastMessages({
+      sessionId: INTEGRATION_SESSION_ID,
+      recipientIds: [INTEGRATION_GROUP_ID, '120363000000000099@g.us'],
+      operationClass: 'MESSAGE_SEND_IMAGE',
+    });
+
+    expect(forecast).toMatchObject({
+      status: 'WAITING', reason: 'QUEUED_WORK_AHEAD', targetCount: 2, messageUnits: 4,
+      queuedMessagesAhead: 1, recipientDeferredTargets: 1,
+    });
+    expect(forecast.estimatedLastAdmissionAt!.valueOf() - forecast.calculatedAt.valueOf())
+      .toBeGreaterThanOrEqual(6 * 60 * 60 * 1_000 - 1_000);
+  });
+
   it('reports quiescence only after processing work and active safety leases drain', async () => {
     const messageJobId = await createProcessingMessage('quiescence', INTEGRATION_GROUP_ID);
     const decision = await safety.reserveMessage({
@@ -775,6 +835,16 @@ describe('OpenWA Safety Governor', () => {
   }
 
   async function createProcessingMessage(key: string, recipientId: string): Promise<string> {
+    const messageJobId = await createQueuedMessage(key, recipientId);
+    expect(await messages.markProcessing(messageJobId)).not.toBeNull();
+    return messageJobId;
+  }
+
+  async function createQueuedMessage(
+    key: string,
+    recipientId: string,
+    dryRun = true,
+  ): Promise<string> {
     const text = `safety-${key}`;
     const created = await messages.create({
       idempotencyScope: 'openwa-safety-test',
@@ -784,16 +854,15 @@ describe('OpenWA Safety Governor', () => {
         recipientId,
         text,
         scheduledAt: null,
-        dryRun: true,
+        dryRun,
       }),
       sessionId: INTEGRATION_SESSION_ID,
       recipientId,
       text,
       scheduledAt: new Date(Date.now() - 1_000),
-      dryRun: true,
+      dryRun,
     });
     await messages.claimDue(10);
-    expect(await messages.markProcessing(created.job.id)).not.toBeNull();
     return created.job.id;
   }
 });

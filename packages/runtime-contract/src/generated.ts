@@ -1384,6 +1384,31 @@ export interface components {
             /** @enum {string} */
             reason: "TARGET_CAPABILITY_DENIED" | "TARGET_CAPABILITY_UNKNOWN" | "TARGET_CAPABILITY_STALE";
         };
+        CampaignSafetyForecastDto: {
+            /**
+             * @description Current admission posture. This is not a delivery guarantee.
+             * @enum {string}
+             */
+            status: "READY" | "WAITING" | "BLOCKED";
+            reason: string | null;
+            targetCount: number;
+            messageUnits: number;
+            queuedMessagesAhead: number;
+            recipientDeferredTargets: number;
+            /**
+             * Format: date-time
+             * @description Estimated first Runtime safety admission, without consuming budget.
+             */
+            estimatedFirstAdmissionAt: string | null;
+            /**
+             * Format: date-time
+             * @description Estimated last Runtime safety admission, not message delivery time.
+             */
+            estimatedLastAdmissionAt: string | null;
+            estimatedSpanSeconds: number | null;
+            /** Format: date-time */
+            calculatedAt: string;
+        };
         CampaignPreflightDto: {
             /** @enum {string} */
             status: "PASS" | "WARN" | "BLOCK";
@@ -1407,6 +1432,8 @@ export interface components {
             unknownTargets: number;
             checks: components["schemas"]["CampaignPreflightCheckDto"][];
             targetIssues: components["schemas"]["CampaignTargetIssueDto"][];
+            /** @description Read-only LIVE admission estimate. Omitted for dry-runs and empty target sets. */
+            safetyForecast?: components["schemas"]["CampaignSafetyForecastDto"];
         };
         CreateCampaignRunDto: {
             /**

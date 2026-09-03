@@ -59,6 +59,44 @@ export class CampaignTargetIssueDto {
   reason!: CampaignTargetIssueReason;
 }
 
+export class CampaignSafetyForecastDto {
+  @ApiProperty({
+    enum: ['READY', 'WAITING', 'BLOCKED'],
+    description: 'Current admission posture. This is not a delivery guarantee.',
+  })
+  status!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  reason!: string | null;
+
+  @ApiProperty() targetCount!: number;
+  @ApiProperty() messageUnits!: number;
+  @ApiProperty() queuedMessagesAhead!: number;
+  @ApiProperty() recipientDeferredTargets!: number;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Estimated first Runtime safety admission, without consuming budget.',
+  })
+  estimatedFirstAdmissionAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Estimated last Runtime safety admission, not message delivery time.',
+  })
+  estimatedLastAdmissionAt!: Date | null;
+
+  @ApiProperty({ type: Number, nullable: true })
+  estimatedSpanSeconds!: number | null;
+
+  @ApiProperty({ format: 'date-time' })
+  calculatedAt!: Date;
+}
+
 export class CampaignPreflightDto {
   @ApiProperty({ enum: CampaignPreflightStatus })
   status!: CampaignPreflightStatus;
@@ -110,4 +148,10 @@ export class CampaignPreflightDto {
 
   @ApiProperty({ type: [CampaignTargetIssueDto] })
   targetIssues!: CampaignTargetIssueDto[];
+
+  @ApiPropertyOptional({
+    type: CampaignSafetyForecastDto,
+    description: 'Read-only LIVE admission estimate. Omitted for dry-runs and empty target sets.',
+  })
+  safetyForecast?: CampaignSafetyForecastDto;
 }

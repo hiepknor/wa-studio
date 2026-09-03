@@ -40,6 +40,15 @@ export class CampaignPreflightService {
       ? true
       : await this.media.matchesSnapshot(input.content, input.sessionId);
     const safety = await this.safety.sessionSnapshot(input.sessionId);
+    const safetyForecast = input.executionMode === 'LIVE' && input.targets.length > 0
+      ? await this.safety.forecastMessages({
+          sessionId: input.sessionId,
+          recipientIds: input.targets.map(target => target.groupId),
+          operationClass: input.content.type === CampaignContentType.TEXT
+            ? 'MESSAGE_SEND_TEXT'
+            : 'MESSAGE_SEND_IMAGE',
+        })
+      : undefined;
     return evaluateCampaignPreflight({
       executionMode: input.executionMode,
       content: input.content,
@@ -49,6 +58,7 @@ export class CampaignPreflightService {
       liveSendsEnabled: this.config.ALLOW_LIVE_SENDS,
       safetyStatus: safety.status,
       outboundState: safety.outboundState,
+      safetyForecast,
       campaignRevision: input.campaignRevision,
       targetsRevision: input.targetsRevision,
     });

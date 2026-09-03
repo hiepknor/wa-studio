@@ -3,6 +3,7 @@ import {
   CampaignPreflightCheckCode,
   CampaignPreflightStatus,
   CampaignTargetIssueReason,
+  type CampaignSafetyForecastDto,
   type CampaignPreflightDto,
 } from '../../contracts/campaigns/campaign-preflight.dto';
 import type { CampaignTargetDto } from '../../contracts/campaigns/campaign-target.dto';
@@ -11,6 +12,8 @@ import {
   type CampaignContentDto,
 } from '../../contracts/campaigns/campaign-content.dto';
 import type { OpenWASafetyStatus } from '../../integrations/openwa/safety/openwa-safety.types';
+
+export const CAMPAIGN_PREFLIGHT_POLICY_VERSION = 6;
 
 export interface CampaignPreflightSessionState {
   status: string;
@@ -28,6 +31,7 @@ export function evaluateCampaignPreflight(input: {
   liveSendsEnabled: boolean;
   safetyStatus?: OpenWASafetyStatus;
   outboundState?: 'RUNNING' | 'PAUSED';
+  safetyForecast?: CampaignSafetyForecastDto;
   campaignRevision: number;
   targetsRevision: number;
   checkedAt?: Date;
@@ -69,7 +73,8 @@ export function evaluateCampaignPreflight(input: {
   });
   const safetyReady = input.executionMode !== CampaignExecutionMode.LIVE
     || ((input.safetyStatus === undefined || input.safetyStatus === 'READY')
-      && input.outboundState !== 'PAUSED');
+      && input.outboundState !== 'PAUSED'
+      && input.safetyForecast?.status !== 'BLOCKED');
   checks.push({
     code: CampaignPreflightCheckCode.SAFETY_READY,
     status: safetyReady ? CampaignPreflightStatus.PASS : CampaignPreflightStatus.BLOCK,
@@ -79,7 +84,9 @@ export function evaluateCampaignPreflight(input: {
         ? 'Session safety controls are ready'
         : input.outboundState === 'PAUSED'
           ? 'Outbound sends are paused by the operator'
-          : `Session safety controls are ${input.safetyStatus?.toLowerCase()}`,
+          : input.safetyForecast?.status === 'BLOCKED'
+            ? `Outbound admission is blocked: ${input.safetyForecast.reason ?? 'SAFETY_BLOCKED'}`
+            : `Session safety controls are ${input.safetyStatus?.toLowerCase()}`,
   });
   if (content.type !== CampaignContentType.TEXT) {
     checks.push({
@@ -124,7 +131,7 @@ export function evaluateCampaignPreflight(input: {
       ? CampaignPreflightStatus.WARN : CampaignPreflightStatus.PASS;
   return {
     status,
-    policyVersion: 5,
+    policyVersion: CAMPAIGN_PREFLIGHT_POLICY_VERSION,
     campaignRevision: input.campaignRevision,
     targetsRevision: input.targetsRevision,
     executionMode: input.executionMode,
@@ -135,5 +142,6 @@ export function evaluateCampaignPreflight(input: {
     unknownTargets,
     checks,
     targetIssues,
+    ...(input.safetyForecast ? { safetyForecast: input.safetyForecast } : {}),
   };
 }

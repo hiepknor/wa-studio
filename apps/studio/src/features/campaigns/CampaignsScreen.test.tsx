@@ -1076,6 +1076,39 @@ describe("CampaignsScreen", () => {
       .not.toBeInTheDocument();
   });
 
+  it("renders the read-only outbound admission forecast returned for LIVE preflight", async () => {
+    const user = userEvent.setup();
+    const forecastReport: RuntimeCampaignPreflight = {
+      ...report("LIVE", "PASS"),
+      safetyForecast: {
+        status: "WAITING",
+        reason: "RECIPIENT_FREQUENCY_LIMIT",
+        targetCount: 9,
+        messageUnits: 18,
+        queuedMessagesAhead: 2,
+        recipientDeferredTargets: 1,
+        estimatedFirstAdmissionAt: "2026-08-14T03:05:00.000Z",
+        estimatedLastAdmissionAt: "2026-08-14T05:05:00.000Z",
+        estimatedSpanSeconds: 7_200,
+        calculatedAt: "2026-08-14T03:00:00.000Z",
+      },
+    };
+    renderCampaigns({ preflightCampaign: vi.fn().mockResolvedValue(forecastReport) });
+    await connect(user);
+    await openCampaign(user);
+    await user.click(screen.getByRole("tab", { name: "Review & launch" }));
+    await runPreflight(user, "LIVE");
+
+    const forecast = await screen.findByRole("group", { name: "Safety admission forecast" });
+    const forecastHeading = screen.getByRole("heading", { name: "Safety admission estimate" });
+    expect(forecastHeading.closest("section")).toHaveTextContent(
+      "18 safety units · 2 queued ahead · Recipient Frequency Limit",
+    );
+    expect(within(forecast).getByText("2.0 hr")).toBeInTheDocument();
+    expect(within(forecast).getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("Waiting")).toHaveClass("ui-badge-warning");
+  });
+
   it("allows a warned DRY_RUN but never offers LIVE launch without a passing proof", async () => {
     const user = userEvent.setup();
     const preflightCampaign = vi.fn()

@@ -204,6 +204,20 @@ function preflightCheckStatusLabel(status: RuntimeCampaignPreflight["checks"][nu
   return status.charAt(0) + status.slice(1).toLocaleLowerCase();
 }
 
+function forecastTone(status: "READY" | "WAITING" | "BLOCKED") {
+  if (status === "READY") return "success" as const;
+  if (status === "WAITING") return "warning" as const;
+  return "danger" as const;
+}
+
+function forecastSpanLabel(seconds: number | null): string {
+  if (seconds === null) return "Unavailable";
+  if (seconds < 60) return `${seconds} sec`;
+  if (seconds < 3_600) return `${Math.ceil(seconds / 60)} min`;
+  if (seconds < 86_400) return `${(seconds / 3_600).toFixed(1)} hr`;
+  return `${(seconds / 86_400).toFixed(1)} days`;
+}
+
 function runTone(status: RuntimeCampaignRun["status"]) {
   if (status === "COMPLETED" || status === "RUNNING") return "success" as const;
   if (status === "SCHEDULED" || status === "PAUSED" || status === "PREPARING" || status === "CANCELLING") return "warning" as const;
@@ -2384,6 +2398,42 @@ function PreflightReport({ report, stale }: { report: RuntimeCampaignPreflight; 
           { label: "Unknown", tone: "warning", value: report.unknownTargets },
         ]} />
       </section>
+      {report.safetyForecast && (
+        <section aria-labelledby="preflight-safety-forecast-title" className="preflight-target-summary preflight-safety-forecast">
+          <header>
+            <div>
+              <span>Outbound forecast</span>
+              <h4 id="preflight-safety-forecast-title">Safety admission estimate</h4>
+              <p>
+                Read-only estimate · {report.safetyForecast.messageUnits.toLocaleString()} safety units
+                {report.safetyForecast.queuedMessagesAhead > 0
+                  ? ` · ${report.safetyForecast.queuedMessagesAhead.toLocaleString()} queued ahead`
+                  : ""}
+                {report.safetyForecast.reason ? ` · ${statusLabel(report.safetyForecast.reason)}` : ""}
+              </p>
+            </div>
+            <Badge tone={forecastTone(report.safetyForecast.status)} variant="status">
+              {statusLabel(report.safetyForecast.status)}
+            </Badge>
+          </header>
+          <MetricGrid ariaLabel="Safety admission forecast" className="preflight-metrics" items={[
+            {
+              label: "First admission",
+              value: report.safetyForecast.estimatedFirstAdmissionAt
+                ? <DateTime value={report.safetyForecast.estimatedFirstAdmissionAt} />
+                : "Unavailable",
+            },
+            {
+              label: "Last admission",
+              value: report.safetyForecast.estimatedLastAdmissionAt
+                ? <DateTime value={report.safetyForecast.estimatedLastAdmissionAt} />
+                : "Unavailable",
+            },
+            { label: "Safety span", value: forecastSpanLabel(report.safetyForecast.estimatedSpanSeconds) },
+            { label: "Window-limited", value: report.safetyForecast.recipientDeferredTargets },
+          ]} />
+        </section>
+      )}
       <MetricGrid ariaLabel="Preflight context" className="preflight-context" items={[
         { label: "Mode", value: executionModeLabel(report.executionMode) },
         { label: "Policy", value: `Policy v${report.policyVersion}` },
