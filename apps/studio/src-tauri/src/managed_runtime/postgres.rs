@@ -10,6 +10,8 @@ use std::{
 use age::{secrecy::SecretString, x25519, Decryptor, Encryptor};
 use fs2::FileExt;
 use postgresql_embedded::{blocking::PostgreSQL, SettingsBuilder, Status};
+use ring::digest::{Context as DigestContext, SHA256};
+use serde::{Deserialize, Serialize};
 
 use super::model::ManagedRuntimeBackup;
 
@@ -25,6 +27,22 @@ const MANUAL_BACKUP_RETENTION_COUNT: usize = 5;
 const SAFETY_BACKUP_RETENTION_COUNT: usize = 3;
 const PROCESS_OUTPUT_LIMIT: usize = 64 * 1024;
 const MAINTENANCE_CANCELLED: &str = "Managed PostgreSQL maintenance was cancelled.";
+const BACKUP_MANIFEST_FORMAT_VERSION: u32 = 1;
+const BACKUP_STORAGE_POLICY_VERSION: u32 = 1;
+const BACKUP_MANIFEST_MAX_BYTES: u64 = 64 * 1024;
+
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ManagedBackupManifest {
+    format_version: u32,
+    backup_id: String,
+    backup_kind: String,
+    created_at_ms: u64,
+    size_bytes: u64,
+    sha256: String,
+    storage_policy_version: u32,
+    data_classes: Vec<String>,
+}
 
 pub struct ManagedPostgres {
     postgresql: PostgreSQL,
@@ -605,6 +623,14 @@ impl ManagedPostgres {
                 final_path.display()
             )
         })?;
+        if let Err(error) = write_backup_manifest(&final_path, cancellation) {
+            let _ = fs::remove_file(&final_path);
+            if let Ok(manifest) = backup_manifest_path(&final_path) {
+                let _ = fs::remove_file(manifest);
+            }
+            return Err(error);
+        }
+        sync_parent_directory(&final_path)?;
         if rotate_after {
             rotate_backups(backup_directory)?;
         }
@@ -625,6 +651,7 @@ impl ManagedPostgres {
         identity: &x25519::Identity,
         cancellation: Option<&AtomicBool>,
     ) -> Result<(), String> {
+        verify_backup_manifest_if_present(source, cancellation)?;
         let encrypted = File::open(source)
             .map(BufReader::new)
             .map_err(|error| format!("Could not open encrypted PostgreSQL backup: {error}"))?;
@@ -1055,6 +1082,161 @@ fn safe_filename_component(value: &str) -> String {
         .collect()
 }
 
+fn backup_manifest_path(backup: &Path) -> Result<PathBuf, String> {
+    let name = backup
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "The managed backup file name is not valid UTF-8.".to_string())?;
+    Ok(backup.with_file_name(format!("{name}.manifest.json")))
+}
+
+fn backup_manifest_data_classes() -> Vec<String> {
+    [
+        "durable-domain",
+        "delivery-evidence",
+        "active-transient-work",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn sha256_file(path: &Path, cancellation: Option<&AtomicBool>) -> Result<String, String> {
+    let mut file = File::open(path)
+        .map(BufReader::new)
+        .map_err(|error| format!("Could not read managed backup for hashing: {error}"))?;
+    let mut digest = DigestContext::new(&SHA256);
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        if cancellation.is_some_and(|token| token.load(Ordering::Acquire)) {
+            return Err(MAINTENANCE_CANCELLED.to_string());
+        }
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("Could not hash managed backup: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(digest
+        .finish()
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+fn write_backup_manifest(backup: &Path, cancellation: Option<&AtomicBool>) -> Result<(), String> {
+    let backup_id = backup
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "The managed backup file name is not valid UTF-8.".to_string())?;
+    let (kind, created_at_ms) = managed_backup_identity(backup_id)
+        .ok_or_else(|| "The managed backup file name is invalid.".to_string())?;
+    let size_bytes = fs::metadata(backup)
+        .map_err(|error| format!("Could not inspect managed backup size: {error}"))?
+        .len();
+    let manifest = ManagedBackupManifest {
+        format_version: BACKUP_MANIFEST_FORMAT_VERSION,
+        backup_id: backup_id.to_string(),
+        backup_kind: kind.to_string(),
+        created_at_ms,
+        size_bytes,
+        sha256: sha256_file(backup, cancellation)?,
+        storage_policy_version: BACKUP_STORAGE_POLICY_VERSION,
+        data_classes: backup_manifest_data_classes(),
+    };
+    let path = backup_manifest_path(backup)?;
+    let partial = path.with_extension("json.partial");
+    let result = (|| {
+        let encoded = serde_json::to_vec(&manifest)
+            .map_err(|error| format!("Could not encode managed backup manifest: {error}"))?;
+        let mut file = secure_file(&partial)
+            .map(BufWriter::new)
+            .map_err(|error| format!("Could not create managed backup manifest: {error}"))?;
+        file.write_all(&encoded)
+            .and_then(|_| file.flush())
+            .and_then(|_| file.get_ref().sync_all())
+            .map_err(|error| format!("Could not write managed backup manifest: {error}"))?;
+        fs::rename(&partial, &path)
+            .map_err(|error| format!("Could not commit managed backup manifest: {error}"))?;
+        sync_parent_directory(&path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&partial);
+    }
+    result
+}
+
+fn verify_backup_manifest_if_present(
+    backup: &Path,
+    cancellation: Option<&AtomicBool>,
+) -> Result<(), String> {
+    let path = backup_manifest_path(backup)?;
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect managed backup manifest: {error}"
+            ))
+        }
+    };
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err("The managed backup manifest is not a regular file.".to_string());
+    }
+    if metadata.len() > BACKUP_MANIFEST_MAX_BYTES {
+        return Err("The managed backup manifest exceeds its size limit.".to_string());
+    }
+    let encoded = fs::read(&path)
+        .map_err(|error| format!("Could not read managed backup manifest: {error}"))?;
+    let manifest: ManagedBackupManifest = serde_json::from_slice(&encoded)
+        .map_err(|error| format!("The managed backup manifest is invalid: {error}"))?;
+    let backup_id = backup
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "The managed backup file name is not valid UTF-8.".to_string())?;
+    let (kind, created_at_ms) = managed_backup_identity(backup_id)
+        .ok_or_else(|| "The managed backup file name is invalid.".to_string())?;
+    let size_bytes = fs::metadata(backup)
+        .map_err(|error| format!("Could not inspect managed backup size: {error}"))?
+        .len();
+    if manifest.format_version != BACKUP_MANIFEST_FORMAT_VERSION
+        || manifest.backup_id != backup_id
+        || manifest.backup_kind != kind
+        || manifest.created_at_ms != created_at_ms
+        || manifest.size_bytes != size_bytes
+        || manifest.storage_policy_version != BACKUP_STORAGE_POLICY_VERSION
+        || manifest.data_classes != backup_manifest_data_classes()
+    {
+        return Err("The managed backup manifest does not match this archive.".to_string());
+    }
+    let actual_sha256 = sha256_file(backup, cancellation)?;
+    if manifest.sha256 != actual_sha256 {
+        return Err("The managed backup failed its manifest checksum verification.".to_string());
+    }
+    Ok(())
+}
+
+fn remove_backup_and_manifest(backup: &Path) -> Result<(), String> {
+    fs::remove_file(backup).map_err(|error| {
+        format!(
+            "Could not rotate expired PostgreSQL backup {}: {error}",
+            backup.display()
+        )
+    })?;
+    let manifest = backup_manifest_path(backup)?;
+    match fs::remove_file(&manifest) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "Could not rotate expired PostgreSQL backup manifest {}: {error}",
+            manifest.display()
+        )),
+    }
+}
+
 fn backup_exists(directory: &Path, prefix: &str) -> Result<bool, String> {
     let entries = fs::read_dir(directory)
         .map_err(|error| format!("Could not inspect PostgreSQL backups: {error}"))?;
@@ -1150,6 +1332,7 @@ pub fn stage_managed_backup(
     staging_directory: &Path,
 ) -> Result<PathBuf, String> {
     let source = resolve_managed_backup(directory, backup_id)?;
+    verify_backup_manifest_if_present(&source, None)?;
     fs::create_dir_all(staging_directory).map_err(|error| {
         format!(
             "Could not create PostgreSQL recovery staging directory {}: {error}",
@@ -1216,7 +1399,15 @@ pub fn retain_staged_managed_backup(
     if result.is_err() {
         let _ = fs::remove_file(&destination);
     }
-    result
+    result?;
+    if let Err(error) = write_backup_manifest(&destination, None) {
+        let _ = fs::remove_file(&destination);
+        if let Ok(manifest) = backup_manifest_path(&destination) {
+            let _ = fs::remove_file(manifest);
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn resolve_managed_backup(directory: &Path, backup_id: &str) -> Result<PathBuf, String> {
@@ -1276,12 +1467,7 @@ fn rotate_backups(directory: &Path) -> Result<(), String> {
         *count += 1;
         *count > backup_retention(kind)
     }) {
-        fs::remove_file(&expired).map_err(|error| {
-            format!(
-                "Could not rotate expired PostgreSQL backup {}: {error}",
-                expired.display()
-            )
-        })?;
+        remove_backup_and_manifest(&expired)?;
     }
     Ok(())
 }
@@ -1311,7 +1497,8 @@ mod tests {
         acquire_root_lock, commit_integrity_marker, copy_with_cancellation, drain_process_output,
         latest_integrity_check, list_backups, postgres_binary, remove_incomplete_backups,
         resolve_managed_backup, retain_staged_managed_backup, rotate_backups,
-        safe_filename_component, stage_managed_backup, stream_archive_to, ManagedPostgres,
+        safe_filename_component, stage_managed_backup, stream_archive_to,
+        verify_backup_manifest_if_present, write_backup_manifest, ManagedPostgres,
         AUTOMATIC_BACKUP_RETENTION_COUNT, DATABASE_NAME, MANUAL_BACKUP_RETENTION_COUNT,
         PROCESS_OUTPUT_LIMIT, SAFETY_BACKUP_RETENTION_COUNT,
     };
@@ -1398,6 +1585,43 @@ mod tests {
             safe_filename_component("0.2.0+desktop/rc1"),
             "0.2.0_desktop_rc1"
         );
+    }
+
+    #[test]
+    fn binds_managed_backup_manifests_to_archive_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let backup = directory.path().join("manual-10.dump.age");
+        fs::write(&backup, b"encrypted archive").unwrap();
+
+        write_backup_manifest(&backup, None).unwrap();
+        verify_backup_manifest_if_present(&backup, None).unwrap();
+
+        fs::write(&backup, b"encrypted archivf").unwrap();
+        let error = verify_backup_manifest_if_present(&backup, None).unwrap_err();
+        assert!(error.contains("manifest checksum"));
+    }
+
+    #[test]
+    fn rotates_a_managed_backup_and_its_manifest_together() {
+        let directory = tempfile::tempdir().unwrap();
+        let oldest = directory.path().join("automatic-0.dump.age");
+        fs::write(&oldest, b"oldest").unwrap();
+        write_backup_manifest(&oldest, None).unwrap();
+        for index in 1..=AUTOMATIC_BACKUP_RETENTION_COUNT {
+            fs::write(
+                directory.path().join(format!("automatic-{index}.dump.age")),
+                index.to_string(),
+            )
+            .unwrap();
+        }
+
+        rotate_backups(directory.path()).unwrap();
+
+        assert!(!oldest.exists());
+        assert!(!directory
+            .path()
+            .join("automatic-0.dump.age.manifest.json")
+            .exists());
     }
 
     #[test]
