@@ -133,6 +133,10 @@ const schema = z
     RUNTIME_EVENT_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(30),
     RUNTIME_INBOX_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).optional(),
     RUNTIME_RAW_WEBHOOK_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(7),
+    RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS: z.coerce.number().int()
+      .min(100).max(1_000_000).optional(),
+    RUNTIME_WEBHOOK_SPOOL_MAX_BYTES: z.coerce.number().int()
+      .min(16_777_216).max(10_737_418_240).optional(),
     RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: optionalBooleanFromEnv,
     RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: optionalBooleanFromEnv,
     RUNTIME_RETENTION_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
@@ -382,12 +386,16 @@ export type RuntimeConfig = Omit<
   | 'RUNTIME_BIND_HOST'
   | 'RUNTIME_INBOX_RETENTION_DAYS'
   | 'RUNTIME_MESSAGE_STORAGE_MODE'
+  | 'RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS'
+  | 'RUNTIME_WEBHOOK_SPOOL_MAX_BYTES'
   | 'RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED'
   | 'RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED'
 > & {
   RUNTIME_BIND_HOST: string;
   RUNTIME_INBOX_RETENTION_DAYS: number;
   RUNTIME_MESSAGE_STORAGE_MODE: 'disabled' | 'full';
+  RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS: number;
+  RUNTIME_WEBHOOK_SPOOL_MAX_BYTES: number;
   RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: boolean;
   RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: boolean;
   enableRuntimeDocs: boolean;
@@ -407,6 +415,10 @@ export function parseRuntimeConfig(environment: NodeJS.ProcessEnv): RuntimeConfi
       ?? (managedDesktop ? 7 : parsed.RUNTIME_EVENT_RETENTION_DAYS),
     RUNTIME_MESSAGE_STORAGE_MODE:
       parsed.RUNTIME_MESSAGE_STORAGE_MODE ?? (managedDesktop ? 'disabled' : 'full'),
+    RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS:
+      parsed.RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS ?? (managedDesktop ? 20_000 : 100_000),
+    RUNTIME_WEBHOOK_SPOOL_MAX_BYTES:
+      parsed.RUNTIME_WEBHOOK_SPOOL_MAX_BYTES ?? (managedDesktop ? 268_435_456 : 1_073_741_824),
     RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED:
       parsed.RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED ?? managedDesktop,
     RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED:

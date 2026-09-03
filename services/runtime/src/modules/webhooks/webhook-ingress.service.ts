@@ -1,4 +1,10 @@
-import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { stableQueueJobId } from '../../core/queue/queue-job-id';
@@ -6,7 +12,11 @@ import { QueueService } from '../../core/queue/queue.service';
 import { WEBHOOK_QUEUE } from '../../core/queue/queue.constants';
 import { SessionScopeService } from '../gateway/session-scope.service';
 import { verifyOpenWASignature } from './webhook-signature';
-import { type OpenWAWebhookEnvelope, WebhookRepository } from './webhook.repository';
+import {
+  type OpenWAWebhookEnvelope,
+  WebhookRepository,
+  WebhookSpoolCapacityError,
+} from './webhook.repository';
 
 export interface WebhookIngressResult {
   accepted: true;
@@ -43,7 +53,15 @@ export class WebhookIngressService {
 
     const envelope = body as OpenWAWebhookEnvelope;
     this.sessions.assertAllowed(envelope.sessionId);
-    const created = await this.repository.insert(envelope);
+    let created: boolean;
+    try {
+      created = await this.repository.insert(envelope);
+    } catch (error) {
+      if (error instanceof WebhookSpoolCapacityError) {
+        throw new ServiceUnavailableException('Runtime webhook spool capacity is exhausted');
+      }
+      throw error;
+    }
     await this.queues.publish(
       WEBHOOK_QUEUE,
       'process-openwa-webhook',

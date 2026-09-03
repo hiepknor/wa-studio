@@ -4,6 +4,12 @@ import type { PoolClient } from 'pg';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { DatabaseService } from '../../core/database/database.service';
+import {
+  decrementRuntimeWebhookSpoolUsage,
+  incrementRuntimeWebhookSpoolUsage,
+  lockRuntimeWebhookSpoolUsage,
+  runtimeWebhookSpoolAdmission,
+} from '../../core/database/runtime-webhook-spool';
 
 export interface OpenWAWebhookEnvelope {
   event: string;
@@ -26,6 +32,13 @@ export interface ClaimedWebhook {
 
 export type WebhookAttemptResult = 'RETRY' | 'DEAD' | 'LOST_OWNERSHIP';
 
+export class WebhookSpoolCapacityError extends Error {
+  constructor() {
+    super('Runtime webhook spool capacity is exhausted');
+    this.name = 'WebhookSpoolCapacityError';
+  }
+}
+
 const webhookIdempotencyLockNamespace = 748_231;
 
 function envelopeHash(envelope: OpenWAWebhookEnvelope): string {
@@ -40,27 +53,41 @@ export class WebhookRepository {
   ) {}
 
   async insert(envelope: OpenWAWebhookEnvelope): Promise<boolean> {
+    const payload = JSON.stringify(envelope);
+    const payloadSha256 = envelopeHash(envelope);
+    const storageBytes = Buffer.byteLength(payload, 'utf8');
     return this.database.transaction(async client => {
+      const usage = await lockRuntimeWebhookSpoolUsage(client);
       await this.lockIdempotencyKey(client, envelope.idempotencyKey);
       const receipt = await client.query(
         `SELECT 1 FROM webhook_event_receipts WHERE idempotency_key = $1`,
         [envelope.idempotencyKey],
       );
       if (receipt.rowCount) return false;
+      const existing = await client.query(
+        `SELECT 1 FROM webhook_events WHERE idempotency_key = $1`,
+        [envelope.idempotencyKey],
+      );
+      if (existing.rowCount) return false;
+      if (!runtimeWebhookSpoolAdmission(usage, this.config, storageBytes)) {
+        throw new WebhookSpoolCapacityError();
+      }
       const result = await client.query(
         `INSERT INTO webhook_events
-           (idempotency_key, delivery_id, event_type, session_id, payload, payload_sha256)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-         ON CONFLICT (idempotency_key) DO NOTHING`,
+           (idempotency_key, delivery_id, event_type, session_id, payload, payload_sha256,
+            storage_bytes)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
         [
           envelope.idempotencyKey,
           envelope.deliveryId,
           envelope.event,
           envelope.sessionId,
-          JSON.stringify(envelope),
-          envelopeHash(envelope),
+          payload,
+          payloadSha256,
+          storageBytes,
         ],
       );
+      await incrementRuntimeWebhookSpoolUsage(client, storageBytes);
       return result.rowCount === 1;
     });
   }
@@ -125,6 +152,9 @@ export class WebhookRepository {
   }
 
   async lockProcessingLease(client: PoolClient, idempotencyKey: string, leaseToken: string): Promise<boolean> {
+    if (this.config.RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED) {
+      await lockRuntimeWebhookSpoolUsage(client);
+    }
     await this.lockIdempotencyKey(client, idempotencyKey);
     const result = await client.query(
       `SELECT 1 FROM webhook_events
@@ -143,23 +173,42 @@ export class WebhookRepository {
     error?: string,
   ): Promise<boolean> {
     if (this.config.RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED) {
-      const result = await client.query(
-        `WITH processed AS (
-           DELETE FROM webhook_events
-           WHERE idempotency_key = $1 AND processing_state = 'PROCESSING' AND lease_token = $2
-             AND lease_expires_at > now()
-           RETURNING idempotency_key, delivery_id, event_type, session_id, payload_sha256, received_at
-         )
-         INSERT INTO webhook_event_receipts
+      const result = await client.query<{
+        delivery_id: string | null;
+        event_type: string;
+        session_id: string | null;
+        payload_sha256: string | null;
+        received_at: Date;
+        storage_bytes: string;
+      }>(
+        `DELETE FROM webhook_events
+         WHERE idempotency_key = $1 AND processing_state = 'PROCESSING' AND lease_token = $2
+           AND lease_expires_at > now()
+         RETURNING delivery_id, event_type, session_id, payload_sha256, received_at,
+           storage_bytes::text`,
+        [idempotencyKey, leaseToken],
+      );
+      const processed = result.rows[0];
+      if (!processed) return false;
+      await client.query(
+        `INSERT INTO webhook_event_receipts
            (idempotency_key, delivery_id, event_type, session_id, payload_sha256,
             received_at, processed_at, processing_error, expires_at)
-         SELECT idempotency_key, delivery_id, event_type, session_id, payload_sha256,
-           received_at, now(), $3, now() + ($4::text || ' days')::interval
-         FROM processed
-         RETURNING 1`,
-        [idempotencyKey, leaseToken, error ?? null, this.config.RUNTIME_RAW_WEBHOOK_RETENTION_DAYS],
+         VALUES ($1, $2, $3, $4, $5, $6, now(), $7,
+           now() + ($8::text || ' days')::interval)`,
+        [
+          idempotencyKey,
+          processed.delivery_id,
+          processed.event_type,
+          processed.session_id,
+          processed.payload_sha256,
+          processed.received_at,
+          error ?? null,
+          this.config.RUNTIME_RAW_WEBHOOK_RETENTION_DAYS,
+        ],
       );
-      return result.rowCount === 1;
+      await decrementRuntimeWebhookSpoolUsage(client, 1, Number(processed.storage_bytes));
+      return true;
     }
     const result = await client.query(
       `UPDATE webhook_events

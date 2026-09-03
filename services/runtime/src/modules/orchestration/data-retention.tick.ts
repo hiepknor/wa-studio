@@ -3,6 +3,10 @@ import type { PoolClient, QueryResult } from 'pg';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { DatabaseService } from '../../core/database/database.service';
+import {
+  decrementRuntimeWebhookSpoolUsage,
+  lockRuntimeWebhookSpoolUsage,
+} from '../../core/database/runtime-webhook-spool';
 
 export interface RetentionResult {
   mutationReceipts: number;
@@ -269,15 +273,24 @@ export class DataRetentionTick {
   }
 
   private async deleteWebhookEvents(client: PoolClient, cutoff: Date, limit: number): Promise<number> {
-    return this.count(await client.query(
+    await lockRuntimeWebhookSpoolUsage(client);
+    const result = await client.query<{ processing_state: string; storage_bytes: string }>(
       `WITH candidates AS (
          SELECT id FROM webhook_events
          WHERE processing_state IN ('PROCESSED','DEAD') AND COALESCE(processed_at, received_at) < $1
          ORDER BY COALESCE(processed_at, received_at), id LIMIT $2 FOR UPDATE SKIP LOCKED
        )
-       DELETE FROM webhook_events we USING candidates c WHERE we.id = c.id`,
+       DELETE FROM webhook_events we USING candidates c WHERE we.id = c.id
+       RETURNING we.processing_state, we.storage_bytes::text`,
       [cutoff, limit],
-    ));
+    );
+    const counted = result.rows.filter(row => row.processing_state !== 'PROCESSED');
+    await decrementRuntimeWebhookSpoolUsage(
+      client,
+      counted.length,
+      counted.reduce((total, row) => total + Number(row.storage_bytes), 0),
+    );
+    return result.rowCount ?? 0;
   }
 
   private async deleteWebhookReceipts(client: PoolClient, now: Date, limit: number): Promise<number> {

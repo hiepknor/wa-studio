@@ -16,7 +16,11 @@ import { GatewaySyncItemRepository } from '../../src/modules/gateway/gateway-syn
 import { GatewaySyncService } from '../../src/modules/gateway/gateway-sync.service';
 import type { OpenWAClient } from '../../src/integrations/openwa/openwa.client';
 import { WebhookProcessorService } from '../../src/modules/webhooks/webhook-processor.service';
-import { WebhookRepository, type OpenWAWebhookEnvelope } from '../../src/modules/webhooks/webhook.repository';
+import {
+  WebhookRepository,
+  WebhookSpoolCapacityError,
+  type OpenWAWebhookEnvelope,
+} from '../../src/modules/webhooks/webhook.repository';
 import { INTEGRATION_GROUP_ID, INTEGRATION_SESSION_ID, integrationPool, resetIntegrationDatabase, seedSendableGroup } from '../support/integration-database';
 
 describe('durable webhook processing', () => {
@@ -165,6 +169,39 @@ describe('durable webhook processing', () => {
       observation_count: '1',
     });
     expect(stored.rows[0]!.processed_at).toBeInstanceOf(Date);
+  });
+
+  it('applies spool backpressure without rejecting duplicates and releases quota after processing', async () => {
+    const limitedConfig = {
+      ...runtimeConfig(),
+      RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: true,
+      RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS: 1,
+      RUNTIME_WEBHOOK_SPOOL_MAX_BYTES: 1_048_576,
+    };
+    const limited = new WebhookRepository(database, limitedConfig);
+    const first: OpenWAWebhookEnvelope = {
+      event: 'session.status', timestamp: '2026-08-11T00:00:00.000Z',
+      sessionId: INTEGRATION_SESSION_ID, idempotencyKey: 'quota-event-1',
+      deliveryId: 'quota-delivery-1', data: { status: 'ready' },
+    };
+    const second: OpenWAWebhookEnvelope = {
+      ...first,
+      idempotencyKey: 'quota-event-2',
+      deliveryId: 'quota-delivery-2',
+    };
+
+    expect(await limited.insert(first)).toBe(true);
+    expect(await limited.insert(first)).toBe(false);
+    await expect(limited.insert(second)).rejects.toBeInstanceOf(WebhookSpoolCapacityError);
+    expect((await pool.query(
+      `SELECT stored_events::text, stored_bytes > 0 AS has_bytes
+       FROM runtime_webhook_spool_usage`,
+    )).rows).toEqual([{ stored_events: '1', has_bytes: true }]);
+
+    const claim = await limited.claimForProcessing(first.idempotencyKey);
+    expect(claim).not.toBeNull();
+    expect(await limited.markProcessed(first.idempotencyKey, claim!.leaseToken)).toBe(true);
+    expect(await limited.insert(second)).toBe(true);
   });
 
   it('projects an OpenWA message status only inside the owning session', async () => {

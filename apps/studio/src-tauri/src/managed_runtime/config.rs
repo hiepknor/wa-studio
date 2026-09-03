@@ -304,6 +304,14 @@ impl DesktopRuntimeConfig {
                 "true".to_string(),
             ),
             ("RUNTIME_INBOX_RETENTION_DAYS".to_string(), "7".to_string()),
+            (
+                "RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS".to_string(),
+                "20000".to_string(),
+            ),
+            (
+                "RUNTIME_WEBHOOK_SPOOL_MAX_BYTES".to_string(),
+                "268435456".to_string(),
+            ),
             ("RUNTIME_BIND_HOST".to_string(), "127.0.0.1".to_string()),
             ("PORT".to_string(), self.port.to_string()),
             ("DATABASE_URL".to_string(), database_url.to_string()),
@@ -503,6 +511,14 @@ mod tests {
         assert!(
             environment.contains(&("RUNTIME_INBOX_RETENTION_DAYS".to_string(), "7".to_string()))
         );
+        assert!(environment.contains(&(
+            "RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS".to_string(),
+            "20000".to_string()
+        )));
+        assert!(environment.contains(&(
+            "RUNTIME_WEBHOOK_SPOOL_MAX_BYTES".to_string(),
+            "268435456".to_string()
+        )));
         assert!(environment.contains(&("RUNTIME_BIND_HOST".to_string(), "127.0.0.1".to_string())));
         assert!(environment.contains(&("QUEUE_BACKEND".to_string(), "postgres".to_string())));
         assert!(environment.contains(&(

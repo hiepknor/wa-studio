@@ -16,6 +16,9 @@ const config = (token?: string): RuntimeConfig => ({
   QUEUE_BACKEND: 'redis',
   RUNTIME_METRICS_TOKEN: token,
   RUNTIME_PROFILE: 'server',
+  RUNTIME_HTTP_BODY_MAX_BYTES: 1_048_576,
+  RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS: 100_000,
+  RUNTIME_WEBHOOK_SPOOL_MAX_BYTES: 1_073_741_824,
 } as RuntimeConfig);
 
 const executionContext = (authorization?: string) => ({
@@ -62,7 +65,14 @@ describe('Runtime metrics cardinality and collection', () => {
   it('exports process, HTTP, dependency and background heartbeat metrics without identifiers', async () => {
     const database = {
       pool: { totalCount: 8, idleCount: 3, waitingCount: 2 },
-      query: vi.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] }),
+      query: vi.fn().mockImplementation((sql: string) => Promise.resolve(sql.includes(
+        'runtime_webhook_spool_usage',
+      ) ? {
+          rows: [{
+            stored_events: '3', stored_bytes: '4096', dead_events: '1',
+            oldest_active_age_seconds: '12.4',
+          }],
+        } : { rows: [{ '?column?': 1 }] })),
     };
     const queues = {
       readiness: vi.fn().mockResolvedValue({ backend: 'redis', ready: true }),
@@ -102,6 +112,11 @@ describe('Runtime metrics cardinality and collection', () => {
     expect(output).toContain('wa_runtime_database_pool_connections{state="total"} 8');
     expect(output).toContain('wa_runtime_database_pool_connections{state="idle"} 3');
     expect(output).toContain('wa_runtime_database_pool_waiting_requests 2');
+    expect(output).toContain('wa_runtime_webhook_spool_events{state="stored"} 3');
+    expect(output).toContain('wa_runtime_webhook_spool_events{state="active"} 2');
+    expect(output).toContain('wa_runtime_webhook_spool_events{state="dead"} 1');
+    expect(output).toContain('wa_runtime_webhook_spool_storage_bytes 4096');
+    expect(output).toContain('wa_runtime_webhook_spool_admission_available 1');
     expect(output).not.toContain('metrics-token-with-at-least-32-characters');
   });
 
@@ -128,7 +143,7 @@ describe('Runtime metrics cardinality and collection', () => {
     const [firstOutput, secondOutput] = await Promise.all([first, second]);
 
     expect(firstOutput).toBe(secondOutput);
-    expect(database.query).toHaveBeenCalledTimes(4);
+    expect(database.query).toHaveBeenCalledTimes(5);
     expect(queues.readiness).toHaveBeenCalledTimes(1);
     expect(queues.runtimeProcessHealth).not.toHaveBeenCalled();
     expect(firstOutput).toContain('wa_runtime_dependency_up{dependency="queue"} 0');
