@@ -6,6 +6,7 @@ import { OpenWASafetyRepository } from './openwa-safety.repository';
 import type {
   CommittedOpenWAMessagePermit,
   OpenWAMessageOperationClass,
+  OpenWAMessageSafetyForecast,
   OpenWAMessagePermit,
   OpenWAConnectorCommandCommit,
   OpenWAOperationClass,
@@ -59,6 +60,14 @@ export class OpenWASafetyGovernorService {
       upstreamId: this.upstreamId,
       leaseTtlMs: this.config.OPENWA_REQUEST_DEADLINE_MS + 30_000,
     });
+  }
+
+  forecastMessages(input: {
+    sessionId: string;
+    recipientIds: string[];
+    operationClass: OpenWAMessageOperationClass;
+  }): Promise<OpenWAMessageSafetyForecast> {
+    return this.repository.forecastMessages({ ...input, upstreamId: this.upstreamId });
   }
 
   commitMessageStart(

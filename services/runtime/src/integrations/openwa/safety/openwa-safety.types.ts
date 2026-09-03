@@ -47,6 +47,21 @@ export interface OpenWASafetyQuiescenceSnapshot {
   checkedAt: Date;
 }
 
+export type OpenWAMessageSafetyForecastStatus = 'READY' | 'WAITING' | 'BLOCKED';
+
+export interface OpenWAMessageSafetyForecast {
+  status: OpenWAMessageSafetyForecastStatus;
+  reason: string | null;
+  targetCount: number;
+  messageUnits: number;
+  queuedMessagesAhead: number;
+  recipientDeferredTargets: number;
+  estimatedFirstAdmissionAt: Date | null;
+  estimatedLastAdmissionAt: Date | null;
+  estimatedSpanSeconds: number | null;
+  calculatedAt: Date;
+}
+
 export interface OpenWASafetyBucketPolicy {
   scopeType: 'UPSTREAM' | 'SESSION';
   operationClass: OpenWAOperationClass | 'UPSTREAM_ALL' | 'MESSAGE_SEND_ALL';

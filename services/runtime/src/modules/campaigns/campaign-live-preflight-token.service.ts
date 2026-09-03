@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import type { CampaignPreflightDto } from '../../contracts/campaigns/campaign-preflight.dto';
+import { CAMPAIGN_PREFLIGHT_POLICY_VERSION } from './campaign-preflight';
 
 const tokenPrefix = 'clp1';
 const signatureContext = 'campaign-live-preflight:v1:';
@@ -93,7 +94,8 @@ export class CampaignLivePreflightTokenService {
     if (claims.campaignId !== expected.campaignId
       || claims.sessionId !== expected.sessionId
       || claims.campaignRevision !== expected.campaignRevision
-      || claims.targetsRevision !== expected.targetsRevision) {
+      || claims.targetsRevision !== expected.targetsRevision
+      || (!options.allowExpired && claims.policyVersion !== CAMPAIGN_PREFLIGHT_POLICY_VERSION)) {
       throw new InvalidCampaignLivePreflightTokenError('MISMATCH');
     }
     return claims;

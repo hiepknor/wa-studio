@@ -22,11 +22,11 @@ const ready = { status: 'ready', engineLoaded: true, restricted: false };
 const revisions = { campaignRevision: 7, targetsRevision: 4 };
 
 describe('evaluateCampaignPreflight', () => {
-  it('publishes policy version 5 for operator-controlled outbound admission', () => {
+  it('publishes policy version 6 for read-only safety forecasting', () => {
     expect(evaluateCampaignPreflight({
       executionMode: CampaignExecutionMode.DRY_RUN,
       text: 'hello', targets: [target('ALLOWED')], session: ready, liveSendsEnabled: false, ...revisions,
-    }).policyVersion).toBe(5);
+    }).policyVersion).toBe(6);
   });
 
   it('blocks media content when its immutable asset is unavailable', () => {
@@ -127,6 +127,27 @@ describe('evaluateCampaignPreflight', () => {
       safetyStatus: 'READY', outboundState: 'PAUSED', ...revisions,
     });
     expect(dryRun.status).toBe('PASS');
+  });
+
+  it('blocks a LIVE launch if the later read-only admission snapshot observes a stop', () => {
+    const report = evaluateCampaignPreflight({
+      executionMode: CampaignExecutionMode.LIVE,
+      text: 'hello', targets: [target('ALLOWED')], session: ready, liveSendsEnabled: true,
+      safetyStatus: 'READY', outboundState: 'RUNNING',
+      safetyForecast: {
+        status: 'BLOCKED', reason: 'OPERATOR_PAUSED_SENDS', targetCount: 1, messageUnits: 1,
+        queuedMessagesAhead: 0, recipientDeferredTargets: 0,
+        estimatedFirstAdmissionAt: null, estimatedLastAdmissionAt: null,
+        estimatedSpanSeconds: null, calculatedAt: new Date('2026-08-01T00:00:00.000Z'),
+      },
+      ...revisions,
+    });
+
+    expect(report.status).toBe('BLOCK');
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      code: 'SAFETY_READY', status: 'BLOCK',
+      message: 'Outbound admission is blocked: OPERATOR_PAUSED_SENDS',
+    }));
   });
 
   it('applies BLOCK over WARN over PASS precedence using stable check codes', () => {

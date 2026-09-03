@@ -6309,6 +6309,68 @@
           "reason"
         ]
       },
+      "CampaignSafetyForecastDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "WAITING",
+              "BLOCKED"
+            ],
+            "description": "Current admission posture. This is not a delivery guarantee."
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "targetCount": {
+            "type": "number"
+          },
+          "messageUnits": {
+            "type": "number"
+          },
+          "queuedMessagesAhead": {
+            "type": "number"
+          },
+          "recipientDeferredTargets": {
+            "type": "number"
+          },
+          "estimatedFirstAdmissionAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Estimated first Runtime safety admission, without consuming budget."
+          },
+          "estimatedLastAdmissionAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Estimated last Runtime safety admission, not message delivery time."
+          },
+          "estimatedSpanSeconds": {
+            "type": "number",
+            "nullable": true
+          },
+          "calculatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "targetCount",
+          "messageUnits",
+          "queuedMessagesAhead",
+          "recipientDeferredTargets",
+          "estimatedFirstAdmissionAt",
+          "estimatedLastAdmissionAt",
+          "estimatedSpanSeconds",
+          "calculatedAt"
+        ]
+      },
       "CampaignPreflightDto": {
         "type": "object",
         "properties": {
@@ -6376,6 +6438,14 @@
             "items": {
               "$ref": "#/components/schemas/CampaignTargetIssueDto"
             }
+          },
+          "safetyForecast": {
+            "description": "Read-only LIVE admission estimate. Omitted for dry-runs and empty target sets.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CampaignSafetyForecastDto"
+              }
+            ]
           }
         },
         "required": [

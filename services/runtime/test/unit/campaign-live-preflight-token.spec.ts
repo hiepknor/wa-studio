@@ -25,7 +25,7 @@ const config = parseRuntimeConfig({
 
 const report: CampaignPreflightDto = {
   status: 'PASS' as never,
-  policyVersion: 2,
+  policyVersion: 6,
   campaignRevision: 7,
   targetsRevision: 4,
   executionMode: 'LIVE' as never,
@@ -47,7 +47,7 @@ describe('Campaign LIVE preflight token', () => {
     expect(tokens.verify(issued.token, {
       campaignId, sessionId, campaignRevision: 7, targetsRevision: 4,
     }, new Date('2026-08-23T10:01:59.000Z'))).toMatchObject({
-      version: 1, campaignId, sessionId, campaignRevision: 7, targetsRevision: 4, policyVersion: 2,
+      version: 1, campaignId, sessionId, campaignRevision: 7, targetsRevision: 4, policyVersion: 6,
     });
   });
 
@@ -64,5 +64,20 @@ describe('Campaign LIVE preflight token', () => {
       .toThrow(new InvalidCampaignLivePreflightTokenError('INVALID'));
     expect(() => tokens.verify(issued.token, { ...expected, targetsRevision: 5 }, checkedAt))
       .toThrow(new InvalidCampaignLivePreflightTokenError('MISMATCH'));
+  });
+
+  it('rejects a proof from an older policy for a new launch while preserving replay semantics', () => {
+    const tokens = new CampaignLivePreflightTokenService(config);
+    const issued = tokens.issue({
+      campaignId,
+      sessionId,
+      report: { ...report, policyVersion: 5 },
+    });
+    const expected = { campaignId, sessionId, campaignRevision: 7, targetsRevision: 4 };
+
+    expect(() => tokens.verify(issued.token, expected, checkedAt))
+      .toThrow(new InvalidCampaignLivePreflightTokenError('MISMATCH'));
+    expect(tokens.verify(issued.token, expected, checkedAt, { allowExpired: true }))
+      .toMatchObject({ policyVersion: 5, ...expected });
   });
 });

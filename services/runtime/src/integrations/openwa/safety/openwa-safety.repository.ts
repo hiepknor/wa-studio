@@ -18,6 +18,7 @@ import {
   type OpenWAConnectorCommandCommit,
   type OpenWAMessageOperationClass,
   type OpenWAMessagePermit,
+  type OpenWAMessageSafetyForecast,
   type OpenWAOperationClass,
   type OpenWAOperationPermit,
   type OpenWAOperationPermitDecision,
@@ -54,6 +55,22 @@ interface BucketRow {
   emission_interval_ms: number;
   burst_capacity: number;
 }
+
+interface ForecastBucketRow extends BucketRow {
+  scope_type: OpenWASafetyBucketPolicy['scopeType'];
+  upstream_id: string;
+  session_id: string;
+  operation_class: OpenWASafetyBucketPolicy['operationClass'];
+  window_name: OpenWASafetyBucketPolicy['windowName'];
+}
+
+interface ForecastBucketState {
+  theoreticalArrivalAtMs: number;
+  emissionIntervalMs: number;
+  burstCapacity: number;
+}
+
+const maximumExactForecastBacklog = 2_000;
 
 const scopeStatus = (row: ScopeRow): OpenWASafetyScopeSnapshot['status'] => {
   if (row.manual_blocked_at || row.circuit_state === 'MANUAL_BLOCKED') return 'BLOCKED';
@@ -587,6 +604,295 @@ export class OpenWASafetyRepository {
     await this.database.transaction(client => this.releaseWithClient(client, permit));
   }
 
+  async forecastMessages(input: {
+    upstreamId: string;
+    sessionId: string;
+    recipientIds: string[];
+    operationClass: OpenWAMessageOperationClass;
+  }): Promise<OpenWAMessageSafetyForecast> {
+    return this.database.transaction(async client => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+      const clock = await client.query<{ calculated_at: Date }>('SELECT now() AS calculated_at');
+      const calculatedAt = clock.rows[0]!.calculated_at;
+      const calculatedAtMs = calculatedAt.valueOf();
+      const scopes = (await client.query<ScopeRow>(
+        `SELECT * FROM openwa_safety_scopes
+         WHERE (scope_type = 'WORKSPACE' AND upstream_id = '' AND session_id = '')
+            OR (scope_type = 'UPSTREAM' AND upstream_id = $1 AND session_id = '')
+            OR (scope_type = 'SESSION' AND upstream_id = $1 AND session_id = $2)
+         ORDER BY scope_type`,
+        [input.upstreamId, input.sessionId],
+      )).rows;
+      const sessionScope = scopes.find(scope => scope.scope_type === 'SESSION');
+      if (!sessionScope) throw new Error('OpenWA safety scope must exist before forecasting messages');
+
+      const uniqueRecipients = [...new Set(input.recipientIds)];
+      const uniqueRecipientIds = new Set(uniqueRecipients);
+      const frequency = messageSafetyPolicy(sessionScope.policy_profile);
+      const messageUnits = uniqueRecipients.length
+        * (input.operationClass === 'MESSAGE_SEND_IMAGE' ? frequency.imageCost : 1);
+      const circuit = this.circuitDecision(scopes);
+      const outbound = this.outboundDecision(scopes);
+      const blocked = circuit?.outcome === 'BLOCKED' ? circuit : outbound;
+      if (blocked) {
+        return {
+          status: 'BLOCKED', reason: blocked.reason, targetCount: uniqueRecipients.length,
+          messageUnits, queuedMessagesAhead: 0, recipientDeferredTargets: 0,
+          estimatedFirstAdmissionAt: null, estimatedLastAdmissionAt: null, estimatedSpanSeconds: null,
+          calculatedAt,
+        };
+      }
+
+      const activeLeases = await client.query<{ lane: string; lease_expires_at: Date }>(
+        `SELECT lane, lease_expires_at FROM openwa_safety_leases
+         WHERE lease_expires_at > now() AND (
+           (lane = 'RECOVERY' AND (
+             (scope_type = 'WORKSPACE' AND upstream_id = '' AND session_id = '')
+             OR (scope_type = 'UPSTREAM' AND upstream_id = $1 AND session_id = '')
+             OR (scope_type = 'SESSION' AND upstream_id = $1 AND session_id = $2)
+           ))
+           OR (lane = 'ACTIVE_SESSION' AND scope_type = 'SESSION'
+             AND upstream_id = $1 AND session_id = $2)
+         )`,
+        [input.upstreamId, input.sessionId],
+      );
+      const leaseNotBeforeMs = activeLeases.rows.reduce(
+        (latest, lease) => Math.max(latest, lease.lease_expires_at.valueOf()),
+        calculatedAtMs,
+      );
+      const circuitNotBeforeMs = circuit?.outcome === 'DEFERRED'
+        ? circuit.notBefore.valueOf()
+        : calculatedAtMs;
+      const baseNotBeforeMs = Math.max(calculatedAtMs, leaseNotBeforeMs, circuitNotBeforeMs);
+
+      const bucketRows = (await client.query<ForecastBucketRow>(
+        `SELECT scope_type, upstream_id, session_id, operation_class, window_name,
+           theoretical_arrival_at, emission_interval_ms, burst_capacity
+         FROM openwa_safety_buckets
+         WHERE (scope_type = 'UPSTREAM' AND upstream_id = $1 AND session_id = '')
+            OR (scope_type = 'SESSION' AND upstream_id = $1 AND session_id = $2)`,
+        [input.upstreamId, input.sessionId],
+      )).rows;
+      const persistedBuckets = new Map(bucketRows.map(row => [this.forecastBucketKey(row), row]));
+      const buckets = new Map<string, ForecastBucketState>();
+      const bucketState = (operationClass: OpenWAMessageOperationClass) => (
+        messageBucketPolicies(sessionScope.policy_profile, operationClass).map(policy => {
+          const keys = this.bucketScope(input, policy);
+          const key = this.forecastBucketKey({
+            scope_type: policy.scopeType,
+            upstream_id: keys.upstreamId,
+            session_id: keys.sessionId,
+            operation_class: policy.operationClass,
+            window_name: policy.windowName,
+          });
+          let state = buckets.get(key);
+          if (!state) {
+            const persisted = persistedBuckets.get(key);
+            state = {
+              theoreticalArrivalAtMs: persisted?.theoretical_arrival_at.valueOf() ?? calculatedAtMs,
+              emissionIntervalMs: Math.max(
+                persisted?.emission_interval_ms ?? 0,
+                emissionIntervalMs(policy),
+              ),
+              burstCapacity: policy.burst,
+            };
+            buckets.set(key, state);
+          }
+          return { state, cost: policy.cost };
+        })
+      );
+      const simulateAdmission = (
+        operationClass: OpenWAMessageOperationClass,
+        requestedAtMs: number,
+      ): number => {
+        const bucketsForOperation = bucketState(operationClass);
+        const admittedAtMs = bucketsForOperation.reduce((latest, { state }) => Math.max(
+          latest,
+          state.theoreticalArrivalAtMs
+            - (state.burstCapacity - 1) * state.emissionIntervalMs,
+        ), requestedAtMs);
+        for (const { state, cost } of bucketsForOperation) {
+          state.theoreticalArrivalAtMs = Math.max(state.theoreticalArrivalAtMs, admittedAtMs)
+            + cost * state.emissionIntervalMs;
+        }
+        return admittedAtMs;
+      };
+
+      const backlogSummary = await client.query<{ message_type: 'text' | 'image'; count: string }>(
+        `SELECT jobs.message_type, count(*)::text AS count
+         FROM message_jobs jobs
+         WHERE jobs.session_id = $1 AND jobs.dry_run = false
+           AND jobs.status IN ('SCHEDULED', 'QUEUED', 'PROCESSING')
+           AND jobs.current_upstream_started_at IS NULL
+           AND (jobs.status <> 'PROCESSING' OR jobs.safety_lease_token IS NULL)
+           AND (jobs.scheduled_at <= now()
+             OR jobs.defer_reason = 'SESSION_OPERATION_IN_FLIGHT')
+           AND NOT EXISTS (
+             SELECT 1 FROM campaign_deliveries deliveries
+             JOIN campaign_runs runs ON runs.id = deliveries.run_id
+             WHERE deliveries.message_job_id = jobs.id AND runs.status <> 'RUNNING'
+           )
+        GROUP BY jobs.message_type`,
+        [input.sessionId],
+      );
+      const orderedBacklog = await client.query<{
+        message_type: 'text' | 'image';
+        recipient_id: string;
+      }>(
+        `SELECT jobs.message_type, jobs.recipient_id
+         FROM message_jobs jobs
+         WHERE jobs.session_id = $1 AND jobs.dry_run = false
+           AND jobs.status IN ('SCHEDULED', 'QUEUED', 'PROCESSING')
+           AND jobs.current_upstream_started_at IS NULL
+           AND (jobs.status <> 'PROCESSING' OR jobs.safety_lease_token IS NULL)
+           AND (jobs.scheduled_at <= now()
+             OR jobs.defer_reason = 'SESSION_OPERATION_IN_FLIGHT')
+           AND NOT EXISTS (
+             SELECT 1 FROM campaign_deliveries deliveries
+             JOIN campaign_runs runs ON runs.id = deliveries.run_id
+             WHERE deliveries.message_job_id = jobs.id AND runs.status <> 'RUNNING'
+           )
+         ORDER BY CASE jobs.status WHEN 'PROCESSING' THEN 0 WHEN 'QUEUED' THEN 1 ELSE 2 END,
+           (jobs.defer_reason = 'SESSION_OPERATION_IN_FLIGHT') DESC,
+           jobs.scheduled_at, jobs.created_at, jobs.id
+         LIMIT $2`,
+        [input.sessionId, maximumExactForecastBacklog],
+      );
+      const queuedMessagesAhead = backlogSummary.rows.reduce(
+        (total, row) => total + Number(row.count),
+        0,
+      );
+      let cursorMs = baseNotBeforeMs;
+      const exactBacklogCounts: Record<'text' | 'image', number> = { text: 0, image: 0 };
+      const projectedRecipientStarts = new Map<string, number[]>();
+      for (const row of orderedBacklog.rows) {
+        exactBacklogCounts[row.message_type] += 1;
+        cursorMs = simulateAdmission(
+          row.message_type === 'text' ? 'MESSAGE_SEND_TEXT' : 'MESSAGE_SEND_IMAGE',
+          cursorMs,
+        );
+        if (uniqueRecipientIds.has(row.recipient_id)) {
+          const starts = projectedRecipientStarts.get(row.recipient_id) ?? [];
+          starts.push(cursorMs);
+          projectedRecipientStarts.set(row.recipient_id, starts);
+        }
+      }
+      let hasApproximateBacklog = false;
+      for (const operationClass of ['MESSAGE_SEND_TEXT', 'MESSAGE_SEND_IMAGE'] as const) {
+        const messageType = operationClass === 'MESSAGE_SEND_TEXT' ? 'text' : 'image';
+        const totalCount = Number(backlogSummary.rows.find(
+          row => row.message_type === messageType,
+        )?.count ?? 0);
+        const approximateCount = totalCount - exactBacklogCounts[messageType];
+        if (approximateCount > 0) {
+          hasApproximateBacklog = true;
+          cursorMs = simulateAdmission(operationClass, cursorMs);
+          const conservativeIntervalMs = Math.max(...bucketState(operationClass).map(
+            ({ state, cost }) => state.emissionIntervalMs * cost,
+          ));
+          // Bound forecast CPU for pathological queues. Advancing one interval per omitted
+          // message also reserves the first campaign admission after this backlog batch.
+          cursorMs += approximateCount * conservativeIntervalMs;
+        }
+      }
+      if (hasApproximateBacklog) {
+        // Recipient identities beyond the exact prefix are intentionally not loaded. Waiting
+        // one full recipient window keeps the resulting admission estimate conservative.
+        cursorMs += frequency.recipientWindowMs;
+      }
+
+      const history = uniqueRecipients.length
+        ? await client.query<{ recipient_id: string; started_at: Date }>(
+            `SELECT recipient_id, current_upstream_started_at AS started_at
+             FROM message_jobs
+             WHERE session_id = $1 AND recipient_id = ANY($2::text[])
+               AND current_upstream_started_at >= now()
+                 - ($3::double precision * interval '1 millisecond')
+               AND status IN ('PROCESSING','ACCEPTED','SENT','DELIVERED','READ','FAILED','UNKNOWN')
+             ORDER BY recipient_id, current_upstream_started_at`,
+            [input.sessionId, uniqueRecipients, frequency.recipientWindowMs],
+          )
+        : { rows: [] as { recipient_id: string; started_at: Date }[] };
+      const recipientHistory = new Map<string, number[]>();
+      for (const row of history.rows) {
+        const timestamps = recipientHistory.get(row.recipient_id) ?? [];
+        timestamps.push(row.started_at.valueOf());
+        recipientHistory.set(row.recipient_id, timestamps);
+      }
+      for (const [recipientId, projectedStarts] of projectedRecipientStarts) {
+        const timestamps = recipientHistory.get(recipientId) ?? [];
+        timestamps.push(...projectedStarts);
+        recipientHistory.set(recipientId, timestamps);
+      }
+      const recipientAdmissionAt = (timestamps: number[], requestedAtMs: number): number => {
+        let candidateMs = requestedAtMs;
+        let start = 0;
+        let end = 0;
+        while (end < timestamps.length && timestamps[end]! <= candidateMs) end += 1;
+        while (start < end
+          && timestamps[start]! < candidateMs - frequency.recipientWindowMs) start += 1;
+        while (end - start >= frequency.recipientLimit) {
+          candidateMs = timestamps[start]! + frequency.recipientWindowMs + 1;
+          while (end < timestamps.length && timestamps[end]! <= candidateMs) end += 1;
+          while (start < end
+            && timestamps[start]! < candidateMs - frequency.recipientWindowMs) start += 1;
+        }
+        return candidateMs;
+      };
+      const recipients = uniqueRecipients.map(recipientId => {
+        const timestamps = recipientHistory.get(recipientId) ?? [];
+        const eligibleAtMs = recipientAdmissionAt(timestamps, cursorMs);
+        return { recipientId, eligibleAtMs };
+      }).sort((left, right) => left.eligibleAtMs - right.eligibleAtMs
+        || left.recipientId.localeCompare(right.recipientId));
+      const recipientDeferredTargets = recipients.filter(
+        recipient => recipient.eligibleAtMs > cursorMs,
+      ).length;
+
+      let firstAdmissionAtMs: number | null = null;
+      let lastAdmissionAtMs: number | null = null;
+      for (const recipient of recipients) {
+        const admittedAtMs = simulateAdmission(
+          input.operationClass,
+          Math.max(cursorMs, recipient.eligibleAtMs),
+        );
+        firstAdmissionAtMs ??= admittedAtMs;
+        lastAdmissionAtMs = admittedAtMs;
+        cursorMs = admittedAtMs;
+      }
+      const waiting = queuedMessagesAhead > 0
+        || recipientDeferredTargets > 0
+        || (firstAdmissionAtMs !== null && firstAdmissionAtMs > calculatedAtMs + 1_000);
+      const reason = circuit?.outcome === 'DEFERRED'
+        ? circuit.reason
+        : activeLeases.rows.some(lease => lease.lane === 'RECOVERY')
+          ? 'RECOVERY_PROBE_IN_FLIGHT'
+          : activeLeases.rows.length
+          ? 'SESSION_OPERATION_IN_FLIGHT'
+          : queuedMessagesAhead > 0
+            ? 'QUEUED_WORK_AHEAD'
+            : recipientDeferredTargets > 0
+              ? 'RECIPIENT_FREQUENCY_LIMIT'
+              : waiting
+                ? 'RATE_BUDGET'
+                : null;
+      return {
+        status: waiting ? 'WAITING' : 'READY',
+        reason,
+        targetCount: recipients.length,
+        messageUnits,
+        queuedMessagesAhead,
+        recipientDeferredTargets,
+        estimatedFirstAdmissionAt: firstAdmissionAtMs === null ? null : new Date(firstAdmissionAtMs),
+        estimatedLastAdmissionAt: lastAdmissionAtMs === null ? null : new Date(lastAdmissionAtMs),
+        estimatedSpanSeconds: firstAdmissionAtMs === null || lastAdmissionAtMs === null
+          ? null
+          : Math.ceil((lastAdmissionAtMs - firstAdmissionAtMs) / 1_000),
+        calculatedAt,
+      };
+    });
+  }
+
   async sessionSnapshot(upstreamId: string, sessionId: string): Promise<OpenWASafetyScopeSnapshot> {
     return this.database.transaction(async client => {
       await this.ensureScopes(client, upstreamId, sessionId);
@@ -1017,6 +1323,17 @@ export class OpenWASafetyRepository {
     return policy.scopeType === 'UPSTREAM'
       ? { upstreamId: input.upstreamId, sessionId: '' }
       : { upstreamId: input.upstreamId, sessionId: input.sessionId };
+  }
+
+  private forecastBucketKey(input: {
+    scope_type: OpenWASafetyBucketPolicy['scopeType'];
+    upstream_id: string;
+    session_id: string;
+    operation_class: OpenWASafetyBucketPolicy['operationClass'];
+    window_name: OpenWASafetyBucketPolicy['windowName'];
+  }): string {
+    return [input.scope_type, input.upstream_id, input.session_id,
+      input.operation_class, input.window_name].join(':');
   }
 
   private async recordSuccess(client: PoolClient, permit: OpenWAOperationPermit): Promise<void> {

@@ -1136,7 +1136,7 @@ describe('campaign draft contract HTTP API', () => {
     expect(dryRun.response.status).toBe(200);
     expect(live.response.status).toBe(200);
     expect(dryRun.body).toMatchObject({
-      status: 'WARN', policyVersion: 5, executionMode: 'DRY_RUN', campaignRevision: 1,
+      status: 'WARN', policyVersion: 6, executionMode: 'DRY_RUN', campaignRevision: 1,
       targetsRevision: 1, totalTargets: 3, allowedTargets: 1, deniedTargets: 1, unknownTargets: 1,
     });
     expect(live.body.status).toBe('BLOCK');
