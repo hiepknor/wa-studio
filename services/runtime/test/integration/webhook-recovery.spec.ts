@@ -70,28 +70,37 @@ describe('durable webhook processing', () => {
     await processor.process(envelope.idempotencyKey);
 
     const stored = await pool.query<{
-      processing_state: string;
-      raw_payload: Record<string, unknown>;
+      processed_at: Date;
+      payload_sha256: string;
       event_type: string;
       event_version: number;
       event_payload: Record<string, unknown>;
       body: string;
     }>(
-      `SELECT we.processing_state, we.payload AS raw_payload, re.event_type, re.event_version,
+      `SELECT receipt.processed_at, receipt.payload_sha256, re.event_type, re.event_version,
          re.payload AS event_payload, im.body
-       FROM webhook_events we
-       JOIN runtime_events re ON re.event_id = we.idempotency_key
+       FROM webhook_event_receipts receipt
+       JOIN runtime_events re ON re.event_id = receipt.idempotency_key
        JOIN inbound_messages im ON im.event_id = re.event_id
-       WHERE we.idempotency_key = $1`,
+       WHERE receipt.idempotency_key = $1`,
       [envelope.idempotencyKey],
     );
     expect(stored.rows[0]).toMatchObject({
-      processing_state: 'PROCESSED',
-      raw_payload: { event: 'message.received', data: {} },
       event_type: 'message.received',
       event_version: 2,
       body: 'hello',
     });
+    expect(stored.rows[0]!.processed_at).toBeInstanceOf(Date);
+    expect(stored.rows[0]!.payload_sha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(await pool.query(
+      'SELECT 1 FROM webhook_events WHERE idempotency_key = $1',
+      [envelope.idempotencyKey],
+    )).toHaveProperty('rowCount', 0);
+    expect(await webhooks.insert(envelope)).toBe(false);
+    expect(await pool.query(
+      'SELECT 1 FROM webhook_events WHERE idempotency_key = $1',
+      [envelope.idempotencyKey],
+    )).toHaveProperty('rowCount', 0);
     expect(stored.rows[0]!.event_payload).not.toHaveProperty('body');
     expect(stored.rows[0]!.event_payload).toMatchObject({ bodyBytes: 5 });
   });
@@ -134,27 +143,25 @@ describe('durable webhook processing', () => {
     await processor.process(envelope.idempotencyKey);
 
     const stored = await pool.query<{
-      processing_state: string;
-      raw_payload: Record<string, unknown>;
+      processed_at: Date;
       event_payload: Record<string, unknown>;
       inbound_count: string;
       observation_count: string;
     }>(
-      `SELECT we.processing_state, we.payload AS raw_payload, re.payload AS event_payload,
+      `SELECT receipt.processed_at, re.payload AS event_payload,
          (SELECT count(*)::text FROM inbound_messages WHERE event_id = re.event_id) AS inbound_count,
          (SELECT count(*)::text FROM contact_message_observation_intents
           WHERE event_id = re.event_id) AS observation_count
-       FROM webhook_events we
-       JOIN runtime_events re ON re.event_id = we.idempotency_key
-       WHERE we.idempotency_key = $1`,
+       FROM webhook_event_receipts receipt
+       JOIN runtime_events re ON re.event_id = receipt.idempotency_key
+       WHERE receipt.idempotency_key = $1`,
       [envelope.idempotencyKey],
     );
     expect(stored.rows[0]).toMatchObject({
-      processing_state: 'PROCESSED',
-      raw_payload: { event: 'message.received', data: {} },
       inbound_count: '0',
       observation_count: '1',
     });
+    expect(stored.rows[0]!.processed_at).toBeInstanceOf(Date);
     expect(stored.rows[0]!.event_payload).not.toHaveProperty('body');
     expect(stored.rows[0]!.event_payload).toMatchObject({
       bodyBytes: Buffer.byteLength('do not retain me', 'utf8'),

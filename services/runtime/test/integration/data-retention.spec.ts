@@ -63,6 +63,12 @@ describe('data retention', () => {
       [old],
     );
     await pool.query(
+      `INSERT INTO webhook_event_receipts
+         (idempotency_key, event_type, received_at, processed_at, expires_at)
+       VALUES ('expired-receipt','message',$1,$1,$1)`,
+      [old],
+    );
+    await pool.query(
       `INSERT INTO gateway_sync_fences (session_id, current_epoch) VALUES ($1, 1)`,
       [INTEGRATION_SESSION_ID],
     );
@@ -107,7 +113,7 @@ describe('data retention', () => {
     expect(result).toEqual({
       mutationReceipts: 0, safetyOutcomeReceipts: 1, groupReconciliationOperations: 0,
       activityEvents: 1, campaignRuns: 1, messageJobs: 1, inboundMessages: 0,
-      runtimeEvents: 1, webhookEvents: 1, syncRuns: 1,
+      runtimeEvents: 1, webhookEvents: 1, webhookReceipts: 1, syncRuns: 1,
       contactObservations: 0,
       mediaUploads: 0, mediaAssets: 0,
       batches: 1, capacityExhausted: false,
@@ -116,6 +122,7 @@ describe('data retention', () => {
     await expectCount('runtime_events', 1);
     await expectCount('inbound_messages', 0);
     await expectCount('webhook_events', 1);
+    await expectCount('webhook_event_receipts', 0);
     await expectCount('sync_runs', 1);
     await expectCount('campaign_runs', 1);
     await expectCount('activity_events', 1);
