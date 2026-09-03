@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseService } from '../../src/core/database/database.service';
@@ -7,6 +9,7 @@ import {
   OpenWASafetyMutationConflictError,
   OpenWASafetyRepository,
 } from '../../src/integrations/openwa/safety/openwa-safety.repository';
+import { MessageDeliveryEvidenceService } from '../../src/modules/messages/message-delivery-evidence.service';
 import { messageRequestHash } from '../../src/modules/messages/message-idempotency';
 import { MessageJobRepository } from '../../src/modules/messages/message-job.repository';
 import {
@@ -494,6 +497,162 @@ describe('OpenWA Safety Governor', () => {
     )).rows[0]).toEqual({ lease_token: replacementLeaseToken });
   });
 
+  it('corrects a sent connector attempt and its safety receipt when a later ack fails', async () => {
+    const sent = await createSentConnectorMessage('late-ack-failure');
+    expect((await pool.query(
+      `SELECT status, last_error FROM message_jobs WHERE id = $1`,
+      [sent.messageJobId],
+    )).rows[0]).toEqual({ status: 'SENT', last_error: null });
+
+    const failedEvidence = {
+      ...sent.sentEvidence,
+      eventId: randomUUID(),
+      sequence: 2,
+      kind: 'ACK_FAILED' as const,
+      deliveryStatus: 'FAILED' as const,
+      errorClass: 'TRANSIENT_FAILURE' as const,
+      errorCode: 'OPENWA_DELIVERY_FAILED',
+      occurredAt: new Date(Date.now() + 1_000).toISOString(),
+    };
+    await expect(sent.deliveryEvidence.project(failedEvidence)).resolves.toMatchObject({
+      state: 'APPLIED', statusAdvanced: true, jobId: sent.messageJobId,
+    });
+    await expect(sent.deliveryEvidence.project(failedEvidence)).resolves.toMatchObject({
+      state: 'APPLIED', statusAdvanced: false, jobId: sent.messageJobId,
+    });
+
+    expect((await pool.query(
+      `SELECT status, last_error FROM message_jobs WHERE id = $1`,
+      [sent.messageJobId],
+    )).rows[0]).toEqual({
+      status: 'FAILED',
+      last_error: 'Connector ack failed: TRANSIENT_FAILURE: OPENWA_DELIVERY_FAILED',
+    });
+    expect((await pool.query(
+      `SELECT transport_state, outcome FROM message_attempts WHERE attempt_id = $1`,
+      [sent.attemptId],
+    )).rows[0]).toEqual({ transport_state: 'FAILED_DEFINITIVE', outcome: 'FAILED' });
+    expect((await pool.query(
+      `SELECT outcome_kind FROM openwa_safety_outcome_receipts WHERE permit_token = $1`,
+      [sent.permitToken],
+    )).rows[0]).toEqual({ outcome_kind: 'TRANSIENT_FAILURE' });
+    expect((await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM openwa_safety_scopes
+       WHERE consecutive_transient_failures = 1 AND success_streak = 0`,
+    )).rows[0]?.count).toBe('3');
+  });
+
+  it('repairs connector ack failures ignored by an older Runtime release', async () => {
+    const sent = await createSentConnectorMessage('legacy-late-ack-failure');
+    const failedEventId = randomUUID();
+    await pool.query(
+      `UPDATE message_attempts SET last_evidence_sequence = 2, last_evidence_at = now()
+       WHERE attempt_id = $1`,
+      [sent.attemptId],
+    );
+    await pool.query(
+      `INSERT INTO message_delivery_evidence
+         (event_id, command_id, attempt_id, sequence, kind, openwa_message_id,
+          delivery_status, error_class, error_code, binding_generation, plugin_version,
+          occurred_at, payload_sha256, record_hash, projection_state)
+       VALUES ($1,$2,$3,2,'ACK_FAILED',$4,'FAILED','TRANSIENT_FAILURE',
+         'OPENWA_DELIVERY_FAILED',1,'integration-test',now(),$5,$6,'IGNORED')`,
+      [failedEventId, sent.commandId, sent.attemptId, sent.sentEvidence.openwaMessageId,
+        sent.payloadSha256, Buffer.alloc(32, 1)],
+    );
+
+    const migration = await readFile(
+      resolve(process.cwd(), 'migrations/071_late_message_failure_reconciliation.sql'),
+      'utf8',
+    );
+    await pool.query(migration);
+
+    expect((await pool.query(
+      `SELECT status, last_error FROM message_jobs WHERE id = $1`,
+      [sent.messageJobId],
+    )).rows[0]).toEqual({
+      status: 'FAILED',
+      last_error: 'Connector ack failed: TRANSIENT_FAILURE: OPENWA_DELIVERY_FAILED',
+    });
+    expect((await pool.query(
+      `SELECT transport_state, outcome FROM message_attempts WHERE attempt_id = $1`,
+      [sent.attemptId],
+    )).rows[0]).toEqual({ transport_state: 'FAILED_DEFINITIVE', outcome: 'FAILED' });
+    expect((await pool.query(
+      `SELECT projection_state FROM message_delivery_evidence WHERE event_id = $1`,
+      [failedEventId],
+    )).rows[0]).toEqual({ projection_state: 'APPLIED' });
+    expect((await pool.query(
+      `SELECT outcome_kind FROM openwa_safety_outcome_receipts WHERE permit_token = $1`,
+      [sent.permitToken],
+    )).rows[0]).toEqual({ outcome_kind: 'TRANSIENT_FAILURE' });
+    expect((await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM openwa_safety_scopes
+       WHERE consecutive_transient_failures = 1 AND success_streak = 0`,
+    )).rows[0]?.count).toBe('3');
+  });
+
+  async function createSentConnectorMessage(key: string) {
+    const messageJobId = await createProcessingMessage(key, INTEGRATION_GROUP_ID);
+    const decision = await safety.reserveMessage({
+      sessionId: INTEGRATION_SESSION_ID,
+      messageJobId,
+      recipientId: INTEGRATION_GROUP_ID,
+      operationClass: 'MESSAGE_SEND_TEXT',
+    });
+    if (decision.outcome !== 'GRANTED') throw new Error('Expected a connector safety permit');
+    await pool.query(
+      `INSERT INTO openwa_connector_sessions
+         (session_id, desired_webhook_id, desired_connector_id, binding_generation, binding_synced_at,
+          health_state, health_lease_expires_at)
+       VALUES ($1, 'late-ack-webhook', $2, 1, now(), 'HEALTHY', now() + interval '10 minutes')
+       ON CONFLICT (session_id) DO UPDATE SET
+         desired_webhook_id = EXCLUDED.desired_webhook_id,
+         desired_connector_id = EXCLUDED.desired_connector_id,
+         binding_generation = EXCLUDED.binding_generation,
+         binding_synced_at = EXCLUDED.binding_synced_at,
+         health_state = EXCLUDED.health_state,
+         health_lease_expires_at = EXCLUDED.health_lease_expires_at`,
+      [INTEGRATION_SESSION_ID, randomUUID()],
+    );
+    const attemptId = randomUUID();
+    const commandId = randomUUID();
+    const commandBody = Buffer.from('{"protocolVersion":1}', 'utf8');
+    const payloadSha256 = createHash('sha256').update(commandBody).digest('hex');
+    const committed = await safetyRepository.commitMessageStart(decision.permit, true, {
+      attemptId, commandId, bindingGeneration: 1, payloadSha256, commandBody,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    if (!committed) throw new Error('Expected a committed connector attempt');
+    const deliveryEvidence = new MessageDeliveryEvidenceService(database, safetyRepository);
+    const sentEvidence = {
+      protocolVersion: 1 as const,
+      eventId: randomUUID(),
+      commandId,
+      attemptId,
+      sessionId: INTEGRATION_SESSION_ID,
+      sequence: 1,
+      kind: 'ACK_SENT' as const,
+      openwaMessageId: `late-ack-message-${randomUUID()}`,
+      deliveryStatus: 'SENT' as const,
+      errorClass: null,
+      errorCode: null,
+      bindingGeneration: 1,
+      pluginVersion: 'integration-test',
+      occurredAt: new Date().toISOString(),
+      payloadSha256,
+    };
+    await pool.query(
+      `UPDATE message_jobs SET last_error = 'Safety deferred: RATE_BUDGET' WHERE id = $1`,
+      [messageJobId],
+    );
+    await deliveryEvidence.project(sentEvidence);
+    return {
+      messageJobId, attemptId, commandId, payloadSha256, sentEvidence, deliveryEvidence,
+      permitToken: decision.permit.permitToken,
+    };
+  }
+
   async function createProcessingMessage(key: string, recipientId: string): Promise<string> {
     const text = `safety-${key}`;
     const created = await messages.create({
@@ -504,13 +663,13 @@ describe('OpenWA Safety Governor', () => {
         recipientId,
         text,
         scheduledAt: null,
-        dryRun: false,
+        dryRun: true,
       }),
       sessionId: INTEGRATION_SESSION_ID,
       recipientId,
       text,
       scheduledAt: new Date(Date.now() - 1_000),
-      dryRun: false,
+      dryRun: true,
     });
     await messages.claimDue(10);
     expect(await messages.markProcessing(created.job.id)).not.toBeNull();

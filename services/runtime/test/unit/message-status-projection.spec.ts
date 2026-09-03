@@ -17,6 +17,7 @@ describe('message status projection policy', () => {
     expect(nextProjectedMessageStatus('ACCEPTED', 'DELIVERED')).toBe('DELIVERED');
     expect(nextProjectedMessageStatus('READ', 'DELIVERED')).toBe('READ');
     expect(nextProjectedMessageStatus('DELIVERED', 'FAILED')).toBe('DELIVERED');
+    expect(nextProjectedMessageStatus('SENT', 'FAILED')).toBe('FAILED');
     expect(nextProjectedMessageStatus('UNKNOWN', 'SENT')).toBe('SENT');
     expect(nextProjectedMessageStatus('ACCEPTED', 'FAILED')).toBe('FAILED');
     expect(nextProjectedMessageStatus('CANCELLED', 'READ')).toBe('CANCELLED');

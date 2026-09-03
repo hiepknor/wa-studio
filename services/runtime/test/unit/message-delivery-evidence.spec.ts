@@ -16,6 +16,7 @@ describe('connector delivery evidence reducer', () => {
 
   it('reduces delivery progress monotonically and preserves terminal outcomes', () => {
     expect(nextTransportState('SEND_STARTED', 'SEND_ACCEPTED')).toBe('SEND_ACCEPTED');
+    expect(nextTransportState('SENT', 'FAILED_DEFINITIVE')).toBe('FAILED_DEFINITIVE');
     expect(nextTransportState('DELIVERED', 'SENT')).toBe('DELIVERED');
     expect(nextTransportState('READ', 'FAILED_DEFINITIVE')).toBe('READ');
     expect(nextTransportState('FAILED_DEFINITIVE', 'READ')).toBe('FAILED_DEFINITIVE');
@@ -32,7 +33,8 @@ describe('connector delivery evidence reducer', () => {
     expect(connectorJobStatusTransitions('PROCESSING', 'ACK_DELIVERED'))
       .toEqual(['ACCEPTED', 'DELIVERED']);
     expect(connectorJobStatusTransitions('UNKNOWN', 'SEND_ACCEPTED')).toEqual(['ACCEPTED']);
-    expect(connectorJobStatusTransitions('SENT', 'ACK_FAILED')).toEqual([]);
+    expect(connectorJobStatusTransitions('SENT', 'ACK_FAILED')).toEqual(['FAILED']);
+    expect(connectorJobStatusTransitions('DELIVERED', 'ACK_FAILED')).toEqual([]);
     expect(connectorJobStatusTransitions('PROCESSING', 'SEND_INDETERMINATE')).toEqual(['UNKNOWN']);
   });
 
