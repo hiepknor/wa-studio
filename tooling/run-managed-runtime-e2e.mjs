@@ -1,11 +1,12 @@
 import { spawn, spawnSync } from "node:child_process";
-import { createHmac, randomUUID } from "node:crypto";
+import strictAssert from "node:assert/strict";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createRequire } from "node:module";
 import { createServer as createNetServer } from "node:net";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import process from "node:process";
 
 const workspaceRoot = resolve(import.meta.dirname, "..");
@@ -155,12 +156,12 @@ async function main() {
     const event = packagedWebhookEvent();
     await postSignedWebhook(eventInboxBaseUrl, profile.webhookSecret, event);
     await waitForEventInboxDrain(eventInboxBaseUrl);
-    await assertLocalWebhookCommitted(event, 1);
+    await waitForLocalWebhookReceipt(event);
 
     // An Event Inbox redelivery after ACK must still collapse onto the same local idempotency key.
     await postSignedWebhook(eventInboxBaseUrl, profile.webhookSecret, event);
     await waitForEventInboxDrain(eventInboxBaseUrl);
-    await assertLocalWebhookCommitted(event, 1);
+    await waitForLocalWebhookReceipt(event);
 
     await exerciseOpenWaOfflineRecovery(openwa, profile.runtimeApiKey);
 
@@ -219,11 +220,31 @@ function assertManagedBackupCreated() {
     .map(name => resolve(managedBackupRoot, name));
   assert(backups.length > 0, "Packaged Runtime restart did not create a recovery backup");
   for (const backup of backups) {
-    assert(statSync(backup).size > 0, `Packaged Runtime created an empty backup: ${backup}`);
+    const archive = readFileSync(backup);
+    const archiveSize = statSync(backup).size;
+    assert(archiveSize > 0, `Packaged Runtime created an empty backup: ${backup}`);
     assert(
-      readFileSync(backup).subarray(0, 64).toString("utf8").includes("age-encryption.org/v1"),
+      archive.subarray(0, 64).toString("utf8").includes("age-encryption.org/v1"),
       `Packaged Runtime backup is not an age archive: ${backup}`,
     );
+    const manifestPath = `${backup}.manifest.json`;
+    assert(existsSync(manifestPath), `Packaged Runtime backup manifest is missing: ${manifestPath}`);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    strictAssert.equal(manifest.formatVersion, 1, "Packaged Runtime backup manifest version drifted");
+    strictAssert.equal(manifest.backupId, basename(backup), "Backup manifest identity does not match its archive");
+    strictAssert.equal(manifest.backupKind, "automatic", "Restart backup was not classified as automatic");
+    strictAssert.equal(manifest.sizeBytes, archiveSize, "Backup manifest size does not match its archive");
+    strictAssert.equal(
+      manifest.sha256,
+      createHash("sha256").update(archive).digest("hex"),
+      "Backup manifest checksum does not match its archive",
+    );
+    strictAssert.equal(manifest.storagePolicyVersion, 1, "Backup storage-policy version drifted");
+    strictAssert.deepEqual(manifest.dataClasses, [
+      "durable-domain",
+      "delivery-evidence",
+      "active-transient-work",
+    ]);
   }
 }
 
@@ -741,7 +762,7 @@ async function waitForEventInboxDrain(eventInboxBaseUrl) {
   );
 }
 
-async function assertLocalWebhookCommitted(event, expectedCount) {
+async function waitForLocalWebhookReceipt(event) {
   const pidFile = resolve(managedPostgresRoot, "data-v17/postmaster.pid");
   const lines = readFileSync(pidFile, "utf8").split(/\r?\n/u);
   const port = Number(lines[3]);
@@ -755,15 +776,35 @@ async function assertLocalWebhookCommitted(event, expectedCount) {
     max: 1,
   });
   try {
-    const result = await pool.query(
-      `SELECT payload, processing_state
-       FROM webhook_events
-       WHERE idempotency_key = $1`,
-      [event.idempotencyKey],
+    const expectedPayloadSha256 = createHash("sha256")
+      .update(JSON.stringify(event))
+      .digest("hex");
+    const deadline = Date.now() + 30_000;
+    let lastState;
+    while (Date.now() < deadline) {
+      const result = await pool.query(
+        `SELECT
+           (SELECT count(*)::integer FROM webhook_events WHERE idempotency_key = $1) AS spool_count,
+           (SELECT count(*)::integer FROM webhook_event_receipts WHERE idempotency_key = $1) AS receipt_count,
+           receipt.delivery_id,
+           receipt.session_id,
+           receipt.payload_sha256
+         FROM (VALUES (1)) AS singleton(value)
+         LEFT JOIN webhook_event_receipts receipt ON receipt.idempotency_key = $1`,
+        [event.idempotencyKey],
+      );
+      lastState = result.rows[0];
+      if (lastState?.spool_count === 0 && lastState?.receipt_count === 1) {
+        strictAssert.equal(lastState.delivery_id, event.deliveryId, "Local Runtime changed webhook delivery identity");
+        strictAssert.equal(lastState.session_id, event.sessionId, "Local Runtime changed webhook session scope");
+        strictAssert.equal(lastState.payload_sha256, expectedPayloadSha256, "Local Runtime changed webhook bytes");
+        return;
+      }
+      await delay(100);
+    }
+    throw new Error(
+      `Local Runtime did not compact the webhook to one deduplication receipt: ${JSON.stringify(lastState)}`,
     );
-    assert(result.rowCount === expectedCount, "Local Runtime webhook deduplication failed");
-    assert(result.rows[0]?.payload?.deliveryId === event.deliveryId, "Local Runtime changed webhook bytes");
-    assert(result.rows[0]?.payload?.sessionId === event.sessionId, "Local Runtime changed session scope");
   } finally {
     await pool.end();
   }
