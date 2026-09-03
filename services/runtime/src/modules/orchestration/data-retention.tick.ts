@@ -14,6 +14,7 @@ export interface RetentionResult {
   inboundMessages: number;
   runtimeEvents: number;
   webhookEvents: number;
+  webhookReceipts: number;
   syncRuns: number;
   contactObservations: number;
   mediaUploads: number;
@@ -43,7 +44,8 @@ export class DataRetentionTick {
     const deleted = result.mutationReceipts + result.safetyOutcomeReceipts
       + result.groupReconciliationOperations
       + result.activityEvents + result.campaignRuns + result.messageJobs + result.inboundMessages + result.runtimeEvents
-      + result.webhookEvents + result.syncRuns + result.contactObservations + result.mediaUploads + result.mediaAssets;
+      + result.webhookEvents + result.webhookReceipts + result.syncRuns
+      + result.contactObservations + result.mediaUploads + result.mediaAssets;
     this.logger.log({
       event: 'data.retention.completed', deleted, durationMs: Math.round(performance.now() - started), ...result,
     });
@@ -70,7 +72,8 @@ export class DataRetentionTick {
       safetyOutcomeReceipts: 0,
       groupReconciliationOperations: 0,
       activityEvents: 0,
-      campaignRuns: 0, messageJobs: 0, inboundMessages: 0, runtimeEvents: 0, webhookEvents: 0, syncRuns: 0,
+      campaignRuns: 0, messageJobs: 0, inboundMessages: 0, runtimeEvents: 0,
+      webhookEvents: 0, webhookReceipts: 0, syncRuns: 0,
       contactObservations: 0,
       mediaUploads: 0, mediaAssets: 0,
       batches: 0, capacityExhausted: false,
@@ -100,6 +103,7 @@ export class DataRetentionTick {
         inboundMessages: await this.deleteInboundMessages(client, inboxCutoff, limit),
         runtimeEvents: await this.deleteRuntimeEvents(client, eventCutoff, limit),
         webhookEvents: await this.deleteWebhookEvents(client, webhookCutoff, limit),
+        webhookReceipts: await this.deleteWebhookReceipts(client, now, limit),
         syncRuns: await this.deleteSyncRuns(client, operationalCutoff, limit),
         contactObservations: await this.deleteRedundantContactObservations(
           client,
@@ -119,6 +123,7 @@ export class DataRetentionTick {
       total.inboundMessages += current.inboundMessages;
       total.runtimeEvents += current.runtimeEvents;
       total.webhookEvents += current.webhookEvents;
+      total.webhookReceipts += current.webhookReceipts;
       total.syncRuns += current.syncRuns;
       total.contactObservations += current.contactObservations;
       total.mediaUploads += current.mediaUploads;
@@ -272,6 +277,19 @@ export class DataRetentionTick {
        )
        DELETE FROM webhook_events we USING candidates c WHERE we.id = c.id`,
       [cutoff, limit],
+    ));
+  }
+
+  private async deleteWebhookReceipts(client: PoolClient, now: Date, limit: number): Promise<number> {
+    return this.count(await client.query(
+      `WITH candidates AS (
+         SELECT idempotency_key FROM webhook_event_receipts
+         WHERE expires_at < $1 ORDER BY expires_at, idempotency_key
+         LIMIT $2 FOR UPDATE SKIP LOCKED
+       )
+       DELETE FROM webhook_event_receipts receipt USING candidates
+       WHERE receipt.idempotency_key = candidates.idempotency_key`,
+      [now, limit],
     ));
   }
 

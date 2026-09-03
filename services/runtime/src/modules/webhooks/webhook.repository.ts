@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
@@ -25,6 +26,12 @@ export interface ClaimedWebhook {
 
 export type WebhookAttemptResult = 'RETRY' | 'DEAD' | 'LOST_OWNERSHIP';
 
+const webhookIdempotencyLockNamespace = 748_231;
+
+function envelopeHash(envelope: OpenWAWebhookEnvelope): string {
+  return createHash('sha256').update(JSON.stringify(envelope)).digest('hex');
+}
+
 @Injectable()
 export class WebhookRepository {
   constructor(
@@ -33,20 +40,29 @@ export class WebhookRepository {
   ) {}
 
   async insert(envelope: OpenWAWebhookEnvelope): Promise<boolean> {
-    const result = await this.database.query(
-      `INSERT INTO webhook_events
-         (idempotency_key, delivery_id, event_type, session_id, payload)
-       VALUES ($1, $2, $3, $4, $5::jsonb)
-       ON CONFLICT (idempotency_key) DO NOTHING`,
-      [
-        envelope.idempotencyKey,
-        envelope.deliveryId,
-        envelope.event,
-        envelope.sessionId,
-        JSON.stringify(envelope),
-      ],
-    );
-    return result.rowCount === 1;
+    return this.database.transaction(async client => {
+      await this.lockIdempotencyKey(client, envelope.idempotencyKey);
+      const receipt = await client.query(
+        `SELECT 1 FROM webhook_event_receipts WHERE idempotency_key = $1`,
+        [envelope.idempotencyKey],
+      );
+      if (receipt.rowCount) return false;
+      const result = await client.query(
+        `INSERT INTO webhook_events
+           (idempotency_key, delivery_id, event_type, session_id, payload, payload_sha256)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+         ON CONFLICT (idempotency_key) DO NOTHING`,
+        [
+          envelope.idempotencyKey,
+          envelope.deliveryId,
+          envelope.event,
+          envelope.sessionId,
+          JSON.stringify(envelope),
+          envelopeHash(envelope),
+        ],
+      );
+      return result.rowCount === 1;
+    });
   }
 
   async find(idempotencyKey: string): Promise<OpenWAWebhookEnvelope | null> {
@@ -109,6 +125,7 @@ export class WebhookRepository {
   }
 
   async lockProcessingLease(client: PoolClient, idempotencyKey: string, leaseToken: string): Promise<boolean> {
+    await this.lockIdempotencyKey(client, idempotencyKey);
     const result = await client.query(
       `SELECT 1 FROM webhook_events
        WHERE idempotency_key = $1 AND processing_state = 'PROCESSING' AND lease_token = $2
@@ -125,6 +142,25 @@ export class WebhookRepository {
     leaseToken: string,
     error?: string,
   ): Promise<boolean> {
+    if (this.config.RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED) {
+      const result = await client.query(
+        `WITH processed AS (
+           DELETE FROM webhook_events
+           WHERE idempotency_key = $1 AND processing_state = 'PROCESSING' AND lease_token = $2
+             AND lease_expires_at > now()
+           RETURNING idempotency_key, delivery_id, event_type, session_id, payload_sha256, received_at
+         )
+         INSERT INTO webhook_event_receipts
+           (idempotency_key, delivery_id, event_type, session_id, payload_sha256,
+            received_at, processed_at, processing_error, expires_at)
+         SELECT idempotency_key, delivery_id, event_type, session_id, payload_sha256,
+           received_at, now(), $3, now() + ($4::text || ' days')::interval
+         FROM processed
+         RETURNING 1`,
+        [idempotencyKey, leaseToken, error ?? null, this.config.RUNTIME_RAW_WEBHOOK_RETENTION_DAYS],
+      );
+      return result.rowCount === 1;
+    }
     const result = await client.query(
       `UPDATE webhook_events
        SET processing_state = 'PROCESSED', processed_at = now(), processing_error = $2,
@@ -160,5 +196,12 @@ export class WebhookRepository {
       [idempotencyKey, error, leaseToken],
     );
     return result.rows[0]?.processing_state ?? 'LOST_OWNERSHIP';
+  }
+
+  private async lockIdempotencyKey(client: PoolClient, idempotencyKey: string): Promise<void> {
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, $2))',
+      [idempotencyKey, webhookIdempotencyLockNamespace],
+    );
   }
 }
