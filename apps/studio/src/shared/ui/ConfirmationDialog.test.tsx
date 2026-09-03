@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createRef } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -123,6 +124,30 @@ describe("ConfirmationDialog", () => {
     expect(cancel).toHaveFocus();
     await user.tab({ shift: true });
     expect(cancel).toHaveFocus();
+  });
+
+  it("includes body controls in the focus trap and supports explicit initial focus", async () => {
+    const user = userEvent.setup();
+    const inputRef = createRef<HTMLInputElement>();
+    render(
+      <ConfirmationDialog
+        body={<label>Acknowledgement<input ref={inputRef} /></label>}
+        confirmLabel="Continue"
+        initialFocusRef={inputRef}
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+        open
+        title="Confirm action"
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Acknowledgement" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("textbox", { name: "Acknowledgement" })).toHaveFocus();
   });
 
   it("announces an operation error inside the active modal", () => {

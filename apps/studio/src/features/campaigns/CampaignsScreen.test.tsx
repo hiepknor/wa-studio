@@ -176,6 +176,19 @@ async function runPreflight(
   await user.click(screen.getByRole("button", { name: "Run preflight" }));
 }
 
+async function confirmLiveLaunch(user: ReturnType<typeof userEvent.setup>) {
+  const dialog = screen.getByRole("dialog", { name: "Launch LIVE campaign?" });
+  const confirm = within(dialog).getByRole("button", { name: "Launch live campaign" });
+  expect(confirm).toBeDisabled();
+  await user.type(
+    within(dialog).getByRole("textbox", { name: `Type ${campaign.name} to confirm` }),
+    campaign.name,
+  );
+  expect(confirm).toBeEnabled();
+  await user.click(confirm);
+  return dialog;
+}
+
 describe("CampaignsScreen", () => {
   it("uses the shared workflow dialog, tabs, fields, badges, and actions in a structured workspace", async () => {
     const user = userEvent.setup();
@@ -1229,7 +1242,8 @@ describe("CampaignsScreen", () => {
     await screen.findByText("GROUP_CAPABILITY");
     await user.click(screen.getByRole("button", { name: "Launch live campaign" }));
     const dialog = screen.getByRole("dialog", { name: "Launch LIVE campaign?" });
-    await user.click(within(dialog).getByRole("button", { name: "Launch live campaign" }));
+    expect(within(dialog).getByText("9 groups")).toBeInTheDocument();
+    await confirmLiveLaunch(user);
     expect(await screen.findByText("Live campaign launched")).toBeInTheDocument();
     expect(createCampaignRun).toHaveBeenCalledTimes(1);
     expect(createCampaignRun).toHaveBeenCalledWith(campaign.id, {
@@ -1257,11 +1271,12 @@ describe("CampaignsScreen", () => {
     await user.click(screen.getByRole("button", { name: "Launch live campaign" }));
     const confirmation = screen.getByRole("dialog", { name: "Launch LIVE campaign?" });
 
-    await user.click(within(confirmation).getByRole("button", { name: "Launch live campaign" }));
+    await confirmLiveLaunch(user);
 
     const alert = await within(confirmation).findByRole("alert");
     expect(alert).toHaveTextContent("Could not launch campaign");
     expect(alert).toHaveTextContent("Runtime unavailable.");
+    expect(within(confirmation).getByRole("button", { name: "Launch live campaign" })).toBeEnabled();
     expect(screen.getAllByText("Runtime unavailable.")).toHaveLength(1);
   });
 
@@ -1279,8 +1294,7 @@ describe("CampaignsScreen", () => {
     await runPreflight(user, "LIVE");
     await screen.findByText("GROUP_CAPABILITY");
     await user.click(screen.getByRole("button", { name: "Launch live campaign" }));
-    await user.click(within(screen.getByRole("dialog", { name: "Launch LIVE campaign?" }))
-      .getByRole("button", { name: "Launch live campaign" }));
+    await confirmLiveLaunch(user);
 
     expect(await screen.findByText("Live campaign launched")).toBeInTheDocument();
     expect(await screen.findByText(/live run was created, but the latest Campaign state/)).toBeInTheDocument();

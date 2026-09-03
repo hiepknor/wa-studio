@@ -1,10 +1,26 @@
 import { createPortal } from "react-dom";
-import { type ComponentProps, type ReactNode, useEffect, useId, useRef } from "react";
+import {
+  type ComponentProps,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useId,
+  useRef,
+} from "react";
 
 import { Button } from "./Button";
 import { InlineAlert } from "./InlineAlert";
 import { acquireModalIsolation } from "./modal-isolation";
 import "./confirmation-dialog.css";
+
+const FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 export interface ConfirmationDialogProps {
   body: ReactNode;
@@ -16,6 +32,7 @@ export interface ConfirmationDialogProps {
   confirmVariant?: ComponentProps<typeof Button>["variant"];
   error?: ReactNode;
   errorTitle?: ReactNode;
+  initialFocusRef?: RefObject<HTMLElement | null>;
   onCancel: () => void;
   onConfirm: () => void;
   open: boolean;
@@ -32,6 +49,7 @@ export function ConfirmationDialog({
   confirmVariant = "primary",
   error,
   errorTitle = "Action failed",
+  initialFocusRef,
   onCancel,
   onConfirm,
   open,
@@ -54,9 +72,9 @@ export function ConfirmationDialog({
     const layer = layerRef.current;
     if (!layer) return;
     const releaseIsolation = acquireModalIsolation(layer, returnFocusRef.current);
-    cancelRef.current?.focus();
+    (initialFocusRef?.current ?? cancelRef.current)?.focus();
     return releaseIsolation;
-  }, [open]);
+  }, [initialFocusRef, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -90,8 +108,9 @@ export function ConfirmationDialog({
             dialogRef.current?.focus();
             return;
           }
-          const focusable = [cancelRef.current, confirmRef.current]
-            .filter((item): item is HTMLButtonElement => Boolean(item && !item.disabled));
+          const focusable = Array.from(
+            dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [],
+          ).filter((item) => item.getAttribute("aria-hidden") !== "true");
           const first = focusable[0];
           const last = focusable[focusable.length - 1];
           if (
