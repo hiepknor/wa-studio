@@ -89,6 +89,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/openwa-safety/sessions/{sessionId}/outbound-control": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause or resume message sends for one session without stopping protected reads */
+        post: operations["OpenWASafetyController_outboundControl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/openwa-safety/sessions/{sessionId}/profile": {
         parameters: {
             query?: never;
@@ -864,6 +881,11 @@ export interface components {
             cooldownUntil: string | null;
             /** @enum {string} */
             profile: "CANARY" | "STANDARD";
+            /** @enum {string} */
+            outboundState: "RUNNING" | "PAUSED";
+            /** Format: date-time */
+            outboundPausedAt: string | null;
+            outboundPauseReason: string | null;
             policyVersion: number;
             revision: number;
             /** Format: date-time */
@@ -872,6 +894,11 @@ export interface components {
             lastFailureAt: string | null;
             /** Format: date-time */
             updatedAt: string;
+        };
+        OpenWAOutboundControlDto: {
+            /** @enum {string} */
+            action: "PAUSE" | "RESUME";
+            reason?: string;
         };
         OpenWASafetyProfileChangeDto: {
             /** @enum {string} */
@@ -1872,6 +1899,33 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["OpenWASafetyControlDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenWASafetyScopeDto"];
+                };
+            };
+        };
+    };
+    OpenWASafetyController_outboundControl: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenWAOutboundControlDto"];
             };
         };
         responses: {

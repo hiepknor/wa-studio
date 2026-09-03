@@ -23,6 +23,9 @@ function snapshot(
     reason: null,
     cooldownUntil: null,
     profile: "CANARY",
+    outboundState: "RUNNING",
+    outboundPausedAt: null,
+    outboundPauseReason: null,
     policyVersion: 4,
     revision: 1,
     lastSuccessAt: "2026-08-29T08:00:00.000Z",
@@ -82,6 +85,38 @@ describe("OpenWASafetySettings", () => {
     expect(await screen.findByText("Blocked")).toBeInTheDocument();
     expect(screen.getByText("OpenWA upstream")).toBeInTheDocument();
     expect(screen.getByText("Reason: UPSTREAM_OPERATOR_BLOCK")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Block session" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Lock all operations" })).toBeInTheDocument();
+  });
+
+  it("pauses message sends without presenting the control as a full operation lock", async () => {
+    const user = userEvent.setup();
+    const api = {
+      getOpenWASafety: vi.fn().mockResolvedValue(snapshot()),
+      controlOpenWAOutbound: vi.fn().mockResolvedValue(snapshot({
+        outboundState: "PAUSED",
+        outboundPausedAt: "2026-08-29T08:01:00.000Z",
+        outboundPauseReason: "OPERATOR_PAUSED_SENDS_FROM_STUDIO",
+        revision: 2,
+      })),
+    } as unknown as RuntimeApi;
+
+    render(
+      <ToastProvider>
+        <OpenWASafetySettings api={api} sessionId={SESSION_ID} sessionName="Production" />
+      </ToastProvider>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Pause sends" }));
+    const dialog = screen.getByRole("dialog", { name: "Pause outbound sending?" });
+    expect(dialog).toHaveTextContent("Synchronization, connector health, delivery evidence, and reconciliation continue");
+    await user.click(within(dialog).getByRole("button", { name: "Pause sends" }));
+
+    await waitFor(() => expect(api.controlOpenWAOutbound).toHaveBeenCalledWith(
+      SESSION_ID,
+      "PAUSE",
+      expect.any(String),
+      "OPERATOR_PAUSED_SENDS_FROM_STUDIO",
+    ));
+    expect(await screen.findByText("Outbound sending paused")).toBeInTheDocument();
   });
 });

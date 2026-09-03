@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiHeader, ApiOkResponse, ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import {
+  OpenWAOutboundControlDto,
   OpenWASafetyControlDto,
   OpenWASafetyProfileChangeDto,
   OpenWASafetyQuiescenceDto,
@@ -69,6 +70,19 @@ export class OpenWASafetyController {
     @Body() input: OpenWASafetyControlDto,
   ) {
     return this.safety.mutateControl(sessionId, idempotencyKey, input);
+  }
+
+  @Post('sessions/:sessionId/outbound-control')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Pause or resume message sends for one session without stopping protected reads' })
+  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
+  @ApiOkResponse({ type: OpenWASafetyScopeDto })
+  outboundControl(
+    @Param('sessionId', ParseUUIDPipe) sessionId: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() input: OpenWAOutboundControlDto,
+  ) {
+    return this.safety.mutateOutboundControl(sessionId, idempotencyKey, input);
   }
 
   @Put('sessions/:sessionId/profile')

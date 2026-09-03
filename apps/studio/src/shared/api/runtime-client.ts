@@ -431,6 +431,32 @@ export class RuntimeApi {
     return result.data;
   }
 
+  async controlOpenWAOutbound(
+    sessionId: string,
+    action: "PAUSE" | "RESUME",
+    idempotencyKey: string,
+    reason?: string,
+  ): Promise<RuntimeOpenWASafetyScope> {
+    const result = await this.client.POST(
+      "/api/v1/openwa-safety/sessions/{sessionId}/outbound-control",
+      {
+        body: { action, ...(reason ? { reason } : {}) },
+        params: {
+          header: { "Idempotency-Key": idempotencyKey },
+          path: { sessionId },
+        },
+      },
+    );
+    if (!result.response.ok || !result.data) {
+      throw runtimeRequestError(
+        `Could not ${action === "PAUSE" ? "pause" : "resume"} outbound sending`,
+        result.response.status,
+        result.error,
+      );
+    }
+    return result.data;
+  }
+
   async setOpenWASafetyProfile(
     sessionId: string,
     profile: RuntimeOpenWASafetyProfile,

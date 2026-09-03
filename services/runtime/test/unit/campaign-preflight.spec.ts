@@ -22,11 +22,11 @@ const ready = { status: 'ready', engineLoaded: true, restricted: false };
 const revisions = { campaignRevision: 7, targetsRevision: 4 };
 
 describe('evaluateCampaignPreflight', () => {
-  it('publishes policy version 4 for media-aware safety semantics', () => {
+  it('publishes policy version 5 for operator-controlled outbound admission', () => {
     expect(evaluateCampaignPreflight({
       executionMode: CampaignExecutionMode.DRY_RUN,
       text: 'hello', targets: [target('ALLOWED')], session: ready, liveSendsEnabled: false, ...revisions,
-    }).policyVersion).toBe(4);
+    }).policyVersion).toBe(5);
   });
 
   it('blocks media content when its immutable asset is unavailable', () => {
@@ -108,6 +108,25 @@ describe('evaluateCampaignPreflight', () => {
     expect(report.checks).toContainEqual(expect.objectContaining({
       code: 'SAFETY_READY', status: 'BLOCK',
     }));
+  });
+
+  it('blocks a LIVE launch while outbound sends are paused without blocking dry-runs', () => {
+    const live = evaluateCampaignPreflight({
+      executionMode: CampaignExecutionMode.LIVE,
+      text: 'hello', targets: [target('ALLOWED')], session: ready, liveSendsEnabled: true,
+      safetyStatus: 'READY', outboundState: 'PAUSED', ...revisions,
+    });
+    expect(live.status).toBe('BLOCK');
+    expect(live.checks).toContainEqual(expect.objectContaining({
+      code: 'SAFETY_READY', status: 'BLOCK', message: 'Outbound sends are paused by the operator',
+    }));
+
+    const dryRun = evaluateCampaignPreflight({
+      executionMode: CampaignExecutionMode.DRY_RUN,
+      text: 'hello', targets: [target('ALLOWED')], session: ready, liveSendsEnabled: false,
+      safetyStatus: 'READY', outboundState: 'PAUSED', ...revisions,
+    });
+    expect(dryRun.status).toBe('PASS');
   });
 
   it('applies BLOCK over WARN over PASS precedence using stable check codes', () => {

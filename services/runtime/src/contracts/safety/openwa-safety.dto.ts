@@ -11,10 +11,28 @@ export enum OpenWASafetyControlActionDto {
   RESUME = 'RESUME',
 }
 
+export enum OpenWAOutboundControlActionDto {
+  PAUSE = 'PAUSE',
+  RESUME = 'RESUME',
+}
+
 export class OpenWASafetyControlDto {
   @ApiProperty({ enum: OpenWASafetyControlActionDto })
   @IsEnum(OpenWASafetyControlActionDto)
   action!: OpenWASafetyControlActionDto;
+
+  @ApiPropertyOptional({ minLength: 1, maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  reason?: string;
+}
+
+export class OpenWAOutboundControlDto {
+  @ApiProperty({ enum: OpenWAOutboundControlActionDto })
+  @IsEnum(OpenWAOutboundControlActionDto)
+  action!: OpenWAOutboundControlActionDto;
 
   @ApiPropertyOptional({ minLength: 1, maxLength: 200 })
   @IsOptional()
@@ -54,6 +72,15 @@ export class OpenWASafetyScopeDto {
 
   @ApiProperty({ enum: OpenWASafetyProfileDto })
   profile!: OpenWASafetyProfileDto;
+
+  @ApiProperty({ enum: ['RUNNING', 'PAUSED'] })
+  outboundState!: string;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  outboundPausedAt!: Date | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  outboundPauseReason!: string | null;
 
   @ApiProperty() policyVersion!: number;
   @ApiProperty() revision!: number;

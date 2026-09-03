@@ -39,6 +39,8 @@ interface ScopeRow {
   cooldown_until: Date | null;
   manual_blocked_at: Date | null;
   manual_block_reason: string | null;
+  outbound_paused_at: Date | null;
+  outbound_pause_reason: string | null;
   policy_profile: OpenWASafetyProfile;
   policy_version: number;
   revision: string;
@@ -69,6 +71,9 @@ const mapScope = (row: ScopeRow): OpenWASafetyScopeSnapshot => ({
   reason: row.manual_blocked_at ? row.manual_block_reason ?? row.reason_code : row.reason_code,
   cooldownUntil: row.cooldown_until,
   profile: row.policy_profile,
+  outboundState: row.outbound_paused_at ? 'PAUSED' : 'RUNNING',
+  outboundPausedAt: row.outbound_paused_at,
+  outboundPauseReason: row.outbound_pause_reason,
   policyVersion: row.policy_version,
   revision: Number(row.revision),
   lastSuccessAt: row.last_success_at,
@@ -213,6 +218,8 @@ export class OpenWASafetyRepository {
       scopes = await this.transitionExpiredCircuits(client, scopes);
       const circuitDecision = this.circuitDecision(scopes);
       if (circuitDecision) return circuitDecision;
+      const outboundDecision = this.outboundDecision(scopes);
+      if (outboundDecision) return outboundDecision;
 
       const activeRecovery = await client.query<{ lease_expires_at: Date }>(
         `SELECT max(lease_expires_at) AS lease_expires_at FROM openwa_safety_leases
@@ -387,6 +394,7 @@ export class OpenWASafetyRepository {
                  OR (scopes.scope_type = 'SESSION' AND scopes.upstream_id = $2 AND scopes.session_id = $3)
                ) AND (
                  scopes.manual_blocked_at IS NOT NULL
+                 OR (scopes.scope_type = 'SESSION' AND scopes.outbound_paused_at IS NOT NULL)
                  OR scopes.circuit_state IN ('OPEN', 'MANUAL_BLOCKED')
                  OR scopes.cooldown_until > now()
                  OR (scopes.circuit_state = 'HALF_OPEN' AND NOT EXISTS (
@@ -737,7 +745,8 @@ export class OpenWASafetyRepository {
     upstreamId: string;
     sessionId: string;
     operationType: Extract<RuntimeMutationType,
-      'OPENWA_SESSION_BLOCK' | 'OPENWA_SESSION_RESUME' | 'OPENWA_SAFETY_PROFILE_CHANGE'>;
+      'OPENWA_SESSION_BLOCK' | 'OPENWA_SESSION_RESUME' | 'OPENWA_SAFETY_PROFILE_CHANGE'
+      | 'OPENWA_OUTBOUND_PAUSE' | 'OPENWA_OUTBOUND_RESUME'>;
     idempotencyKey: string;
     requestHash: string;
     reason?: string;
@@ -755,7 +764,23 @@ export class OpenWASafetyRepository {
       await this.ensureScopes(client, input.upstreamId, input.sessionId);
       if (!receipt) {
         let result;
-        if (input.operationType === 'OPENWA_SESSION_BLOCK') {
+        if (input.operationType === 'OPENWA_OUTBOUND_PAUSE') {
+          result = await client.query<ScopeRow>(
+            `UPDATE openwa_safety_scopes SET outbound_paused_at = now(),
+               outbound_pause_reason = $3, revision = revision + 1, updated_at = now()
+             WHERE scope_type = 'SESSION' AND upstream_id = $1 AND session_id = $2
+             RETURNING *`,
+            [input.upstreamId, input.sessionId, input.reason ?? 'OPERATOR_PAUSED_SENDS'],
+          );
+        } else if (input.operationType === 'OPENWA_OUTBOUND_RESUME') {
+          result = await client.query<ScopeRow>(
+            `UPDATE openwa_safety_scopes SET outbound_paused_at = NULL,
+               outbound_pause_reason = NULL, revision = revision + 1, updated_at = now()
+             WHERE scope_type = 'SESSION' AND upstream_id = $1 AND session_id = $2
+             RETURNING *`,
+            [input.upstreamId, input.sessionId],
+          );
+        } else if (input.operationType === 'OPENWA_SESSION_BLOCK') {
           result = await client.query<ScopeRow>(
             `UPDATE openwa_safety_scopes SET manual_blocked_at = now(),
                manual_block_reason = $3,
@@ -789,18 +814,24 @@ export class OpenWASafetyRepository {
           'SELECT name FROM gateway_sessions WHERE id = $1',
           [input.sessionId],
         );
-        const eventType = input.operationType === 'OPENWA_SESSION_BLOCK'
-          ? 'openwa_safety.session_blocked'
-          : input.operationType === 'OPENWA_SESSION_RESUME'
-            ? 'openwa_safety.session_resumed'
-            : 'openwa_safety.profile_changed';
+        const eventType = input.operationType === 'OPENWA_OUTBOUND_PAUSE'
+          ? 'openwa_safety.outbound_paused'
+          : input.operationType === 'OPENWA_OUTBOUND_RESUME'
+            ? 'openwa_safety.outbound_resumed'
+            : input.operationType === 'OPENWA_SESSION_BLOCK'
+              ? 'openwa_safety.session_blocked'
+              : input.operationType === 'OPENWA_SESSION_RESUME'
+                ? 'openwa_safety.session_resumed'
+                : 'openwa_safety.profile_changed';
         await appendActivityEvent(client, {
           sessionId: input.sessionId,
           eventType,
           category: 'SESSION',
           severity: input.operationType === 'OPENWA_SESSION_BLOCK'
+            || input.operationType === 'OPENWA_OUTBOUND_PAUSE'
             ? 'WARNING'
             : input.operationType === 'OPENWA_SESSION_RESUME'
+              || input.operationType === 'OPENWA_OUTBOUND_RESUME'
               ? 'SUCCESS'
               : 'INFO',
           origin: 'STUDIO',
@@ -809,6 +840,7 @@ export class OpenWASafetyRepository {
           subjectLabelSnapshot: session.rows[0]?.name ?? input.sessionId,
           metadata: {
             circuitState: mapScope(updated).circuitState,
+            outboundState: mapScope(updated).outboundState,
             profile: updated.policy_profile,
             policyVersion: updated.policy_version,
             ...(input.reason ? { reason: input.reason } : {}),
@@ -909,6 +941,15 @@ export class OpenWASafetyRepository {
       }
     }
     return cooldown ? { outcome: 'DEFERRED', ...cooldown } : null;
+  }
+
+  private outboundDecision(
+    scopes: ScopeRow[],
+  ): Extract<OpenWAPermitDecision, { outcome: 'BLOCKED' }> | null {
+    const session = scopes.find(scope => scope.scope_type === 'SESSION');
+    return session?.outbound_paused_at
+      ? { outcome: 'BLOCKED', reason: session.outbound_pause_reason ?? 'OPERATOR_PAUSED_SENDS' }
+      : null;
   }
 
   private async checkBuckets(
