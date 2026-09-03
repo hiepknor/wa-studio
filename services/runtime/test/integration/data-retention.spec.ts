@@ -122,6 +122,13 @@ describe('data retention', () => {
       contactObservations: 0,
       mediaUploads: 0, mediaAssets: 0,
       batches: 1, capacityExhausted: false,
+      storagePolicy: {
+        version: 1,
+        phase: 'NOT_APPLICABLE',
+        inboundMessagesDeleted: 0,
+        runtimeMessageEventsDeleted: 0,
+        processedWebhooksCompacted: 0,
+      },
     });
     await expectCount('message_jobs', 1);
     await expectCount('runtime_events', 1);
@@ -300,6 +307,88 @@ describe('data retention', () => {
     expect(result).toMatchObject({ inboundMessages: 1, runtimeEvents: 0 });
     await expectCount('inbound_messages', 0);
     await expectCount('runtime_events', 1);
+  });
+
+  it('resumes draining legacy message bodies and processed webhooks under the desktop policy', async () => {
+    await pool.query(
+      `INSERT INTO runtime_events
+         (event_id, source_event_type, event_type, session_id, occurred_at, payload, created_at)
+       VALUES ('desktop-message-event','message','message.received',$1,now(),'{"body":"secret"}',now()),
+              ('desktop-status-event','ack','message.ack',$1,now(),'{"status":"sent"}',now())`,
+      [INTEGRATION_SESSION_ID],
+    );
+    await pool.query(
+      `INSERT INTO inbound_messages
+         (session_id, message_id, group_id, sender_id, body, message_type, received_at, event_id)
+       VALUES ($1,'desktop-message',$2,'sender','secret','text',now(),'desktop-message-event')`,
+      [INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    );
+    await pool.query(
+      `INSERT INTO webhook_events
+         (idempotency_key, event_type, session_id, payload, processing_state, processed_at,
+          received_at, storage_bytes)
+       VALUES ('legacy-processed','message.received',$1,'{"data":{"body":"secret"}}',
+         'PROCESSED',now(),now(),0)`,
+      [INTEGRATION_SESSION_ID],
+    );
+    const config = {
+      ...runtimeConfig(),
+      RUNTIME_PROFILE: 'desktop-managed' as const,
+      RUNTIME_MESSAGE_STORAGE_MODE: 'disabled' as const,
+      RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: true,
+    };
+
+    const first = await new DataRetentionTick(database, config).cleanup({
+      batchSize: 100,
+      maxBatches: 1,
+    });
+
+    expect(first).toMatchObject({
+      inboundMessages: 1,
+      runtimeEvents: 1,
+      webhookEvents: 1,
+      storagePolicy: {
+        version: 1,
+        phase: 'LOGICALLY_COMPACT',
+        inboundMessagesDeleted: 1,
+        runtimeMessageEventsDeleted: 1,
+        processedWebhooksCompacted: 1,
+      },
+    });
+    await expectCount('inbound_messages', 0);
+    expect((await pool.query<{ event_id: string }>(
+      'SELECT event_id FROM runtime_events ORDER BY event_id',
+    )).rows).toEqual([{ event_id: 'desktop-status-event' }]);
+    await expectCount('webhook_events', 0);
+    await expectCount('webhook_event_receipts', 1);
+    expect((await pool.query<{
+      phase: string;
+      inbound_messages_deleted: string;
+      runtime_message_events_deleted: string;
+      processed_webhooks_compacted: string;
+      completed_at: Date | null;
+    }>(
+      `SELECT phase, inbound_messages_deleted::text, runtime_message_events_deleted::text,
+         processed_webhooks_compacted::text, completed_at
+       FROM runtime_storage_policy_state WHERE singleton = true`,
+    )).rows[0]).toMatchObject({
+      phase: 'LOGICALLY_COMPACT',
+      inbound_messages_deleted: '1',
+      runtime_message_events_deleted: '1',
+      processed_webhooks_compacted: '1',
+      completed_at: expect.any(Date),
+    });
+
+    const resumed = await new DataRetentionTick(database, config).cleanup({
+      batchSize: 100,
+      maxBatches: 1,
+    });
+    expect(resumed.storagePolicy).toMatchObject({
+      phase: 'LOGICALLY_COMPACT',
+      inboundMessagesDeleted: 0,
+      runtimeMessageEventsDeleted: 0,
+      processedWebhooksCompacted: 0,
+    });
   });
 
   it('reports remaining capacity pressure when the configured batch cap is reached', async () => {

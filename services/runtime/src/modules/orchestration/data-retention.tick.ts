@@ -25,6 +25,15 @@ export interface RetentionResult {
   mediaAssets: number;
   batches: number;
   capacityExhausted: boolean;
+  storagePolicy: StoragePolicyProgress;
+}
+
+export interface StoragePolicyProgress {
+  version: number;
+  phase: 'NOT_APPLICABLE' | 'DRAINING' | 'LOGICALLY_COMPACT';
+  inboundMessagesDeleted: number;
+  runtimeMessageEventsDeleted: number;
+  processedWebhooksCompacted: number;
 }
 
 interface RetentionOptions {
@@ -81,6 +90,13 @@ export class DataRetentionTick {
       contactObservations: 0,
       mediaUploads: 0, mediaAssets: 0,
       batches: 0, capacityExhausted: false,
+      storagePolicy: {
+        version: Number(this.config.RUNTIME_STORAGE_POLICY_VERSION),
+        phase: this.storagePolicyActive() ? 'DRAINING' : 'NOT_APPLICABLE',
+        inboundMessagesDeleted: 0,
+        runtimeMessageEventsDeleted: 0,
+        processedWebhooksCompacted: 0,
+      },
     };
     let drained = false;
 
@@ -89,56 +105,124 @@ export class DataRetentionTick {
         total.capacityExhausted = true;
         break;
       }
-      const current = await this.database.transaction(async client => ({
-        mutationReceipts: await this.deleteMutationReceipts(client, operationalCutoff, limit),
-        safetyOutcomeReceipts: await this.deleteSafetyOutcomeReceipts(
-          client,
-          operationalCutoff,
-          limit,
-        ),
-        groupReconciliationOperations: await this.deleteGroupReconciliationOperations(
-          client,
-          operationalCutoff,
-          limit,
-        ),
-        activityEvents: await this.deleteActivityEvents(client, activityCutoff, limit),
-        campaignRuns: await this.deleteCampaignRuns(client, operationalCutoff, limit),
-        messageJobs: await this.deleteMessageJobs(client, operationalCutoff, limit),
-        inboundMessages: await this.deleteInboundMessages(client, inboxCutoff, limit),
-        runtimeEvents: await this.deleteRuntimeEvents(client, eventCutoff, limit),
-        webhookEvents: await this.deleteWebhookEvents(client, webhookCutoff, limit),
-        webhookReceipts: await this.deleteWebhookReceipts(client, now, limit),
-        syncRuns: await this.deleteSyncRuns(client, operationalCutoff, limit),
-        contactObservations: await this.deleteRedundantContactObservations(
-          client,
-          contactObservationCutoff,
-          limit,
-        ),
-        mediaUploads: await this.deleteExpiredMediaUploads(client, now, mediaOrphanCutoff, limit),
-        mediaAssets: await this.deleteOrphanMediaAssets(client, mediaOrphanCutoff, limit),
-      }));
+      const current = await this.database.transaction(async client => {
+        const policy = {
+          inboundMessagesDeleted: this.config.RUNTIME_MESSAGE_STORAGE_MODE === 'disabled'
+            ? await this.deleteInboundMessages(client, now, limit) : 0,
+          runtimeMessageEventsDeleted: this.config.RUNTIME_MESSAGE_STORAGE_MODE === 'disabled'
+            ? await this.deleteDisabledMessageRuntimeEvents(client, limit) : 0,
+          processedWebhooksCompacted:
+            this.config.RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED
+              ? await this.compactProcessedWebhookEvents(client, limit) : 0,
+        };
+        const counts = {
+          mutationReceipts: await this.deleteMutationReceipts(client, operationalCutoff, limit),
+          safetyOutcomeReceipts: await this.deleteSafetyOutcomeReceipts(
+            client,
+            operationalCutoff,
+            limit,
+          ),
+          groupReconciliationOperations: await this.deleteGroupReconciliationOperations(
+            client,
+            operationalCutoff,
+            limit,
+          ),
+          activityEvents: await this.deleteActivityEvents(client, activityCutoff, limit),
+          campaignRuns: await this.deleteCampaignRuns(client, operationalCutoff, limit),
+          messageJobs: await this.deleteMessageJobs(client, operationalCutoff, limit),
+          inboundMessages: policy.inboundMessagesDeleted
+            + await this.deleteInboundMessages(client, inboxCutoff, limit),
+          runtimeEvents: policy.runtimeMessageEventsDeleted
+            + await this.deleteRuntimeEvents(client, eventCutoff, limit),
+          webhookEvents: policy.processedWebhooksCompacted
+            + await this.deleteWebhookEvents(client, webhookCutoff, limit),
+          webhookReceipts: await this.deleteWebhookReceipts(client, now, limit),
+          syncRuns: await this.deleteSyncRuns(client, operationalCutoff, limit),
+          contactObservations: await this.deleteRedundantContactObservations(
+            client,
+            contactObservationCutoff,
+            limit,
+          ),
+          mediaUploads: await this.deleteExpiredMediaUploads(client, now, mediaOrphanCutoff, limit),
+          mediaAssets: await this.deleteOrphanMediaAssets(client, mediaOrphanCutoff, limit),
+        };
+        if (this.storagePolicyActive()) {
+          await this.recordStoragePolicyProgress(
+            client,
+            policy,
+            Object.values(policy).every(count => count < limit),
+          );
+        }
+        return { counts, policy };
+      });
       total.batches += 1;
-      total.mutationReceipts += current.mutationReceipts;
-      total.safetyOutcomeReceipts += current.safetyOutcomeReceipts;
-      total.groupReconciliationOperations += current.groupReconciliationOperations;
-      total.activityEvents += current.activityEvents;
-      total.campaignRuns += current.campaignRuns;
-      total.messageJobs += current.messageJobs;
-      total.inboundMessages += current.inboundMessages;
-      total.runtimeEvents += current.runtimeEvents;
-      total.webhookEvents += current.webhookEvents;
-      total.webhookReceipts += current.webhookReceipts;
-      total.syncRuns += current.syncRuns;
-      total.contactObservations += current.contactObservations;
-      total.mediaUploads += current.mediaUploads;
-      total.mediaAssets += current.mediaAssets;
-      if (Object.values(current).every(count => count < limit)) {
+      total.mutationReceipts += current.counts.mutationReceipts;
+      total.safetyOutcomeReceipts += current.counts.safetyOutcomeReceipts;
+      total.groupReconciliationOperations += current.counts.groupReconciliationOperations;
+      total.activityEvents += current.counts.activityEvents;
+      total.campaignRuns += current.counts.campaignRuns;
+      total.messageJobs += current.counts.messageJobs;
+      total.inboundMessages += current.counts.inboundMessages;
+      total.runtimeEvents += current.counts.runtimeEvents;
+      total.webhookEvents += current.counts.webhookEvents;
+      total.webhookReceipts += current.counts.webhookReceipts;
+      total.syncRuns += current.counts.syncRuns;
+      total.contactObservations += current.counts.contactObservations;
+      total.mediaUploads += current.counts.mediaUploads;
+      total.mediaAssets += current.counts.mediaAssets;
+      total.storagePolicy.inboundMessagesDeleted += current.policy.inboundMessagesDeleted;
+      total.storagePolicy.runtimeMessageEventsDeleted += current.policy.runtimeMessageEventsDeleted;
+      total.storagePolicy.processedWebhooksCompacted += current.policy.processedWebhooksCompacted;
+      const policyDrained = Object.values(current.policy).every(count => count < limit);
+      if (this.storagePolicyActive() && policyDrained) {
+        total.storagePolicy.phase = 'LOGICALLY_COMPACT';
+      }
+      if (Object.values(current.counts).every(count => count < limit)) {
         drained = true;
         break;
       }
     }
     if (!drained && total.batches === maxBatches) total.capacityExhausted = true;
     return total;
+  }
+
+  private storagePolicyActive(): boolean {
+    return this.config.RUNTIME_MESSAGE_STORAGE_MODE === 'disabled'
+      || this.config.RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED;
+  }
+
+  private async recordStoragePolicyProgress(
+    client: PoolClient,
+    progress: Omit<StoragePolicyProgress, 'version' | 'phase'>,
+    completed: boolean,
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO runtime_storage_policy_state
+         (singleton, policy_version, phase, inbound_messages_deleted,
+          runtime_message_events_deleted, processed_webhooks_compacted, completed_at)
+       VALUES (true, $1, $2, $3, $4, $5, CASE WHEN $6 THEN now() ELSE NULL END)
+       ON CONFLICT (singleton) DO UPDATE SET
+         policy_version = EXCLUDED.policy_version,
+         phase = EXCLUDED.phase,
+         inbound_messages_deleted = runtime_storage_policy_state.inbound_messages_deleted
+           + EXCLUDED.inbound_messages_deleted,
+         runtime_message_events_deleted = runtime_storage_policy_state.runtime_message_events_deleted
+           + EXCLUDED.runtime_message_events_deleted,
+         processed_webhooks_compacted = runtime_storage_policy_state.processed_webhooks_compacted
+           + EXCLUDED.processed_webhooks_compacted,
+         updated_at = now(),
+         completed_at = CASE WHEN $6 THEN COALESCE(
+           runtime_storage_policy_state.completed_at, now()
+         ) ELSE NULL END`,
+      [
+        Number(this.config.RUNTIME_STORAGE_POLICY_VERSION),
+        completed ? 'LOGICALLY_COMPACT' : 'DRAINING',
+        progress.inboundMessagesDeleted,
+        progress.runtimeMessageEventsDeleted,
+        progress.processedWebhooksCompacted,
+        completed,
+      ],
+    );
   }
 
   private async deleteMutationReceipts(client: PoolClient, cutoff: Date, limit: number): Promise<number> {
@@ -260,6 +344,28 @@ export class DataRetentionTick {
     ));
   }
 
+  private async deleteDisabledMessageRuntimeEvents(
+    client: PoolClient,
+    limit: number,
+  ): Promise<number> {
+    return this.count(await client.query(
+      `WITH candidates AS (
+         SELECT event_id FROM runtime_events
+         WHERE event_type = 'message.received'
+         ORDER BY created_at, event_id LIMIT $1 FOR UPDATE SKIP LOCKED
+       ), deleted_message_events AS (
+         DELETE FROM message_events event USING candidates
+         WHERE event.event_id = candidates.event_id
+       ), deleted_inbound_messages AS (
+         DELETE FROM inbound_messages message USING candidates
+         WHERE message.event_id = candidates.event_id
+       )
+       DELETE FROM runtime_events event USING candidates
+       WHERE event.event_id = candidates.event_id`,
+      [limit],
+    ));
+  }
+
   private async deleteInboundMessages(client: PoolClient, cutoff: Date, limit: number): Promise<number> {
     return this.count(await client.query(
       `WITH candidates AS (
@@ -289,6 +395,36 @@ export class DataRetentionTick {
       client,
       counted.length,
       counted.reduce((total, row) => total + Number(row.storage_bytes), 0),
+    );
+    return result.rowCount ?? 0;
+  }
+
+  private async compactProcessedWebhookEvents(
+    client: PoolClient,
+    limit: number,
+  ): Promise<number> {
+    await lockRuntimeWebhookSpoolUsage(client);
+    const result = await client.query(
+      `WITH candidates AS (
+         SELECT id, idempotency_key, delivery_id, event_type, session_id, payload_sha256,
+           received_at, processed_at, processing_error
+         FROM webhook_events
+         WHERE processing_state = 'PROCESSED'
+         ORDER BY COALESCE(processed_at, received_at), id
+         LIMIT $1 FOR UPDATE SKIP LOCKED
+       ), retained_receipts AS (
+         INSERT INTO webhook_event_receipts
+           (idempotency_key, delivery_id, event_type, session_id, payload_sha256,
+            received_at, processed_at, processing_error, expires_at)
+         SELECT idempotency_key, delivery_id, event_type, session_id, payload_sha256,
+           received_at, COALESCE(processed_at, received_at), processing_error,
+           now() + ($2::text || ' days')::interval
+         FROM candidates
+         ON CONFLICT (idempotency_key) DO NOTHING
+       )
+       DELETE FROM webhook_events event USING candidates
+       WHERE event.id = candidates.id`,
+      [limit, this.config.RUNTIME_RAW_WEBHOOK_RETENTION_DAYS],
     );
     return result.rowCount ?? 0;
   }
