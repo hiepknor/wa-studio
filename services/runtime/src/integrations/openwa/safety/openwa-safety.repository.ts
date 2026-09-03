@@ -37,6 +37,8 @@ interface ScopeRow {
   rate_mode: 'NORMAL' | 'THROTTLED';
   reason_code: string | null;
   cooldown_until: Date | null;
+  manual_blocked_at: Date | null;
+  manual_block_reason: string | null;
   policy_profile: OpenWASafetyProfile;
   policy_version: number;
   revision: string;
@@ -52,7 +54,7 @@ interface BucketRow {
 }
 
 const scopeStatus = (row: ScopeRow): OpenWASafetyScopeSnapshot['status'] => {
-  if (row.circuit_state === 'MANUAL_BLOCKED') return 'BLOCKED';
+  if (row.manual_blocked_at || row.circuit_state === 'MANUAL_BLOCKED') return 'BLOCKED';
   if (row.circuit_state === 'HALF_OPEN') return 'RECOVERY';
   if (row.circuit_state === 'OPEN' || (row.cooldown_until && row.cooldown_until > new Date())) return 'COOLDOWN';
   return row.rate_mode === 'THROTTLED' ? 'THROTTLED' : 'READY';
@@ -61,10 +63,10 @@ const scopeStatus = (row: ScopeRow): OpenWASafetyScopeSnapshot['status'] => {
 const mapScope = (row: ScopeRow): OpenWASafetyScopeSnapshot => ({
   scopeType: row.scope_type,
   effectiveScopeType: row.scope_type,
-  circuitState: row.circuit_state,
+  circuitState: row.manual_blocked_at ? 'MANUAL_BLOCKED' : row.circuit_state,
   rateMode: row.rate_mode,
   status: scopeStatus(row),
-  reason: row.reason_code,
+  reason: row.manual_blocked_at ? row.manual_block_reason ?? row.reason_code : row.reason_code,
   cooldownUntil: row.cooldown_until,
   profile: row.policy_profile,
   policyVersion: row.policy_version,
@@ -94,7 +96,9 @@ const mapEffectiveSession = (scopes: ScopeRow[]): OpenWASafetyScopeSnapshot => {
     ...mapScope(session),
     effectiveScopeType: effective.scope_type,
     status: scopeStatus(effective),
-    reason: effective.reason_code,
+    reason: effective.manual_blocked_at
+      ? effective.manual_block_reason ?? effective.reason_code
+      : effective.reason_code,
     cooldownUntil: effective.cooldown_until,
   };
 };
@@ -382,7 +386,8 @@ export class OpenWASafetyRepository {
                  OR (scopes.scope_type = 'UPSTREAM' AND scopes.upstream_id = $2 AND scopes.session_id = '')
                  OR (scopes.scope_type = 'SESSION' AND scopes.upstream_id = $2 AND scopes.session_id = $3)
                ) AND (
-                 scopes.circuit_state IN ('OPEN', 'MANUAL_BLOCKED')
+                 scopes.manual_blocked_at IS NOT NULL
+                 OR scopes.circuit_state IN ('OPEN', 'MANUAL_BLOCKED')
                  OR scopes.cooldown_until > now()
                  OR (scopes.circuit_state = 'HALF_OPEN' AND NOT EXISTS (
                    SELECT 1 FROM openwa_safety_leases recovery
@@ -675,18 +680,18 @@ export class OpenWASafetyRepository {
       if (!receipt) {
         const result = input.operationType === 'OPENWA_WORKSPACE_BLOCK'
           ? await client.query<ScopeRow>(
-            `UPDATE openwa_safety_scopes SET circuit_state = 'MANUAL_BLOCKED',
-               reason_code = $1, manual_blocked_at = now(), cooldown_until = NULL,
-               success_streak = 0, revision = revision + 1, updated_at = now()
+            `UPDATE openwa_safety_scopes SET manual_blocked_at = now(),
+               manual_block_reason = $1,
+               revision = revision + 1, updated_at = now()
              WHERE scope_type = 'WORKSPACE' AND upstream_id = '' AND session_id = ''
              RETURNING *`,
             [input.reason ?? 'MANAGED_RUNTIME_MAINTENANCE'],
           )
           : await client.query<ScopeRow>(
-            `UPDATE openwa_safety_scopes SET circuit_state = 'CLOSED', rate_mode = 'NORMAL',
-               reason_code = NULL, cooldown_until = NULL, manual_blocked_at = NULL,
-               consecutive_rate_limits = 0, consecutive_transient_failures = 0,
-               consecutive_ambiguous_outcomes = 0, success_streak = 0,
+            `UPDATE openwa_safety_scopes SET
+               circuit_state = CASE WHEN circuit_state = 'MANUAL_BLOCKED' THEN 'CLOSED' ELSE circuit_state END,
+               reason_code = CASE WHEN circuit_state = 'MANUAL_BLOCKED' THEN NULL ELSE reason_code END,
+               manual_blocked_at = NULL, manual_block_reason = NULL,
                revision = revision + 1, updated_at = now()
              WHERE scope_type = 'WORKSPACE' AND upstream_id = '' AND session_id = ''
              RETURNING *`,
@@ -705,7 +710,7 @@ export class OpenWASafetyRepository {
           subjectId,
           subjectLabelSnapshot: 'Managed Runtime workspace',
           metadata: {
-            circuitState: updated.circuit_state,
+            circuitState: mapScope(updated).circuitState,
             profile: updated.policy_profile,
             policyVersion: updated.policy_version,
             ...(input.reason ? { reason: input.reason } : {}),
@@ -752,28 +757,22 @@ export class OpenWASafetyRepository {
         let result;
         if (input.operationType === 'OPENWA_SESSION_BLOCK') {
           result = await client.query<ScopeRow>(
-            `UPDATE openwa_safety_scopes SET circuit_state = 'MANUAL_BLOCKED',
-               reason_code = $3, manual_blocked_at = now(), cooldown_until = NULL,
-               success_streak = 0, revision = revision + 1, updated_at = now()
+            `UPDATE openwa_safety_scopes SET manual_blocked_at = now(),
+               manual_block_reason = $3,
+               revision = revision + 1, updated_at = now()
              WHERE scope_type = 'SESSION' AND upstream_id = $1 AND session_id = $2
              RETURNING *`,
             [input.upstreamId, input.sessionId, input.reason ?? 'OPERATOR_BLOCKED'],
           );
         } else if (input.operationType === 'OPENWA_SESSION_RESUME') {
           result = await client.query<ScopeRow>(
-            `UPDATE openwa_safety_scopes SET circuit_state = 'CLOSED', rate_mode = 'NORMAL',
-               reason_code = NULL, cooldown_until = NULL, manual_blocked_at = NULL,
-               consecutive_rate_limits = 0, consecutive_transient_failures = 0,
-               consecutive_ambiguous_outcomes = 0, success_streak = 0,
+            `UPDATE openwa_safety_scopes SET
+               circuit_state = CASE WHEN circuit_state = 'MANUAL_BLOCKED' THEN 'CLOSED' ELSE circuit_state END,
+               reason_code = CASE WHEN circuit_state = 'MANUAL_BLOCKED' THEN NULL ELSE reason_code END,
+               manual_blocked_at = NULL, manual_block_reason = NULL,
                revision = revision + 1, updated_at = now()
              WHERE scope_type = 'SESSION' AND upstream_id = $1 AND session_id = $2
              RETURNING *`,
-            [input.upstreamId, input.sessionId],
-          );
-          await client.query(
-            `UPDATE openwa_safety_buckets SET theoretical_arrival_at = now(),
-               emission_interval_ms = base_emission_interval_ms, updated_at = now()
-             WHERE scope_type = 'SESSION' AND upstream_id = $1 AND session_id = $2`,
             [input.upstreamId, input.sessionId],
           );
         } else {
@@ -809,7 +808,7 @@ export class OpenWASafetyRepository {
           subjectId: input.sessionId,
           subjectLabelSnapshot: session.rows[0]?.name ?? input.sessionId,
           metadata: {
-            circuitState: updated.circuit_state,
+            circuitState: mapScope(updated).circuitState,
             profile: updated.policy_profile,
             policyVersion: updated.policy_version,
             ...(input.reason ? { reason: input.reason } : {}),
@@ -892,8 +891,11 @@ export class OpenWASafetyRepository {
     const now = Date.now();
     let cooldown: { notBefore: Date; reason: string } | null = null;
     for (const scope of scopes) {
-      if (scope.circuit_state === 'MANUAL_BLOCKED') {
-        return { outcome: 'BLOCKED', reason: scope.reason_code ?? 'OPERATOR_BLOCKED' };
+      if (scope.manual_blocked_at || scope.circuit_state === 'MANUAL_BLOCKED') {
+        return {
+          outcome: 'BLOCKED',
+          reason: scope.manual_block_reason ?? scope.reason_code ?? 'OPERATOR_BLOCKED',
+        };
       }
       if (scope.circuit_state === 'OPEN' && !scope.cooldown_until) {
         return { outcome: 'BLOCKED', reason: scope.reason_code ?? 'CIRCUIT_OPEN' };
@@ -1095,8 +1097,8 @@ export class OpenWASafetyRepository {
 
   private async blockSession(client: PoolClient, permit: OpenWAOperationPermit, reason: string): Promise<void> {
     await client.query(
-      `UPDATE openwa_safety_scopes SET circuit_state = 'MANUAL_BLOCKED', reason_code = $3,
-         manual_blocked_at = now(), cooldown_until = NULL, last_failure_at = now(),
+      `UPDATE openwa_safety_scopes SET manual_blocked_at = now(), manual_block_reason = $3,
+         last_failure_at = now(),
          revision = revision + 1, updated_at = now()
        WHERE scope_type = 'SESSION' AND upstream_id = $1 AND session_id = $2`,
       [permit.upstreamId, permit.sessionId, reason],
