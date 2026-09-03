@@ -27,7 +27,7 @@
     "active": true,
     "targets": "all",
     "macOS": {
-      "minimumSystemVersion": "26.0"
+      "minimumSystemVersion": "13.5"
     },
     "externalBin": [
       "binaries/wa-runtime"

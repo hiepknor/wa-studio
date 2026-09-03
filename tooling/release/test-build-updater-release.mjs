@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   releaseIndependentEnvironment,
   releasePreflightErrors,
 } from "./build-updater-release.mjs";
+
+const workspaceRoot = resolve(import.meta.dirname, "../..");
+const tauriConfig = JSON.parse(readFileSync(
+  resolve(workspaceRoot, "apps/studio/src-tauri/tauri.conf.json"),
+  "utf8",
+));
+assert.equal(
+  tauriConfig.bundle?.macOS?.minimumSystemVersion,
+  "13.5",
+  "macOS deployment target must remain compatible with the packaged Runtime sidecar",
+);
 
 const updaterSecrets = {
   WA_STUDIO_CONNECTOR_PLUGIN_URL: `https://github.com/hiepknor/wa-studio/releases/download/v1.2.3/wa-studio-connector-0.1.0.zip#sha256=${"a".repeat(64)}`,
