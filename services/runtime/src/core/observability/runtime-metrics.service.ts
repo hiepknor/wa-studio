@@ -10,6 +10,7 @@ import { runtimeConfig, type RuntimeConfig } from '../config/runtime-config';
 import { RUNTIME_CONFIG } from '../config/runtime-config.module';
 import { DatabaseService } from '../database/database.service';
 import { readRuntimeWebhookSpoolSnapshot } from '../database/runtime-webhook-spool';
+import { readRuntimeStoragePolicySnapshot } from '../database/runtime-storage-policy';
 import { QueueService } from '../queue/queue.service';
 import { RUNTIME_VERSION } from '../release/runtime-release';
 
@@ -58,6 +59,8 @@ export class RuntimeMetricsService {
   private readonly webhookSpoolLimitBytes: Gauge;
   private readonly webhookSpoolOldestActiveAge: Gauge;
   private readonly webhookSpoolAdmissionAvailable: Gauge;
+  private readonly storagePolicyState: Gauge<'phase' | 'version'>;
+  private readonly storagePolicyRowsRemoved: Gauge<'data_class'>;
   private activeScrape: Promise<string> | undefined;
 
   constructor(
@@ -187,6 +190,18 @@ export class RuntimeMetricsService {
       help: 'Whether Runtime can admit one maximum-sized webhook into its raw spool.',
       registers: [this.registry],
     });
+    this.storagePolicyState = new Gauge({
+      name: 'wa_runtime_storage_policy_state',
+      help: 'Current bounded Runtime storage policy phase.',
+      labelNames: ['phase', 'version'] as const,
+      registers: [this.registry],
+    });
+    this.storagePolicyRowsRemoved = new Gauge({
+      name: 'wa_runtime_storage_policy_rows_removed',
+      help: 'Rows removed or compacted while applying the current storage policy.',
+      labelNames: ['data_class'] as const,
+      registers: [this.registry],
+    });
 
     this.dependencyUp.set({ dependency: 'postgres' }, 0);
     this.dependencyUp.set({ dependency: 'queue' }, 0);
@@ -205,6 +220,9 @@ export class RuntimeMetricsService {
     this.webhookSpoolLimitBytes.set(config.RUNTIME_WEBHOOK_SPOOL_MAX_BYTES);
     this.webhookSpoolOldestActiveAge.set(0);
     this.webhookSpoolAdmissionAvailable.set(0);
+    for (const dataClass of ['inbound_messages', 'runtime_message_events', 'processed_webhooks']) {
+      this.storagePolicyRowsRemoved.set({ data_class: dataClass }, 0);
+    }
   }
 
   get contentType(): string {
@@ -244,13 +262,15 @@ export class RuntimeMetricsService {
   private async performScrape(): Promise<string> {
     const started = performance.now();
     this.snapshotDatabasePool();
-    const [postgres, queue, openWASafety, webhookSpool] = await Promise.all([
+    const [postgres, queue, openWASafety, webhookSpool, storagePolicy] = await Promise.all([
       this.probePostgres(),
       this.probeQueue(),
       this.snapshotOpenWASafety(),
       this.snapshotWebhookSpool(),
+      this.snapshotStoragePolicy(),
     ]);
-    const result = postgres && queue && openWASafety && webhookSpool ? 'complete' : 'degraded';
+    const result = postgres && queue && openWASafety && webhookSpool && storagePolicy
+      ? 'complete' : 'degraded';
     try {
       return await this.registry.metrics();
     } finally {
@@ -358,6 +378,34 @@ export class RuntimeMetricsService {
     } catch {
       this.webhookSpoolAdmissionAvailable.set(0);
       this.snapshotFailures.inc({ dependency: 'webhook_spool' });
+      return false;
+    }
+  }
+
+  private async snapshotStoragePolicy(): Promise<boolean> {
+    try {
+      const snapshot = await readRuntimeStoragePolicySnapshot(this.database, this.config);
+      this.storagePolicyState.reset();
+      this.storagePolicyState.set({
+        phase: snapshot.phase.toLowerCase(),
+        version: String(snapshot.version),
+      }, 1);
+      this.storagePolicyRowsRemoved.set(
+        { data_class: 'inbound_messages' },
+        snapshot.inboundMessagesDeleted,
+      );
+      this.storagePolicyRowsRemoved.set(
+        { data_class: 'runtime_message_events' },
+        snapshot.runtimeMessageEventsDeleted,
+      );
+      this.storagePolicyRowsRemoved.set(
+        { data_class: 'processed_webhooks' },
+        snapshot.processedWebhooksCompacted,
+      );
+      return true;
+    } catch {
+      this.storagePolicyState.reset();
+      this.snapshotFailures.inc({ dependency: 'storage_policy' });
       return false;
     }
   }

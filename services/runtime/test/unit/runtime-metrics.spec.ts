@@ -16,6 +16,9 @@ const config = (token?: string): RuntimeConfig => ({
   QUEUE_BACKEND: 'redis',
   RUNTIME_METRICS_TOKEN: token,
   RUNTIME_PROFILE: 'server',
+  RUNTIME_STORAGE_POLICY_VERSION: '1',
+  RUNTIME_MESSAGE_STORAGE_MODE: 'full',
+  RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: false,
   RUNTIME_HTTP_BODY_MAX_BYTES: 1_048_576,
   RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS: 100_000,
   RUNTIME_WEBHOOK_SPOOL_MAX_BYTES: 1_073_741_824,
@@ -72,7 +75,9 @@ describe('Runtime metrics cardinality and collection', () => {
             stored_events: '3', stored_bytes: '4096', dead_events: '1',
             oldest_active_age_seconds: '12.4',
           }],
-        } : { rows: [{ '?column?': 1 }] })),
+        } : sql.includes('runtime_storage_policy_state')
+          ? { rows: [] }
+          : { rows: [{ '?column?': 1 }] })),
     };
     const queues = {
       readiness: vi.fn().mockResolvedValue({ backend: 'redis', ready: true }),
@@ -117,6 +122,7 @@ describe('Runtime metrics cardinality and collection', () => {
     expect(output).toContain('wa_runtime_webhook_spool_events{state="dead"} 1');
     expect(output).toContain('wa_runtime_webhook_spool_storage_bytes 4096');
     expect(output).toContain('wa_runtime_webhook_spool_admission_available 1');
+    expect(output).toContain('wa_runtime_storage_policy_state{phase="not_applicable",version="1"} 1');
     expect(output).not.toContain('metrics-token-with-at-least-32-characters');
   });
 
@@ -143,7 +149,7 @@ describe('Runtime metrics cardinality and collection', () => {
     const [firstOutput, secondOutput] = await Promise.all([first, second]);
 
     expect(firstOutput).toBe(secondOutput);
-    expect(database.query).toHaveBeenCalledTimes(5);
+    expect(database.query).toHaveBeenCalledTimes(6);
     expect(queues.readiness).toHaveBeenCalledTimes(1);
     expect(queues.runtimeProcessHealth).not.toHaveBeenCalled();
     expect(firstOutput).toContain('wa_runtime_dependency_up{dependency="queue"} 0');
