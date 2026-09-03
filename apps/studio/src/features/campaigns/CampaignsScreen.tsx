@@ -421,10 +421,12 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const [runMutation, setRunMutation] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [liveLaunchConfirmationOpen, setLiveLaunchConfirmationOpen] = useState(false);
+  const [liveLaunchAcknowledgement, setLiveLaunchAcknowledgement] = useState("");
   const [deleteIntent, setDeleteIntent] = useState<RuntimeCampaign | null>(null);
   const [deletingCampaign, setDeletingCampaign] = useState(false);
   const [campaignDeleteError, setCampaignDeleteError] = useState<string | null>(null);
   const createIntentRef = useRef<CampaignCreateIntent | null>(null);
+  const liveLaunchAcknowledgementRef = useRef<HTMLInputElement>(null);
   const launchKeyRef = useRef<{ key: string; mode: RuntimeCampaignExecutionMode } | null>(null);
   const runActionKeyRef = useRef<{
     action: "pause" | "resume" | "cancel";
@@ -630,6 +632,10 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
     if (listState.sessionId !== selectedSessionId || !listState.sessionId) return;
     void loadCampaigns(listStateRef.current);
   }, [currentListRequestKey, listState.sessionId, loadCampaigns, selectedSessionId]);
+
+  useEffect(() => {
+    if (!liveLaunchConfirmationOpen) setLiveLaunchAcknowledgement("");
+  }, [liveLaunchConfirmationOpen]);
 
   useEffect(() => {
     if (observedCampaignsRevisionRef.current === campaignsResourceRevision) return;
@@ -1974,7 +1980,7 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
   const reviewPrimaryAction = canLaunchReviewedRun && preflight ? (
     preflight.executionMode === "DRY_RUN"
       ? <Button disabled={campaignMutationBusy || preflightLoading} loading={runMutation === "launch:DRY_RUN"} onClick={() => void launchRun("DRY_RUN")} variant="primary">Create dry run</Button>
-      : <Button disabled={campaignMutationBusy || preflightLoading} loading={runMutation === "launch:LIVE"} onClick={() => { setRunError(null); setLiveLaunchConfirmationOpen(true); }} variant="primary">Launch live campaign</Button>
+      : <Button disabled={campaignMutationBusy || preflightLoading} loading={runMutation === "launch:LIVE"} onClick={() => { setRunError(null); setLiveLaunchAcknowledgement(""); setLiveLaunchConfirmationOpen(true); }} variant="primary">Launch live campaign</Button>
   ) : (
     <Button disabled={!campaign || detailsDirty || targetsDirty || revisionRefreshRequired || campaignMutationBusy || preflightLoading} loading={preflightLoading} onClick={() => void runPreflight(preflightMode)} variant="primary">{reportStale || preflight ? "Run preflight again" : "Run preflight"}</Button>
   );
@@ -2305,13 +2311,44 @@ export function CampaignsScreen({ onOpenRun }: { onOpenRun?: (runId: string) => 
         title="Discard campaign changes?"
       />
       <ConfirmationDialog
-        body="Create the single LIVE run for these reviewed campaign and target revisions? Runtime may begin or schedule real message delivery, and the campaign will become read-only."
+        body={campaign && preflight ? (
+          <div className="campaign-live-confirmation">
+            <p>Runtime may begin or schedule real message delivery as soon as this run is created. The campaign will become read-only.</p>
+            <dl className="campaign-live-confirmation-summary">
+              <div><dt>Campaign</dt><dd title={campaign.name}>{campaign.name}</dd></div>
+              <div><dt>Session</dt><dd title={campaign.sessionId}>{campaign.sessionId}</dd></div>
+              <div><dt>Audience</dt><dd>{preflight.totalTargets.toLocaleString()} {preflight.totalTargets === 1 ? "group" : "groups"}</dd></div>
+              {preflight.safetyForecast && (
+                <div>
+                  <dt>Admission</dt>
+                  <dd>
+                    {statusLabel(preflight.safetyForecast.status)}
+                    {preflight.safetyForecast.estimatedFirstAdmissionAt
+                      ? <> · first <DateTime value={preflight.safetyForecast.estimatedFirstAdmissionAt} /></>
+                      : ""}
+                  </dd>
+                </div>
+              )}
+            </dl>
+            <TextField
+              autoComplete="off"
+              disabled={runMutation === "launch:LIVE"}
+              label={<>Type <strong>{campaign.name}</strong> to confirm</>}
+              onChange={(event) => setLiveLaunchAcknowledgement(event.currentTarget.value)}
+              ref={liveLaunchAcknowledgementRef}
+              spellCheck={false}
+              value={liveLaunchAcknowledgement}
+            />
+          </div>
+        ) : "Run a current LIVE preflight before confirming this launch."}
         busy={runMutation === "launch:LIVE"}
         busyLabel="Launching…"
         cancelLabel="Keep reviewing"
+        confirmDisabled={liveLaunchAcknowledgement !== campaign?.name}
         confirmLabel="Launch live campaign"
         error={runError}
         errorTitle="Could not launch campaign"
+        initialFocusRef={liveLaunchAcknowledgementRef}
         onCancel={() => setLiveLaunchConfirmationOpen(false)}
         onConfirm={() => void launchRun("LIVE")}
         open={liveLaunchConfirmationOpen}

@@ -46,6 +46,40 @@
 .campaign-review-gate[data-tone="success"] .campaign-review-gate-icon { color: var(--state-success); }
 .campaign-review-gate[data-tone="warning"] .campaign-review-gate-icon { color: var(--state-warning); }
 .campaign-review-gate[data-tone="danger"] .campaign-review-gate-icon { color: var(--state-danger); }
+
+.campaign-live-confirmation { display: grid; gap: var(--space-4); }
+.campaign-live-confirmation > p { margin: 0; }
+.campaign-live-confirmation-summary {
+  display: grid;
+  margin: 0;
+  overflow: hidden;
+  border: var(--border-width) solid var(--divider);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+}
+.campaign-live-confirmation-summary > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(84px, .65fr) minmax(0, 1.35fr);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+.campaign-live-confirmation-summary > div + div { border-top: var(--border-width) solid var(--divider); }
+.campaign-live-confirmation-summary dt {
+  color: var(--text-tertiary);
+  font-size: var(--text-supporting-size);
+}
+.campaign-live-confirmation-summary dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-supporting-size);
+  font-weight: var(--weight-medium);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .campaign-content-identity-grid { min-width: 0; display: grid; grid-template-columns: minmax(0, 2fr) minmax(210px, 1fr); gap: var(--space-4); }
 .campaign-form-section-heading {
   display: flex;
