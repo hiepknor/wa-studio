@@ -20,6 +20,70 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'wa_runtime_webhook_spool_events{job="wa-runtime",state="dead"}'
+        values: '0 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: WARuntimeWebhookDeadEvents
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: WA Runtime contains unreconciled dead webhooks
+              description: At least one authenticated webhook exhausted processing retries; stop promotion and reconcile the retained envelope before resuming unattended operation.
+
+  - interval: 1m
+    input_series:
+      - series: 'wa_runtime_webhook_spool_admission_available{job="wa-runtime"}'
+        values: '1 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: WARuntimeWebhookSpoolAdmissionUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: wa-runtime
+              severity: critical
+            exp_annotations:
+              summary: WA Runtime webhook spool cannot safely admit a callback
+              description: The Runtime cannot reserve capacity for one maximum-sized webhook; restore headroom without deleting unresolved evidence.
+
+  - interval: 1m
+    input_series:
+      - series: 'wa_runtime_webhook_spool_events{job="wa-runtime",state="stored"}'
+        values: '81x12'
+      - series: 'wa_runtime_webhook_spool_limit_events{job="wa-runtime"}'
+        values: '100x12'
+      - series: 'wa_runtime_webhook_spool_storage_bytes{job="wa-runtime"}'
+        values: '10x12'
+      - series: 'wa_runtime_webhook_spool_limit_bytes{job="wa-runtime"}'
+        values: '100x12'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: WARuntimeWebhookSpoolCapacityHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: WA Runtime webhook spool capacity is high
+              description: Event or byte utilization has exceeded 80 percent for ten minutes; diagnose stalled or dead work before admission is lost.
+
+  - interval: 1m
+    input_series:
+      - series: 'wa_runtime_webhook_spool_oldest_active_age_seconds{job="wa-runtime"}'
+        values: '601x7'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: WARuntimeWebhookProcessingStalled
+        exp_alerts:
+          - exp_labels:
+              job: wa-runtime
+              severity: warning
+            exp_annotations:
+              summary: WA Runtime webhook processing is stalled
+              description: The oldest pending or processing webhook has exceeded ten minutes; inspect scheduler recovery and processing leases.
+
+  - interval: 1m
+    input_series:
       - series: 'wa_runtime_openwa_safety_scopes{job="wa-runtime",circuit_state="OPEN",rate_mode="NORMAL"}'
         values: '1 1 1'
     alert_rule_test:

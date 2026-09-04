@@ -205,13 +205,20 @@ image per Runtime process. OpenWA 409 and 429 responses are the only image-send 
 automatically, up to `MESSAGE_SAFE_RETRY_MAX_ATTEMPTS`. Timeouts, malformed success responses, and
 5xx responses remain `UNKNOWN` after the request starts because retrying could duplicate a send.
 
-Terminal operational rows are retained for `RUNTIME_RETENTION_DAYS` (90 days by default), the
+Resolved terminal operational rows are retained for `RUNTIME_RETENTION_DAYS` (90 days by default), the
 sanitized Activity ledger for `RUNTIME_ACTIVITY_RETENTION_DAYS` (90 days), normalized events for
 `RUNTIME_EVENT_RETENTION_DAYS` (30 days), inbox message bodies for
 `RUNTIME_INBOX_RETENTION_DAYS` (equal to event retention when omitted; 7 days in the staging
 template), and raw webhook envelopes for `RUNTIME_RAW_WEBHOOK_RETENTION_DAYS` (7 days). The event
 retention is the effective webhook idempotency window. Backups remain governed by their own
 retention policy.
+
+`UNKNOWN` Message Jobs, Campaign Run graphs containing unknown delivery evidence, and `DEAD`
+webhooks do not expire through routine retention. They remain visible until authenticated evidence
+resolves them or a separately reviewed recovery migration performs an explicit reconciliation.
+Processed webhooks release active spool quota immediately even when their diagnostic payload remains
+stored until raw-webhook retention. Never delete unresolved rows merely to clear an alert or recover
+quota; follow [ADR 023](adr/023-unresolved-delivery-evidence-retention.md).
 
 Mutation receipts use the operational retention window and are deleted before the terminal object
 they can replay. Historical group-reconciliation operation rows use the same cutoff: the current

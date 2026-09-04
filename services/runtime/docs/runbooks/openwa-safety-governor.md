@@ -51,6 +51,10 @@ wa_runtime_openwa_safety_scopes{circuit_state,rate_mode}
 wa_runtime_openwa_safety_leases{lane}
 wa_runtime_openwa_safety_deferred_message_jobs
 wa_runtime_openwa_unknown_message_jobs
+wa_runtime_openwa_oldest_unknown_message_job_age_seconds
+wa_runtime_webhook_spool_events{state="dead"}
+wa_runtime_webhook_spool_oldest_dead_age_seconds
+wa_runtime_webhook_spool_admission_available
 wa_runtime_metrics_snapshot_failures_total{dependency="openwa_safety"}
 ```
 
@@ -92,7 +96,8 @@ Runtime never promotes a session automatically.
   `UNKNOWN`; authenticated connector `SEND_ACCEPTED` evidence must bind the exact attempt, command,
   payload digest and OpenWA message ID, while acknowledgements may resolve it to
   sent/delivered/read/failed.
-- If no definitive evidence arrives, retain `UNKNOWN` and include it in the no-go record.
+- If no definitive evidence arrives, retain `UNKNOWN` and include it in the no-go record. Routine
+  retention intentionally cannot erase it; database deletion is not reconciliation.
 
 ### `MANUAL_BLOCKED` or session restriction
 

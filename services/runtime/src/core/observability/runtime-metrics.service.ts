@@ -53,11 +53,13 @@ export class RuntimeMetricsService {
   private readonly openWASafetyLeases: Gauge<'lane'>;
   private readonly openWADeferredJobs: Gauge;
   private readonly openWAUnknownJobs: Gauge;
+  private readonly openWAOldestUnknownJobAge: Gauge;
   private readonly webhookSpoolEvents: Gauge<'state'>;
   private readonly webhookSpoolBytes: Gauge;
   private readonly webhookSpoolLimitEvents: Gauge;
   private readonly webhookSpoolLimitBytes: Gauge;
   private readonly webhookSpoolOldestActiveAge: Gauge;
+  private readonly webhookSpoolOldestDeadAge: Gauge;
   private readonly webhookSpoolAdmissionAvailable: Gauge;
   private readonly storagePolicyState: Gauge<'phase' | 'version'>;
   private readonly storagePolicyRowsRemoved: Gauge<'data_class'>;
@@ -159,6 +161,11 @@ export class RuntimeMetricsService {
       help: 'Message jobs with an ambiguous post-dispatch outcome.',
       registers: [this.registry],
     });
+    this.openWAOldestUnknownJobAge = new Gauge({
+      name: 'wa_runtime_openwa_oldest_unknown_message_job_age_seconds',
+      help: 'Age of the oldest unresolved ambiguous outbound Message Job.',
+      registers: [this.registry],
+    });
     this.webhookSpoolEvents = new Gauge({
       name: 'wa_runtime_webhook_spool_events',
       help: 'Current raw Runtime webhook spool events by bounded state.',
@@ -183,6 +190,11 @@ export class RuntimeMetricsService {
     this.webhookSpoolOldestActiveAge = new Gauge({
       name: 'wa_runtime_webhook_spool_oldest_active_age_seconds',
       help: 'Age of the oldest pending or processing Runtime webhook.',
+      registers: [this.registry],
+    });
+    this.webhookSpoolOldestDeadAge = new Gauge({
+      name: 'wa_runtime_webhook_spool_oldest_dead_age_seconds',
+      help: 'Age of the oldest unresolved dead Runtime webhook.',
       registers: [this.registry],
     });
     this.webhookSpoolAdmissionAvailable = new Gauge({
@@ -212,6 +224,7 @@ export class RuntimeMetricsService {
     this.databasePoolWaitingRequests.set(0);
     this.openWADeferredJobs.set(0);
     this.openWAUnknownJobs.set(0);
+    this.openWAOldestUnknownJobAge.set(0);
     for (const state of ['active', 'dead', 'stored']) {
       this.webhookSpoolEvents.set({ state }, 0);
     }
@@ -219,6 +232,7 @@ export class RuntimeMetricsService {
     this.webhookSpoolLimitEvents.set(config.RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS);
     this.webhookSpoolLimitBytes.set(config.RUNTIME_WEBHOOK_SPOOL_MAX_BYTES);
     this.webhookSpoolOldestActiveAge.set(0);
+    this.webhookSpoolOldestDeadAge.set(0);
     this.webhookSpoolAdmissionAvailable.set(0);
     for (const dataClass of ['inbound_messages', 'runtime_message_events', 'processed_webhooks']) {
       this.storagePolicyRowsRemoved.set({ data_class: dataClass }, 0);
@@ -339,12 +353,18 @@ export class RuntimeMetricsService {
         `SELECT lane, count(*)::text AS count FROM openwa_safety_leases
          WHERE lease_expires_at > now() GROUP BY lane`,
       );
-      const jobs = await this.database.query<{ deferred: string; unknown: string }>(
+      const jobs = await this.database.query<{
+        deferred: string;
+        unknown: string;
+        oldest_unknown_age_seconds: string | null;
+      }>(
         `SELECT
            count(*) FILTER (WHERE status = 'SCHEDULED'
              AND last_error LIKE ANY(ARRAY['Safety deferred:%','Safety blocked:%',
                'Final send fence rejected%']))::text AS deferred,
-           count(*) FILTER (WHERE status = 'UNKNOWN')::text AS unknown
+           count(*) FILTER (WHERE status = 'UNKNOWN')::text AS unknown,
+           EXTRACT(EPOCH FROM now() - min(updated_at)
+             FILTER (WHERE status = 'UNKNOWN'))::text AS oldest_unknown_age_seconds
          FROM message_jobs`,
       );
       this.openWASafetyScopes.reset();
@@ -358,6 +378,11 @@ export class RuntimeMetricsService {
       for (const lease of leases.rows) this.openWASafetyLeases.set({ lane: lease.lane }, Number(lease.count));
       this.openWADeferredJobs.set(Number(jobs.rows[0]?.deferred ?? 0));
       this.openWAUnknownJobs.set(Number(jobs.rows[0]?.unknown ?? 0));
+      this.openWAOldestUnknownJobAge.set(
+        jobs.rows[0]?.oldest_unknown_age_seconds === null
+          ? 0
+          : Math.max(0, Number(jobs.rows[0]?.oldest_unknown_age_seconds ?? 0)),
+      );
       return true;
     } catch {
       this.snapshotFailures.inc({ dependency: 'openwa_safety' });
@@ -373,6 +398,7 @@ export class RuntimeMetricsService {
       this.webhookSpoolEvents.set({ state: 'dead' }, snapshot.deadEvents);
       this.webhookSpoolBytes.set(snapshot.storedBytes);
       this.webhookSpoolOldestActiveAge.set(snapshot.oldestActiveAgeSeconds ?? 0);
+      this.webhookSpoolOldestDeadAge.set(snapshot.oldestDeadAgeSeconds ?? 0);
       this.webhookSpoolAdmissionAvailable.set(snapshot.admissionAvailable ? 1 : 0);
       return true;
     } catch {

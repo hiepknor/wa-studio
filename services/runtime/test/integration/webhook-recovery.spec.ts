@@ -204,6 +204,40 @@ describe('durable webhook processing', () => {
     expect(await limited.insert(second)).toBe(true);
   });
 
+  it('releases active spool quota when processed payload retention is enabled', async () => {
+    const retainedPayloadConfig = {
+      ...runtimeConfig(),
+      RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: false,
+      RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS: 1,
+      RUNTIME_WEBHOOK_SPOOL_MAX_BYTES: 1_048_576,
+    };
+    const retainedPayloads = new WebhookRepository(database, retainedPayloadConfig);
+    const first: OpenWAWebhookEnvelope = {
+      event: 'session.status', timestamp: '2026-08-11T00:00:00.000Z',
+      sessionId: INTEGRATION_SESSION_ID, idempotencyKey: 'retained-quota-event-1',
+      deliveryId: 'retained-quota-delivery-1', data: { status: 'ready' },
+    };
+    const second: OpenWAWebhookEnvelope = {
+      ...first,
+      idempotencyKey: 'retained-quota-event-2',
+      deliveryId: 'retained-quota-delivery-2',
+    };
+
+    expect(await retainedPayloads.insert(first)).toBe(true);
+    const claim = await retainedPayloads.claimForProcessing(first.idempotencyKey);
+    expect(claim).not.toBeNull();
+    expect(await retainedPayloads.markProcessed(first.idempotencyKey, claim!.leaseToken)).toBe(true);
+    expect((await pool.query(
+      `SELECT stored_events::text, stored_bytes::text FROM runtime_webhook_spool_usage`,
+    )).rows).toEqual([{ stored_events: '0', stored_bytes: '0' }]);
+    expect((await pool.query<{ processing_state: string; has_payload: boolean }>(
+      `SELECT processing_state, payload <> '{}'::jsonb AS has_payload
+       FROM webhook_events WHERE idempotency_key = $1`,
+      [first.idempotencyKey],
+    )).rows).toEqual([{ processing_state: 'PROCESSED', has_payload: true }]);
+    expect(await retainedPayloads.insert(second)).toBe(true);
+  });
+
   it('projects an OpenWA message status only inside the owning session', async () => {
     const otherSessionId = '00000000-0000-4000-8000-000000000099';
     const openwaMessageId = 'shared-openwa-message';

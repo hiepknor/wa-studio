@@ -57,7 +57,6 @@ export class WebhookRepository {
     const payloadSha256 = envelopeHash(envelope);
     const storageBytes = Buffer.byteLength(payload, 'utf8');
     return this.database.transaction(async client => {
-      const usage = await lockRuntimeWebhookSpoolUsage(client);
       await this.lockIdempotencyKey(client, envelope.idempotencyKey);
       const receipt = await client.query(
         `SELECT 1 FROM webhook_event_receipts WHERE idempotency_key = $1`,
@@ -69,6 +68,7 @@ export class WebhookRepository {
         [envelope.idempotencyKey],
       );
       if (existing.rowCount) return false;
+      const usage = await lockRuntimeWebhookSpoolUsage(client);
       if (!runtimeWebhookSpoolAdmission(usage, this.config, storageBytes)) {
         throw new WebhookSpoolCapacityError();
       }
@@ -152,9 +152,6 @@ export class WebhookRepository {
   }
 
   async lockProcessingLease(client: PoolClient, idempotencyKey: string, leaseToken: string): Promise<boolean> {
-    if (this.config.RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED) {
-      await lockRuntimeWebhookSpoolUsage(client);
-    }
     await this.lockIdempotencyKey(client, idempotencyKey);
     const result = await client.query(
       `SELECT 1 FROM webhook_events
@@ -172,6 +169,10 @@ export class WebhookRepository {
     leaseToken: string,
     error?: string,
   ): Promise<boolean> {
+    // The idempotency lock is already held by lockProcessingLease. Take the
+    // global usage row only for the terminal write so unrelated projections
+    // do not serialize for their full transaction.
+    await lockRuntimeWebhookSpoolUsage(client);
     if (this.config.RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED) {
       const result = await client.query<{
         delivery_id: string | null;
@@ -210,7 +211,7 @@ export class WebhookRepository {
       await decrementRuntimeWebhookSpoolUsage(client, 1, Number(processed.storage_bytes));
       return true;
     }
-    const result = await client.query(
+    const result = await client.query<{ storage_bytes: string }>(
       `UPDATE webhook_events
        SET processing_state = 'PROCESSED', processed_at = now(), processing_error = $2,
          lease_token = NULL, lease_expires_at = NULL,
@@ -223,11 +224,15 @@ export class WebhookRepository {
              'data', '{}'::jsonb
            ) ELSE payload END
        WHERE idempotency_key = $1 AND processing_state = 'PROCESSING' AND lease_token = $3
-         AND lease_expires_at > now()`,
+         AND lease_expires_at > now()
+       RETURNING storage_bytes::text`,
       [idempotencyKey, error ?? null, leaseToken,
         this.config.RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED],
     );
-    return result.rowCount === 1;
+    const processed = result.rows[0];
+    if (!processed) return false;
+    await decrementRuntimeWebhookSpoolUsage(client, 1, Number(processed.storage_bytes));
+    return true;
   }
 
   async markFailed(idempotencyKey: string, leaseToken: string, error: string): Promise<WebhookAttemptResult> {

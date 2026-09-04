@@ -16,6 +16,7 @@ export interface RuntimeWebhookSpoolSnapshot extends RuntimeWebhookSpoolUsage {
   activeEvents: number;
   deadEvents: number;
   oldestActiveAgeSeconds: number | null;
+  oldestDeadAgeSeconds: number | null;
   utilization: number;
   admissionAvailable: boolean;
 }
@@ -86,11 +87,14 @@ export async function readRuntimeWebhookSpoolSnapshot(
     stored_bytes: string;
     dead_events: string;
     oldest_active_age_seconds: string | null;
+    oldest_dead_age_seconds: string | null;
   }>(
     `SELECT usage.stored_events::text, usage.stored_bytes::text,
        (SELECT count(*)::text FROM webhook_events
         WHERE processing_state = 'DEAD') AS dead_events,
-       EXTRACT(EPOCH FROM now() - active.oldest_received_at)::text AS oldest_active_age_seconds
+       EXTRACT(EPOCH FROM now() - active.oldest_received_at)::text AS oldest_active_age_seconds,
+       (SELECT EXTRACT(EPOCH FROM now() - min(COALESCE(dead_at, received_at)))::text
+        FROM webhook_events WHERE processing_state = 'DEAD') AS oldest_dead_age_seconds
      FROM runtime_webhook_spool_usage usage
      CROSS JOIN LATERAL (
        SELECT min(received_at) AS oldest_received_at FROM (
@@ -117,6 +121,8 @@ export async function readRuntimeWebhookSpoolSnapshot(
     deadEvents,
     oldestActiveAgeSeconds: row.oldest_active_age_seconds === null
       ? null : Math.max(0, Math.round(Number(row.oldest_active_age_seconds))),
+    oldestDeadAgeSeconds: row.oldest_dead_age_seconds === null
+      ? null : Math.max(0, Math.round(Number(row.oldest_dead_age_seconds))),
     utilization: Math.max(
       storedEvents / config.RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS,
       storedBytes / config.RUNTIME_WEBHOOK_SPOOL_MAX_BYTES,

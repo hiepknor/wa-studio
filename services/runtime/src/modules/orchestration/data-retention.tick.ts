@@ -3,10 +3,6 @@ import type { PoolClient, QueryResult } from 'pg';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { DatabaseService } from '../../core/database/database.service';
-import {
-  decrementRuntimeWebhookSpoolUsage,
-  lockRuntimeWebhookSpoolUsage,
-} from '../../core/database/runtime-webhook-spool';
 
 export interface RetentionResult {
   mutationReceipts: number;
@@ -308,6 +304,12 @@ export class DataRetentionTick {
       `WITH candidates AS (
          SELECT id FROM campaign_runs
          WHERE status IN ('COMPLETED','PARTIAL_FAILED','CANCELLED','FAILED') AND updated_at < $1
+           AND NOT EXISTS (
+             SELECT 1 FROM campaign_deliveries delivery
+             LEFT JOIN message_jobs job ON job.id = delivery.message_job_id
+             WHERE delivery.run_id = campaign_runs.id
+               AND (delivery.status = 'UNKNOWN' OR job.status = 'UNKNOWN')
+           )
          ORDER BY updated_at, id LIMIT $2 FOR UPDATE SKIP LOCKED
        )
        DELETE FROM campaign_runs cr USING candidates c WHERE cr.id = c.id`,
@@ -319,7 +321,7 @@ export class DataRetentionTick {
     return this.count(await client.query(
       `WITH candidates AS (
          SELECT mj.id FROM message_jobs mj
-         WHERE mj.status IN ('ACCEPTED','SENT','DELIVERED','READ','FAILED','UNKNOWN','DRY_RUN_COMPLETED','CANCELLED')
+         WHERE mj.status IN ('ACCEPTED','SENT','DELIVERED','READ','FAILED','DRY_RUN_COMPLETED','CANCELLED')
            AND mj.updated_at < $1
            AND NOT EXISTS (SELECT 1 FROM campaign_deliveries cd WHERE cd.message_job_id = mj.id)
          ORDER BY mj.updated_at, mj.id LIMIT $2 FOR UPDATE OF mj SKIP LOCKED
@@ -379,31 +381,21 @@ export class DataRetentionTick {
   }
 
   private async deleteWebhookEvents(client: PoolClient, cutoff: Date, limit: number): Promise<number> {
-    await lockRuntimeWebhookSpoolUsage(client);
-    const result = await client.query<{ processing_state: string; storage_bytes: string }>(
+    return this.count(await client.query(
       `WITH candidates AS (
          SELECT id FROM webhook_events
-         WHERE processing_state IN ('PROCESSED','DEAD') AND COALESCE(processed_at, received_at) < $1
+         WHERE processing_state = 'PROCESSED' AND COALESCE(processed_at, received_at) < $1
          ORDER BY COALESCE(processed_at, received_at), id LIMIT $2 FOR UPDATE SKIP LOCKED
        )
-       DELETE FROM webhook_events we USING candidates c WHERE we.id = c.id
-       RETURNING we.processing_state, we.storage_bytes::text`,
+       DELETE FROM webhook_events we USING candidates c WHERE we.id = c.id`,
       [cutoff, limit],
-    );
-    const counted = result.rows.filter(row => row.processing_state !== 'PROCESSED');
-    await decrementRuntimeWebhookSpoolUsage(
-      client,
-      counted.length,
-      counted.reduce((total, row) => total + Number(row.storage_bytes), 0),
-    );
-    return result.rowCount ?? 0;
+    ));
   }
 
   private async compactProcessedWebhookEvents(
     client: PoolClient,
     limit: number,
   ): Promise<number> {
-    await lockRuntimeWebhookSpoolUsage(client);
     const result = await client.query(
       `WITH candidates AS (
          SELECT id, idempotency_key, delivery_id, event_type, session_id, payload_sha256,
