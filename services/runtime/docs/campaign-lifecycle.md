@@ -196,7 +196,8 @@ PENDING/MATERIALIZED -> CANCELLED
 or `READ`, or record a definitive failure while the message is still only accepted. The campaign is considered dispatch-complete once no delivery remains in `PENDING`,
 `MATERIALIZED` or `PROCESSING`. Any failed, unknown, capability-blocked or cancelled delivery makes
 the final run `PARTIAL_FAILED`; otherwise it becomes `COMPLETED`. If later authoritative evidence
-changes an accepted delivery to failed, or resolves an unknown delivery to sent, reconciliation
+changes an accepted delivery to failed, or resolves an unknown delivery with attempt-bound accepted
+or acknowledgement evidence, reconciliation
 updates `COMPLETED`/`PARTIAL_FAILED` to match the current durable delivery aggregate and records an
 audit event. The evidence transition is monotonic even though the aggregate label may be corrected.
 It never resends the message or rewrites the underlying delivery history.

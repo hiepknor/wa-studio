@@ -60,13 +60,21 @@ export class CampaignDeliveryRepository {
            WHEN 'CANCELLED' THEN 'CANCELLED'::campaign_delivery_status
            ELSE cd.status
          END,
-         failure_reason = CASE WHEN mj.status IN ('FAILED','UNKNOWN') THEN mj.last_error ELSE cd.failure_reason END,
+         failure_reason = CASE
+           WHEN mj.status IN ('FAILED','UNKNOWN') THEN mj.last_error
+           WHEN mj.status = 'CANCELLED' THEN cd.failure_reason
+           ELSE NULL
+         END,
          updated_at = now()
        FROM message_jobs mj
        WHERE cd.message_job_id = mj.id
          AND mj.status IN ('PROCESSING','DRY_RUN_COMPLETED','ACCEPTED','SENT','DELIVERED','READ','FAILED','UNKNOWN','CANCELLED')
          AND (cd.status::text IS DISTINCT FROM mj.status::text
-           OR (mj.status IN ('FAILED','UNKNOWN') AND cd.failure_reason IS DISTINCT FROM mj.last_error))`,
+           OR cd.failure_reason IS DISTINCT FROM CASE
+             WHEN mj.status IN ('FAILED','UNKNOWN') THEN mj.last_error
+             WHEN mj.status = 'CANCELLED' THEN cd.failure_reason
+             ELSE NULL
+           END)`,
     );
     return result.rowCount ?? 0;
   }

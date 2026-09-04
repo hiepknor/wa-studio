@@ -89,7 +89,9 @@ Runtime never promotes a session automatically.
 - Immediately pause the Campaign Run or block the session if further sends could compound impact.
 - Never clone, requeue, or manually retry the Message Job. The upstream effect may already exist.
 - Reconcile later webhook/message-status evidence. Only the normal projection path may resolve
-  `UNKNOWN` to a definitive sent/delivered/read/failed state.
+  `UNKNOWN`; authenticated connector `SEND_ACCEPTED` evidence must bind the exact attempt, command,
+  payload digest and OpenWA message ID, while acknowledgements may resolve it to
+  sent/delivered/read/failed.
 - If no definitive evidence arrives, retain `UNKNOWN` and include it in the no-go record.
 
 ### `MANUAL_BLOCKED` or session restriction
