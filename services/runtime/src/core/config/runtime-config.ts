@@ -91,6 +91,8 @@ const schema = z
       .min(0.5).max(1).default(0.75),
     OPENWA_CONNECTOR_PLUGIN_ID: z.string().trim().min(1).max(128)
       .regex(/^[A-Za-z0-9._-]+$/u).default('wa-studio-connector'),
+    OPENWA_CONNECTOR_ID: z.uuid().optional(),
+    OPENWA_CONNECTOR_PLUGIN_VERSION: z.string().trim().min(1).max(128).optional(),
     OPENWA_CONNECTOR_INSTANCE_ID: z.string().trim().min(1).max(128)
       .regex(/^[A-Za-z0-9._-]+$/u).optional(),
     OPENWA_CONNECTOR_INGRESS_SECRET: z.string().min(32).max(4096).optional(),
@@ -283,11 +285,23 @@ const schema = z
         message: 'Requiring connector health for live sends requires Event Inbox configuration',
       });
     }
-    if (value.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS
-      && (!value.OPENWA_CONNECTOR_INSTANCE_ID || !value.OPENWA_CONNECTOR_INGRESS_SECRET)) {
+    const connectorIdentity = [
+      value.OPENWA_CONNECTOR_ID,
+      value.OPENWA_CONNECTOR_PLUGIN_VERSION,
+      value.OPENWA_CONNECTOR_INSTANCE_ID,
+      value.OPENWA_CONNECTOR_INGRESS_SECRET,
+    ];
+    if (connectorIdentity.some(Boolean) && !connectorIdentity.every(Boolean)) {
       context.addIssue({
-        code: 'custom', path: ['OPENWA_CONNECTOR_INSTANCE_ID'],
-        message: 'Connector-required live sends require an OpenWA connector instance and ingress secret',
+        code: 'custom', path: ['OPENWA_CONNECTOR_ID'],
+        message: 'Connector ID, plugin version, instance and ingress secret must be configured together',
+      });
+    }
+    if (value.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS
+      && !connectorIdentity.every(Boolean)) {
+      context.addIssue({
+        code: 'custom', path: ['OPENWA_CONNECTOR_ID'],
+        message: 'Connector-required live sends require the provisioned OpenWA connector identity',
       });
     }
     if (value.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS

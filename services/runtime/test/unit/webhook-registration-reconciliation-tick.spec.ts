@@ -4,10 +4,25 @@ import type { OpenWAClient } from '../../src/integrations/openwa/openwa.client';
 import {
   RUNTIME_OPENWA_WEBHOOK_EVENTS,
   WebhookRegistrationReconciliationTick,
+  type WebhookRegistrationReconciliationOptions,
 } from '../../src/modules/webhooks/webhook-registration-reconciliation.tick';
 
 const callbackUrl = 'https://runtime.example.test/api/v1/webhooks/openwa';
 const secret = 'test-secret-at-least-thirty-two-characters';
+const connectorId = '00000000-0000-4000-8000-000000000002';
+const pluginVersion = '1.0.0';
+
+const options = (
+  overrides: Partial<WebhookRegistrationReconciliationOptions> = {},
+): WebhookRegistrationReconciliationOptions => ({
+  enabled: true,
+  callbackUrl,
+  secret,
+  allowedSessionIds: ['session-one'],
+  expectedConnectorId: connectorId,
+  expectedPluginVersion: pluginVersion,
+  ...overrides,
+});
 
 const client = () => ({
   reconcileWebhookRegistration: vi.fn(),
@@ -22,12 +37,10 @@ describe('WebhookRegistrationReconciliationTick', () => {
 
   it('does not call OpenWA while disabled', async () => {
     const openwa = client();
-    await new WebhookRegistrationReconciliationTick(openwa as unknown as OpenWAClient, {
-      enabled: false,
-      callbackUrl: null,
-      secret,
-      allowedSessionIds: ['session-one'],
-    }).run();
+    await new WebhookRegistrationReconciliationTick(
+      openwa as unknown as OpenWAClient,
+      options({ enabled: false, callbackUrl: null }),
+    ).run();
 
     expect(openwa.reconcileWebhookRegistration).not.toHaveBeenCalled();
   });
@@ -37,12 +50,14 @@ describe('WebhookRegistrationReconciliationTick', () => {
     openwa.reconcileWebhookRegistration.mockResolvedValue({
       created: 1, updated: 0, deleted: 0, webhookId: 'webhook-one',
     });
-    const connectorId = '00000000-0000-4000-8000-000000000002';
     const connector = {
       status: vi.fn().mockResolvedValue({
-        sessions: [{ sessionId: 'session-one', connector: { connectorId } }],
+        sessions: [{ sessionId: 'session-one', connector: { connectorId, pluginVersion } }],
       }),
-      setBinding: vi.fn().mockResolvedValue({ connectorId, webhookId: 'webhook-one', generation: 1 }),
+      setBinding: vi.fn().mockResolvedValue({
+        sessionId: 'session-one', connectorId, webhookId: 'webhook-one', generation: 1,
+        updatedAt: '2026-09-04T00:00:00.000Z',
+      }),
     };
     const connectorHealth = {
       stageBinding: vi.fn().mockResolvedValue({
@@ -51,12 +66,12 @@ describe('WebhookRegistrationReconciliationTick', () => {
       markBindingSynced: vi.fn().mockResolvedValue(undefined),
     };
 
-    await new WebhookRegistrationReconciliationTick(openwa as unknown as OpenWAClient, {
-      enabled: true,
-      callbackUrl,
-      secret,
-      allowedSessionIds: ['session-one'],
-    }, connector as never, connectorHealth as never).run();
+    await new WebhookRegistrationReconciliationTick(
+      openwa as unknown as OpenWAClient,
+      options(),
+      connector as never,
+      connectorHealth as never,
+    ).run();
 
     expect(openwa.reconcileWebhookRegistration).toHaveBeenCalledWith({
       sessionId: 'session-one',
@@ -81,12 +96,10 @@ describe('WebhookRegistrationReconciliationTick', () => {
       .mockResolvedValueOnce({ created: 1, updated: 0, deleted: 0, webhookId: 'webhook-two' });
     const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
-    const tick = new WebhookRegistrationReconciliationTick(openwa as unknown as OpenWAClient, {
-      enabled: true,
-      callbackUrl,
-      secret,
-      allowedSessionIds: ['sensitive-session-one', 'sensitive-session-two'],
-    });
+    const tick = new WebhookRegistrationReconciliationTick(
+      openwa as unknown as OpenWAClient,
+      options({ allowedSessionIds: ['sensitive-session-one', 'sensitive-session-two'] }),
+    );
 
     await expect(tick.run()).rejects.toThrow('failed for 1 session(s)');
     expect(openwa.reconcileWebhookRegistration).toHaveBeenCalledTimes(2);
@@ -95,5 +108,38 @@ describe('WebhookRegistrationReconciliationTick', () => {
     }));
     expect(JSON.stringify(warning.mock.calls)).not.toContain('sensitive-session');
     expect(JSON.stringify(warning.mock.calls)).not.toContain(callbackUrl);
+  });
+
+  it('does not mark a binding synchronized when the acknowledgement identity differs', async () => {
+    const openwa = client();
+    openwa.reconcileWebhookRegistration.mockResolvedValue({
+      created: 0, updated: 0, deleted: 0, webhookId: 'webhook-one',
+    });
+    const connector = {
+      status: vi.fn().mockResolvedValue({
+        sessions: [{ sessionId: 'session-one', connector: { connectorId, pluginVersion } }],
+      }),
+      setBinding: vi.fn().mockResolvedValue({
+        sessionId: 'session-one',
+        connectorId: '00000000-0000-4000-8000-000000000099',
+        webhookId: 'webhook-one',
+        generation: 1,
+        updatedAt: '2026-09-04T00:00:00.000Z',
+      }),
+    };
+    const connectorHealth = {
+      stageBinding: vi.fn().mockResolvedValue({
+        sessionId: 'session-one', connectorId, webhookId: 'webhook-one', generation: 1,
+      }),
+      markBindingSynced: vi.fn(),
+    };
+
+    await expect(new WebhookRegistrationReconciliationTick(
+      openwa as unknown as OpenWAClient,
+      options(),
+      connector as never,
+      connectorHealth as never,
+    ).run()).rejects.toThrow('failed for 1 session(s)');
+    expect(connectorHealth.markBindingSynced).not.toHaveBeenCalled();
   });
 });

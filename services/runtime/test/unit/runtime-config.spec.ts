@@ -79,12 +79,22 @@ describe('runtime worker concurrency configuration', () => {
       ...validEnvironment(),
       EVENT_INBOX_BASE_URL: 'https://inbox.example.test',
       EVENT_INBOX_DEVICE_TOKEN: 'device-token-with-at-least-32-characters',
+      OPENWA_CONNECTOR_ID: '00000000-0000-4000-8000-000000000002',
+      OPENWA_CONNECTOR_PLUGIN_VERSION: '1.0.0',
       OPENWA_CONNECTOR_INSTANCE_ID: 'wa-studio',
       OPENWA_CONNECTOR_INGRESS_SECRET: 'connector-ingress-secret-with-at-least-32-characters',
       OPENWA_WEBHOOK_RECONCILIATION_ENABLED: 'true',
       OPENWA_WEBHOOK_CALLBACK_URL: 'https://inbox.example.test/api/v1/webhooks/openwa',
       EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS: 'true',
     }).EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS).toBe(true);
+  });
+
+  it('requires one complete provisioned connector identity', () => {
+    expect(() => parseRuntimeConfig({
+      ...validEnvironment(),
+      OPENWA_CONNECTOR_INSTANCE_ID: 'wa-studio',
+      OPENWA_CONNECTOR_INGRESS_SECRET: 'connector-ingress-secret-with-at-least-32-characters',
+    })).toThrow('must be configured together');
   });
 
   it('fails closed when production live sends bypass the connector path', () => {

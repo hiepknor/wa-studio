@@ -20,6 +20,8 @@ export interface WebhookRegistrationReconciliationOptions {
   callbackUrl: string | null;
   secret: string;
   allowedSessionIds: string[];
+  expectedConnectorId: string | null;
+  expectedPluginVersion: string | null;
 }
 
 interface ReconciliationCounts {
@@ -64,16 +66,24 @@ export class WebhookRegistrationReconciliationTick {
         totals.deleted += counts.deleted;
         if (this.connector && this.connectorHealth && connectorStatus) {
           const status = await connectorStatus;
-          const connectorId = status.sessions.find(session => session.sessionId === sessionId)
-            ?.connector?.connectorId;
-          if (!connectorId) throw new Error('No reporting connector is available for this session');
+          const report = status.sessions.find(session => session.sessionId === sessionId)?.connector;
+          if (!this.options.expectedConnectorId || !this.options.expectedPluginVersion) {
+            throw new Error('The provisioned connector identity is not configured');
+          }
+          if (!report
+            || report.connectorId !== this.options.expectedConnectorId
+            || report.pluginVersion !== this.options.expectedPluginVersion) {
+            throw new Error('The reporting connector does not match the provisioned identity');
+          }
           const binding = await this.connectorHealth.stageBinding(
             sessionId,
-            connectorId,
+            this.options.expectedConnectorId,
             counts.webhookId,
           );
           const synchronized = await this.connector.setBinding(binding);
-          if (synchronized.webhookId !== binding.webhookId
+          if (synchronized.sessionId !== binding.sessionId
+            || synchronized.connectorId !== binding.connectorId
+            || synchronized.webhookId !== binding.webhookId
             || synchronized.generation !== binding.generation) {
             throw new Error('Event Inbox connector binding acknowledgement did not match the desired binding');
           }
