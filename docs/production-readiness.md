@@ -12,6 +12,9 @@ the private release record. Repository CI alone is not production acceptance.
 - [ ] The protected `release` environment contains only the Apple signing, notarization, and updater
       secrets required by the signed desktop job. Tag, workflow and artifact verification gates are
       the release authorization boundary for the single-maintainer repository.
+- [ ] A dedicated Ed25519 production-authorization private key is held only in the operator vault;
+      its public PEM is stored as the protected GitHub Actions variable
+      `PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM`. It is not the updater, Apple, Connector, or backup key.
 - [ ] The Cloudflare R2 bucket exists with a bucket-scoped Object Read & Write token, 35-day lock on
       `production/`, 90-day production expiry, and one-day staging expiry.
 - [ ] The dedicated Telegram bot and private operator chat exist; token and chat ID are installed as
@@ -227,6 +230,20 @@ specific newer stable tag. The command re-runs the full private GO verification 
 release identities and SHA-256 commitments; it does not copy the operator, UAT target, Runtime
 instance, or connector identifiers into Git:
 
+Create the dedicated signing key once in the operator vault (or use the equivalent vault-backed
+Ed25519 generation flow), export only its public half to the protected repository variable, and
+retain both the public key and its printed key ID with the private release evidence:
+
+```bash
+umask 077
+openssl genpkey -algorithm Ed25519 \
+  -out /private/keys/wa-studio-production-authorization.pem
+openssl pkey \
+  -in /private/keys/wa-studio-production-authorization.pem \
+  -pubout \
+  -out /private/keys/wa-studio-production-authorization-public.pem
+```
+
 ```bash
 npm run release:promotion:create -- \
   --accepted-deployment /private/release/wa-studio-deployment.json \
@@ -234,12 +251,15 @@ npm run release:promotion:create -- \
   --recovery-evidence /private/release/production-recovery-evidence.json \
   --acceptance-record /private/release/production-acceptance.json \
   --target-tag v<next-stable-version> \
+  --signing-private-key /private/keys/wa-studio-production-authorization.pem \
   --output release/production-promotion.json
 ```
 
 Review and commit `release/production-promotion.json` with the stable-only version/channel bump. The
-receipt is an auditable commitment to the retained private evidence, not a substitute for it. The
-release workflow requires the receipt only for `stable`, checks its policy and exact target, downloads
+receipt is a signed, domain-separated authorization over the exact target and every retained private
+evidence digest, not a substitute for that evidence. The private key never enters GitHub Actions.
+The release workflow requires the receipt only for `stable`, verifies its Ed25519 signature against
+the protected public-key variable, checks its policy and exact target, downloads
 the referenced published canary deployment manifest, verifies its GitHub attestation against the
 recorded source commit, and compares every accepted release identity before publication. It also
 requires the accepted tag to resolve to that commit, proves the stable commit descends from it, and
@@ -247,7 +267,9 @@ rejects every source delta except the coordinated Studio/Tauri version fields, r
 and new receipt. The gate executes the verifier from the accepted canary checkout, not from the stable
 candidate being judged; version-bearing files may not hide semantic or file-mode changes. A `canary`
 build fails if it carries a stale receipt, so remove the prior receipt when beginning the next canary
-cycle.
+cycle. A missing key, wrong key, altered receipt, altered target, or unsigned legacy schema fails
+closed. Rotate this key only through a new canary cycle, update the protected public-key variable
+before its stable promotion, and archive the retired public key for historical verification.
 
 A no-go means: route Event Inbox back to 34200, stop outbound activity, preserve evidence, and
 fix-forward. A go means: prepare the reviewed 0.2.1 stable bump, converge the primary slot, verify the
