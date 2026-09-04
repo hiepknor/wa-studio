@@ -182,6 +182,7 @@ export class EventInboxRepository implements OnModuleDestroy {
     tokenGeneration: number,
     sessionIds: string[],
     limit: number,
+    throughSequence?: string,
   ): Promise<EventInboxEvent[]> {
     const leaseId = randomUUID();
     const result = await this.pool.query<{
@@ -206,7 +207,8 @@ export class EventInboxRepository implements OnModuleDestroy {
            AND expires_at > now()
            AND available_at <= now()
            AND (lease_expires_at IS NULL OR lease_expires_at <= now())
-         ORDER BY received_at, event.idempotency_key
+           AND ($7::bigint IS NULL OR event.event_sequence <= $7::bigint)
+         ORDER BY event.event_sequence
          FOR UPDATE OF event SKIP LOCKED
          LIMIT $2
        )
@@ -226,6 +228,7 @@ export class EventInboxRepository implements OnModuleDestroy {
         deviceId,
         tokenGeneration,
         this.config.EVENT_INBOX_LEASE_SECONDS,
+        throughSequence ?? null,
       ],
     );
     return result.rows.map(row => ({
@@ -234,6 +237,47 @@ export class EventInboxRepository implements OnModuleDestroy {
       rawBody: row.raw_body.toString('base64'),
       signature: row.signature,
     }));
+  }
+
+  async recovery(
+    deviceId: string,
+    tokenGeneration: number,
+    sessionIds: string[],
+    requestedWatermark?: string,
+  ): Promise<{ watermark: string; remaining: number }> {
+    const result = await this.pool.query<{
+      watermark: string;
+      remaining: string;
+    }>(
+      `WITH owned_events AS (
+         SELECT event.event_sequence
+         FROM event_inbox_events AS event
+         JOIN event_inbox_session_owners AS owner
+           ON owner.session_id = event.session_id
+          AND owner.device_id = $2::uuid
+          AND owner.token_generation = $3
+         JOIN event_inbox_devices AS device
+           ON device.device_id = owner.device_id
+          AND device.token_generation = owner.token_generation
+          AND device.revoked_at IS NULL
+          AND device.token_expires_at > now()
+         WHERE event.session_id = ANY($1::uuid[])
+           AND event.dead_at IS NULL
+           AND event.expires_at > now()
+       ), watermark AS (
+         SELECT COALESCE($4::bigint, max(event_sequence), 0) AS value
+         FROM owned_events
+       )
+       SELECT watermark.value::text AS watermark,
+         count(owned_events.event_sequence)::text AS remaining
+       FROM watermark
+       LEFT JOIN owned_events ON owned_events.event_sequence <= watermark.value
+       GROUP BY watermark.value`,
+      [sessionIds, deviceId, tokenGeneration, requestedWatermark ?? null],
+    );
+    const recovery = result.rows[0];
+    if (!recovery) throw new Error('Event Inbox recovery watermark is unavailable');
+    return { watermark: recovery.watermark, remaining: Number(recovery.remaining) };
   }
 
   async acknowledge(

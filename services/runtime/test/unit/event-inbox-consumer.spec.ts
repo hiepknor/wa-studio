@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseRuntimeConfig } from '../../src/core/config/runtime-config';
 import { OutboundResponseTooLargeError } from '../../src/core/http/bounded-response';
 import { EventInboxConsumerService } from '../../src/modules/webhooks/event-inbox-consumer.service';
+import type { RuntimeDispatchReadinessService } from '../../src/core/dispatch-readiness/runtime-dispatch-readiness.service';
 import type { WebhookIngressService } from '../../src/modules/webhooks/webhook-ingress.service';
 
 const sessionId = '00000000-0000-4000-8000-000000000001';
@@ -32,6 +33,34 @@ const claimedEvent = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('EventInboxConsumerService', () => {
+  it('drains every event through the captured recovery watermark before opening dispatch', async () => {
+    const ingress = { accept: vi.fn().mockResolvedValue({ accepted: true, duplicate: false }) };
+    const readiness = {
+      markReady: vi.fn().mockResolvedValue(undefined),
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ watermark: '12', remaining: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ data: [claimedEvent] }))
+      .mockResolvedValueOnce(jsonResponse({ acknowledged: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ watermark: '12', remaining: 0 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new EventInboxConsumerService(
+      ingress as unknown as WebhookIngressService,
+      config(),
+      readiness as unknown as RuntimeDispatchReadinessService,
+    ).recover()).resolves.toBe('12');
+
+    expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string)).toEqual({
+      limit: config().EVENT_INBOX_BATCH_SIZE,
+      waitSeconds: 0,
+      throughSequence: '12',
+    });
+    expect(readiness.markReady).toHaveBeenCalledWith('12');
+    expect(readiness.markReady.mock.invocationCallOrder[0])
+      .toBeGreaterThan(fetchMock.mock.invocationCallOrder[3]!);
+  });
+
   it('rejects a claim response larger than the configured memory boundary', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', {
       headers: { 'content-length': String(config().EVENT_INBOX_RESPONSE_MAX_BYTES + 1) },

@@ -1674,6 +1674,20 @@ export interface components {
             /** @enum {string} */
             scheduler: "healthy" | "degraded";
         };
+        RuntimeDispatchReadinessDto: {
+            required: boolean;
+            ready: boolean;
+            /** @enum {string} */
+            state: "DISABLED" | "RECOVERING" | "READY" | "DEGRADED";
+            reason: string | null;
+            recoveryWatermark: string | null;
+            /** Format: date-time */
+            recoveryStartedAt: string | null;
+            /** Format: date-time */
+            readyAt: string | null;
+            /** Format: date-time */
+            heartbeatAt: string | null;
+        };
         HealthReadyDto: {
             /** @enum {string} */
             status: "ready";
@@ -1683,6 +1697,7 @@ export interface components {
             /** @example 0.23.3 */
             openwaRelease: string;
             allowedSessionCount: number;
+            dispatch: components["schemas"]["RuntimeDispatchReadinessDto"];
         };
         HealthNotReadyDto: {
             /** @enum {string} */
@@ -1729,6 +1744,7 @@ export interface components {
         RuntimeComponentHealthDto: {
             openwa: components["schemas"]["OpenWAComponentHealthDto"];
             connector: components["schemas"]["OpenWAConnectorComponentHealthDto"];
+            dispatch: components["schemas"]["RuntimeDispatchReadinessDto"];
         };
         HealthOperationalDto: {
             /** @enum {string} */
@@ -1743,7 +1759,7 @@ export interface components {
             processes: components["schemas"]["RuntimeProcessHealthDto"];
             components: components["schemas"]["RuntimeComponentHealthDto"];
             /** @enum {string} */
-            reason?: "dependency_unavailable" | "background_process_degraded" | "upstream_status_unknown" | "upstream_unavailable" | "upstream_incompatible" | "connector_unhealthy";
+            reason?: "dependency_unavailable" | "background_process_degraded" | "upstream_status_unknown" | "upstream_unavailable" | "upstream_incompatible" | "connector_unhealthy" | "dispatch_not_ready";
         };
         InboundMessageDto: {
             /** Format: uuid */

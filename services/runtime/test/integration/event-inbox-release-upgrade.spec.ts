@@ -73,7 +73,7 @@ describe('Event Inbox release upgrade', () => {
 
       const forward = files.filter(name => Number(name.slice(0, 3)) > LAST_ACCEPTED_MIGRATION);
       expect((await runMigrations(upgrade, migrations)).applied).toEqual(forward);
-      expect(forward.at(-1)).toBe('014_event_inbox_active_lease_index.sql');
+      expect(forward.at(-1)).toBe('015_event_inbox_recovery_watermark.sql');
       const hotPathIndexes = await upgrade.query<{ indexname: string }>(
         `SELECT indexname FROM pg_indexes
          WHERE schemaname = current_schema()
@@ -82,12 +82,14 @@ describe('Event Inbox release upgrade', () => {
         [[
           'idx_event_inbox_events_lease_active',
           'idx_event_inbox_events_received_active',
+          'idx_event_inbox_events_recovery',
           'idx_event_inbox_events_session_received_active',
         ]],
       );
       expect(hotPathIndexes.rows.map(row => row.indexname)).toEqual([
         'idx_event_inbox_events_lease_active',
         'idx_event_inbox_events_received_active',
+        'idx_event_inbox_events_recovery',
         'idx_event_inbox_events_session_received_active',
       ]);
       expect(await runMigrations(upgrade, migrations)).toEqual({
@@ -103,10 +105,18 @@ describe('Event Inbox release upgrade', () => {
         EVENT_INBOX_OPENWA_BASE_URL: 'http://127.0.0.1:2785',
         EVENT_INBOX_ALLOWED_SESSION_IDS: SESSION_ID,
       }));
+      const recovery = await repository.recovery(DEVICE_ID, 1, [SESSION_ID]);
+      expect(recovery).toMatchObject({ remaining: 1 });
+      await expect(repository.claim(DEVICE_ID, 1, [SESSION_ID], 1, recovery.watermark))
+        .resolves.toEqual([]);
+      await expect(repository.recovery(DEVICE_ID, 1, [SESSION_ID], recovery.watermark))
+        .resolves.toEqual({ watermark: recovery.watermark, remaining: 1 });
       await expect(repository.acknowledge(DEVICE_ID, 1, [{
         idempotencyKey: IDEMPOTENCY_KEY,
         leaseId: LEASE_ID,
       }])).resolves.toBe(1);
+      await expect(repository.recovery(DEVICE_ID, 1, [SESSION_ID], recovery.watermark))
+        .resolves.toEqual({ watermark: recovery.watermark, remaining: 0 });
 
       const legacyRetry = await upgrade.connect();
       try {

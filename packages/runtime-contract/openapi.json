@@ -7282,6 +7282,59 @@
           "scheduler"
         ]
       },
+      "RuntimeDispatchReadinessDto": {
+        "type": "object",
+        "properties": {
+          "required": {
+            "type": "boolean"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "DISABLED",
+              "RECOVERING",
+              "READY",
+              "DEGRADED"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "recoveryWatermark": {
+            "type": "string",
+            "nullable": true
+          },
+          "recoveryStartedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "readyAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "heartbeatAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "required",
+          "ready",
+          "state",
+          "reason",
+          "recoveryWatermark",
+          "recoveryStartedAt",
+          "readyAt",
+          "heartbeatAt"
+        ]
+      },
       "HealthReadyDto": {
         "type": "object",
         "properties": {
@@ -7307,6 +7360,9 @@
           "allowedSessionCount": {
             "type": "number",
             "minimum": 0
+          },
+          "dispatch": {
+            "$ref": "#/components/schemas/RuntimeDispatchReadinessDto"
           }
         },
         "required": [
@@ -7315,7 +7371,8 @@
           "processes",
           "liveSendsEnabled",
           "openwaRelease",
-          "allowedSessionCount"
+          "allowedSessionCount",
+          "dispatch"
         ]
       },
       "HealthNotReadyDto": {
@@ -7497,11 +7554,15 @@
           },
           "connector": {
             "$ref": "#/components/schemas/OpenWAConnectorComponentHealthDto"
+          },
+          "dispatch": {
+            "$ref": "#/components/schemas/RuntimeDispatchReadinessDto"
           }
         },
         "required": [
           "openwa",
-          "connector"
+          "connector",
+          "dispatch"
         ]
       },
       "HealthOperationalDto": {
@@ -7551,7 +7612,8 @@
               "upstream_status_unknown",
               "upstream_unavailable",
               "upstream_incompatible",
-              "connector_unhealthy"
+              "connector_unhealthy",
+              "dispatch_not_ready"
             ]
           }
         },

@@ -10,6 +10,7 @@ import type {
   ClaimedOpenWAConnectorCommand,
   OpenWAConnectorCommandRepository,
 } from '../../src/modules/messages/openwa-connector-command.repository';
+import type { RuntimeDispatchReadinessService } from '../../src/core/dispatch-readiness/runtime-dispatch-readiness.service';
 
 const config = parseRuntimeConfig({
   NODE_ENV: 'test',
@@ -45,7 +46,11 @@ function claimed(overrides: Partial<ClaimedOpenWAConnectorCommand> = {}): Claime
   };
 }
 
-function harness(command: ClaimedOpenWAConnectorCommand, submit: ReturnType<typeof vi.fn>) {
+function harness(
+  command: ClaimedOpenWAConnectorCommand,
+  submit: ReturnType<typeof vi.fn>,
+  readinessStates: boolean[] = [true, true],
+) {
   const commands = {
     settleExpired: vi.fn().mockResolvedValue({ failed: 0, indeterminate: 0 }),
     settleEvidenceTimeout: vi.fn().mockResolvedValue(0),
@@ -55,18 +60,49 @@ function harness(command: ClaimedOpenWAConnectorCommand, submit: ReturnType<type
     settleIndeterminate: vi.fn().mockResolvedValue(true),
     rescheduleSafeRejection: vi.fn().mockResolvedValue(true),
     reschedule: vi.fn().mockResolvedValue(true),
+    deferForDispatchReadiness: vi.fn().mockResolvedValue(true),
   };
+  const snapshot = vi.fn();
+  for (const ready of readinessStates) snapshot.mockResolvedValueOnce({ ready });
+  snapshot.mockResolvedValue({ ready: readinessStates.at(-1) ?? true });
   return {
     commands,
+    snapshot,
     dispatcher: new OpenWAConnectorCommandDispatcherService(
       commands as unknown as OpenWAConnectorCommandRepository,
       { submit } as unknown as OpenWAConnectorIngressClient,
       config,
+      { snapshot } as unknown as RuntimeDispatchReadinessService,
     ),
   };
 }
 
 describe('OpenWAConnectorCommandDispatcherService', () => {
+  it('does not claim commands while Event Inbox recovery is closed', async () => {
+    const command = claimed();
+    const submit = vi.fn();
+    const { commands, dispatcher } = harness(command, submit, [false]);
+
+    await dispatcher.run();
+
+    expect(commands.claimDue).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('releases a claimed command if readiness closes immediately before submit', async () => {
+    const command = claimed();
+    const submit = vi.fn();
+    const { commands, dispatcher } = harness(command, submit, [true, false]);
+
+    await expect(dispatcher.dispatchAttempt(command.attemptId)).resolves.toBe(true);
+
+    expect(commands.deferForDispatchReadiness).toHaveBeenCalledWith(
+      command,
+      config.EVENT_INBOX_POLL_INTERVAL_MS,
+    );
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it('settles expired dispatches and missing evidence before claiming new work', async () => {
     const command = claimed();
     const submit = vi.fn().mockResolvedValue({ duplicate: false });

@@ -74,6 +74,37 @@ describe('OpenWA Safety Governor', () => {
     })).resolves.toMatchObject({ outcome: 'DEFERRED', reason: 'RATE_BUDGET' });
   });
 
+  it('atomically refuses message start until Event Inbox recovery is ready and fresh', async () => {
+    const messageJobId = await createProcessingMessage('recovery-fence', INTEGRATION_GROUP_ID);
+    const decision = await safety.reserveMessage({
+      sessionId: INTEGRATION_SESSION_ID,
+      messageJobId,
+      recipientId: INTEGRATION_GROUP_ID,
+      operationClass: 'MESSAGE_SEND_TEXT',
+    });
+    expect(decision.outcome).toBe('GRANTED');
+    if (decision.outcome !== 'GRANTED') return;
+
+    await expect(safetyRepository.commitMessageStart(
+      decision.permit,
+      false,
+      undefined,
+      { required: true, maximumHeartbeatAgeMs: 60_000 },
+    )).resolves.toBeNull();
+
+    await pool.query(
+      `INSERT INTO runtime_dispatch_readiness
+         (singleton, state, recovery_watermark, ready_at, heartbeat_at)
+       VALUES (true, 'READY', 9, now(), now())`,
+    );
+    await expect(safetyRepository.commitMessageStart(
+      decision.permit,
+      false,
+      undefined,
+      { required: true, maximumHeartbeatAgeMs: 60_000 },
+    )).resolves.toMatchObject({ upstreamAttemptNumber: 1 });
+  });
+
   it('enforces one session send envelope across text and image messages', async () => {
     const first = await createProcessingMessage('mixed-first', INTEGRATION_GROUP_ID);
     const decision = await safety.reserveMessage({

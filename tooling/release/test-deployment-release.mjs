@@ -58,8 +58,8 @@ try {
 
   const manifest = createDeploymentManifest({ ...common, outputPath });
   assert.equal(manifest.components.eventInbox.imageDigest, `sha256:${imageDigest}`);
-  assert.equal(manifest.components.eventInbox.migrationHead.name, "014_event_inbox_active_lease_index.sql");
-  assert.equal(manifest.components.eventInbox.migrationHead.count, 14);
+  assert.equal(manifest.components.eventInbox.migrationHead.name, "015_event_inbox_recovery_watermark.sql");
+  assert.equal(manifest.components.eventInbox.migrationHead.count, 15);
   assert.match(manifest.components.eventInbox.migrationHead.setSha256, /^[0-9a-f]{64}$/u);
   assert.equal(manifest.components.connector.artifact.sha256, connectorDigest);
   assert.equal(manifest.components.acceptance.policyVersion, 2);
