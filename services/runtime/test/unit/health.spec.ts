@@ -20,6 +20,26 @@ describe('HealthController readiness', () => {
     expect(controller.live()).toEqual({ status: 'ok', service: 'wa-runtime', version: '0.1.0' });
   });
 
+  it('returns machine-readable production release evidence from the private health surface', async () => {
+    const snapshot = {
+      schemaVersion: 1,
+      status: 'complete',
+      generatedAt: '2026-09-04T00:00:00.000Z',
+      openwaSafety: {},
+      webhookSpool: {},
+    } as const;
+    const controller = new HealthController(
+      {} as DatabaseService,
+      {} as QueueService,
+      undefined,
+      undefined,
+      undefined,
+      { snapshot: vi.fn().mockResolvedValue(snapshot) } as never,
+    );
+
+    await expect(controller.productionReleaseEvidence()).resolves.toBe(snapshot);
+  });
+
   it('reports the selected Redis queue backend and healthy background processes', async () => {
     const database = { query: vi.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] }) };
     const queues = {

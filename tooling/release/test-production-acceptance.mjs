@@ -143,7 +143,7 @@ try {
   );
   const snapshotCapturedAt = "2026-08-29T02:55:00.000Z";
   const operationalSnapshot = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     product: "wa-studio",
     capturedAt: snapshotCapturedAt,
     release: record.release,
@@ -168,6 +168,33 @@ try {
       allowedSessionCount: 1,
       openwaStatus: "COMPATIBLE",
       connectorStatus: "HEALTHY",
+    },
+    runtimeEvidence: {
+      schemaVersion: 1,
+      status: "complete",
+      generatedAt: snapshotCapturedAt,
+      openwaSafety: {
+        openCircuitScopes: 0,
+        halfOpenCircuitScopes: 0,
+        manualBlockedScopes: 0,
+        throttledScopes: 0,
+        deferredMessageJobs: 0,
+        unknownMessageJobs: 0,
+        oldestUnknownMessageJobAgeSeconds: null,
+      },
+      webhookSpool: {
+        storedEvents: 0,
+        storedBytes: 0,
+        maxStoredEvents: 10_000,
+        maxStoredBytes: 10_485_760,
+        maximumIncomingEventBytes: 1_048_576,
+        activeEvents: 0,
+        deadEvents: 0,
+        oldestActiveAgeSeconds: null,
+        oldestDeadAgeSeconds: null,
+        utilization: 0,
+        admissionAvailable: true,
+      },
     },
     connector: {
       sessionId: "00000000-0000-4000-8000-000000000001",
@@ -590,6 +617,7 @@ try {
 
   const earlyOperationalSnapshot = structuredClone(operationalSnapshot);
   earlyOperationalSnapshot.capturedAt = "2026-08-28T14:05:00.000Z";
+  earlyOperationalSnapshot.runtimeEvidence.generatedAt = earlyOperationalSnapshot.capturedAt;
   earlyOperationalSnapshot.connector.verifiedAt = "2026-08-28T14:05:00.000Z";
   earlyOperationalSnapshot.connector.heartbeatObservedAt = "2026-08-28T14:04:50.000Z";
   const earlyOperationalJson = `${JSON.stringify(earlyOperationalSnapshot, null, 2)}\n`;

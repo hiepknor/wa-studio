@@ -117,10 +117,13 @@ closed. A later release may version the policy without weakening or rewriting hi
 At the end of the unchanged canary window, capture the live operational state before editing the
 decision. `--managed-profile` reads the bound connector and Runtime credentials from the macOS
 Keychain, runs the deployment verifier against OpenWA and Event Inbox, and probes Runtime's
-public liveness plus authenticated readiness and operational health. Capture fails unless exactly one
-allowed session is live-send enabled, Runtime and its workers are healthy, OpenWA matches the pinned
-release, the connector is exclusively healthy and current, its journal is drained, and storage stays
-below the Connector journal production-pressure threshold:
+public liveness plus authenticated readiness, operational health, and release evidence. Capture
+fails unless exactly one allowed session is live-send enabled, Runtime and its workers are healthy,
+OpenWA matches the pinned release, the connector is exclusively healthy and current, its journal is
+drained, and storage stays below the Connector journal production-pressure threshold. The same
+capture also fails closed when any outbound job is `UNKNOWN` or safety-deferred, a safety scope is
+open, half-open, manually blocked, or throttled, any Runtime webhook is `DEAD`, callback processing
+has stalled for more than five minutes, or the webhook spool cannot admit one maximum-sized event.
 
 ```bash
 npm run release:operational:capture -- \
@@ -135,8 +138,10 @@ npm run release:operational:verify -- \
 
 Managed capture is pinned to WA Runtime's loopback origin at `http://127.0.0.1:34100`; it will not
 forward the Keychain API key to an alternate origin. The snapshot is an owner-only, secret-free
-evidence file containing release identities, health states, connector generations, and observation
-timestamps. It still belongs in the encrypted immutable evidence archive, never in Git. Attach it
+evidence file containing release identities, health states, connector generations, aggregate safety
+and callback-spool state, and observation timestamps. The private release-evidence endpoint exposes
+only aggregate counts and ages, is excluded from OpenAPI, and requires the Runtime API credential.
+The snapshot still belongs in the encrypted immutable evidence archive, never in Git. Attach it
 atomically to the still-`PENDING` record; this
 copies the verified connector generations and health timestamps and refuses a different snapshot,
 pre-populated evidence, or an inconsistent repeat:

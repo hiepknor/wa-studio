@@ -97,6 +97,33 @@ const operational = {
     },
   },
 };
+const releaseEvidence = {
+  schemaVersion: 1,
+  status: "complete",
+  generatedAt: capturedAt,
+  openwaSafety: {
+    openCircuitScopes: 0,
+    halfOpenCircuitScopes: 0,
+    manualBlockedScopes: 0,
+    throttledScopes: 0,
+    deferredMessageJobs: 0,
+    unknownMessageJobs: 0,
+    oldestUnknownMessageJobAgeSeconds: null,
+  },
+  webhookSpool: {
+    storedEvents: 0,
+    storedBytes: 0,
+    maxStoredEvents: 10_000,
+    maxStoredBytes: 10_485_760,
+    maximumIncomingEventBytes: 1_048_576,
+    activeEvents: 0,
+    deadEvents: 0,
+    oldestActiveAgeSeconds: null,
+    oldestDeadAgeSeconds: null,
+    utilization: 0,
+    admissionAvailable: true,
+  },
+};
 
 function build(overrides = {}) {
   return buildProductionOperationalSnapshot({
@@ -105,6 +132,7 @@ function build(overrides = {}) {
     live,
     ready,
     operational,
+    releaseEvidence,
     capturedAt,
     ...overrides,
   });
@@ -187,6 +215,9 @@ function captureFixture() {
     } else if (url.origin === runtimeOrigin && url.pathname === "/api/v1/health/operational") {
       assert.equal(init.headers["x-runtime-key"], "runtime-secret");
       value = operational;
+    } else if (url.origin === runtimeOrigin && url.pathname === "/api/v1/health/release-evidence") {
+      assert.equal(init.headers["x-runtime-key"], "runtime-secret");
+      value = releaseEvidence;
     } else {
       return new Response(JSON.stringify({ message: "not found" }), { status: 404 });
     }
@@ -231,7 +262,7 @@ try {
     now: () => new Date(capturedAt),
   });
   assert.equal(captured.connector.verifiedAt, capturedAt);
-  assert.equal(capture.requests.length, 10);
+  assert.equal(capture.requests.length, 11);
   assert.equal(statSync(capturedSnapshotPath).mode & 0o077, 0);
   const capturedText = readFileSync(capturedSnapshotPath, "utf8");
   assert.equal(capturedText.includes("runtime-secret"), false);
@@ -298,6 +329,69 @@ try {
       },
     }),
     /not drained/u,
+  );
+  assert.throws(
+    () => build({
+      releaseEvidence: {
+        ...releaseEvidence,
+        openwaSafety: { ...releaseEvidence.openwaSafety, unknownMessageJobs: 1 },
+      },
+    }),
+    /Unknown Message Jobs must be zero/u,
+  );
+  assert.throws(
+    () => build({
+      releaseEvidence: {
+        ...releaseEvidence,
+        webhookSpool: {
+          ...releaseEvidence.webhookSpool,
+          storedEvents: 1,
+          deadEvents: 1,
+          oldestDeadAgeSeconds: 20,
+        },
+      },
+    }),
+    /Dead webhook events must be zero/u,
+  );
+  assert.throws(
+    () => build({
+      releaseEvidence: {
+        ...releaseEvidence,
+        webhookSpool: {
+          ...releaseEvidence.webhookSpool,
+          storedEvents: 10_000,
+          activeEvents: 10_000,
+          oldestActiveAgeSeconds: 1,
+          utilization: 1,
+          admissionAvailable: false,
+        },
+      },
+    }),
+    /must retain maximum-event admission capacity/u,
+  );
+  assert.throws(
+    () => build({
+      releaseEvidence: {
+        ...releaseEvidence,
+        webhookSpool: {
+          ...releaseEvidence.webhookSpool,
+          storedEvents: 1,
+          activeEvents: 1,
+          oldestActiveAgeSeconds: 301,
+          utilization: 0.0001,
+        },
+      },
+    }),
+    /processing is stalled/u,
+  );
+  assert.throws(
+    () => build({
+      releaseEvidence: {
+        ...releaseEvidence,
+        webhookSpool: { ...releaseEvidence.webhookSpool, utilization: 0.1 },
+      },
+    }),
+    /utilization is inconsistent/u,
   );
 
   writeFileSync(deploymentPath, `${JSON.stringify({

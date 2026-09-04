@@ -107,6 +107,30 @@ describe('HTTP readiness', () => {
     expect(live.status).toBe(200);
   });
 
+  it('exposes bounded release evidence only through the authenticated health surface', async () => {
+    const missing = await fetch(`${baseUrl}/health/release-evidence`);
+    expect(missing.status).toBe(401);
+
+    const response = await fetch(`${baseUrl}/health/release-evidence`, {
+      headers: runtimeHeaders,
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      schemaVersion: 1,
+      status: 'complete',
+      generatedAt: expect.any(String),
+      openwaSafety: {
+        unknownMessageJobs: expect.any(Number),
+        deferredMessageJobs: expect.any(Number),
+      },
+      webhookSpool: {
+        storedEvents: expect.any(Number),
+        deadEvents: expect.any(Number),
+        admissionAvailable: expect.any(Boolean),
+      },
+    });
+  });
+
   it('exposes low-cardinality Prometheus metrics only to the dedicated bearer token', async () => {
     const unauthorized = await fetch(`${baseUrl}/metrics`);
     expect(unauthorized.status).toBe(401);
