@@ -6,15 +6,29 @@ import { CampaignRunRepository } from '../campaigns/campaign-run.repository';
 @Injectable()
 export class CampaignDispatchTick {
   private readonly logger = new Logger(CampaignDispatchTick.name);
+  private schedulerSessionInitialized = false;
 
   constructor(
     private readonly runs: CampaignRunRepository,
     private readonly queues: QueueService,
   ) {}
 
+  async beginSchedulerSession(): Promise<void> {
+    const held = await this.runs.holdDueRunsAtSchedulerStartup();
+    this.schedulerSessionInitialized = true;
+    if (held > 0) {
+      this.logger.warn({ event: 'campaign_schedules.held_after_restart', count: held });
+    }
+  }
+
   async run(): Promise<void> {
+    if (!this.schedulerSessionInitialized) await this.beginSchedulerSession();
     const recovered = await this.runs.recoverExpiredPreparations();
     if (recovered > 0) this.logger.warn({ event: 'campaign_preparations.recovered', count: recovered });
+    const schedules = await this.runs.activateDueRuns();
+    if (schedules.held > 0) {
+      this.logger.warn({ event: 'campaign_schedules.start_window_expired', count: schedules.held });
+    }
     const preparing = await this.runs.listPreparing(100);
     for (const run of preparing) {
       try {
@@ -30,7 +44,6 @@ export class CampaignDispatchTick {
         // PREPARING remains durable for the next tick.
       }
     }
-    await this.runs.activateDueRuns();
     await this.runs.reconcileDeliveries();
     await this.runs.finalizeRuns(100);
     for (const runId of await this.runs.listRunningIds(100)) {

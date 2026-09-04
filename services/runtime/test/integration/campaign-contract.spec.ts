@@ -51,6 +51,8 @@ describe('campaign draft contract HTTP API', () => {
       targets: Record<string, any>[],
     ): Promise<unknown>;
     auditLifecycle(): Promise<Record<string, number>>;
+    holdDueRunsAtSchedulerStartup(): Promise<number>;
+    activateDueRuns(): Promise<{ held: number; started: number }>;
     materializePending(runId: string, maxBuffered: number): Promise<number>;
     reconcileDeliveries(): Promise<number>;
     finalizeRuns(limit: number): Promise<number>;
@@ -1310,6 +1312,125 @@ describe('campaign draft contract HTTP API', () => {
     });
     expect(launch.response.status).toBe(409);
     expect(launch.body.code).toBe('CAMPAIGN_RUN_SCHEDULE_EXPIRED');
+  });
+
+  it('holds a due one-time LIVE run when a scheduler session starts', async () => {
+    const campaign = await createCampaign({
+      scheduleType: 'ONCE', scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const campaignId = campaign.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const run = await jsonRequest(`/campaigns/${campaignId}/runs`, {
+      method: 'POST', headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify(await passingLiveLaunchInput(campaignId)),
+    });
+    const runId = run.body.id as string;
+    await runPreparer.prepare(runId);
+    await pool.query(
+      `UPDATE campaign_runs SET scheduled_at = now() - interval '1 second',
+         schedule_start_deadline_at = now() + interval '29 seconds' WHERE id = $1`,
+      [runId],
+    );
+
+    expect(await runRepository.holdDueRunsAtSchedulerStartup()).toBe(1);
+    expect((await jsonRequest(`/campaign-runs/${runId}`)).body).toMatchObject({
+      status: 'PAUSED', statusReason: 'MISSED_SCHEDULE',
+    });
+    expect((await jsonRequest(`/campaigns/${campaignId}`)).body.status).toBe('PAUSED');
+    expect(await runRepository.activateDueRuns()).toEqual({ held: 0, started: 0 });
+    expect((await pool.query<{ event_type: string; metadata: Record<string, unknown> }>(
+      `SELECT event_type, metadata FROM activity_events
+       WHERE run_id = $1 ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+      [runId],
+    )).rows[0]).toMatchObject({
+      event_type: 'campaign_run.schedule_missed',
+      metadata: { reason: 'RUNTIME_RESTART' },
+    });
+  });
+
+  it('holds late preparation and requires an explicit resume before sending', async () => {
+    const campaign = await createCampaign({
+      scheduleType: 'ONCE', scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const campaignId = campaign.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const run = await jsonRequest(`/campaigns/${campaignId}/runs`, {
+      method: 'POST', headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify(await passingLiveLaunchInput(campaignId)),
+    });
+    const runId = run.body.id as string;
+    await pool.query(
+      `UPDATE campaign_runs SET scheduled_at = now() - interval '1 second',
+         schedule_start_deadline_at = now() + interval '29 seconds' WHERE id = $1`,
+      [runId],
+    );
+
+    await runPreparer.prepare(runId);
+    expect((await jsonRequest(`/campaign-runs/${runId}`)).body).toMatchObject({
+      status: 'PAUSED', statusReason: 'MISSED_SCHEDULE', startedAt: null,
+    });
+    expect((await pool.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM message_jobs WHERE idempotency_scope = $1',
+      [`campaign-run:${runId}`],
+    )).rows[0]?.count).toBe('0');
+
+    const resumed = await runAction(runId, 'resume');
+    expect(resumed.response.status).toBe(200);
+    expect(resumed.body).toMatchObject({ status: 'RUNNING', statusReason: null });
+  });
+
+  it('starts a due prepared run only inside its persisted grace window', async () => {
+    const campaign = await createCampaign({
+      scheduleType: 'ONCE', scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const campaignId = campaign.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const run = await jsonRequest(`/campaigns/${campaignId}/runs`, {
+      method: 'POST', headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify(await passingLiveLaunchInput(campaignId)),
+    });
+    const runId = run.body.id as string;
+    await runPreparer.prepare(runId);
+    await pool.query(
+      `UPDATE campaign_runs SET scheduled_at = now() - interval '1 second',
+         schedule_start_deadline_at = now() + interval '29 seconds' WHERE id = $1`,
+      [runId],
+    );
+
+    expect(await runRepository.activateDueRuns()).toEqual({ held: 0, started: 1 });
+    expect((await jsonRequest(`/campaign-runs/${runId}`)).body.status).toBe('RUNNING');
+  });
+
+  it('holds a prepared run after its persisted start window expires', async () => {
+    const campaign = await createCampaign({
+      scheduleType: 'ONCE', scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const campaignId = campaign.body.id as string;
+    await jsonRequest(`/campaigns/${campaignId}/targets`, {
+      method: 'PUT', body: JSON.stringify({ groupIds: [INTEGRATION_GROUP_ID] }),
+    });
+    const run = await jsonRequest(`/campaigns/${campaignId}/runs`, {
+      method: 'POST', headers: { 'idempotency-key': randomUUID() },
+      body: JSON.stringify(await passingLiveLaunchInput(campaignId)),
+    });
+    const runId = run.body.id as string;
+    await runPreparer.prepare(runId);
+    await pool.query(
+      `UPDATE campaign_runs SET scheduled_at = now() - interval '31 seconds',
+         schedule_start_deadline_at = now() - interval '1 second' WHERE id = $1`,
+      [runId],
+    );
+
+    expect(await runRepository.activateDueRuns()).toEqual({ held: 1, started: 0 });
+    expect((await jsonRequest(`/campaign-runs/${runId}`)).body).toMatchObject({
+      status: 'PAUSED', statusReason: 'MISSED_SCHEDULE', startedAt: null,
+    });
   });
 
   it('keeps a campaign PAUSED when resume preflight remains blocked', async () => {

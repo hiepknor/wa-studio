@@ -119,6 +119,7 @@ export function RunsScreen({
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("overview");
   const [mutation, setMutation] = useState<RunAction | null>(null);
   const [cancelConfirmationOpen, setCancelConfirmationOpen] = useState(false);
+  const [missedScheduleConfirmationOpen, setMissedScheduleConfirmationOpen] = useState(false);
   const [deliveryPage, setDeliveryPage] = useState<RuntimeCampaignDeliveryPage | null>(null);
   const [deliveryInputQuery, setDeliveryInputQuery] = useState("");
   const [deliveryQuery, setDeliveryQuery] = useState("");
@@ -248,6 +249,7 @@ export function RunsScreen({
     setRunError(null);
     setMutation(null);
     setCancelConfirmationOpen(false);
+    setMissedScheduleConfirmationOpen(false);
     setDeliveryPage(null);
     setDeliveriesLoading(false);
     setDeliveriesError(null);
@@ -398,6 +400,7 @@ export function RunsScreen({
     setRunError(null);
     setMutation(null);
     setCancelConfirmationOpen(false);
+    setMissedScheduleConfirmationOpen(false);
     setInspectorTab("overview");
     setDeliveryPage(null);
     setDeliveriesLoading(false);
@@ -422,6 +425,7 @@ export function RunsScreen({
     setRunError(null);
     setMutation(null);
     setCancelConfirmationOpen(false);
+    setMissedScheduleConfirmationOpen(false);
     onRunSelectionChange?.(null);
     detailTriggerRef.current = null;
   }
@@ -429,6 +433,11 @@ export function RunsScreen({
   function requestRunCancellation() {
     setRunError(null);
     setCancelConfirmationOpen(true);
+  }
+
+  function requestMissedScheduleResume() {
+    setRunError(null);
+    setMissedScheduleConfirmationOpen(true);
   }
 
   async function changeRunState(action: RunAction) {
@@ -466,6 +475,7 @@ export function RunsScreen({
       ) return;
       setRun(updated);
       setCancelConfirmationOpen(false);
+      setMissedScheduleConfirmationOpen(false);
       void loadRuns(listState, true);
       if (inspectorTab === "deliveries") void loadDeliveries(true);
       invalidate({ resources: ["campaigns"], sessionId: targetRun.sessionId });
@@ -543,7 +553,12 @@ export function RunsScreen({
       <InspectorDrawer
         contentKey={`${selectedRunId ?? "none"}:${inspectorTab}`}
         kicker="Campaign run"
-        footer={run && runHasActions(run) ? <RunActions mutation={mutation} onAction={(action) => action === "cancel" ? requestRunCancellation() : void changeRunState(action)} run={run} /> : undefined}
+        footer={run && runHasActions(run) ? <RunActions mutation={mutation} onAction={(action) => {
+          if (action === "cancel") requestRunCancellation();
+          else if (action === "resume" && run.statusReason === "MISSED_SCHEDULE") {
+            requestMissedScheduleResume();
+          } else void changeRunState(action);
+        }} run={run} /> : undefined}
         meta={currentRun ? [
           `Run ${shortId(currentRun.id)}`,
           currentRun.executionMode === "LIVE" ? "Live" : "Dry run",
@@ -557,7 +572,7 @@ export function RunsScreen({
         title={currentRun?.campaignNameSnapshot ?? "Run inspector"}
       >
         {runLoading && !run && <EmptyState compact icon="refresh" loading title="Loading run details">Runtime is returning the durable execution state.</EmptyState>}
-        {runError && !cancelConfirmationOpen && <InlineAlert action={selectedRunId ? <Button onClick={() => void loadRun(selectedRunId)} size="sm">Retry</Button> : undefined} title="Run needs attention">{runError}</InlineAlert>}
+        {runError && !cancelConfirmationOpen && !missedScheduleConfirmationOpen && <InlineAlert action={selectedRunId ? <Button onClick={() => void loadRun(selectedRunId)} size="sm">Retry</Button> : undefined} title="Run needs attention">{runError}</InlineAlert>}
         {run && inspectorTab === "overview" && <RunOverview run={run} />}
         {selectedRunId && inspectorTab === "deliveries" && (
           <RunDeliveries
@@ -586,6 +601,18 @@ export function RunsScreen({
         open={cancelConfirmationOpen}
         title="Cancel this campaign run?"
       />
+      <ConfirmationDialog
+        body="This one-time campaign missed its scheduled start. WA Runtime will run a fresh preflight and, only if it passes, begin sending immediately."
+        busy={mutation === "resume"}
+        busyLabel="Checking and starting…"
+        confirmLabel="Send now"
+        error={runError}
+        errorTitle="Could not resume run"
+        onCancel={() => setMissedScheduleConfirmationOpen(false)}
+        onConfirm={() => void changeRunState("resume")}
+        open={missedScheduleConfirmationOpen}
+        title="Send missed campaign now?"
+      />
     </div>
   );
 }
@@ -605,7 +632,9 @@ function RunOverview({ run }: { run: RuntimeCampaignRun }) {
     ["Failed", progress.failed], ["Unknown", progress.unknown],
     ["Blocked", progress.blocked], ["Cancelled", progress.cancelled],
   ] as const;
-  const statusReason = run.statusReason?.replace(/_/g, " ").toLocaleLowerCase();
+  const statusReason = run.statusReason === "MISSED_SCHEDULE"
+    ? "The scheduled start was missed. Sending remains paused until an operator confirms it."
+    : run.statusReason?.replace(/_/g, " ").toLocaleLowerCase();
   const lifecycleSummary = run.completedAt
     ? <>Completed <DateTime precision="second" value={run.completedAt} /></>
     : run.startedAt
@@ -726,14 +755,19 @@ function RunActions({ mutation, onAction, run }: {
   onAction: (action: RunAction) => void;
   run: RuntimeCampaignRun;
 }) {
+  const missedSchedule = run.status === "PAUSED" && run.statusReason === "MISSED_SCHEDULE";
   return <div className="runs-action-footer">
     <ActionFooter
       actions={<>
         {(run.status === "RUNNING" || run.status === "SCHEDULED") && <Button disabled={Boolean(mutation)} loading={mutation === "pause"} onClick={() => onAction("pause")}>Pause</Button>}
-        {(run.status === "PAUSED" || run.status === "BLOCKED") && <Button disabled={Boolean(mutation)} loading={mutation === "resume"} onClick={() => onAction("resume")} variant="primary">Resume</Button>}
+        {(run.status === "PAUSED" || run.status === "BLOCKED") && <Button disabled={Boolean(mutation)} loading={mutation === "resume"} onClick={() => onAction("resume")} variant="primary">{missedSchedule ? "Review & send now" : "Resume"}</Button>}
         <Button disabled={Boolean(mutation)} onClick={() => onAction("cancel")} variant="danger">Cancel</Button>
       </>}
-      description={mutation ? "Runtime is applying the requested state change." : "Actions affect pending Runtime work."}
+      description={mutation
+        ? "Runtime is applying the requested state change."
+        : missedSchedule
+          ? "This run will not send until you explicitly release it."
+          : "Actions affect pending Runtime work."}
       title={mutation ? `${mutation.charAt(0).toLocaleUpperCase()}${mutation.slice(1)} in progress…` : `${runStatusLabel(run.status)} · Runtime authoritative`}
     />
   </div>;

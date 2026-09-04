@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import type { CampaignContentDto } from '../../contracts/campaigns/campaign-content.dto';
 import type { CampaignExecutionMode, CampaignPreflightDto } from '../../contracts/campaigns/campaign-preflight.dto';
 import type { CampaignDeliveryStatus } from '../../contracts/campaigns/campaign-delivery.dto';
@@ -6,12 +6,15 @@ import type { CampaignRunDto, CampaignRunStatus } from '../../contracts/campaign
 import type { CampaignScheduleType } from '../../contracts/campaigns/create-campaign.dto';
 import type { CampaignTargetDto } from '../../contracts/campaigns/campaign-target.dto';
 import { DatabaseService } from '../../core/database/database.service';
+import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
+import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { MessageJobRepository } from '../messages/message-job.repository';
 import { CampaignDeliveryRepository } from './campaign-delivery.repository';
 import {
   CampaignRunActionIdempotencyConflictError,
   type CampaignRunActionRequest,
   type CampaignRunActionResult,
+  type CampaignScheduleDispatchResult,
   CampaignResumeResult,
   CampaignRunLifecycleRepository,
 } from './campaign-run-lifecycle.repository';
@@ -67,6 +70,7 @@ export class CampaignRunRepository {
   constructor(
     private readonly database: DatabaseService,
     messageJobs: MessageJobRepository,
+    @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
   ) {
     this.deliveries = new CampaignDeliveryRepository(database, messageJobs);
     this.lifecycle = new CampaignRunLifecycleRepository(database);
@@ -194,17 +198,26 @@ export class CampaignRunRepository {
       const scheduledAt = campaign.schedule_type === 'ONCE' && campaign.scheduled_at
         ? campaign.scheduled_at
         : new Date();
+      const scheduleStartDeadline = input.executionMode === 'LIVE'
+        && campaign.schedule_type === 'ONCE'
+        && campaign.scheduled_at
+        ? new Date(
+            campaign.scheduled_at.getTime()
+              + this.config.CAMPAIGN_SCHEDULE_START_GRACE_SECONDS * 1_000,
+          )
+        : null;
       const inserted = await client.query<{ id: string }>(
          `INSERT INTO campaign_runs
            (campaign_id, campaign_name_snapshot, session_id, idempotency_key, execution_mode,
-            message_type, media_asset_id, payload_snapshot, scheduled_at,
+            message_type, media_asset_id, payload_snapshot, scheduled_at, schedule_start_deadline_at,
             campaign_revision, targets_revision, target_source_group_list_id,
             target_source_group_list_name_snapshot, target_source_membership_revision,
             target_source_applied_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,$16)
          ON CONFLICT DO NOTHING RETURNING id`,
         [campaign.id, campaign.name, campaign.session_id, input.idempotencyKey, input.executionMode,
           campaign.message_type, campaign.media_asset_id, JSON.stringify(campaign.payload), scheduledAt,
+          scheduleStartDeadline,
           campaign.revision, campaign.targets_revision,
           campaign.target_source_group_list_id, campaign.target_source_group_list_name_snapshot,
           campaign.target_source_membership_revision,
@@ -471,8 +484,15 @@ export class CampaignRunRepository {
     observedTargets: CampaignTargetDto[],
   ): Promise<CampaignPreflightApplyResult> {
     return this.database.transaction(async client => {
-      const locked = await client.query<{ status: string; scheduled_at: Date }>(
-         `SELECT status, scheduled_at FROM campaign_runs
+      const locked = await client.query<{
+        status: string;
+        scheduled_at: Date;
+        schedule_start_deadline_at: Date | null;
+        campaign_id: string;
+        database_now: Date;
+      }>(
+         `SELECT status, scheduled_at, schedule_start_deadline_at, campaign_id, now() AS database_now
+          FROM campaign_runs
          WHERE id = $1 AND status = 'PREPARING' AND preparation_lease_token = $2
            AND preparation_lease_expires_at > now() FOR UPDATE`,
         [runId, leaseToken],
@@ -488,6 +508,32 @@ export class CampaignRunRepository {
           [runId, leaseToken],
         );
         return 'STALE_INPUT';
+      }
+      if (run.schedule_start_deadline_at && run.scheduled_at <= run.database_now) {
+        await client.query(
+          `UPDATE campaign_runs SET status = 'PAUSED', status_reason = 'MISSED_SCHEDULE',
+             preflight_status = $2, preflight_policy_version = $3, preflight_report = $4::jsonb,
+             preparation_lease_token = NULL, preparation_lease_expires_at = NULL, updated_at = now()
+           WHERE id = $1`,
+          [runId, report.status, report.policyVersion, JSON.stringify(report)],
+        );
+        await client.query(
+          `UPDATE campaigns SET status = 'PAUSED', updated_at = now()
+           WHERE id = $1 AND status = 'ACTIVE'`,
+          [run.campaign_id],
+        );
+        await appendCampaignRunActivity(client, {
+          runId,
+          eventType: 'campaign_run.schedule_missed',
+          severity: 'WARNING',
+          origin: 'RUNTIME',
+          metadata: {
+            reason: 'PREPARATION_NOT_READY_AT_SCHEDULE',
+            scheduledAt: run.scheduled_at.toISOString(),
+            startDeadlineAt: run.schedule_start_deadline_at.toISOString(),
+          },
+        });
+        return 'APPLIED';
       }
       if (report.status === 'BLOCK') {
         await client.query(
@@ -591,7 +637,11 @@ export class CampaignRunRepository {
     });
   }
 
-  async activateDueRuns(): Promise<number> {
+  async holdDueRunsAtSchedulerStartup(): Promise<number> {
+    return this.lifecycle.holdDueAtSchedulerStartup();
+  }
+
+  async activateDueRuns(): Promise<CampaignScheduleDispatchResult> {
     return this.lifecycle.activateDue();
   }
 

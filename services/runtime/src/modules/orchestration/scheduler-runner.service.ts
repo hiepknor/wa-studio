@@ -76,6 +76,16 @@ export class SchedulerRunnerService {
     if (this.started) return;
     await this.leadership.acquire();
     this.logger.log({ event: 'scheduler.leadership.acquired' });
+    try {
+      await this.campaigns.beginSchedulerSession();
+    } catch (error) {
+      try {
+        await this.leadership.release();
+      } catch (releaseError) {
+        this.logger.error({ event: 'scheduler.leadership.release_failed', error: releaseError });
+      }
+      throw error;
+    }
     const gatewayTick = this.tick(
       'gateway', this.config.GATEWAY_SYNC_POLL_INTERVAL_MS, 60_000, () => this.gateway.run(),
     );
