@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -6,6 +7,9 @@ import { canonicalUpdaterEndpoint } from "./updater-release.mjs";
 
 const workspaceRoot = resolve(import.meta.dirname, "../..");
 const studioRoot = resolve(workspaceRoot, "apps/studio");
+const releaseComponents = JSON.parse(
+  readFileSync(resolve(workspaceRoot, "release/components.json"), "utf8"),
+);
 
 const commonRequired = [
   "WA_STUDIO_CONNECTOR_PLUGIN_URL",
@@ -35,7 +39,11 @@ const signedBuildOnlyEnvironment = new Set([
 
 const present = (environment, name) => Boolean(environment[name]?.trim());
 
-export function releasePreflightErrors(environment, platform = process.platform) {
+export function releasePreflightErrors(
+  environment,
+  platform = process.platform,
+  releaseChannel = releaseComponents.releaseChannel,
+) {
   const errors = [];
   const missing = commonRequired.filter(name => !present(environment, name));
   if (missing.length > 0) {
@@ -56,7 +64,7 @@ export function releasePreflightErrors(environment, platform = process.platform)
   if (present(environment, "GITHUB_REPOSITORY")
     && present(environment, "WA_STUDIO_UPDATER_ENDPOINT")) {
     try {
-      const expected = canonicalUpdaterEndpoint(environment.GITHUB_REPOSITORY);
+      const expected = canonicalUpdaterEndpoint(environment.GITHUB_REPOSITORY, releaseChannel);
       if (environment.WA_STUDIO_UPDATER_ENDPOINT.trim() !== expected) {
         errors.push(`WA_STUDIO_UPDATER_ENDPOINT must publish from ${expected}.`);
       }

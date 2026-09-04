@@ -125,6 +125,8 @@ function input(fetchImpl) {
     eventInboxOrigin,
     openwaRelease: "0.23.3",
     pluginVersion: "0.1.0",
+    protocolVersion: 1,
+    journalSchemaVersion: 1,
     sessionId,
     connectorId,
     instanceId,
@@ -132,6 +134,7 @@ function input(fetchImpl) {
     bindingGeneration: 4,
     heartbeatObservedAt: observedAt,
     heartbeatAgeMs: 10_000,
+    verifiedAt: generatedAt,
     pendingCount: 0,
     storageUtilization: 0.1,
   });

@@ -8,6 +8,8 @@ import {
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readProductionAcceptancePolicy } from "./production-acceptance.mjs";
+
 const defaultWorkspaceRoot = resolve(import.meta.dirname, "../..");
 const digestPattern = /^[0-9a-f]{64}$/u;
 const commitPattern = /^[0-9a-f]{40}$/u;
@@ -206,6 +208,9 @@ function expectedManifest({
   };
   if (!updaterDirectory) return manifest;
 
+  const acceptancePolicy = readProductionAcceptancePolicy(
+    resolve(workspaceRoot, "release/production-acceptance-policy.json"),
+  );
   const desktop = readDesktopRelease(
     updaterDirectory,
     normalizedRepository,
@@ -220,6 +225,10 @@ function expectedManifest({
     ...manifest,
     components: {
       studio: { version: components.studioVersion, ...desktop },
+      acceptance: {
+        policyVersion: acceptancePolicy.identity.version,
+        policySha256: acceptancePolicy.identity.sha256,
+      },
       ...manifest.components,
     },
   };

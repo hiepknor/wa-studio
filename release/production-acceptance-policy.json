@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "product": "wa-studio",
+  "policyVersion": 2,
+  "callbackIncident": {
+    "id": "openwa-callback-failures-2026-08-21",
+    "requiredObservedFailureSlice": 58
+  },
+  "canary": {
+    "minimumObservationSeconds": 86400,
+    "maximumFinalEvidenceAgeSeconds": 900
+  },
+  "managedStorage": {
+    "minimumAvailableBytes": 21474836480,
+    "maximumAutomaticRecoveryUtilization": 1
+  }
+}

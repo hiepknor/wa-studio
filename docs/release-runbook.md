@@ -64,7 +64,8 @@ The release assets are:
 - `wa-studio-server-deployment.json`, the attested server-only binding used to canary Event Inbox
   without depending on macOS signing;
 - `wa-studio-deployment.json`, the attested binding between the source commit, desktop checksum set,
-  Event Inbox digest and migration set, connector digest and protocol, OpenWA pin, and component versions;
+  Event Inbox digest and migration set, connector digest and protocol, OpenWA pin, production
+  acceptance policy digest, and component versions;
 - the installable `wa-studio-connector-<version>.zip` and its `.sha256` checksum.
 
 ## Verify after publication
@@ -171,7 +172,18 @@ perform this check because they intentionally contain no update channel or publi
    endpoint switch, critical alert, failed backup, or unresolved UAT discrepancy.
 6. Accept only with zero unexplained callback loss, zero duplicate outbound effects, zero critical
    alerts, a successful encrypted off-host backup plus restore drill, and explicit operator
-   sign-off. Preserve the evidence by release digest and UTC interval.
+   sign-off. Create the private record with `release:acceptance:create`; at the end of the unchanged
+   window run `release:operational:capture` and `release:operational:verify`, then bind that file with
+   `release:acceptance:attach-operational`. Refresh **Settings → Backups & recovery** at the end of
+   the window, retain its native managed-storage evidence, and populate `managedStorage` with the
+   exact diagnostics: normal pressure, at least 20 GiB available, one or more recovery points, fresh
+   recovery and integrity checks, and automatic recovery usage no greater than its budget. Capture
+   both the operational snapshot and native storage evidence within the final 15 minutes of the
+   recorded canary window. Validate
+   drafts with `release:acceptance:verify`, and require `release:acceptance:verify-go` to pass against
+   both the operational snapshot and attested coordinated deployment manifest before accepting the
+   canary. Preserve the snapshot, encrypted evidence archive, native storage capture, and record by
+   release digest and UTC interval; none belongs in Git.
 
 Rollback server traffic immediately to 34200 when liveness/readiness fails, a callback cannot be
 accounted for, an outbound result is `UNKNOWN`, storage becomes critical, or a paging path is broken.
@@ -184,6 +196,17 @@ After canary acceptance, create a version-bump commit that moves Studio and Taur
 updates Runtime metadata only when Runtime changed, regenerates the release manifest, and changes
 `releaseChannel` to `stable`. Merge it through a pull request with every required check successful,
 then tag only that commit as `v0.2.2`.
+The stable bump is forbidden unless the private canary record has passed
+`release:acceptance:verify-go`. Generate `release/production-promotion.json` from that record with
+`release:promotion:create` for the exact stable tag, then commit the sanitized receipt with the
+version/channel-only stable bump. CI rejects a stable tag without it, downloads the accepted canary
+manifest, and verifies its digest, source commit, tag binding, prerelease state, and GitHub attestation
+before publishing. The stable commit must descend from the accepted canary and its complete diff is
+restricted to the receipt plus normalized Studio/Tauri version and release-channel fields; any other
+code, dependency, configuration, file mode, or manifest change requires a new canary. CI runs this
+comparison with the verifier checked out from the accepted canary rather than trusting candidate
+code. Keep the coordinated manifest, operational snapshot, encrypted evidence archive, and acceptance
+JSON together as the immutable private promotion input.
 Converge the primary Event Inbox slot to the accepted immutable image,
 switch Caddy back to the fail-safe 34200 target, then publish 0.2.2 as latest. Verify an installed
 0.2.1 canary and the preceding stable build both discover 0.2.2 through the signed updater manifest.
@@ -197,6 +220,11 @@ Do not promote or relabel the 0.2.1 prerelease.
 - A failed asset upload leaves a draft. Re-run failed jobs; the server stage verifies its four
   required assets byte-for-byte even when a prior product upload left additional expected files,
   while final publication still refuses any set other than the exact twelve product assets.
+- If publication succeeded but advancing the mutable canary channel pointer failed, re-run the
+  workflow from the same tag. It downloads all twelve published assets, verifies the updater,
+  connector checksum, both deployment manifests, every applicable GitHub attestation, and the OCI
+  image provenance before retrying only the channel pointer. It never replaces a published product
+  asset.
 - The workflow refuses to replace an already-published release or a mismatched version tag.
 - Never mutate a published archive, signature, manifest or tag. If a published release is defective,
   ship a higher fix-forward version. The updater creates an encrypted pre-update Runtime backup

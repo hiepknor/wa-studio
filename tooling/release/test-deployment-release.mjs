@@ -62,6 +62,8 @@ try {
   assert.equal(manifest.components.eventInbox.migrationHead.count, 14);
   assert.match(manifest.components.eventInbox.migrationHead.setSha256, /^[0-9a-f]{64}$/u);
   assert.equal(manifest.components.connector.artifact.sha256, connectorDigest);
+  assert.equal(manifest.components.acceptance.policyVersion, 2);
+  assert.match(manifest.components.acceptance.policySha256, /^[0-9a-f]{64}$/u);
   assert.match(manifest.components.studio.releaseChecksumsSha256, /^[0-9a-f]{64}$/u);
   assert.equal(manifest.components.openwa.releaseTag, components.openwaReleaseTag);
   assert.equal(manifest.releaseScope, "product");
@@ -135,6 +137,13 @@ try {
   ], { encoding: "utf8" }), /Verified server candidate deployment manifest/u);
 
   const tampered = JSON.parse(readFileSync(outputPath, "utf8"));
+  tampered.components.acceptance.policySha256 = "f".repeat(64);
+  writeFileSync(outputPath, `${JSON.stringify(tampered)}\n`);
+  assert.throws(
+    () => verifyDeploymentManifest({ ...common, manifestPath: outputPath }),
+    /does not match coordinated release inputs/u,
+  );
+  tampered.components.acceptance = manifest.components.acceptance;
   tampered.components.connector.protocolVersion += 1;
   writeFileSync(outputPath, `${JSON.stringify(tampered)}\n`);
   assert.throws(
@@ -172,6 +181,8 @@ try {
     "deployment-release.mjs verify-server",
     "wa-studio-server-deployment.json",
     "Create or resume server candidate draft",
+    "id: server_candidate_release",
+    "steps.server_candidate_release.outputs.is_draft == 'true'",
     "Create coordinated deployment manifest",
     "Attest coordinated deployment manifest",
     "deployment-release.mjs verify",
