@@ -15,6 +15,12 @@ pub fn run() {
         .menu(windowing::build_menu)
         .on_menu_event(windowing::handle_menu_event)
         .setup(|app| {
+            if let Err(error) = managed_runtime::observability::initialize(app.handle()) {
+                managed_runtime::observability::warn(
+                    "managed_runtime.observability_initialization_failed",
+                    serde_json::json!({ "reason": error }),
+                );
+            }
             app_updates::initialize(app)?;
             windowing::initialize_main_window(app).map_err(Box::<dyn std::error::Error>::from)?;
             managed_runtime::initialize(app.handle());
