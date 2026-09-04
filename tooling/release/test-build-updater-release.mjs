@@ -51,14 +51,20 @@ const mismatchedPublishedEndpoint = releasePreflightErrors({
   GITHUB_REPOSITORY: "hiepknor/wa-studio",
 }, "linux");
 assert.deepEqual(mismatchedPublishedEndpoint, [
-  "WA_STUDIO_UPDATER_ENDPOINT must publish from https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json.",
+  "WA_STUDIO_UPDATER_ENDPOINT must publish from https://github.com/hiepknor/wa-studio/releases/download/wa-studio-canary/latest.json.",
 ]);
 
 assert.deepEqual(releasePreflightErrors({
   ...updaterSecrets,
   GITHUB_REPOSITORY: "hiepknor/wa-studio",
-  WA_STUDIO_UPDATER_ENDPOINT: "https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json",
+  WA_STUDIO_UPDATER_ENDPOINT: "https://github.com/hiepknor/wa-studio/releases/download/wa-studio-canary/latest.json",
 }, "linux"), []);
+
+assert.deepEqual(releasePreflightErrors({
+  ...updaterSecrets,
+  GITHUB_REPOSITORY: "hiepknor/wa-studio",
+  WA_STUDIO_UPDATER_ENDPOINT: "https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json",
+}, "linux", "stable"), []);
 
 const unsignedMac = releasePreflightErrors(updaterSecrets, "darwin");
 assert.equal(unsignedMac.length, 2);

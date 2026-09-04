@@ -52,6 +52,14 @@ try {
     canonicalUpdaterEndpoint("hiepknor/wa-studio"),
     "https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json",
   );
+  assert.equal(
+    canonicalUpdaterEndpoint("hiepknor/wa-studio", "canary"),
+    "https://github.com/hiepknor/wa-studio/releases/download/wa-studio-canary/latest.json",
+  );
+  assert.throws(
+    () => canonicalUpdaterEndpoint("hiepknor/wa-studio", "nightly"),
+    /Unsupported updater release channel/u,
+  );
 
   const manifest = JSON.parse(readFileSync(resolve(outputRoot, "latest.json"), "utf8"));
   assert.deepEqual(manifest, {
@@ -137,6 +145,28 @@ try {
     "gh release create \"$GITHUB_REF_NAME\" --draft",
     "gh release upload \"$GITHUB_REF_NAME\"",
     "require('./release/components.json').releaseChannel",
+    "release:promotion:verify-target",
+    "Verify accepted canary promotion source",
+    "node dist/accepted-source/tooling/release/production-promotion.mjs verify-source",
+    "node dist/accepted-source/tooling/release/production-promotion.mjs verify-delta",
+    "dist/accepted-canary/wa-studio-deployment.json",
+    "git worktree add --detach dist/accepted-source \"$accepted_commit\"",
+    "fetch-depth: 0",
+    "git rev-parse \"${accepted_tag}^{commit}\"",
+    "source-digest \"$accepted_commit\"",
+    "group: release-${{ github.repository }}",
+    "id: coordinated_release",
+    "steps.coordinated_release.outputs.is_draft == 'true'",
+    "Verify immutable published product release",
+    "dist/published-product-release/updater",
+    "dist/published-product-release/connector",
+    "dist/published-product-release/metadata",
+    "deployment-release.mjs verify-server",
+    "deployment-release.mjs verify",
+    "gh attestation verify \"oci://${image}\"",
+    "gh attestation verify \"$asset\"",
+    "pointer_tag=\"wa-studio-canary\"",
+    "gh release upload \"$pointer_tag\" dist/published-product-release/updater/latest.json --clobber",
     "gh release edit \"$GITHUB_REF_NAME\" --draft=false --prerelease=true",
     "gh release edit \"$GITHUB_REF_NAME\" --draft=false --prerelease=false --latest",
     "actions/attest-build-provenance@",

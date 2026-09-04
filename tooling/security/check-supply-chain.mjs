@@ -44,6 +44,36 @@ for (const packageFile of ["package.json", "services/runtime/package.json"]) {
   );
 }
 
+const rootPackage = JSON.parse(read("package.json"));
+assert.deepEqual(
+  rootPackage.allowScripts,
+  {
+    "msgpackr-extract@3.0.4": true,
+    "fsevents@2.3.2": true,
+    "@scarf/scarf": false,
+    esbuild: true,
+  },
+  "Dependency install scripts must remain explicitly reviewed",
+);
+assert.match(
+  read(".npmrc"),
+  /^strict-allow-scripts=true$/mu,
+  "npm installs must fail when a dependency adds an unreviewed lifecycle script",
+);
+const packageLock = JSON.parse(read("package-lock.json"));
+const reviewedInstallScripts = Object.fromEntries(
+  Object.entries(packageLock.packages)
+    .filter(([, dependency]) => dependency.hasInstallScript)
+    .map(([path, dependency]) => [path, dependency.version]),
+);
+assert.deepEqual(reviewedInstallScripts, {
+  "node_modules/@scarf/scarf": "1.4.0",
+  "node_modules/esbuild": "0.28.2",
+  "node_modules/msgpackr-extract": "3.0.4",
+  "node_modules/playwright/node_modules/fsevents": "2.3.2",
+  "packages/openwa-connector-plugin/node_modules/esbuild": "0.25.12",
+}, "The install-script inventory changed and requires an explicit security review");
+
 const rustToolchain = read("rust-toolchain.toml");
 assert.match(rustToolchain, /channel = "1\.97\.1"/u);
 assert.match(rustToolchain, /profile = "minimal"/u);

@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -34,6 +34,14 @@ jobs:
         run: |
           expected="v$(node -p "require('./apps/studio/package.json').version")"
           test "$GITHUB_REF_NAME" = "$expected"
+      - name: Verify production promotion requirement
+        run: |
+          channel="$(node -p "require('./release/components.json').releaseChannel")"
+          npm run release:promotion:verify-target -- \
+            --receipt release/production-promotion.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --release-channel "$channel"
       - run: npm run contract:check
       - run: npm run check:connector
       - run: npm run check:runtime
@@ -195,15 +203,21 @@ jobs:
             --source-digest "$GITHUB_SHA" \
             --bundle-from-oci
       - name: Create or resume server candidate draft
+        id: server_candidate_release
         run: |
           state="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
           if [[ -z "$state" ]]; then
             gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "WA Studio $GITHUB_REF_NAME" --generate-notes
-          elif [[ "$state" != "true" ]]; then
-            echo "Release $GITHUB_REF_NAME is already published; refusing to replace it." >&2
-            exit 1
+            state="true"
+          fi
+          if [[ "$state" == "true" ]]; then
+            echo "is_draft=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_draft=false" >> "$GITHUB_OUTPUT"
+            echo "Release $GITHUB_REF_NAME is already published; server candidate upload is complete."
           fi
       - name: Upload and verify server candidate assets
+        if: ${{ steps.server_candidate_release.outputs.is_draft == 'true' }}
         run: |
           gh release upload "$GITHUB_REF_NAME" dist/server-release/* dist/connector-plugin/* --clobber
           mkdir -p dist/published-server-verification
@@ -324,6 +338,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .nvmrc
@@ -343,6 +359,44 @@ jobs:
         with:
           name: wa-studio-server-release-${{ github.ref_name }}
           path: dist/server-release
+      - name: Verify accepted canary promotion source
+        run: |
+          channel="$(node -p "require('./release/components.json').releaseChannel")"
+          if [[ "$channel" == "canary" ]]; then
+            exit 0
+          fi
+          npm run release:promotion:verify-target -- \
+            --receipt release/production-promotion.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --release-channel "$channel"
+          accepted_tag="$(node -p "require('./release/production-promotion.json').acceptedRelease.tag")"
+          accepted_commit="$(node -p "require('./release/production-promotion.json').acceptedRelease.gitCommit")"
+          test "$(git rev-parse "${accepted_tag}^{commit}")" = "$accepted_commit"
+          test "$(gh release view "$accepted_tag" --json isDraft --jq '.isDraft')" = "false"
+          test "$(gh release view "$accepted_tag" --json isPrerelease --jq '.isPrerelease')" = "true"
+          mkdir -p dist/accepted-canary
+          gh release download "$accepted_tag" \
+            --pattern wa-studio-deployment.json \
+            --dir dist/accepted-canary
+          git worktree add --detach dist/accepted-source "$accepted_commit"
+          node dist/accepted-source/tooling/release/production-promotion.mjs verify-source \
+            --receipt release/production-promotion.json \
+            --accepted-deployment dist/accepted-canary/wa-studio-deployment.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --policy dist/accepted-source/release/production-acceptance-policy.json
+          node dist/accepted-source/tooling/release/production-promotion.mjs verify-delta \
+            --receipt release/production-promotion.json \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --target-commit "$GITHUB_SHA" \
+            --workspace-root "$GITHUB_WORKSPACE" \
+            --policy dist/accepted-source/release/production-acceptance-policy.json
+          gh attestation verify dist/accepted-canary/wa-studio-deployment.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$accepted_commit"
       - name: Create coordinated deployment manifest
         run: |
           node tooling/release/deployment-release.mjs create \
@@ -415,15 +469,21 @@ jobs:
             --source-digest "$GITHUB_SHA" \
             --bundle-from-oci
       - name: Create or resume draft release
+        id: coordinated_release
         run: |
           state="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
           if [[ -z "$state" ]]; then
             gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "WA Studio $GITHUB_REF_NAME" --generate-notes
-          elif [[ "$state" != "true" ]]; then
-            echo "Release $GITHUB_REF_NAME is already published; refusing to replace it." >&2
-            exit 1
+            state="true"
+          fi
+          if [[ "$state" == "true" ]]; then
+            echo "is_draft=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_draft=false" >> "$GITHUB_OUTPUT"
+            echo "Release $GITHUB_REF_NAME is already published; preserving its immutable assets."
           fi
       - name: Upload and verify draft assets
+        if: ${{ steps.coordinated_release.outputs.is_draft == 'true' }}
         run: |
           gh release upload "$GITHUB_REF_NAME" dist/updater-release/* dist/release-metadata/* dist/server-release/wa-studio-server-deployment.json dist/connector-plugin/* --clobber
           test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 12
@@ -431,12 +491,117 @@ jobs:
           gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir dist/published-verification
           cmp dist/updater-release/latest.json dist/published-verification/latest.json
       - name: Publish verified release
+        if: ${{ steps.coordinated_release.outputs.is_draft == 'true' }}
         run: |
           channel="$(node -p "require('./release/components.json').releaseChannel")"
           if [[ "$channel" == "canary" ]]; then
             gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=true
           elif [[ "$channel" == "stable" ]]; then
             gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest
+          else
+            echo "Unsupported release channel: $channel" >&2
+            exit 1
+          fi
+      - name: Verify immutable published product release
+        run: |
+          test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft')" = "false"
+          test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 12
+          rm -rf dist/published-product-release
+          mkdir -p \
+            dist/published-product-release/updater \
+            dist/published-product-release/connector \
+            dist/published-product-release/metadata
+          node -e '
+            const metadata = require("./dist/updater-release/release-assets.json");
+            for (const name of Object.values(metadata.assets)) process.stdout.write(`${name}\n`);
+          ' | while IFS= read -r asset; do
+            gh release download "$GITHUB_REF_NAME" \
+              --pattern "$asset" \
+              --dir dist/published-product-release/updater
+          done
+          connector_zip="$(find dist/connector-plugin -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          connector_name="$(basename "$connector_zip")"
+          for asset in \
+            "$connector_name" \
+            "${connector_name}.sha256"; do
+            gh release download "$GITHUB_REF_NAME" \
+              --pattern "$asset" \
+              --dir dist/published-product-release/connector
+          done
+          for asset in \
+            event-inbox-image.txt \
+            wa-studio-server-deployment.json \
+            wa-studio-deployment.json; do
+            gh release download "$GITHUB_REF_NAME" \
+              --pattern "$asset" \
+              --dir dist/published-product-release/metadata
+          done
+          npm run release:verify-updater -- \
+            --directory dist/published-product-release/updater \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME"
+          (cd dist/published-product-release/connector && shasum -a 256 -c "${connector_name}.sha256")
+          node tooling/release/deployment-release.mjs verify-server \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --git-commit "$GITHUB_SHA" \
+            --image-file dist/published-product-release/metadata/event-inbox-image.txt \
+            --connector-directory dist/published-product-release/connector \
+            --manifest dist/published-product-release/metadata/wa-studio-server-deployment.json
+          node tooling/release/deployment-release.mjs verify \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$GITHUB_REF_NAME" \
+            --git-commit "$GITHUB_SHA" \
+            --image-file dist/published-product-release/metadata/event-inbox-image.txt \
+            --connector-directory dist/published-product-release/connector \
+            --updater-directory dist/published-product-release/updater \
+            --manifest dist/published-product-release/metadata/wa-studio-deployment.json
+          for asset in dist/published-product-release/updater/*; do
+            gh attestation verify "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$GITHUB_SHA"
+          done
+          gh attestation verify \
+            "dist/published-product-release/connector/$connector_name" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$GITHUB_SHA"
+          for asset in \
+            dist/published-product-release/metadata/wa-studio-server-deployment.json \
+            dist/published-product-release/metadata/wa-studio-deployment.json; do
+            gh attestation verify "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$GITHUB_SHA"
+          done
+          image="$(tr -d '\r\n' < dist/published-product-release/metadata/event-inbox-image.txt)"
+          gh attestation verify "oci://${image}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-digest "$GITHUB_SHA" \
+            --bundle-from-oci
+      - name: Advance verified updater channel
+        run: |
+          channel="$(node -p "require('./release/components.json').releaseChannel")"
+          if [[ "$channel" == "canary" ]]; then
+            test "$(gh release view "$GITHUB_REF_NAME" --json isPrerelease --jq '.isPrerelease')" = "true"
+            pointer_tag="wa-studio-canary"
+            if ! gh release view "$pointer_tag" >/dev/null 2>&1; then
+              gh release create "$pointer_tag" \
+                --prerelease \
+                --target "$GITHUB_SHA" \
+                --title "WA Studio Canary Update Channel" \
+                --notes "Mutable pointer to the latest verified, signed WA Studio canary release."
+            fi
+            gh release edit "$pointer_tag" --draft=false --prerelease=true
+            gh release upload "$pointer_tag" dist/published-product-release/updater/latest.json --clobber
+            rm -rf dist/channel-verification
+            mkdir -p dist/channel-verification
+            gh release download "$pointer_tag" --pattern latest.json --dir dist/channel-verification
+            cmp dist/published-product-release/updater/latest.json dist/channel-verification/latest.json
+          elif [[ "$channel" == "stable" ]]; then
+            test "$(gh release view "$GITHUB_REF_NAME" --json isPrerelease --jq '.isPrerelease')" = "false"
           else
             echo "Unsupported release channel: $channel" >&2
             exit 1

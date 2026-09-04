@@ -96,6 +96,136 @@ restore-drill result, UAT run ID, test-group ID, alert test timestamps, operator
 the final go/no-go decision. Store identifiers only in the private release record; never add customer
 or credential data to Git.
 
+Create the private, release-bound record before starting the canary. The command refuses to
+overwrite an existing record and creates it without group or world permissions:
+
+```bash
+npm run release:acceptance:create -- \
+  --deployment /private/release/wa-studio-deployment.json \
+  --output /private/release/production-acceptance.json
+```
+
+The default criteria come from the reviewed
+`release/production-acceptance-policy.json`. Its version and SHA-256 digest are embedded in the
+attested coordinated deployment manifest and copied into the record. Changing the criteria,
+substituting another policy file, or verifying from the wrong release checkout therefore fails
+closed. A later release may version the policy without weakening or rewriting historical evidence.
+
+At the end of the unchanged canary window, capture the live operational state before editing the
+decision. `--managed-profile` reads the bound connector and Runtime credentials from the macOS
+Keychain, runs the deployment verifier against OpenWA and Event Inbox, and probes Runtime's
+public liveness plus authenticated readiness and operational health. Capture fails unless exactly one
+allowed session is live-send enabled, Runtime and its workers are healthy, OpenWA matches the pinned
+release, the connector is exclusively healthy and current, its journal is drained, and storage stays
+below the Connector journal production-pressure threshold:
+
+```bash
+npm run release:operational:capture -- \
+  --managed-profile \
+  --deployment /private/release/wa-studio-deployment.json \
+  --output /private/release/production-operational-snapshot.json
+
+npm run release:operational:verify -- \
+  --deployment /private/release/wa-studio-deployment.json \
+  --snapshot /private/release/production-operational-snapshot.json
+```
+
+Managed capture is pinned to WA Runtime's loopback origin at `http://127.0.0.1:34100`; it will not
+forward the Keychain API key to an alternate origin. The snapshot is an owner-only, secret-free
+evidence file containing release identities, health states, connector generations, and observation
+timestamps. It still belongs in the encrypted immutable evidence archive, never in Git. Attach it
+atomically to the still-`PENDING` record; this
+copies the verified connector generations and health timestamps and refuses a different snapshot,
+pre-populated evidence, or an inconsistent repeat:
+
+```bash
+npm run release:acceptance:attach-operational -- \
+  --deployment /private/release/wa-studio-deployment.json \
+  --operational-snapshot /private/release/production-operational-snapshot.json \
+  --record /private/release/production-acceptance.json
+```
+
+The operational snapshot does not inspect WA Studio's native managed PostgreSQL filesystem or local
+recovery directory. Those paths and their storage policy are owned by the Tauri supervisor rather
+than Runtime's HTTP surface. At the end of the unchanged canary, open **Settings → Backups &
+recovery**, refresh the view, and select **Copy acceptance evidence**. Paste that exact secret-free
+JSON object into the record's `managedStorage` section; the action preserves the native generation
+timestamp and byte values rather than rounded display labels. Retain a screenshot of the same view
+in the encrypted evidence archive. A `GO` requires all of the following:
+
+- `verifiedAt` and the operational snapshot are captured within the final 15 minutes of the recorded
+  canary interval;
+- `pressure` is `normal` and `filesystemAvailableBytes` is at least 20 GiB;
+- at least one recovery point exists, with both `recoveryFreshness` and `integrityFreshness` equal
+  to `fresh`;
+- `automaticRecoveryBytes` does not exceed `automaticRecoveryBudgetBytes`.
+
+Do not substitute Connector `storageUtilization` for this evidence: that value describes the remote
+event journal, not the desktop database or its recovery points. Missing, stale, rounded, or unsafe
+managed-storage evidence makes `release:acceptance:verify-go` fail closed.
+
+Fill the remaining record fields only from retained evidence. `release:acceptance:verify` requires
+the edited file to remain owner-readable and inaccessible to group/world, validates the closed
+schema, rejects secret-bearing fields, and proves that the release, connector artifact, Event Inbox
+image, and coordinated deployment manifest still have the exact recorded identity:
+
+```bash
+npm run release:acceptance:verify -- \
+  --deployment /private/release/wa-studio-deployment.json \
+  --operational-snapshot /private/release/production-operational-snapshot.json \
+  --record /private/release/production-acceptance.json
+```
+
+Before a `GO`, store the supporting screenshots, command results, health snapshots, and alert events
+as an encrypted immutable evidence archive. Put only its object key and SHA-256 digest in
+`evidenceArchive`; do not put payloads, API keys, tokens, credentials, or customer data in the JSON.
+Then run the fail-closed gate:
+
+```bash
+npm run release:acceptance:verify-go -- \
+  --deployment /private/release/wa-studio-deployment.json \
+  --operational-snapshot /private/release/production-operational-snapshot.json \
+  --record /private/release/production-acceptance.json
+```
+
+This gate requires the complete 58-callback incident classification, an unchanged 24-hour candidate,
+zero critical/loss/duplicate/unknown/cooldown counters, current connector generations and health,
+normal and fresh managed desktop storage evidence, successful off-device backup and restore,
+terminal UAT results, every required resilience drill, reconciled Event Inbox/Runtime state, and an
+explicit operator acknowledgement after the canary ends.
+Every time-based UAT, drill, connector, backup, and health observation must fall inside the recorded
+canary interval. The final operational snapshot, Connector verification, and managed-storage
+diagnostics must also fall within the policy-bound final 15-minute evidence window. A structurally
+valid `PENDING` or `NO_GO` record passes `verify` for preservation but
+can never pass `verify-go`. Any record whose decision is already `GO` receives the full GO checks
+even under the ordinary `verify` command, so selecting the weaker command cannot bypass the gate.
+
+After `verify-go` succeeds for a published canary, create the sanitized receipt that authorizes one
+specific newer stable tag. The command re-runs the full private GO verification and records only
+release identities and SHA-256 commitments; it does not copy the operator, UAT target, Runtime
+instance, or connector identifiers into Git:
+
+```bash
+npm run release:promotion:create -- \
+  --accepted-deployment /private/release/wa-studio-deployment.json \
+  --operational-snapshot /private/release/production-operational-snapshot.json \
+  --acceptance-record /private/release/production-acceptance.json \
+  --target-tag v<next-stable-version> \
+  --output release/production-promotion.json
+```
+
+Review and commit `release/production-promotion.json` with the stable-only version/channel bump. The
+receipt is an auditable commitment to the retained private evidence, not a substitute for it. The
+release workflow requires the receipt only for `stable`, checks its policy and exact target, downloads
+the referenced published canary deployment manifest, verifies its GitHub attestation against the
+recorded source commit, and compares every accepted release identity before publication. It also
+requires the accepted tag to resolve to that commit, proves the stable commit descends from it, and
+rejects every source delta except the coordinated Studio/Tauri version fields, release-channel field,
+and new receipt. The gate executes the verifier from the accepted canary checkout, not from the stable
+candidate being judged; version-bearing files may not hide semantic or file-mode changes. A `canary`
+build fails if it carries a stale receipt, so remove the prior receipt when beginning the next canary
+cycle.
+
 A no-go means: route Event Inbox back to 34200, stop outbound activity, preserve evidence, and
 fix-forward. A go means: prepare the reviewed 0.2.1 stable bump, converge the primary slot, verify the
 signed updater from both supported predecessor builds, and keep the canary evidence for audit.

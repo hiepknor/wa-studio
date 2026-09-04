@@ -31,8 +31,15 @@ function validateRepository(repository) {
   return normalized;
 }
 
-export function canonicalUpdaterEndpoint(repository) {
-  return `https://github.com/${validateRepository(repository)}/releases/latest/download/latest.json`;
+export function canonicalUpdaterEndpoint(repository, releaseChannel = "stable") {
+  const normalizedRepository = validateRepository(repository);
+  if (releaseChannel === "stable") {
+    return `https://github.com/${normalizedRepository}/releases/latest/download/latest.json`;
+  }
+  if (releaseChannel === "canary") {
+    return `https://github.com/${normalizedRepository}/releases/download/wa-studio-canary/latest.json`;
+  }
+  throw new Error(`Unsupported updater release channel: ${releaseChannel}.`);
 }
 
 function releaseDownloadUrl(repository, tag, assetName) {

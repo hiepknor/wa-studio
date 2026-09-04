@@ -34,7 +34,9 @@ function normalizeOrigin(value, label) {
     || !["", "/"].includes(url.pathname)) {
     throw new Error(`${label} must be an HTTP(S) origin without credentials, path, query or fragment.`);
   }
-  const loopback = ["127.0.0.1", "::1", "localhost"].includes(url.hostname.toLowerCase());
+  const loopback = ["127.0.0.1", "::1", "[::1]", "localhost"].includes(
+    url.hostname.toLowerCase(),
+  );
   if (url.protocol !== "https:" && !loopback) {
     throw new Error(`${label} must use HTTPS outside loopback development.`);
   }
@@ -295,6 +297,8 @@ export async function verifyConnectorDeployment({
     eventInboxOrigin,
     openwaRelease: health.version,
     pluginVersion: plugin.version,
+    protocolVersion: versions.protocolVersion,
+    journalSchemaVersion: versions.journalSchemaVersion,
     sessionId: expected.sessionId,
     connectorId: expected.connectorId,
     instanceId: expected.instanceId,
@@ -302,12 +306,13 @@ export async function verifyConnectorDeployment({
     bindingGeneration: connector.bindingGeneration,
     heartbeatObservedAt: connector.observedAt,
     heartbeatAgeMs,
+    verifiedAt: new Date(generatedAt).toISOString(),
     pendingCount: connector.pendingCount,
     storageUtilization: connector.storageUtilization,
   };
 }
 
-function managedProfile() {
+export function loadManagedConnectorProfile() {
   if (process.platform !== "darwin") {
     throw new Error("--managed-profile requires the macOS Keychain.");
   }
@@ -334,6 +339,7 @@ function managedProfile() {
     throw new Error("WA Studio managed profile must be migrated to connector schema 3 first.");
   }
   return {
+    runtimeApiKey: credentials.runtimeApiKey,
     openwaBaseUrl: credentials.openwaBaseUrl,
     openwaApiKey: credentials.openwaApiKey,
     eventInboxDeviceToken: credentials.eventInboxDeviceToken,
@@ -358,7 +364,7 @@ function environmentProfile(environment) {
 
 async function main() {
   const profile = process.argv.includes("--managed-profile")
-    ? managedProfile()
+    ? loadManagedConnectorProfile()
     : environmentProfile(process.env);
   const result = await verifyConnectorDeployment({
     ...profile,
