@@ -1,6 +1,6 @@
 # ADR 024: Bind final promotion to machine-captured Runtime safety evidence
 
-- Status: Accepted
+- Status: Superseded by ADR 025
 - Date: 2026-09-04
 - Applies to: Runtime private health surface, canary operational snapshot and production promotion
 
@@ -35,9 +35,8 @@ telemetry deployment and introduce a second secret into the managed Runtime prof
 4. The evidence must be generated within 30 seconds of the snapshot capture time. Its spool ledger
    counts and nullable ages must be internally consistent, so editing one field cannot create a
    valid artifact.
-5. The endpoint is point-in-time evidence, not an alert-history replacement. The encrypted evidence
-   archive and acceptance record still prove the full unchanged 24-hour observation window and the
-   Event Inbox server's independent state.
+5. The endpoint was initially point-in-time evidence rather than an alert-history replacement. ADR
+   025 adds a bounded app-native observation ledger after the desktop supervision gap was found.
 
 ## Consequences
 

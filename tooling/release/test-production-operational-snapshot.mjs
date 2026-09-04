@@ -98,7 +98,7 @@ const operational = {
   },
 };
 const releaseEvidence = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   status: "complete",
   generatedAt: capturedAt,
   openwaSafety: {
@@ -122,6 +122,24 @@ const releaseEvidence = {
     oldestDeadAgeSeconds: null,
     utilization: 0,
     admissionAvailable: true,
+  },
+  observation: {
+    requiredWindowSeconds: 86_400,
+    observedWindowSeconds: 86_400,
+    firstObservedAt: "2026-08-27T12:00:00.000Z",
+    lastObservedAt: capturedAt,
+    sampleCount: 1_441,
+    maximumGapSeconds: 60,
+    maximumAllowedGapSeconds: 300,
+    violatingSamples: 0,
+    coverageComplete: true,
+    candidateIdentity: {
+      runtimeVersion: "0.1.0",
+      runtimeProfile: "desktop-managed",
+      managedInstanceId: connectorVerification.instanceId,
+      studioVersion: "0.2.2",
+      openwaRelease: "0.23.3",
+    },
   },
 };
 
@@ -392,6 +410,39 @@ try {
       },
     }),
     /utilization is inconsistent/u,
+  );
+  assert.throws(
+    () => build({
+      releaseEvidence: {
+        ...releaseEvidence,
+        observation: { ...releaseEvidence.observation, coverageComplete: false },
+      },
+    }),
+    /coverage is incomplete/u,
+  );
+  assert.throws(
+    () => build({
+      releaseEvidence: {
+        ...releaseEvidence,
+        observation: { ...releaseEvidence.observation, violatingSamples: 1 },
+      },
+    }),
+    /samples must be zero/u,
+  );
+  assert.throws(
+    () => build({
+      releaseEvidence: {
+        ...releaseEvidence,
+        observation: {
+          ...releaseEvidence.observation,
+          candidateIdentity: {
+            ...releaseEvidence.observation.candidateIdentity,
+            studioVersion: "0.2.1",
+          },
+        },
+      },
+    }),
+    /different release candidate/u,
   );
 
   writeFileSync(deploymentPath, `${JSON.stringify({

@@ -49,7 +49,7 @@ from any failures recorded before or after it. Before the canary clock starts:
 
 ## Canary UAT and 24-hour gate
 
-- [ ] Install the notarized 0.2.1 canary DMG and connect through production discovery protocol v2.
+- [ ] Install the notarized 0.2.2 canary DMG and connect through production discovery protocol v2.
 - [ ] If the Mac has a legacy schema-2 profile, save the connection again and confirm it migrates to
       connector schema 3; live sends must remain effectively disabled until that migration and its
       heartbeat quorum complete.
@@ -81,14 +81,17 @@ from any failures recorded before or after it. Before the canary clock starts:
 - [ ] Disconnect an isolated canary workspace and verify the ingress and session override are gone,
       the plugin is disabled, and its merge-only base configuration contains the retired tombstone
       rather than the prior connector credential.
-- [ ] Verify public liveness and discovery, private readiness/metrics, TLS expiry, disk alerts, backup
-      freshness, restore freshness, and Telegram firing/resolved delivery. Retain synthetic firing and
-      resolution evidence for Event Inbox webhook-admission loss, Runtime `UNKNOWN` Message Jobs, an
-      open safety circuit, persistent throttling, stalled recovery, and a non-draining deferred queue.
-- [ ] Observe the unchanged candidate digest for 24 continuous hours with no critical alert,
+- [ ] Verify public liveness and discovery, authenticated Runtime readiness, Event Inbox private
+      metrics, TLS expiry, disk alerts, backup freshness, restore freshness, and Telegram
+      firing/resolved delivery. Retain synthetic firing and resolution evidence for Event Inbox
+      webhook-admission loss, Runtime `UNKNOWN` Message Jobs, an open safety circuit, persistent
+      throttling, stalled recovery, and a non-draining deferred queue.
+- [ ] After the exact canary is installed, paired, and live sends are enabled, observe the unchanged
+      candidate for 24 continuous hours with no scheduler observation gap over five minutes and no critical alert,
       new OpenWA terminal webhook failure, unexplained callback loss, duplicate outbound effect,
       `UNKNOWN` delivery, recurring OpenWA cooldown, safety metric snapshot failure, or storage
-      pressure.
+      pressure. Closing the app, changing WA Studio/Runtime/OpenWA identity, or exceeding the gap
+      limit prevents release evidence from proving the window; do not substitute elapsed wall time.
 
 ## Go/no-go record
 
@@ -121,7 +124,9 @@ public liveness plus authenticated readiness, operational health, and release ev
 fails unless exactly one allowed session is live-send enabled, Runtime and its workers are healthy,
 OpenWA matches the pinned release, the connector is exclusively healthy and current, its journal is
 drained, and storage stays below the Connector journal production-pressure threshold. The same
-capture also fails closed when any outbound job is `UNKNOWN` or safety-deferred, a safety scope is
+capture requires Runtime's bounded local ledger to prove 24 continuous hours for the exact WA
+Studio, Runtime, OpenWA, and managed-instance identity, with no gap over five minutes and no
+violating sample. It also fails closed when any outbound job is `UNKNOWN` or safety-deferred, a safety scope is
 open, half-open, manually blocked, or throttled, any Runtime webhook is `DEAD`, callback processing
 has stalled for more than five minutes, or the webhook spool cannot admit one maximum-sized event.
 
@@ -138,8 +143,8 @@ npm run release:operational:verify -- \
 
 Managed capture is pinned to WA Runtime's loopback origin at `http://127.0.0.1:34100`; it will not
 forward the Keychain API key to an alternate origin. The snapshot is an owner-only, secret-free
-evidence file containing release identities, health states, connector generations, aggregate safety
-and callback-spool state, and observation timestamps. The private release-evidence endpoint exposes
+evidence file containing release identities, health states, connector generations, current aggregate
+safety and callback-spool state, plus the candidate-bound 24-hour observation summary. The private release-evidence endpoint exposes
 only aggregate counts and ages, is excluded from OpenAPI, and requires the Runtime API credential.
 The snapshot still belongs in the encrypted immutable evidence archive, never in Git. Attach it
 atomically to the still-`PENDING` record; this
@@ -277,5 +282,5 @@ closed. Rotate this key only through a new canary cycle, update the protected pu
 before its stable promotion, and archive the retired public key for historical verification.
 
 A no-go means: route Event Inbox back to 34200, stop outbound activity, preserve evidence, and
-fix-forward. A go means: prepare the reviewed 0.2.1 stable bump, converge the primary slot, verify the
+fix-forward. A go means: prepare the reviewed 0.2.3 stable bump, converge the primary slot, verify the
 signed updater from both supported predecessor builds, and keep the canary evidence for audit.

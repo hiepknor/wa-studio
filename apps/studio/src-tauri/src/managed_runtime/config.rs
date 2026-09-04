@@ -288,6 +288,10 @@ impl DesktopRuntimeConfig {
             ("NODE_ENV".to_string(), self.node_environment.clone()),
             ("RUNTIME_PROFILE".to_string(), "desktop-managed".to_string()),
             (
+                "WA_STUDIO_VERSION".to_string(),
+                env!("CARGO_PKG_VERSION").to_string(),
+            ),
+            (
                 "RUNTIME_STORAGE_POLICY_VERSION".to_string(),
                 "1".to_string(),
             ),
@@ -500,6 +504,10 @@ mod tests {
         assert!(
             environment.contains(&("RUNTIME_PROFILE".to_string(), "desktop-managed".to_string()))
         );
+        assert!(environment.contains(&(
+            "WA_STUDIO_VERSION".to_string(),
+            env!("CARGO_PKG_VERSION").to_string()
+        )));
         assert!(environment.contains(&(
             "RUNTIME_STORAGE_POLICY_VERSION".to_string(),
             "1".to_string()

@@ -15,9 +15,20 @@ import { WebhookDispatchTick } from './webhook-dispatch.tick';
 import { GatewayWorkListenerService } from './gateway-work-listener.service';
 import { ContactsModule } from '../contacts/contacts.module';
 import { SchedulerLeadershipService } from './scheduler-leadership.service';
+import { RuntimeOperationalEvidenceModule } from '../../core/observability/runtime-operational-evidence.module';
+import { RuntimeOperationalObservationTick } from './runtime-operational-observation.tick';
 
 @Module({
-  imports: [DatabaseModule, QueueModule, MessagesModule, WebhooksModule, GatewayModule, CampaignsModule, ContactsModule],
+  imports: [
+    DatabaseModule,
+    QueueModule,
+    MessagesModule,
+    WebhooksModule,
+    GatewayModule,
+    CampaignsModule,
+    ContactsModule,
+    RuntimeOperationalEvidenceModule,
+  ],
   providers: [
     MessageDispatchTick,
     WebhookDispatchTick,
@@ -28,6 +39,7 @@ import { SchedulerLeadershipService } from './scheduler-leadership.service';
     SchedulerRunnerService,
     SchedulerLeadershipService,
     GatewayWorkListenerService,
+    RuntimeOperationalObservationTick,
   ],
   exports: [SchedulerRunnerService],
 })

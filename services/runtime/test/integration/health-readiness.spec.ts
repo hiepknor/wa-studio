@@ -116,7 +116,7 @@ describe('HTTP readiness', () => {
     });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: 'complete',
       generatedAt: expect.any(String),
       openwaSafety: {
@@ -127,6 +127,19 @@ describe('HTTP readiness', () => {
         storedEvents: expect.any(Number),
         deadEvents: expect.any(Number),
         admissionAvailable: expect.any(Boolean),
+      },
+      observation: {
+        requiredWindowSeconds: 86_400,
+        sampleCount: expect.any(Number),
+        violatingSamples: expect.any(Number),
+        coverageComplete: expect.any(Boolean),
+        candidateIdentity: {
+          runtimeVersion: '0.1.0',
+          runtimeProfile: expect.any(String),
+          managedInstanceId: expect.any(String),
+          studioVersion: expect.any(String),
+          openwaRelease: expect.any(String),
+        },
       },
     });
   });

@@ -2,6 +2,9 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { withCorrelationContext } from '../../core/observability/correlation-context';
+import {
+  RUNTIME_OPERATIONAL_OBSERVATION_INTERVAL_MS,
+} from '../../core/observability/runtime-operational-evidence.service';
 import { terminationSignal } from '../../core/process/termination-signal';
 import { runWithCleanup } from '../../core/process/run-with-cleanup';
 import { RUNTIME_HEARTBEAT_INTERVAL_MS } from '../../core/queue/runtime-heartbeat';
@@ -24,6 +27,7 @@ import { ContactMessageObservationTick } from '../contacts/contact-message-obser
 import { MessageStatusProjectionService } from '../messages/message-status-projection.service';
 import { EventInboxConnectorHealthTick } from '../webhooks/event-inbox-connector-health.tick';
 import { OpenWAConnectorCommandDispatcherService } from '../messages/openwa-connector-command-dispatcher.service';
+import { RuntimeOperationalObservationTick } from './runtime-operational-observation.tick';
 
 @Injectable()
 export class SchedulerRunnerService {
@@ -48,6 +52,7 @@ export class SchedulerRunnerService {
     private readonly contactProjection: ContactProjectionTick,
     private readonly contactMessageObservations: ContactMessageObservationTick,
     private readonly leadership: SchedulerLeadershipService,
+    private readonly operationalObservations: RuntimeOperationalObservationTick,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
     @Optional() private readonly messageStatusProjections?: MessageStatusProjectionService,
     @Optional() private readonly connectorHealth?: EventInboxConnectorHealthTick,
@@ -95,6 +100,12 @@ export class SchedulerRunnerService {
       gatewayTick,
       this.tick('campaigns', 1_000, 30_000, () => this.campaigns.run()),
       this.tick('campaign-lifecycle-audit', 60_000, 30_000, () => this.campaignLifecycleAudit.run()),
+      this.tick(
+        'runtime-operational-observation',
+        RUNTIME_OPERATIONAL_OBSERVATION_INTERVAL_MS,
+        30_000,
+        () => this.operationalObservations.run(),
+      ),
       this.tick(
         'retention',
         this.config.RUNTIME_RETENTION_INTERVAL_MS,

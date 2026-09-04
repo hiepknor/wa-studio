@@ -30,6 +30,7 @@ const schema = z
     RUNTIME_INSTANCE_ID: z.string().trim().min(1).max(128)
       .regex(/^[A-Za-z0-9._:-]+$/u)
       .default('default'),
+    WA_STUDIO_VERSION: z.string().trim().min(1).max(64).default('unmanaged'),
     RUNTIME_BIND_HOST: z.string().trim().min(1).optional(),
     RUNTIME_HTTP_BODY_MAX_BYTES: z.coerce.number().int()
       .min(65_536).max(16_777_216).default(1_048_576),
