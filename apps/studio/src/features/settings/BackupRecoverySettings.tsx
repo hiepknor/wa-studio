@@ -5,6 +5,7 @@ import { userFacingErrorMessage } from "@/shared/errors/error-message";
 import type {
   ManagedRuntimeBackup,
   ManagedRuntimeDiagnostics,
+  ManagedRuntimeQuarantineCleanup,
   ProtectionFreshness,
 } from "@/shared/native/managed-runtime";
 import { AppIcon } from "@/shared/ui/AppIcon";
@@ -24,6 +25,7 @@ import type { SettingsTaskNavigationState } from "./settings-types";
 interface BackupRecoverySettingsProps {
   backups: ManagedRuntimeBackup[];
   createBackup: () => Promise<void>;
+  deleteQuarantinedData: () => Promise<ManagedRuntimeQuarantineCleanup>;
   diagnostics: ManagedRuntimeDiagnostics | null;
   exportRecoveryArchive: (passphrase: string) => Promise<string | null>;
   loadError: string | null;
@@ -36,8 +38,21 @@ interface BackupRecoverySettingsProps {
 }
 
 type RecoveryFlow = "export" | "import" | null;
-type RecoveryOperation = "create-backup" | "export" | "import" | "restore-backup" | null;
+type RecoveryOperation = "create-backup" | "delete-quarantines" | "export" | "import" | "restore-backup" | null;
 type ProtectionTone = "danger" | "neutral" | "success" | "warning";
+
+export function managedStorageAcceptanceEvidence(diagnostics: ManagedRuntimeDiagnostics) {
+  return {
+    verifiedAt: new Date(diagnostics.generatedAtMs).toISOString(),
+    pressure: diagnostics.storage.pressure,
+    filesystemAvailableBytes: diagnostics.storage.filesystemAvailableBytes,
+    recoveryPointCount: diagnostics.recoveryPointCount,
+    recoveryFreshness: diagnostics.recoveryFreshness,
+    integrityFreshness: diagnostics.integrityFreshness,
+    automaticRecoveryBytes: diagnostics.storage.automaticRecoveryBytes,
+    automaticRecoveryBudgetBytes: diagnostics.storage.automaticRecoveryBudgetBytes,
+  };
+}
 
 function backupKind(kind: ManagedRuntimeBackup["kind"]): string {
   if (kind === "automatic") return "Rolling daily backup";
@@ -50,7 +65,8 @@ function backupKind(kind: ManagedRuntimeBackup["kind"]): string {
 function bytes(value: number): string {
   if (value < 1_024) return `${value} B`;
   if (value < 1_048_576) return `${(value / 1_024).toFixed(1)} KB`;
-  return `${(value / 1_048_576).toFixed(1)} MB`;
+  if (value < 1_073_741_824) return `${(value / 1_048_576).toFixed(1)} MB`;
+  return `${(value / 1_073_741_824).toFixed(1)} GiB`;
 }
 
 function protectionPresentation(freshness: ProtectionFreshness | undefined): {
@@ -66,6 +82,7 @@ function protectionPresentation(freshness: ProtectionFreshness | undefined): {
 export function BackupRecoverySettings({
   backups,
   createBackup,
+  deleteQuarantinedData,
   diagnostics,
   exportRecoveryArchive,
   loadError,
@@ -84,11 +101,13 @@ export function BackupRecoverySettings({
   const [exportConfirmation, setExportConfirmation] = useState("");
   const [importPassphrase, setImportPassphrase] = useState("");
   const [confirmingImport, setConfirmingImport] = useState(false);
+  const [confirmingQuarantineCleanup, setConfirmingQuarantineCleanup] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [passphraseError, setPassphraseError] = useState<string | null>(null);
   const operationLifecycle = useSingleFlightOperation();
   const protection = protectionPresentation(diagnostics?.recoveryFreshness);
   const creatingBackup = operation === "create-backup";
+  const deletingQuarantines = operation === "delete-quarantines";
   const restoringBackup = operation === "restore-backup";
   const exportingArchive = operation === "export";
   const importingArchive = operation === "import";
@@ -143,6 +162,54 @@ export function BackupRecoverySettings({
     } catch (caught) {
       if (operationLifecycle.isCurrent(token)) {
         setError(userFacingErrorMessage(caught, "Could not create a manual backup."));
+      }
+    } finally {
+      if (operationLifecycle.complete(token)) setOperation(null);
+    }
+  }
+
+  async function copyAcceptanceEvidence() {
+    if (!diagnostics) return;
+    try {
+      const evidence = managedStorageAcceptanceEvidence(diagnostics);
+      await navigator.clipboard.writeText(JSON.stringify(evidence, null, 2));
+      notify({
+        description: "Paste this exact managedStorage object into the private production acceptance record.",
+        title: "Managed storage evidence copied",
+        tone: "success",
+      });
+    } catch {
+      notify({
+        description: "The exact diagnostics could not be placed on the clipboard.",
+        title: "Could not copy storage evidence",
+        tone: "danger",
+      });
+    }
+  }
+
+  async function confirmDeleteQuarantinedData() {
+    if (operationBusy) return;
+    const token = operationLifecycle.begin();
+    if (token === null) return;
+    setOperation("delete-quarantines");
+    setError(null);
+    try {
+      const result = await deleteQuarantinedData();
+      if (!operationLifecycle.isCurrent(token)) return;
+      setConfirmingQuarantineCleanup(false);
+      const refreshed = await reloadAfterCommittedOperation();
+      if (!operationLifecycle.isCurrent(token)) return;
+      notify({
+        description: refreshed
+          ? `${result.removedCount} retained database item(s) removed; ${bytes(result.removedBytes)} released.`
+          : `${result.removedCount} item(s) were removed, but storage diagnostics could not be refreshed.`,
+        title: refreshed ? "Old data deleted" : "Old data deleted; refresh needed",
+        tone: refreshed ? "success" : "warning",
+      });
+    } catch (caught) {
+      if (operationLifecycle.isCurrent(token)) {
+        setError(userFacingErrorMessage(caught, "Could not delete retained database data."));
+        await reloadAfterCommittedOperation();
       }
     } finally {
       if (operationLifecycle.complete(token)) setOperation(null);
@@ -268,7 +335,20 @@ export function BackupRecoverySettings({
       )}
 
       <SettingsSection
-        action={<Badge tone={protection.tone} variant="status">{protection.label}</Badge>}
+        action={(
+          <div className="settings-section-actions">
+            <Badge tone={protection.tone} variant="status">{protection.label}</Badge>
+            <Button
+              disabled={!diagnostics}
+              icon="copy"
+              onClick={() => void copyAcceptanceEvidence()}
+              size="sm"
+              variant="ghost"
+            >
+              Copy acceptance evidence
+            </Button>
+          </div>
+        )}
         description="WA Studio verifies backup freshness and database integrity on this device."
         kicker="Protection status"
         title="Your local data"
@@ -281,6 +361,38 @@ export function BackupRecoverySettings({
           label="Latest recovery point"
         />
         <SettingsRow action={<span className="settings-row-value">{diagnostics?.recoveryPointCount ?? 0}</span>} label="Recovery points" />
+        <SettingsRow
+          action={<span className="settings-row-value">{bytes(diagnostics?.storage.recoveryPointBytes ?? 0)}</span>}
+          label="Recovery storage"
+        />
+        <SettingsRow
+          action={<span className="settings-row-value">
+            {bytes(diagnostics?.storage.automaticRecoveryBytes ?? 0)} / {bytes(diagnostics?.storage.automaticRecoveryBudgetBytes ?? 0)}
+          </span>}
+          description="Automatic and safety recovery points; manual backups are excluded from this budget."
+          label="Automatic recovery budget"
+        />
+        <SettingsRow
+          action={(
+            <div className="settings-row-actions">
+              <span className="settings-row-value">
+                {diagnostics?.storage.quarantinedClusterCount ?? 0} · {bytes(diagnostics?.storage.quarantinedClusterBytes ?? 0)}
+              </span>
+              {(diagnostics?.storage.quarantinedClusterCount ?? 0) > 0 && (
+                <Button
+                  disabled={!runtimeReady || operationBusy}
+                  onClick={() => { setError(null); setConfirmingQuarantineCleanup(true); }}
+                  size="sm"
+                  variant="danger"
+                >
+                  Delete old data
+                </Button>
+              )}
+            </div>
+          )}
+          description="Previous managed database clusters retained after recovery or reset. Recovery points are stored separately."
+          label="Retained previous data"
+        />
         <SettingsRow
           action={<Badge tone={protectionPresentation(diagnostics?.integrityFreshness).tone} variant="status">
             {protectionPresentation(diagnostics?.integrityFreshness).label}
@@ -471,6 +583,25 @@ export function BackupRecoverySettings({
         )}
       </SettingsSection>
 
+      <ConfirmationDialog
+        body={(
+          <>
+            Permanently delete {diagnostics?.storage.quarantinedClusterCount ?? 0} previous managed
+            database item(s), using {bytes(diagnostics?.storage.quarantinedClusterBytes ?? 0)}?
+            Existing recovery points and the active database are not changed. This cannot be undone.
+          </>
+        )}
+        busy={deletingQuarantines}
+        busyLabel="Deleting…"
+        confirmLabel="Delete old data"
+        confirmVariant="danger"
+        error={error}
+        errorTitle="Old data cleanup failed"
+        onCancel={() => { if (!operationBusy) setConfirmingQuarantineCleanup(false); }}
+        onConfirm={() => void confirmDeleteQuarantinedData()}
+        open={confirmingQuarantineCleanup}
+        title="Delete retained previous data?"
+      />
       <ConfirmationDialog
         body={selectedBackup ? (
           <>

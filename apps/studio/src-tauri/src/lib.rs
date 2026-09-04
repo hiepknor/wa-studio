@@ -29,6 +29,7 @@ pub fn run() {
             managed_runtime::get_managed_runtime_state,
             managed_runtime::get_managed_runtime_provisioning_profile,
             managed_runtime::create_managed_runtime_backup,
+            managed_runtime::delete_managed_runtime_quarantines,
             managed_runtime::export_managed_runtime_recovery_archive,
             managed_runtime::list_managed_runtime_backups,
             managed_runtime::provision_managed_runtime,

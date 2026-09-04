@@ -21,6 +21,7 @@ use std::os::unix::fs::OpenOptionsExt;
 const DATABASE_NAME: &str = "wa_runtime";
 const AUTOMATIC_BACKUP_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const INTEGRITY_CHECK_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const CLOCK_SKEW_TOLERANCE: Duration = Duration::from_secs(5 * 60);
 const INTEGRITY_MARKER_PREFIX: &str = "integrity-ok-v1-";
 const AUTOMATIC_BACKUP_RETENTION_COUNT: usize = 7;
 const MANUAL_BACKUP_RETENTION_COUNT: usize = 5;
@@ -30,6 +31,12 @@ const MAINTENANCE_CANCELLED: &str = "Managed PostgreSQL maintenance was cancelle
 const BACKUP_MANIFEST_FORMAT_VERSION: u32 = 1;
 const BACKUP_STORAGE_POLICY_VERSION: u32 = 1;
 const BACKUP_MANIFEST_MAX_BYTES: u64 = 64 * 1024;
+const MEBIBYTE: u64 = 1_024 * 1_024;
+const GIBIBYTE: u64 = 1_024 * MEBIBYTE;
+const BACKUP_ESTIMATE_MIN_BYTES: u64 = 64 * MEBIBYTE;
+const BACKUP_FREE_SPACE_RESERVE_BYTES: u64 = 2 * GIBIBYTE;
+const BACKUP_BUDGET_MIN_BYTES: u64 = 2 * GIBIBYTE;
+const BACKUP_BUDGET_MAX_BYTES: u64 = 8 * GIBIBYTE;
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -167,7 +174,9 @@ impl ManagedPostgres {
         })?;
         let version = safe_filename_component(release_version);
         let prefix = format!("pre-migration-v{version}-");
-        if backup_exists(backup_directory, &prefix)? {
+        if verified_backup_exists(backup_directory, &prefix, |backup| {
+            self.verify_encrypted_dump_with_cancellation(backup, identity, cancellation)
+        })? {
             return Ok(None);
         }
         self.create_encrypted_backup_with_cancellation(
@@ -259,14 +268,8 @@ impl ManagedPostgres {
         identity: &x25519::Identity,
         cancellation: &AtomicBool,
     ) -> Result<Option<PathBuf>, String> {
-        if !self.database_preexisting {
-            return Ok(None);
-        }
         let now = unix_timestamp_millis()?;
-        let interval = AUTOMATIC_BACKUP_INTERVAL.as_millis() as u64;
-        if list_backups(backup_directory)?.iter().any(|backup| {
-            now.saturating_sub(backup.created_at_ms) < interval || backup.created_at_ms > now
-        }) {
+        if !automatic_backup_is_due(backup_directory, now)? {
             return Ok(None);
         }
         self.create_encrypted_backup_with_cancellation(
@@ -299,9 +302,6 @@ impl ManagedPostgres {
         state_directory: &Path,
         cancellation: &AtomicBool,
     ) -> Result<bool, String> {
-        if !self.database_preexisting {
-            return Ok(false);
-        }
         fs::create_dir_all(state_directory).map_err(|error| {
             format!(
                 "Could not create PostgreSQL integrity state directory {}: {error}",
@@ -309,15 +309,23 @@ impl ManagedPostgres {
             )
         })?;
         let now = unix_timestamp_millis()?;
-        let interval = INTEGRITY_CHECK_INTERVAL.as_millis() as u64;
-        if latest_integrity_check(state_directory)?
-            .is_some_and(|timestamp| timestamp > now || now.saturating_sub(timestamp) < interval)
-        {
+        if !integrity_check_is_due(state_directory, now)? {
             return Ok(false);
         }
         self.run_pg_amcheck(cancellation)?;
         commit_integrity_marker(state_directory, now)?;
         Ok(true)
+    }
+
+    pub fn background_maintenance_due(
+        &self,
+        state_directory: &Path,
+    ) -> Result<(bool, bool), String> {
+        let now = unix_timestamp_millis()?;
+        Ok((
+            integrity_check_is_due(state_directory, now)?,
+            automatic_backup_is_due(state_directory, now)?,
+        ))
     }
 
     #[cfg(test)]
@@ -602,9 +610,22 @@ impl ManagedPostgres {
                 backup_directory.display()
             )
         })?;
+        rotate_backups(backup_directory)?;
         let timestamp = unix_timestamp_millis()?;
         let final_path = backup_directory.join(format!("{prefix}{timestamp}.dump.age"));
         let partial_path = backup_directory.join(format!("{prefix}{timestamp}.dump.age.partial"));
+        let backup_kind = final_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(managed_backup_identity)
+            .map(|(kind, _)| kind)
+            .ok_or_else(|| "The managed backup prefix is invalid.".to_string())?;
+        let storage_budget = backup_storage_preflight(
+            backup_directory,
+            &self.postgresql.settings().data_dir,
+            backup_kind,
+            cancellation,
+        )?;
         if let Err(error) =
             self.write_encrypted_dump_cancellable(&partial_path, identity, cancellation)
         {
@@ -613,6 +634,15 @@ impl ManagedPostgres {
         }
         if let Err(error) =
             self.verify_encrypted_dump_with_cancellation(&partial_path, identity, cancellation)
+        {
+            let _ = fs::remove_file(&partial_path);
+            return Err(error);
+        }
+        let actual_size = fs::metadata(&partial_path)
+            .map_err(|error| format!("Could not inspect managed backup size: {error}"))?
+            .len();
+        if let Err(error) =
+            ensure_backup_fits_budget(backup_directory, backup_kind, actual_size, storage_budget)
         {
             let _ = fs::remove_file(&partial_path);
             return Err(error);
@@ -634,6 +664,7 @@ impl ManagedPostgres {
         if rotate_after {
             rotate_backups(backup_directory)?;
         }
+        enforce_backup_byte_budget(backup_directory, storage_budget)?;
         Ok(final_path)
     }
 
@@ -862,17 +893,17 @@ fn unix_timestamp_millis() -> Result<u64, String> {
     u64::try_from(millis).map_err(|_| "Database backup timestamp exceeds u64.".to_string())
 }
 
-fn latest_integrity_check(directory: &Path) -> Result<Option<u64>, String> {
+fn integrity_check_timestamps(directory: &Path) -> Result<Vec<u64>, String> {
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => {
             return Err(format!(
                 "Could not inspect PostgreSQL integrity state: {error}"
             ))
         }
     };
-    let mut latest = None;
+    let mut timestamps = Vec::new();
     for entry in entries {
         let entry = entry
             .map_err(|error| format!("Could not inspect PostgreSQL integrity state: {error}"))?;
@@ -891,17 +922,64 @@ fn latest_integrity_check(directory: &Path) -> Result<Option<u64>, String> {
         else {
             continue;
         };
-        latest = Some(latest.map_or(timestamp, |current: u64| current.max(timestamp)));
+        timestamps.push(timestamp);
     }
-    Ok(latest)
+    Ok(timestamps)
 }
 
-pub fn last_integrity_check_at(directory: &Path) -> Result<Option<u64>, String> {
-    latest_integrity_check(directory)
+pub fn last_integrity_check_at(directory: &Path, now_ms: u64) -> Result<Option<u64>, String> {
+    Ok(latest_credible_timestamp(
+        now_ms,
+        integrity_check_timestamps(directory)?,
+    ))
 }
 
 pub fn integrity_check_interval_millis() -> u64 {
     INTEGRITY_CHECK_INTERVAL.as_millis() as u64
+}
+
+fn maintenance_is_due(now_ms: u64, last_success_at_ms: Option<u64>, interval_ms: u64) -> bool {
+    match last_success_at_ms {
+        None => true,
+        Some(last_success_at_ms) if !timestamp_is_credible(now_ms, last_success_at_ms) => true,
+        Some(last_success_at_ms) if last_success_at_ms > now_ms => false,
+        Some(last_success_at_ms) => now_ms.saturating_sub(last_success_at_ms) >= interval_ms,
+    }
+}
+
+pub(super) fn timestamp_is_credible(now_ms: u64, timestamp_ms: u64) -> bool {
+    timestamp_ms <= now_ms.saturating_add(CLOCK_SKEW_TOLERANCE.as_millis() as u64)
+}
+
+fn latest_credible_timestamp(
+    now_ms: u64,
+    timestamps: impl IntoIterator<Item = u64>,
+) -> Option<u64> {
+    timestamps
+        .into_iter()
+        .filter(|timestamp| timestamp_is_credible(now_ms, *timestamp))
+        .max()
+}
+
+pub fn latest_recovery_point_at(backups: &[ManagedRuntimeBackup], now_ms: u64) -> Option<u64> {
+    latest_credible_timestamp(now_ms, backups.iter().map(|backup| backup.created_at_ms))
+}
+
+fn automatic_backup_is_due(directory: &Path, now_ms: u64) -> Result<bool, String> {
+    let latest_backup = latest_recovery_point_at(&list_backups(directory)?, now_ms);
+    Ok(maintenance_is_due(
+        now_ms,
+        latest_backup,
+        AUTOMATIC_BACKUP_INTERVAL.as_millis() as u64,
+    ))
+}
+
+fn integrity_check_is_due(directory: &Path, now_ms: u64) -> Result<bool, String> {
+    Ok(maintenance_is_due(
+        now_ms,
+        last_integrity_check_at(directory, now_ms)?,
+        INTEGRITY_CHECK_INTERVAL.as_millis() as u64,
+    ))
 }
 
 fn commit_integrity_marker(directory: &Path, timestamp: u64) -> Result<(), String> {
@@ -1237,16 +1315,68 @@ fn remove_backup_and_manifest(backup: &Path) -> Result<(), String> {
     }
 }
 
-fn backup_exists(directory: &Path, prefix: &str) -> Result<bool, String> {
+fn require_backup_manifest(backup: &Path) -> Result<(), String> {
+    let path = backup_manifest_path(backup)?;
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(
+                "A manifest is required to reuse a pre-migration recovery point.".to_string(),
+            )
+        }
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect managed backup manifest: {error}"
+            ))
+        }
+    };
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Err("The managed backup manifest is not a regular file.".to_string());
+    }
+    Ok(())
+}
+
+fn verified_backup_exists<F>(directory: &Path, prefix: &str, mut verify: F) -> Result<bool, String>
+where
+    F: FnMut(&Path) -> Result<(), String>,
+{
     let entries = fs::read_dir(directory)
         .map_err(|error| format!("Could not inspect PostgreSQL backups: {error}"))?;
+    let mut candidates = Vec::new();
     for entry in entries {
         let entry =
             entry.map_err(|error| format!("Could not inspect PostgreSQL backup: {error}"))?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with(prefix) && name.ends_with(".dump.age") {
-            return Ok(true);
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("Could not inspect PostgreSQL backup type: {error}"))?;
+        if !file_type.is_file() || file_type.is_symlink() {
+            continue;
+        }
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Some((_, timestamp)) = managed_backup_identity(&name) else {
+            continue;
+        };
+        if name.starts_with(prefix) {
+            candidates.push((timestamp, entry.path()));
+        }
+    }
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
+    for (_, backup) in candidates {
+        match require_backup_manifest(&backup).and_then(|_| verify(&backup)) {
+            Ok(()) => return Ok(true),
+            Err(error) if error.contains(MAINTENANCE_CANCELLED) => return Err(error),
+            Err(error) => {
+                let reason: String = error.chars().take(512).collect();
+                super::observability::warn(
+                    "managed_postgres.existing_backup_invalid",
+                    serde_json::json!({
+                        "backupId": backup.file_name().and_then(|name| name.to_str()),
+                        "reason": reason,
+                    }),
+                );
+            }
         }
     }
     Ok(false)
@@ -1285,6 +1415,46 @@ pub fn list_backups(directory: &Path) -> Result<Vec<ManagedRuntimeBackup>, Strin
     }
     backups.sort_by_key(|backup| std::cmp::Reverse(backup.created_at_ms));
     Ok(backups)
+}
+
+pub struct BackupStorageSummary {
+    pub recovery_point_bytes: u64,
+    pub automatic_recovery_bytes: u64,
+    pub automatic_recovery_budget_bytes: u64,
+}
+
+pub fn backup_storage_summary(
+    directory: &Path,
+    filesystem_total_bytes: u64,
+) -> Result<BackupStorageSummary, String> {
+    let backups = backup_files(directory)?;
+    let recovery_point_bytes = backups.iter().fold(0_u64, |total, backup| {
+        total.saturating_add(backup.size_bytes)
+    });
+    let automatic_recovery_bytes = backups
+        .iter()
+        .filter(|backup| backup.kind != "manual")
+        .fold(0_u64, |total, backup| {
+            total.saturating_add(backup.size_bytes)
+        });
+    let estimated_backup_bytes = backups
+        .iter()
+        .max_by_key(|backup| backup.timestamp)
+        .map(|backup| {
+            backup
+                .size_bytes
+                .saturating_add(backup.size_bytes / 2)
+                .max(BACKUP_ESTIMATE_MIN_BYTES)
+        })
+        .unwrap_or(BACKUP_ESTIMATE_MIN_BYTES);
+    Ok(BackupStorageSummary {
+        recovery_point_bytes,
+        automatic_recovery_bytes,
+        automatic_recovery_budget_bytes: backup_storage_budget(
+            filesystem_total_bytes,
+            estimated_backup_bytes,
+        ),
+    })
 }
 
 pub fn remove_incomplete_backups(directory: &Path) -> Result<usize, String> {
@@ -1447,27 +1617,236 @@ fn managed_backup_identity(name: &str) -> Option<(&'static str, u64)> {
     Some((kind, timestamp.parse().ok()?))
 }
 
-fn rotate_backups(directory: &Path) -> Result<(), String> {
-    let mut backups = fs::read_dir(directory)
-        .map_err(|error| format!("Could not inspect PostgreSQL backups: {error}"))?
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            let (kind, timestamp) = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .and_then(managed_backup_identity)?;
-            (path.is_file() && !path.is_symlink()).then_some((path, kind, timestamp))
+#[derive(Debug)]
+struct BackupFile {
+    path: PathBuf,
+    kind: &'static str,
+    timestamp: u64,
+    size_bytes: u64,
+}
+
+fn backup_files(directory: &Path) -> Result<Vec<BackupFile>, String> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Could not inspect PostgreSQL backups: {error}")),
+    };
+    let mut backups = Vec::new();
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("Could not inspect PostgreSQL backup: {error}"))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("Could not inspect PostgreSQL backup type: {error}"))?;
+        if !file_type.is_file() || file_type.is_symlink() {
+            continue;
+        }
+        let Some((kind, timestamp)) = entry.file_name().to_str().and_then(managed_backup_identity)
+        else {
+            continue;
+        };
+        let size_bytes = entry
+            .metadata()
+            .map_err(|error| format!("Could not inspect PostgreSQL backup size: {error}"))?
+            .len();
+        backups.push(BackupFile {
+            path: entry.path(),
+            kind,
+            timestamp,
+            size_bytes,
+        });
+    }
+    Ok(backups)
+}
+
+fn backup_storage_preflight(
+    backup_directory: &Path,
+    postgres_data_directory: &Path,
+    new_kind: &str,
+    cancellation: Option<&AtomicBool>,
+) -> Result<u64, String> {
+    let backups = backup_files(backup_directory)?;
+    let estimated_bytes = match backups.iter().max_by_key(|backup| backup.timestamp) {
+        Some(latest) => latest
+            .size_bytes
+            .saturating_add(latest.size_bytes / 2)
+            .max(BACKUP_ESTIMATE_MIN_BYTES),
+        None => {
+            directory_size(postgres_data_directory, cancellation)?.max(BACKUP_ESTIMATE_MIN_BYTES)
+        }
+    };
+    let filesystem_total_bytes = fs2::total_space(backup_directory)
+        .map_err(|error| format!("Could not inspect backup storage capacity: {error}"))?;
+    let filesystem_available_bytes = fs2::available_space(backup_directory)
+        .map_err(|error| format!("Could not inspect available backup storage: {error}"))?;
+    let required_available_bytes = estimated_bytes.saturating_add(BACKUP_FREE_SPACE_RESERVE_BYTES);
+    if filesystem_available_bytes < required_available_bytes {
+        return Err(format!(
+            "Not enough free space to create a managed PostgreSQL backup safely. At least {} bytes must remain available after reserving space for the backup.",
+            BACKUP_FREE_SPACE_RESERVE_BYTES
+        ));
+    }
+    let budget = backup_storage_budget(filesystem_total_bytes, estimated_bytes);
+    ensure_backup_fits_budget(backup_directory, new_kind, estimated_bytes, budget)?;
+    Ok(budget)
+}
+
+fn backup_storage_budget(filesystem_total_bytes: u64, estimated_backup_bytes: u64) -> u64 {
+    let baseline = (filesystem_total_bytes / 20)
+        .clamp(BACKUP_BUDGET_MIN_BYTES, BACKUP_BUDGET_MAX_BYTES)
+        .min(filesystem_total_bytes);
+    baseline.max(estimated_backup_bytes)
+}
+
+fn ensure_backup_fits_budget(
+    directory: &Path,
+    new_kind: &str,
+    new_size_bytes: u64,
+    budget_bytes: u64,
+) -> Result<(), String> {
+    let backups = backup_files(directory)?;
+    let newest_safety_bytes = (!is_safety_backup(new_kind))
+        .then(|| {
+            backups
+                .iter()
+                .filter(|backup| is_safety_backup(backup.kind))
+                .max_by_key(|backup| backup.timestamp)
+                .map(|backup| backup.size_bytes)
         })
-        .collect::<Vec<_>>();
-    backups.sort_by_key(|(_, kind, timestamp)| (*kind, std::cmp::Reverse(*timestamp)));
+        .flatten()
+        .unwrap_or(0);
+    let protected_bytes = new_size_bytes.saturating_add(newest_safety_bytes);
+    if protected_bytes > budget_bytes {
+        return Err(format!(
+            "The managed backup would exceed the automatic recovery budget of {budget_bytes} bytes while preserving the latest safety recovery point."
+        ));
+    }
+    Ok(())
+}
+
+fn enforce_backup_byte_budget(directory: &Path, budget_bytes: u64) -> Result<(), String> {
+    let mut backups = backup_files(directory)?;
+    let now_ms = unix_timestamp_millis()?;
+    let mut retained_bytes = backups
+        .iter()
+        .filter(|backup| backup.kind != "manual")
+        .fold(0_u64, |total, backup| {
+            total.saturating_add(backup.size_bytes)
+        });
+    if retained_bytes <= budget_bytes {
+        return Ok(());
+    }
+
+    let newest_path = backups
+        .iter()
+        .filter(|backup| backup.kind != "manual")
+        .max_by_key(|backup| {
+            (
+                timestamp_is_credible(now_ms, backup.timestamp),
+                backup.timestamp,
+            )
+        })
+        .map(|backup| backup.path.clone());
+    let newest_safety_path = backups
+        .iter()
+        .filter(|backup| is_safety_backup(backup.kind))
+        .max_by_key(|backup| {
+            (
+                timestamp_is_credible(now_ms, backup.timestamp),
+                backup.timestamp,
+            )
+        })
+        .map(|backup| backup.path.clone());
+    backups.sort_by_key(|backup| {
+        let priority = if backup.kind == "automatic" { 0 } else { 1 };
+        (priority, backup.timestamp)
+    });
+    for backup in backups {
+        if retained_bytes <= budget_bytes {
+            break;
+        }
+        if backup.kind == "manual"
+            || newest_path.as_ref() == Some(&backup.path)
+            || newest_safety_path.as_ref() == Some(&backup.path)
+        {
+            continue;
+        }
+        remove_backup_and_manifest(&backup.path)?;
+        retained_bytes = retained_bytes.saturating_sub(backup.size_bytes);
+    }
+    if retained_bytes > budget_bytes {
+        return Err(format!(
+            "Managed recovery points use {retained_bytes} bytes, exceeding the automatic recovery budget of {budget_bytes} bytes; protected recovery points were retained."
+        ));
+    }
+    Ok(())
+}
+
+fn directory_size(path: &Path, cancellation: Option<&AtomicBool>) -> Result<u64, String> {
+    if cancellation.is_some_and(|token| token.load(Ordering::Acquire)) {
+        return Err(MAINTENANCE_CANCELLED.to_string());
+    }
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect managed PostgreSQL storage: {error}"
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(0);
+    }
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+    if !metadata.is_dir() {
+        return Ok(0);
+    }
+    let mut total = 0_u64;
+    for entry in fs::read_dir(path)
+        .map_err(|error| format!("Could not inspect managed PostgreSQL storage: {error}"))?
+    {
+        let entry = entry
+            .map_err(|error| format!("Could not inspect managed PostgreSQL storage: {error}"))?;
+        total = total.saturating_add(directory_size(&entry.path(), cancellation)?);
+    }
+    Ok(total)
+}
+
+fn is_safety_backup(kind: &str) -> bool {
+    matches!(kind, "pre-migration" | "pre-restore" | "pre-update")
+}
+
+fn backup_retention_class(kind: &str) -> &str {
+    if is_safety_backup(kind) {
+        "safety"
+    } else {
+        kind
+    }
+}
+
+fn rotate_backups(directory: &Path) -> Result<(), String> {
+    let mut backups = backup_files(directory)?;
+    let now_ms = unix_timestamp_millis()?;
+    backups.sort_by_key(|backup| {
+        (
+            backup_retention_class(backup.kind),
+            std::cmp::Reverse((
+                backup.kind == "manual" || timestamp_is_credible(now_ms, backup.timestamp),
+                backup.timestamp,
+            )),
+        )
+    });
     let mut seen = std::collections::HashMap::<&str, usize>::new();
-    for (expired, _, _) in backups.into_iter().filter(|(_, kind, _)| {
-        let count = seen.entry(kind).or_default();
+    for expired in backups.into_iter().filter(|backup| {
+        let class = backup_retention_class(backup.kind);
+        let count = seen.entry(class).or_default();
         *count += 1;
-        *count > backup_retention(kind)
+        *count > backup_retention(class)
     }) {
-        remove_backup_and_manifest(&expired)?;
+        remove_backup_and_manifest(&expired.path)?;
     }
     Ok(())
 }
@@ -1494,17 +1873,34 @@ mod tests {
     use super::super::secret_store::random_secret;
 
     use super::{
-        acquire_root_lock, commit_integrity_marker, copy_with_cancellation, drain_process_output,
-        latest_integrity_check, list_backups, postgres_binary, remove_incomplete_backups,
-        resolve_managed_backup, retain_staged_managed_backup, rotate_backups,
-        safe_filename_component, stage_managed_backup, stream_archive_to,
-        verify_backup_manifest_if_present, write_backup_manifest, ManagedPostgres,
-        AUTOMATIC_BACKUP_RETENTION_COUNT, DATABASE_NAME, MANUAL_BACKUP_RETENTION_COUNT,
-        PROCESS_OUTPUT_LIMIT, SAFETY_BACKUP_RETENTION_COUNT,
+        acquire_root_lock, automatic_backup_is_due, commit_integrity_marker,
+        copy_with_cancellation, drain_process_output, enforce_backup_byte_budget,
+        ensure_backup_fits_budget, integrity_check_is_due, last_integrity_check_at,
+        latest_recovery_point_at, list_backups, maintenance_is_due, postgres_binary,
+        remove_incomplete_backups, resolve_managed_backup, retain_staged_managed_backup,
+        rotate_backups, safe_filename_component, stage_managed_backup, stream_archive_to,
+        unix_timestamp_millis, verified_backup_exists, verify_backup_manifest_if_present,
+        write_backup_manifest, ManagedPostgres, AUTOMATIC_BACKUP_RETENTION_COUNT,
+        BACKUP_BUDGET_MAX_BYTES, BACKUP_BUDGET_MIN_BYTES, DATABASE_NAME, INTEGRITY_MARKER_PREFIX,
+        MAINTENANCE_CANCELLED, MANUAL_BACKUP_RETENTION_COUNT, PROCESS_OUTPUT_LIMIT,
+        SAFETY_BACKUP_RETENTION_COUNT,
     };
 
     struct EarlyClosingWriter {
         bytes_before_close: usize,
+    }
+
+    #[test]
+    fn marks_daily_and_weekly_protection_due_during_long_running_sessions() {
+        let hour = 60 * 60 * 1_000;
+        let day = 24 * hour;
+        let week = 7 * day;
+
+        assert!(maintenance_is_due(48 * hour, Some(24 * hour), day));
+        assert!(maintenance_is_due(8 * day, Some(day), week));
+        assert!(!maintenance_is_due(day - 1, Some(0), day));
+        assert!(!maintenance_is_due(day, Some(day + 1), day));
+        assert!(maintenance_is_due(day, Some(day + hour), day));
     }
 
     impl Write for EarlyClosingWriter {
@@ -1602,6 +1998,160 @@ mod tests {
     }
 
     #[test]
+    fn pre_migration_dedup_uses_only_the_newest_verified_regular_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let prefix = "pre-migration-v0.2.2-";
+        fs::create_dir(directory.path().join(format!("{prefix}30.dump.age"))).unwrap();
+        fs::write(
+            directory.path().join(format!("{prefix}20.dump.age")),
+            b"invalid",
+        )
+        .unwrap();
+        fs::write(
+            directory
+                .path()
+                .join(format!("{prefix}20.dump.age.manifest.json")),
+            b"manifest",
+        )
+        .unwrap();
+        fs::write(
+            directory.path().join(format!("{prefix}10.dump.age")),
+            b"valid",
+        )
+        .unwrap();
+        fs::write(
+            directory
+                .path()
+                .join(format!("{prefix}10.dump.age.manifest.json")),
+            b"manifest",
+        )
+        .unwrap();
+        fs::write(directory.path().join("manual-40.dump.age"), b"unrelated").unwrap();
+        fs::write(
+            directory
+                .path()
+                .join(format!("{prefix}not-a-time.dump.age")),
+            b"malformed",
+        )
+        .unwrap();
+        let mut inspected = Vec::new();
+
+        let exists = verified_backup_exists(directory.path(), prefix, |backup| {
+            let name = backup.file_name().unwrap().to_string_lossy().to_string();
+            inspected.push(name.clone());
+            if name == format!("{prefix}10.dump.age") {
+                Ok(())
+            } else {
+                Err("archive is corrupt".to_string())
+            }
+        })
+        .unwrap();
+
+        assert!(exists);
+        assert_eq!(
+            inspected,
+            vec![
+                format!("{prefix}20.dump.age"),
+                format!("{prefix}10.dump.age")
+            ]
+        );
+    }
+
+    #[test]
+    fn pre_migration_dedup_creates_a_new_backup_when_all_candidates_are_invalid() {
+        let directory = tempfile::tempdir().unwrap();
+        let prefix = "pre-migration-v0.2.2-";
+        fs::write(
+            directory.path().join(format!("{prefix}10.dump.age")),
+            b"invalid",
+        )
+        .unwrap();
+        fs::write(
+            directory
+                .path()
+                .join(format!("{prefix}10.dump.age.manifest.json")),
+            b"manifest",
+        )
+        .unwrap();
+
+        assert!(!verified_backup_exists(directory.path(), prefix, |_| {
+            Err("archive is corrupt".to_string())
+        })
+        .unwrap());
+    }
+
+    #[test]
+    fn pre_migration_dedup_propagates_maintenance_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let prefix = "pre-migration-v0.2.2-";
+        fs::write(
+            directory.path().join(format!("{prefix}10.dump.age")),
+            b"candidate",
+        )
+        .unwrap();
+        fs::write(
+            directory
+                .path()
+                .join(format!("{prefix}10.dump.age.manifest.json")),
+            b"manifest",
+        )
+        .unwrap();
+
+        let error = verified_backup_exists(directory.path(), prefix, |_| {
+            Err(MAINTENANCE_CANCELLED.to_string())
+        })
+        .unwrap_err();
+
+        assert_eq!(error, MAINTENANCE_CANCELLED);
+    }
+
+    #[test]
+    fn pre_migration_dedup_rejects_a_legacy_archive_without_a_manifest() {
+        let directory = tempfile::tempdir().unwrap();
+        let prefix = "pre-migration-v0.2.2-";
+        fs::write(
+            directory.path().join(format!("{prefix}10.dump.age")),
+            b"legacy archive",
+        )
+        .unwrap();
+        let mut inspected = false;
+
+        let exists = verified_backup_exists(directory.path(), prefix, |_| {
+            inspected = true;
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(!exists);
+        assert!(!inspected);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pre_migration_dedup_never_follows_symlink_candidates() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let external = tempfile::NamedTempFile::new().unwrap();
+        let prefix = "pre-migration-v0.2.2-";
+        symlink(
+            external.path(),
+            directory.path().join(format!("{prefix}10.dump.age")),
+        )
+        .unwrap();
+        let mut inspected = false;
+
+        let exists = verified_backup_exists(directory.path(), prefix, |_| {
+            inspected = true;
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(!exists);
+        assert!(!inspected);
+    }
+
+    #[test]
     fn rotates_a_managed_backup_and_its_manifest_together() {
         let directory = tempfile::tempdir().unwrap();
         let oldest = directory.path().join("automatic-0.dump.age");
@@ -1625,7 +2175,7 @@ mod tests {
     }
 
     #[test]
-    fn rotates_each_backup_class_without_one_class_evicting_another() {
+    fn rotates_automatic_manual_and_shared_safety_retention_classes() {
         let directory = tempfile::tempdir().unwrap();
         for index in 0..(AUTOMATIC_BACKUP_RETENTION_COUNT + 2) {
             fs::write(
@@ -1667,13 +2217,83 @@ mod tests {
             AUTOMATIC_BACKUP_RETENTION_COUNT
                 + MANUAL_BACKUP_RETENTION_COUNT
                 + SAFETY_BACKUP_RETENTION_COUNT
-                + 2
         );
         assert!(directory
             .path()
             .join("pre-update-v0.2.0-to-v0.3.0-101.dump.age")
             .exists());
         assert!(directory.path().join("user-owned.dump.age").exists());
+    }
+
+    #[test]
+    fn byte_budget_prunes_automatic_backups_but_preserves_latest_safety_and_manual() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("automatic-1.dump.age"), [1; 6]).unwrap();
+        fs::write(directory.path().join("automatic-4.dump.age"), [1; 6]).unwrap();
+        fs::write(
+            directory.path().join("pre-migration-v0.1.0-3.dump.age"),
+            [1; 6],
+        )
+        .unwrap();
+        fs::write(directory.path().join("manual-2.dump.age"), [1; 100]).unwrap();
+
+        enforce_backup_byte_budget(directory.path(), 12).unwrap();
+
+        assert!(!directory.path().join("automatic-1.dump.age").exists());
+        assert!(directory.path().join("automatic-4.dump.age").exists());
+        assert!(directory
+            .path()
+            .join("pre-migration-v0.1.0-3.dump.age")
+            .exists());
+        assert!(directory.path().join("manual-2.dump.age").exists());
+    }
+
+    #[test]
+    fn byte_budget_does_not_preserve_an_implausibly_future_backup_over_a_current_one() {
+        let directory = tempfile::tempdir().unwrap();
+        let now = unix_timestamp_millis().unwrap();
+        let current = directory.path().join(format!("automatic-{now}.dump.age"));
+        let future = directory
+            .path()
+            .join(format!("automatic-{}.dump.age", u64::MAX));
+        fs::write(&current, [1; 6]).unwrap();
+        fs::write(&future, [1; 6]).unwrap();
+
+        enforce_backup_byte_budget(directory.path(), 6).unwrap();
+
+        assert!(current.exists());
+        assert!(!future.exists());
+    }
+
+    #[test]
+    fn capacity_check_does_not_replace_the_latest_safety_point_with_an_automatic_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(
+            directory
+                .path()
+                .join("pre-update-v0.1.0-to-v0.2.0-1.dump.age"),
+            [1; 8],
+        )
+        .unwrap();
+
+        assert!(ensure_backup_fits_budget(directory.path(), "automatic", 10, 17).is_err());
+        assert!(ensure_backup_fits_budget(directory.path(), "pre-update", 10, 10).is_ok());
+    }
+
+    #[test]
+    fn storage_budget_is_bounded_but_can_fit_one_large_recovery_point() {
+        assert_eq!(
+            super::backup_storage_budget(20 * BACKUP_BUDGET_MIN_BYTES, 1),
+            BACKUP_BUDGET_MIN_BYTES
+        );
+        assert_eq!(
+            super::backup_storage_budget(u64::MAX, 1),
+            BACKUP_BUDGET_MAX_BYTES
+        );
+        assert_eq!(
+            super::backup_storage_budget(u64::MAX, BACKUP_BUDGET_MAX_BYTES + 1),
+            BACKUP_BUDGET_MAX_BYTES + 1
+        );
     }
 
     #[test]
@@ -1710,8 +2330,88 @@ mod tests {
         commit_integrity_marker(directory.path(), 10).unwrap();
         commit_integrity_marker(directory.path(), 20).unwrap();
 
-        assert_eq!(latest_integrity_check(directory.path()).unwrap(), Some(20));
+        assert_eq!(
+            last_integrity_check_at(directory.path(), 20).unwrap(),
+            Some(20)
+        );
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn scheduling_ignores_implausibly_future_backup_and_integrity_timestamps() {
+        let backup_directory = tempfile::tempdir().unwrap();
+        let integrity_directory = tempfile::tempdir().unwrap();
+        let now = 1_000;
+        fs::write(backup_directory.path().join("automatic-900.dump.age"), [1]).unwrap();
+        fs::write(
+            backup_directory
+                .path()
+                .join(format!("automatic-{}.dump.age", u64::MAX)),
+            [1],
+        )
+        .unwrap();
+        fs::write(
+            integrity_directory
+                .path()
+                .join(format!("{INTEGRITY_MARKER_PREFIX}900")),
+            [],
+        )
+        .unwrap();
+        fs::write(
+            integrity_directory
+                .path()
+                .join(format!("{INTEGRITY_MARKER_PREFIX}{}", u64::MAX)),
+            [],
+        )
+        .unwrap();
+
+        let backups = list_backups(backup_directory.path()).unwrap();
+        assert_eq!(latest_recovery_point_at(&backups, now), Some(900));
+        assert!(!automatic_backup_is_due(backup_directory.path(), now).unwrap());
+        assert_eq!(
+            last_integrity_check_at(integrity_directory.path(), now).unwrap(),
+            Some(900)
+        );
+        assert!(!integrity_check_is_due(integrity_directory.path(), now).unwrap());
+
+        fs::remove_file(backup_directory.path().join("automatic-900.dump.age")).unwrap();
+        fs::remove_file(
+            integrity_directory
+                .path()
+                .join(format!("{INTEGRITY_MARKER_PREFIX}900")),
+        )
+        .unwrap();
+        assert!(automatic_backup_is_due(backup_directory.path(), now).unwrap());
+        assert_eq!(
+            last_integrity_check_at(integrity_directory.path(), now).unwrap(),
+            None
+        );
+        assert!(integrity_check_is_due(integrity_directory.path(), now).unwrap());
+    }
+
+    #[test]
+    fn retention_keeps_a_current_backup_ahead_of_future_clock_anomalies() {
+        let directory = tempfile::tempdir().unwrap();
+        let now = unix_timestamp_millis().unwrap();
+        let current = directory.path().join(format!("automatic-{now}.dump.age"));
+        fs::write(&current, [1]).unwrap();
+        for offset in 0..AUTOMATIC_BACKUP_RETENTION_COUNT {
+            fs::write(
+                directory
+                    .path()
+                    .join(format!("automatic-{}.dump.age", u64::MAX - offset as u64)),
+                [1],
+            )
+            .unwrap();
+        }
+
+        rotate_backups(directory.path()).unwrap();
+
+        assert!(current.exists());
+        assert_eq!(
+            list_backups(directory.path()).unwrap().len(),
+            AUTOMATIC_BACKUP_RETENTION_COUNT
+        );
     }
 
     #[test]

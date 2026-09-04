@@ -24,12 +24,12 @@ use age::secrecy::SecretString;
 use config::{DesktopDatabaseConfig, DesktopRuntimeConfig};
 use model::{
     ManagedRuntimeConnection, ManagedRuntimeLifecycleStatus, ManagedRuntimeMaintenance,
-    ManagedRuntimeMaintenanceKind, ManagedRuntimePhase, ManagedRuntimeStorageDiagnostics,
-    ProtectionFreshness, StoragePressure,
+    ManagedRuntimeMaintenanceKind, ManagedRuntimePhase, ManagedRuntimeQuarantineCleanup,
+    ManagedRuntimeStorageDiagnostics, ProtectionFreshness, StoragePressure,
 };
 use provisioning::{ManagedRuntimeProvisioningInput, ManagedRuntimeProvisioningProfile};
 use release::{OPENWA_CONTRACT_SHA256, OPENWA_RELEASE_TAG};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -50,7 +50,10 @@ const STORAGE_CRITICAL_AVAILABLE_BYTES: u64 = 10 * GIBIBYTE;
 const STORAGE_WARNING_AVAILABLE_PERCENT: u8 = 15;
 const STORAGE_CRITICAL_AVAILABLE_PERCENT: u8 = 8;
 const BACKGROUND_MAINTENANCE_START_DELAY: Duration = Duration::from_secs(15);
+const BACKGROUND_MAINTENANCE_POLL_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const BACKGROUND_MAINTENANCE_MAX_JITTER: Duration = Duration::from_secs(2 * 60);
 
+#[derive(Clone)]
 struct ManagedPostgresMaintenanceContext {
     backup_directory: PathBuf,
     backup_identity: Option<String>,
@@ -87,6 +90,9 @@ fn protection_freshness(
 ) -> ProtectionFreshness {
     match last_success_at_ms {
         None => ProtectionFreshness::Missing,
+        Some(timestamp) if !postgres::timestamp_is_credible(now_ms, timestamp) => {
+            ProtectionFreshness::Due
+        }
         Some(timestamp) if now_ms.saturating_sub(timestamp) <= interval_ms => {
             ProtectionFreshness::Fresh
         }
@@ -124,6 +130,11 @@ fn storage_diagnostics(path: &std::path::Path) -> Result<ManagedRuntimeStorageDi
         filesystem_available_bytes,
         filesystem_available_percent,
         pressure,
+        recovery_point_bytes: 0,
+        automatic_recovery_bytes: 0,
+        automatic_recovery_budget_bytes: 0,
+        quarantined_cluster_count: 0,
+        quarantined_cluster_bytes: 0,
     })
 }
 
@@ -158,22 +169,50 @@ pub async fn get_managed_runtime_diagnostics(
         .path()
         .app_data_dir()
         .map_err(|error| format!("Could not resolve WA Desktop data directory: {error}"))?;
-    let storage = storage_diagnostics(&app_data_directory)?;
+    let mut storage = storage_diagnostics(&app_data_directory)?;
     let backup_directory = config
         .as_ref()
         .and_then(|config| config.managed_backup_directory(&app_data_directory));
-    let (backups, last_integrity_check_at_ms) = match backup_directory {
+    let postgres_root = config.as_ref().and_then(|config| match &config.database {
+        DesktopDatabaseConfig::Managed { root, .. } => Some(
+            root.clone()
+                .unwrap_or_else(|| app_data_directory.join("postgresql")),
+        ),
+        DesktopDatabaseConfig::External { .. } => None,
+    });
+    let filesystem_total_bytes = storage.filesystem_total_bytes;
+    let (backups, last_integrity_check_at_ms, backup_storage) = match backup_directory {
         Some(directory) => tauri::async_runtime::spawn_blocking(move || {
             Ok::<_, String>((
                 postgres::list_backups(&directory)?,
-                postgres::last_integrity_check_at(&directory)?,
+                postgres::last_integrity_check_at(&directory, generated_at_ms)?,
+                postgres::backup_storage_summary(&directory, filesystem_total_bytes)?,
             ))
         })
         .await
         .map_err(|error| format!("Managed PostgreSQL diagnostics task failed: {error}"))??,
-        None => (Vec::new(), None),
+        None => (
+            Vec::new(),
+            None,
+            postgres::BackupStorageSummary {
+                recovery_point_bytes: 0,
+                automatic_recovery_bytes: 0,
+                automatic_recovery_budget_bytes: 0,
+            },
+        ),
     };
-    let latest_recovery_point_at_ms = backups.first().map(|backup| backup.created_at_ms);
+    let quarantine = match postgres_root {
+        Some(root) => tauri::async_runtime::spawn_blocking(move || quarantine_inventory(&root))
+            .await
+            .map_err(|error| format!("Managed PostgreSQL quarantine task failed: {error}"))??,
+        None => QuarantineInventory::default(),
+    };
+    storage.recovery_point_bytes = backup_storage.recovery_point_bytes;
+    storage.automatic_recovery_bytes = backup_storage.automatic_recovery_bytes;
+    storage.automatic_recovery_budget_bytes = backup_storage.automatic_recovery_budget_bytes;
+    storage.quarantined_cluster_count = quarantine.count;
+    storage.quarantined_cluster_bytes = quarantine.size_bytes;
+    let latest_recovery_point_at_ms = postgres::latest_recovery_point_at(&backups, generated_at_ms);
     Ok(ManagedRuntimeDiagnostics {
         generated_at_ms,
         desktop_product: "wa-studio",
@@ -616,6 +655,46 @@ pub async fn create_managed_runtime_backup(app: AppHandle) -> Result<(), String>
 }
 
 #[tauri::command]
+pub async fn delete_managed_runtime_quarantines(
+    app: AppHandle,
+) -> Result<ManagedRuntimeQuarantineCleanup, String> {
+    let state = app.state::<ManagedRuntimeState>();
+    let _maintenance = state.begin_maintenance("retained database cleanup")?;
+    if state.snapshot()?.phase != ManagedRuntimePhase::Ready {
+        return Err(
+            "Managed Runtime must be ready before deleting retained database data.".to_string(),
+        );
+    }
+    let app_data_directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Could not resolve WA Desktop data directory: {error}"))?;
+    let config = load_runtime_config().await?;
+    let postgres_root = match config.database {
+        DesktopDatabaseConfig::External { .. } => {
+            return Err("External PostgreSQL databases are not managed by WA Studio.".to_string())
+        }
+        DesktopDatabaseConfig::Managed { root, .. } => {
+            root.unwrap_or_else(|| app_data_directory.join("postgresql"))
+        }
+    };
+    let removed =
+        tauri::async_runtime::spawn_blocking(move || remove_quarantined_clusters(&postgres_root))
+            .await
+            .map_err(|error| {
+                format!("Managed PostgreSQL retained-data cleanup task failed: {error}")
+            })??;
+    observability::info(
+        "managed_postgres.quarantines_deleted",
+        json!({ "removedCount": removed.count, "removedBytes": removed.size_bytes }),
+    );
+    Ok(ManagedRuntimeQuarantineCleanup {
+        removed_count: removed.count,
+        removed_bytes: removed.size_bytes,
+    })
+}
+
+#[tauri::command]
 pub async fn export_managed_runtime_recovery_archive(
     app: AppHandle,
     passphrase: String,
@@ -897,18 +976,8 @@ async fn restore_degraded_managed_backup(
         let state = recovery_app.state::<ManagedRuntimeState>();
         state.stop_processes_for_restart()?;
         state.stop_postgres_for_restart()?;
-        let quarantine = quarantine_path(&recovery_root, "stale")?;
         if recovery_root.exists() {
-            fs::rename(&recovery_root, &quarantine).map_err(|error| {
-                format!(
-                    "Could not quarantine degraded PostgreSQL data at {}: {error}",
-                    quarantine.display()
-                )
-            })?;
-            observability::warn(
-                "managed_postgres.data_quarantined",
-                json!({ "reason": "degraded-recovery" }),
-            );
+            quarantine_postgres_root(&recovery_root, "degraded-recovery")?;
         }
         state.resume_for_restart();
         state.start_postgres(&recovery_root, password)?;
@@ -975,15 +1044,13 @@ pub async fn reset_managed_runtime_database(app: AppHandle) -> Result<(), String
                 .to_string(),
         );
     }
-    let quarantine = quarantine_path(&postgres_dir, "stale")?;
     let reset_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = reset_app.state::<ManagedRuntimeState>();
         state.stop_processes_for_restart()?;
         state.stop_postgres_for_restart()?;
         if postgres_dir.exists() {
-            std::fs::rename(&postgres_dir, &quarantine)
-                .map_err(|error| format!("Could not quarantine local PostgreSQL data: {error}"))?;
+            quarantine_postgres_root(&postgres_dir, "operator-reset")?;
         }
         Ok::<(), String>(())
     })
@@ -1042,7 +1109,7 @@ pub fn initialize(app: &AppHandle) {
 
 fn prepare_shutdown(app: &AppHandle) {
     let state = app.state::<ManagedRuntimeState>();
-    state.cancel_maintenance();
+    state.cancel_background_maintenance();
     if let Ok(snapshot) = state.snapshot() {
         if let Some(manifest) = snapshot.manifest {
             publish_snapshot(
@@ -1342,15 +1409,14 @@ async fn initialize_inner(app: &AppHandle) -> Result<(), String> {
             let backup_directory = backup_root
                 .unwrap_or_else(|| app_data_directory.join("backups").join("postgresql"));
             let database_app = app.clone();
-            let (database_url, database_preexisting) =
-                tauri::async_runtime::spawn_blocking(move || {
-                    database_app
-                        .state::<ManagedRuntimeState>()
-                        .start_postgres(&root, password)
-                })
-                .await
-                .map_err(|error| format!("Managed PostgreSQL task failed: {error}"))??;
-            let maintenance = database_preexisting.then_some(ManagedPostgresMaintenanceContext {
+            let (database_url, _) = tauri::async_runtime::spawn_blocking(move || {
+                database_app
+                    .state::<ManagedRuntimeState>()
+                    .start_postgres(&root, password)
+            })
+            .await
+            .map_err(|error| format!("Managed PostgreSQL task failed: {error}"))??;
+            let maintenance = Some(ManagedPostgresMaintenanceContext {
                 backup_directory,
                 backup_identity,
             });
@@ -1493,92 +1559,148 @@ fn schedule_background_postgres_maintenance(
     app: &AppHandle,
     context: ManagedPostgresMaintenanceContext,
 ) {
+    let generation = app
+        .state::<ManagedRuntimeState>()
+        .start_background_maintenance();
     let maintenance_app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let result = tauri::async_runtime::spawn_blocking(move || {
-            thread::sleep(BACKGROUND_MAINTENANCE_START_DELAY);
-            let state = maintenance_app.state::<ManagedRuntimeState>();
-            if state.snapshot()?.phase != ManagedRuntimePhase::Ready {
-                return Ok::<_, String>(());
+        let mut delay = BACKGROUND_MAINTENANCE_START_DELAY;
+        loop {
+            tokio::time::sleep(delay).await;
+            if !maintenance_app
+                .state::<ManagedRuntimeState>()
+                .background_maintenance_is_current(generation)
+            {
+                break;
             }
-            let guard = match state.begin_maintenance("background database protection") {
-                Ok(guard) => guard,
-                Err(reason) => {
-                    observability::info(
-                        "managed_postgres.background_maintenance_deferred",
-                        json!({ "reason": reason }),
-                    );
-                    return Ok(());
-                }
-            };
-            let cancellation = guard.cancellation();
+            let run_app = maintenance_app.clone();
+            let run_context = context.clone();
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                run_background_postgres_maintenance(&run_app, &run_context, generation)
+            })
+            .await;
+            report_background_postgres_maintenance(&result);
+            if !maintenance_app
+                .state::<ManagedRuntimeState>()
+                .background_maintenance_is_current(generation)
+            {
+                break;
+            }
+            delay =
+                background_maintenance_poll_delay(current_timestamp_millis().unwrap_or_default());
+        }
+        observability::info(
+            "managed_postgres.background_maintenance_scheduler_stopped",
+            json!({ "generation": generation }),
+        );
+    });
+}
+
+fn run_background_postgres_maintenance(
+    app: &AppHandle,
+    context: &ManagedPostgresMaintenanceContext,
+    generation: u64,
+) -> Result<(), String> {
+    let state = app.state::<ManagedRuntimeState>();
+    if !state.background_maintenance_is_current(generation)
+        || state.snapshot()?.phase != ManagedRuntimePhase::Ready
+    {
+        return Ok(());
+    }
+    let (integrity_due, automatic_backup_due) =
+        state.postgres_background_maintenance_due(&context.backup_directory)?;
+    if !integrity_due && !automatic_backup_due {
+        return Ok(());
+    }
+    let guard = match state.begin_maintenance("background database protection") {
+        Ok(guard) => guard,
+        Err(reason) => {
+            observability::info(
+                "managed_postgres.background_maintenance_deferred",
+                json!({ "reason": reason, "generation": generation }),
+            );
+            return Ok(());
+        }
+    };
+    if !state.background_maintenance_is_current(generation) {
+        return Ok(());
+    }
+    let cancellation = guard.cancellation();
+    let maintenance_result = (|| {
+        if integrity_due {
             publish_maintenance(
-                &maintenance_app,
+                app,
                 Some(ManagedRuntimeMaintenance {
                     kind: ManagedRuntimeMaintenanceKind::IntegrityCheck,
                     blocking: false,
                     cancellable: true,
                 }),
             );
-            let maintenance_result = (|| {
-                let identity = match context.backup_identity {
-                    Some(encoded) => secret_store::parse_backup_identity(&encoded)?,
-                    None => secret_store::managed_postgres_backup_identity()?,
-                };
-                let integrity_checked = state
-                    .verify_postgres_integrity_if_due(&context.backup_directory, &cancellation)?;
-                if integrity_checked {
-                    observability::info(
-                        "managed_postgres.integrity_check_succeeded",
-                        json!({ "tool": "pg_amcheck", "blockingStartup": false }),
-                    );
-                }
-                publish_maintenance(
-                    &maintenance_app,
-                    Some(ManagedRuntimeMaintenance {
-                        kind: ManagedRuntimeMaintenanceKind::AutomaticBackup,
-                        blocking: false,
-                        cancellable: true,
-                    }),
-                );
-                if let Some(path) = state.create_automatic_postgres_backup(
-                    &context.backup_directory,
-                    &identity,
-                    &cancellation,
-                )? {
-                    observability::info(
-                        "managed_postgres.backup_created",
-                        json!({
-                            "kind": "automatic",
-                            "backupId": backup_file_name(&path),
-                            "blockingStartup": false,
-                        }),
-                    );
-                }
-                Ok(())
-            })();
-            publish_maintenance(&maintenance_app, None);
-            maintenance_result
-        })
-        .await;
-        match result {
-            Err(error) => observability::warn(
-                "managed_postgres.background_maintenance_failed",
-                json!({ "reason": error.to_string(), "taskFailed": true }),
-            ),
-            Ok(Err(error)) if error.contains("maintenance was cancelled") => {
+            let integrity_checked =
+                state.verify_postgres_integrity_if_due(&context.backup_directory, &cancellation)?;
+            if integrity_checked {
                 observability::info(
-                    "managed_postgres.background_maintenance_cancelled",
-                    json!({}),
+                    "managed_postgres.integrity_check_succeeded",
+                    json!({ "tool": "pg_amcheck", "blockingStartup": false }),
                 );
             }
-            Ok(Err(error)) => observability::warn(
-                "managed_postgres.background_maintenance_failed",
-                json!({ "reason": error, "taskFailed": false }),
-            ),
-            Ok(Ok(())) => {}
         }
-    });
+        if automatic_backup_due {
+            let identity = match context.backup_identity.as_ref() {
+                Some(encoded) => secret_store::parse_backup_identity(encoded)?,
+                None => secret_store::managed_postgres_backup_identity()?,
+            };
+            publish_maintenance(
+                app,
+                Some(ManagedRuntimeMaintenance {
+                    kind: ManagedRuntimeMaintenanceKind::AutomaticBackup,
+                    blocking: false,
+                    cancellable: true,
+                }),
+            );
+            if let Some(path) = state.create_automatic_postgres_backup(
+                &context.backup_directory,
+                &identity,
+                &cancellation,
+            )? {
+                observability::info(
+                    "managed_postgres.backup_created",
+                    json!({
+                        "kind": "automatic",
+                        "backupId": backup_file_name(&path),
+                        "blockingStartup": false,
+                    }),
+                );
+            }
+        }
+        Ok(())
+    })();
+    publish_maintenance(app, None);
+    maintenance_result
+}
+
+fn report_background_postgres_maintenance(result: &Result<Result<(), String>, tauri::Error>) {
+    match result {
+        Err(error) => observability::warn(
+            "managed_postgres.background_maintenance_failed",
+            json!({ "reason": error.to_string(), "taskFailed": true }),
+        ),
+        Ok(Err(error)) if error.contains("maintenance was cancelled") => observability::info(
+            "managed_postgres.background_maintenance_cancelled",
+            json!({}),
+        ),
+        Ok(Err(error)) => observability::warn(
+            "managed_postgres.background_maintenance_failed",
+            json!({ "reason": error, "taskFailed": false }),
+        ),
+        Ok(Ok(())) => {}
+    }
+}
+
+fn background_maintenance_poll_delay(now_ms: u64) -> Duration {
+    let jitter_ceiling_ms = BACKGROUND_MAINTENANCE_MAX_JITTER.as_millis() as u64;
+    let jitter_ms = now_ms % (jitter_ceiling_ms + 1);
+    BACKGROUND_MAINTENANCE_POLL_INTERVAL + Duration::from_millis(jitter_ms)
 }
 
 fn publish_maintenance(app: &AppHandle, maintenance: Option<ManagedRuntimeMaintenance>) {
@@ -1626,6 +1748,170 @@ fn recovery_passphrase(passphrase: String) -> Result<SecretString, String> {
         );
     }
     Ok(SecretString::from(passphrase))
+}
+
+const QUARANTINE_MANIFEST_FILE: &str = ".wa-studio-quarantine.json";
+const QUARANTINE_MANIFEST_FORMAT_VERSION: u32 = 1;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QuarantineManifest<'a> {
+    format_version: u32,
+    created_at_ms: u64,
+    reason: &'a str,
+}
+
+#[derive(Default)]
+struct QuarantineInventory {
+    count: usize,
+    size_bytes: u64,
+}
+
+fn quarantine_postgres_root(root: &Path, reason: &str) -> Result<PathBuf, String> {
+    let quarantine = quarantine_path(root, "stale")?;
+    fs::rename(root, &quarantine).map_err(|error| {
+        format!(
+            "Could not quarantine managed PostgreSQL data at {}: {error}",
+            quarantine.display()
+        )
+    })?;
+    let created_at_ms = quarantine_timestamp(&quarantine).unwrap_or(current_timestamp_millis()?);
+    if let Err(error) = write_quarantine_manifest(&quarantine, created_at_ms, reason) {
+        observability::warn(
+            "managed_postgres.quarantine_manifest_failed",
+            json!({ "reason": reason, "error": error }),
+        );
+    }
+    observability::warn(
+        "managed_postgres.data_quarantined",
+        json!({
+            "reason": reason,
+            "quarantine": quarantine.file_name().and_then(|name| name.to_str()),
+        }),
+    );
+    Ok(quarantine)
+}
+
+fn write_quarantine_manifest(
+    quarantine: &Path,
+    created_at_ms: u64,
+    reason: &str,
+) -> Result<(), String> {
+    let manifest = QuarantineManifest {
+        format_version: QUARANTINE_MANIFEST_FORMAT_VERSION,
+        created_at_ms,
+        reason,
+    };
+    let path = quarantine.join(QUARANTINE_MANIFEST_FILE);
+    let partial = quarantine.join(format!("{QUARANTINE_MANIFEST_FILE}.partial"));
+    let encoded = serde_json::to_vec(&manifest)
+        .map_err(|error| format!("Could not encode PostgreSQL quarantine metadata: {error}"))?;
+    let result = (|| {
+        let mut file = fs::File::create(&partial)
+            .map_err(|error| format!("Could not create PostgreSQL quarantine metadata: {error}"))?;
+        file.write_all(&encoded)
+            .and_then(|_| file.sync_all())
+            .map_err(|error| format!("Could not write PostgreSQL quarantine metadata: {error}"))?;
+        fs::rename(&partial, &path)
+            .map_err(|error| format!("Could not commit PostgreSQL quarantine metadata: {error}"))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&partial);
+    }
+    result
+}
+
+fn quarantine_inventory(root: &Path) -> Result<QuarantineInventory, String> {
+    let mut inventory = QuarantineInventory::default();
+    for path in quarantined_cluster_paths(root)? {
+        inventory.count += 1;
+        inventory.size_bytes = inventory
+            .size_bytes
+            .saturating_add(directory_size_without_symlinks(&path)?);
+    }
+    Ok(inventory)
+}
+
+fn remove_quarantined_clusters(root: &Path) -> Result<QuarantineInventory, String> {
+    let mut removed = QuarantineInventory::default();
+    for path in quarantined_cluster_paths(root)? {
+        let size_bytes = directory_size_without_symlinks(&path)?;
+        fs::remove_dir_all(&path).map_err(|error| {
+            format!(
+                "Could not delete retained PostgreSQL data at {} after deleting {} earlier item(s): {error}",
+                path.display(),
+                removed.count,
+            )
+        })?;
+        removed.count += 1;
+        removed.size_bytes = removed.size_bytes.saturating_add(size_bytes);
+    }
+    Ok(removed)
+}
+
+fn quarantined_cluster_paths(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let parent = root
+        .parent()
+        .ok_or_else(|| "Managed PostgreSQL root has no parent directory.".to_string())?;
+    let root_name = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Managed PostgreSQL root name is not valid UTF-8.".to_string())?;
+    let prefix = format!("{root_name}-stale-");
+    let entries = match fs::read_dir(parent) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Could not inspect PostgreSQL quarantines: {error}")),
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("Could not inspect PostgreSQL quarantine: {error}"))?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.starts_with(&prefix) || quarantine_timestamp(&entry.path()).is_none() {
+            continue;
+        }
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("Could not inspect PostgreSQL quarantine type: {error}"))?;
+        if !file_type.is_dir() || file_type.is_symlink() {
+            continue;
+        }
+        paths.push(entry.path());
+    }
+    paths.sort_unstable();
+    Ok(paths)
+}
+
+fn directory_size_without_symlinks(path: &Path) -> Result<u64, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("Could not inspect PostgreSQL quarantine storage: {error}"))?;
+    if metadata.file_type().is_symlink() {
+        return Ok(0);
+    }
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+    if !metadata.is_dir() {
+        return Ok(0);
+    }
+    let mut total = 0_u64;
+    for entry in fs::read_dir(path)
+        .map_err(|error| format!("Could not inspect PostgreSQL quarantine storage: {error}"))?
+    {
+        let entry = entry
+            .map_err(|error| format!("Could not inspect PostgreSQL quarantine storage: {error}"))?;
+        total = total.saturating_add(directory_size_without_symlinks(&entry.path())?);
+    }
+    Ok(total)
+}
+
+fn quarantine_timestamp(path: &Path) -> Option<u64> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.rsplit_once('-'))
+        .and_then(|(_, timestamp)| timestamp.parse().ok())
 }
 
 fn quarantine_path(root: &Path, label: &str) -> Result<PathBuf, String> {
@@ -2241,9 +2527,12 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        operational_response_matches, parse_and_validate_manifest, protection_freshness,
-        quarantine_path, recovery_passphrase, storage_diagnostics, OPENWA_CONTRACT_SHA256,
-        OPENWA_RELEASE_TAG,
+        background_maintenance_poll_delay, operational_response_matches,
+        parse_and_validate_manifest, protection_freshness, quarantine_inventory, quarantine_path,
+        quarantine_postgres_root, recovery_passphrase, remove_quarantined_clusters,
+        storage_diagnostics, BACKGROUND_MAINTENANCE_MAX_JITTER,
+        BACKGROUND_MAINTENANCE_POLL_INTERVAL, OPENWA_CONTRACT_SHA256, OPENWA_RELEASE_TAG,
+        QUARANTINE_MANIFEST_FILE,
     };
     use crate::managed_runtime::model::{ProtectionFreshness, StoragePressure};
     use serde_json::json;
@@ -2300,6 +2589,22 @@ mod tests {
         assert_eq!(
             protection_freshness(1_000, Some(1_001), 100),
             ProtectionFreshness::Fresh
+        );
+        assert_eq!(
+            protection_freshness(1_000, Some(1_000_000), 100),
+            ProtectionFreshness::Due
+        );
+    }
+
+    #[test]
+    fn bounds_background_maintenance_poll_jitter() {
+        let minimum = background_maintenance_poll_delay(0);
+        let maximum = background_maintenance_poll_delay(u64::MAX);
+
+        assert_eq!(minimum, BACKGROUND_MAINTENANCE_POLL_INTERVAL);
+        assert!(maximum >= BACKGROUND_MAINTENANCE_POLL_INTERVAL);
+        assert!(
+            maximum <= BACKGROUND_MAINTENANCE_POLL_INTERVAL + BACKGROUND_MAINTENANCE_MAX_JITTER
         );
     }
 
@@ -2403,5 +2708,72 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .starts_with("postgresql-stale-"));
+    }
+
+    #[test]
+    fn catalogs_quarantined_clusters_without_following_unmanaged_directories() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("postgresql");
+        std::fs::create_dir_all(root.join("data-v17")).unwrap();
+        std::fs::write(root.join("data-v17/record"), [1, 2, 3, 4]).unwrap();
+
+        let quarantine = quarantine_postgres_root(&root, "test-recovery").unwrap();
+        std::fs::create_dir_all(directory.path().join("postgresql-stale-not-a-timestamp")).unwrap();
+        let inventory = quarantine_inventory(&root).unwrap();
+
+        assert!(!root.exists());
+        assert_eq!(inventory.count, 1);
+        assert!(inventory.size_bytes >= 4);
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(quarantine.join(QUARANTINE_MANIFEST_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["reason"], "test-recovery");
+        assert_eq!(manifest["formatVersion"], 1);
+    }
+
+    #[test]
+    fn deletes_only_cataloged_quarantined_clusters() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("postgresql");
+        let first = directory.path().join("postgresql-stale-100");
+        let second = directory.path().join("postgresql-stale-200");
+        let malformed = directory.path().join("postgresql-stale-not-a-timestamp");
+        let unrelated = directory.path().join("another-postgresql-stale-300");
+        std::fs::create_dir_all(first.join("data")).unwrap();
+        std::fs::create_dir_all(second.join("data")).unwrap();
+        std::fs::create_dir_all(&malformed).unwrap();
+        std::fs::create_dir_all(&unrelated).unwrap();
+        std::fs::write(first.join("data/one"), [1, 2]).unwrap();
+        std::fs::write(second.join("data/two"), [3, 4, 5]).unwrap();
+
+        let removed = remove_quarantined_clusters(&root).unwrap();
+
+        assert_eq!(removed.count, 2);
+        assert_eq!(removed.size_bytes, 5);
+        assert!(!first.exists());
+        assert!(!second.exists());
+        assert!(malformed.exists());
+        assert!(unrelated.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn never_follows_a_quarantine_shaped_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("postgresql");
+        let external = directory.path().join("operator-files");
+        let shaped_link = directory.path().join("postgresql-stale-300");
+        std::fs::create_dir_all(&external).unwrap();
+        std::fs::write(external.join("keep"), [1, 2, 3]).unwrap();
+        symlink(&external, &shaped_link).unwrap();
+
+        let removed = remove_quarantined_clusters(&root).unwrap();
+
+        assert_eq!(removed.count, 0);
+        assert!(shaped_link.exists());
+        assert_eq!(std::fs::read(external.join("keep")).unwrap(), [1, 2, 3]);
     }
 }

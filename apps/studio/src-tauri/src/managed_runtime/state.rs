@@ -82,6 +82,7 @@ pub struct ManagedRuntimeState {
     initializing: AtomicBool,
     maintenance: AtomicBool,
     maintenance_cancellation: Mutex<Option<Arc<AtomicBool>>>,
+    background_maintenance_generation: AtomicU64,
     provisioning: AtomicBool,
     stopping: AtomicBool,
     shutdown_gate: Mutex<()>,
@@ -127,6 +128,26 @@ impl ManagedRuntimeState {
                 cancellation.store(true, Ordering::Release);
             }
         }
+    }
+
+    pub fn start_background_maintenance(&self) -> u64 {
+        self.background_maintenance_generation
+            .fetch_add(1, Ordering::AcqRel)
+            + 1
+    }
+
+    pub fn background_maintenance_is_current(&self, generation: u64) -> bool {
+        !self.stopping.load(Ordering::Acquire)
+            && self
+                .background_maintenance_generation
+                .load(Ordering::Acquire)
+                == generation
+    }
+
+    pub fn cancel_background_maintenance(&self) {
+        self.background_maintenance_generation
+            .fetch_add(1, Ordering::AcqRel);
+        self.cancel_maintenance();
     }
 
     pub fn begin_exit_shutdown(&self) -> bool {
@@ -419,6 +440,22 @@ impl ManagedRuntimeState {
             .verify_integrity_if_due(state_directory, cancellation)
     }
 
+    pub fn postgres_background_maintenance_due(
+        &self,
+        state_directory: &Path,
+    ) -> Result<(bool, bool), String> {
+        let slot = self
+            .postgres
+            .lock()
+            .map_err(|_| "Managed PostgreSQL state lock is poisoned.".to_string())?;
+        if self.stopping.load(Ordering::Acquire) {
+            return Err("Managed Runtime is already stopping.".to_string());
+        }
+        slot.as_ref()
+            .ok_or_else(|| "Managed PostgreSQL is not running.".to_string())?
+            .background_maintenance_due(state_directory)
+    }
+
     pub fn create_manual_postgres_backup(
         &self,
         backup_directory: &Path,
@@ -553,7 +590,7 @@ impl ManagedRuntimeState {
     }
 
     fn stop_postgres_inner(&self) -> Result<(), String> {
-        self.cancel_maintenance();
+        self.cancel_background_maintenance();
         let mut postgres = self
             .postgres
             .lock()
@@ -567,7 +604,7 @@ impl ManagedRuntimeState {
 
     pub fn shutdown_services(&self) -> Result<(), String> {
         self.stopping.store(true, Ordering::Release);
-        self.cancel_maintenance();
+        self.cancel_background_maintenance();
         let _shutdown = self
             .shutdown_gate
             .lock()
@@ -870,6 +907,19 @@ mod tests {
         state.cancel_maintenance();
 
         assert!(cancellation.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn replaces_and_cancels_background_maintenance_generations() {
+        let state = ManagedRuntimeState::default();
+        let first = state.start_background_maintenance();
+        let second = state.start_background_maintenance();
+
+        assert!(!state.background_maintenance_is_current(first));
+        assert!(state.background_maintenance_is_current(second));
+
+        state.cancel_background_maintenance();
+        assert!(!state.background_maintenance_is_current(second));
     }
 
     #[test]
