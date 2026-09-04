@@ -1,5 +1,11 @@
 import { Controller, Get, Inject, Logger, Optional, Res, ServiceUnavailableException } from '@nestjs/common';
-import { ApiOkResponse, ApiSecurity, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiExcludeEndpoint,
+  ApiOkResponse,
+  ApiSecurity,
+  ApiServiceUnavailableResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import { Public } from '../../core/auth/public.decorator';
 import {
@@ -24,6 +30,10 @@ import {
   OpenWACompatibilityService,
   type OpenWACompatibilitySnapshot,
 } from '../../integrations/openwa/openwa-compatibility.service';
+import {
+  RuntimeReleaseEvidenceService,
+  type RuntimeReleaseEvidenceSnapshot,
+} from './runtime-release-evidence.service';
 
 @ApiTags('health')
 @Controller('health')
@@ -36,6 +46,7 @@ export class HealthController {
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
     @Optional() private readonly openwaCompatibility?: OpenWACompatibilityService,
     @Optional() private readonly dispatchReadiness?: RuntimeDispatchReadinessService,
+    @Optional() private readonly releaseEvidence?: RuntimeReleaseEvidenceService,
   ) {}
 
   @Public()
@@ -165,6 +176,18 @@ export class HealthController {
       };
     }
     return { ...base(), status: 'operational', dependencies, processes };
+  }
+
+  @Get('release-evidence')
+  @ApiExcludeEndpoint()
+  async productionReleaseEvidence(): Promise<RuntimeReleaseEvidenceSnapshot> {
+    try {
+      if (!this.releaseEvidence) throw new Error('Runtime release evidence service is unavailable');
+      return await this.releaseEvidence.snapshot();
+    } catch (error) {
+      this.logger.error({ event: 'runtime.release_evidence.failed', error });
+      throw new ServiceUnavailableException('Runtime release evidence is unavailable');
+    }
   }
 
   private async connectorSnapshot(): Promise<OpenWAConnectorComponentHealthDto> {

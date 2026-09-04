@@ -15,6 +15,8 @@ const requestTimeoutMs = 15_000;
 const maximumConnectorVerificationAgeMs = 5 * 60 * 1_000;
 const maximumClockSkewMs = 30_000;
 const maximumHeartbeatAgeMs = 5 * 60 * 1_000;
+const maximumReleaseEvidenceAgeMs = 30_000;
+const maximumActiveWebhookAgeSeconds = 5 * 60;
 const managedRuntimeOrigin = "http://127.0.0.1:34100";
 
 function required(value, label) {
@@ -58,6 +60,20 @@ function fraction(value, label) {
     throw new Error(`${label} must be a finite number below the production limit.`);
   }
   return value;
+}
+
+function nullableNonnegativeNumber(value, label) {
+  if (value === null) return null;
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be null or a finite non-negative number.`);
+  }
+  return value;
+}
+
+function zero(value, label) {
+  if (nonnegativeInteger(value, label) !== 0) {
+    throw new Error(`${label} must be zero for production release evidence.`);
+  }
 }
 
 function timestamp(value, label) {
@@ -254,12 +270,101 @@ function validateConnector({ identity, connectorVerification, capturedAt }) {
   };
 }
 
+function validateReleaseEvidence(value, capturedAt) {
+  const evidence = object(value, "Runtime release evidence");
+  exactKeys(
+    evidence,
+    ["schemaVersion", "status", "generatedAt", "openwaSafety", "webhookSpool"],
+    "Runtime release evidence",
+  );
+  if (evidence.schemaVersion !== 1 || evidence.status !== "complete") {
+    throw new Error("Runtime release evidence is incomplete or incompatible.");
+  }
+  const generated = timestamp(evidence.generatedAt, "Runtime release evidence time");
+  if (generated.parsed > capturedAt + maximumClockSkewMs
+    || capturedAt - generated.parsed > maximumReleaseEvidenceAgeMs) {
+    throw new Error("Runtime release evidence is outside the accepted capture window.");
+  }
+
+  const safety = object(evidence.openwaSafety, "Runtime OpenWA safety evidence");
+  exactKeys(safety, [
+    "openCircuitScopes", "halfOpenCircuitScopes", "manualBlockedScopes", "throttledScopes",
+    "deferredMessageJobs", "unknownMessageJobs", "oldestUnknownMessageJobAgeSeconds",
+  ], "Runtime OpenWA safety evidence");
+  for (const [key, label] of [
+    ["openCircuitScopes", "Open circuit scopes"],
+    ["halfOpenCircuitScopes", "Half-open circuit scopes"],
+    ["manualBlockedScopes", "Manually blocked safety scopes"],
+    ["throttledScopes", "Throttled safety scopes"],
+    ["deferredMessageJobs", "Deferred Message Jobs"],
+    ["unknownMessageJobs", "Unknown Message Jobs"],
+  ]) zero(safety[key], label);
+  if (nullableNonnegativeNumber(
+    safety.oldestUnknownMessageJobAgeSeconds,
+    "Oldest unknown Message Job age",
+  ) !== null) {
+    throw new Error("Unknown Message Job age must be null when no unknown jobs remain.");
+  }
+
+  const spool = object(evidence.webhookSpool, "Runtime webhook spool evidence");
+  exactKeys(spool, [
+    "storedEvents", "storedBytes", "maxStoredEvents", "maxStoredBytes",
+    "maximumIncomingEventBytes", "activeEvents", "deadEvents", "oldestActiveAgeSeconds",
+    "oldestDeadAgeSeconds", "utilization", "admissionAvailable",
+  ], "Runtime webhook spool evidence");
+  const storedEvents = nonnegativeInteger(spool.storedEvents, "Stored webhook events");
+  const storedBytes = nonnegativeInteger(spool.storedBytes, "Stored webhook bytes");
+  const maxStoredEvents = positiveInteger(spool.maxStoredEvents, "Webhook event capacity");
+  const maxStoredBytes = positiveInteger(spool.maxStoredBytes, "Webhook byte capacity");
+  const maximumIncomingEventBytes = positiveInteger(
+    spool.maximumIncomingEventBytes,
+    "Maximum incoming webhook bytes",
+  );
+  const activeEvents = nonnegativeInteger(spool.activeEvents, "Active webhook events");
+  const deadEvents = nonnegativeInteger(spool.deadEvents, "Dead webhook events");
+  if (storedEvents !== activeEvents + deadEvents) {
+    throw new Error("Runtime webhook spool counts are inconsistent.");
+  }
+  zero(deadEvents, "Dead webhook events");
+  const utilization = Math.max(storedEvents / maxStoredEvents, storedBytes / maxStoredBytes);
+  if (Math.abs(spool.utilization - utilization) > Number.EPSILON * 4) {
+    throw new Error("Runtime webhook spool utilization is inconsistent with its ledger.");
+  }
+  const admissionAvailable = storedEvents + 1 <= maxStoredEvents
+    && storedBytes + maximumIncomingEventBytes <= maxStoredBytes;
+  if (spool.admissionAvailable !== admissionAvailable) {
+    throw new Error("Runtime webhook spool admission state is inconsistent with its ledger.");
+  }
+  if (!admissionAvailable) {
+    throw new Error("Runtime webhook spool must retain maximum-event admission capacity.");
+  }
+  fraction(spool.utilization, "Runtime webhook spool utilization");
+  const oldestActiveAge = nullableNonnegativeNumber(
+    spool.oldestActiveAgeSeconds,
+    "Oldest active webhook age",
+  );
+  if ((activeEvents === 0) !== (oldestActiveAge === null)) {
+    throw new Error("Runtime active webhook age does not match the active event count.");
+  }
+  if (oldestActiveAge !== null && oldestActiveAge > maximumActiveWebhookAgeSeconds) {
+    throw new Error("Runtime webhook processing is stalled at release evidence capture time.");
+  }
+  if (nullableNonnegativeNumber(
+    spool.oldestDeadAgeSeconds,
+    "Oldest dead webhook age",
+  ) !== null) {
+    throw new Error("Dead webhook age must be null when no dead events remain.");
+  }
+  return evidence;
+}
+
 export function buildProductionOperationalSnapshot({
   deploymentManifestPath,
   connectorVerification,
   live,
   ready,
   operational,
+  releaseEvidence,
   capturedAt = new Date(),
 }) {
   const identity = deploymentIdentity(deploymentManifestPath);
@@ -276,14 +381,16 @@ export function buildProductionOperationalSnapshot({
     operational,
     capturedAt: capture.parsed,
   });
+  const runtimeEvidence = validateReleaseEvidence(releaseEvidence, capture.parsed);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     product: "wa-studio",
     capturedAt: capture.normalized,
     release: identity.release,
     policy: identity.policy,
     components: identity.components,
     runtime,
+    runtimeEvidence,
     connector,
   };
 }
@@ -291,10 +398,13 @@ export function buildProductionOperationalSnapshot({
 function verifySnapshotShape(snapshot, identity) {
   exactKeys(
     snapshot,
-    ["schemaVersion", "product", "capturedAt", "release", "policy", "components", "runtime", "connector"],
+    [
+      "schemaVersion", "product", "capturedAt", "release", "policy", "components", "runtime",
+      "runtimeEvidence", "connector",
+    ],
     "Production operational snapshot",
   );
-  if (snapshot.schemaVersion !== 1 || snapshot.product !== "wa-studio") {
+  if (snapshot.schemaVersion !== 2 || snapshot.product !== "wa-studio") {
     throw new Error("Production operational snapshot schema is incompatible.");
   }
   timestamp(snapshot.capturedAt, "Operational snapshot capture time");
@@ -337,6 +447,7 @@ function verifySnapshotShape(snapshot, identity) {
   zeroPending(snapshot.connector.pendingCount);
   fraction(snapshot.connector.storageUtilization, "Connector storage utilization");
   const capture = timestamp(snapshot.capturedAt, "Operational snapshot capture time");
+  validateReleaseEvidence(snapshot.runtimeEvidence, capture.parsed);
   const verified = timestamp(snapshot.connector.verifiedAt, "Connector verification time");
   const heartbeat = timestamp(snapshot.connector.heartbeatObservedAt, "Connector heartbeat time");
   const heartbeatAgeMs = nonnegativeInteger(snapshot.connector.heartbeatAgeMs, "Connector heartbeat age");
@@ -473,10 +584,11 @@ export async function captureProductionOperationalSnapshot({
     status: "verified",
     ...await verifyConnectorDeployment({ ...profile, fetchImpl }),
   };
-  const [live, ready, operational] = await Promise.all([
+  const [live, ready, operational, releaseEvidence] = await Promise.all([
     requestRuntimeHealth(fetchImpl, origin, "/api/v1/health/live", profile.runtimeApiKey, true),
     requestRuntimeHealth(fetchImpl, origin, "/api/v1/health/ready", profile.runtimeApiKey),
     requestRuntimeHealth(fetchImpl, origin, "/api/v1/health/operational", profile.runtimeApiKey),
+    requestRuntimeHealth(fetchImpl, origin, "/api/v1/health/release-evidence", profile.runtimeApiKey),
   ]);
   const snapshot = buildProductionOperationalSnapshot({
     deploymentManifestPath,
@@ -484,6 +596,7 @@ export async function captureProductionOperationalSnapshot({
     live,
     ready,
     operational,
+    releaseEvidence,
     capturedAt: now(),
   });
   writeFileSync(resolvedOutput, `${JSON.stringify(snapshot, null, 2)}\n`, {

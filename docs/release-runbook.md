@@ -179,7 +179,10 @@ perform this check because they intentionally contain no update channel or publi
    exact diagnostics: normal pressure, at least 20 GiB available, one or more recovery points, fresh
    recovery and integrity checks, and automatic recovery usage no greater than its budget. Capture
    both the operational snapshot and native storage evidence within the final 15 minutes of the
-   recorded canary window. Validate
+   recorded canary window. The operational capture must show zero ambiguous or deferred Message
+   Jobs, no open/recovering/throttled safety scope, no dead Runtime webhook, fresh callback
+   processing, and available maximum-event spool admission; these values are collected from the
+   authenticated Runtime endpoint rather than transcribed by the operator. Validate
    drafts with `release:acceptance:verify`, and require `release:acceptance:verify-go` to pass against
    both the operational snapshot and attested coordinated deployment manifest before accepting the
    canary. Preserve the snapshot, encrypted evidence archive, native storage capture, and record by
