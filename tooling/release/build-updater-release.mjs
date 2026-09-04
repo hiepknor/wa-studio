@@ -7,6 +7,8 @@ import { canonicalUpdaterEndpoint } from "./updater-release.mjs";
 
 const workspaceRoot = resolve(import.meta.dirname, "../..");
 const studioRoot = resolve(workspaceRoot, "apps/studio");
+const requiredMacArchitecture = "arm64";
+const requiredMacMinimumSystemVersion = "13.5";
 const releaseComponents = JSON.parse(
   readFileSync(resolve(workspaceRoot, "release/components.json"), "utf8"),
 );
@@ -43,6 +45,7 @@ export function releasePreflightErrors(
   environment,
   platform = process.platform,
   releaseChannel = releaseComponents.releaseChannel,
+  architecture = process.arch,
 ) {
   const errors = [];
   const missing = commonRequired.filter(name => !present(environment, name));
@@ -96,6 +99,11 @@ export function releasePreflightErrors(
   }
 
   if (platform === "darwin") {
+    if (architecture !== requiredMacArchitecture) {
+      errors.push(
+        `macOS release builds require ${requiredMacArchitecture}; received ${architecture}.`,
+      );
+    }
     const signingIdentity = environment.APPLE_SIGNING_IDENTITY?.trim();
     const hasKeychainIdentity = Boolean(signingIdentity && signingIdentity !== "-");
     const hasImportedCertificate = present(environment, "APPLE_CERTIFICATE")
@@ -146,6 +154,25 @@ function assertMacReleaseArtifact() {
     process.env.CARGO_TARGET_DIR ?? "src-tauri/target",
   );
   const app = resolve(targetRoot, "release/bundle/macos/WA Studio.app");
+  const binary = resolve(app, "Contents/MacOS/wa-studio");
+  const architecture = spawnSync("lipo", ["-archs", binary], { encoding: "utf8" });
+  if (architecture.error) throw architecture.error;
+  if (architecture.status !== 0) process.exit(architecture.status ?? 1);
+  if (architecture.stdout.trim() !== requiredMacArchitecture) {
+    throw new Error(
+      `macOS release binary must contain only ${requiredMacArchitecture}; received ${architecture.stdout.trim()}.`,
+    );
+  }
+  const minimumSystemVersion = spawnSync("plutil", [
+    "-extract", "LSMinimumSystemVersion", "raw", "-o", "-", resolve(app, "Contents/Info.plist"),
+  ], { encoding: "utf8" });
+  if (minimumSystemVersion.error) throw minimumSystemVersion.error;
+  if (minimumSystemVersion.status !== 0) process.exit(minimumSystemVersion.status ?? 1);
+  if (minimumSystemVersion.stdout.trim() !== requiredMacMinimumSystemVersion) {
+    throw new Error(
+      `macOS release minimum system version must be ${requiredMacMinimumSystemVersion}; received ${minimumSystemVersion.stdout.trim()}.`,
+    );
+  }
   run("codesign", ["--verify", "--deep", "--strict", app]);
   const signature = spawnSync("codesign", ["-dv", "--verbose=4", app], {
     encoding: "utf8",
