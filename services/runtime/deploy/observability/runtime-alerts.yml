@@ -57,6 +57,49 @@ groups:
           summary: WA Runtime contains an ambiguous outbound result
           description: At least one Message Job crossed dispatch without definitive terminal evidence; stop new live campaigns and reconcile it without retrying.
 
+      - alert: WARuntimeWebhookDeadEvents
+        expr: sum(wa_runtime_webhook_spool_events{job="wa-runtime",state="dead"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Runtime contains unreconciled dead webhooks
+          description: At least one authenticated webhook exhausted processing retries; stop promotion and reconcile the retained envelope before resuming unattended operation.
+
+      - alert: WARuntimeWebhookSpoolAdmissionUnavailable
+        expr: wa_runtime_webhook_spool_admission_available{job="wa-runtime"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: WA Runtime webhook spool cannot safely admit a callback
+          description: The Runtime cannot reserve capacity for one maximum-sized webhook; restore headroom without deleting unresolved evidence.
+
+      - alert: WARuntimeWebhookSpoolCapacityHigh
+        expr: |
+          max(
+            max(wa_runtime_webhook_spool_events{job="wa-runtime",state="stored"})
+              / clamp_min(max(wa_runtime_webhook_spool_limit_events{job="wa-runtime"}), 1)
+            or
+            max(wa_runtime_webhook_spool_storage_bytes{job="wa-runtime"})
+              / clamp_min(max(wa_runtime_webhook_spool_limit_bytes{job="wa-runtime"}), 1)
+          ) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Runtime webhook spool capacity is high
+          description: Event or byte utilization has exceeded 80 percent for ten minutes; diagnose stalled or dead work before admission is lost.
+
+      - alert: WARuntimeWebhookProcessingStalled
+        expr: wa_runtime_webhook_spool_oldest_active_age_seconds{job="wa-runtime"} > 600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: WA Runtime webhook processing is stalled
+          description: The oldest pending or processing webhook has exceeded ten minutes; inspect scheduler recovery and processing leases.
+
       - alert: WARuntimeOpenWACircuitOpen
         expr: sum(wa_runtime_openwa_safety_scopes{job="wa-runtime",circuit_state="OPEN"}) > 0
         for: 2m

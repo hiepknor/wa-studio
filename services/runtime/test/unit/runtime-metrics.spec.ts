@@ -73,9 +73,11 @@ describe('Runtime metrics cardinality and collection', () => {
       ) ? {
           rows: [{
             stored_events: '3', stored_bytes: '4096', dead_events: '1',
-            oldest_active_age_seconds: '12.4',
+            oldest_active_age_seconds: '12.4', oldest_dead_age_seconds: '62.4',
           }],
-        } : sql.includes('runtime_storage_policy_state')
+        } : sql.includes('FROM message_jobs')
+          ? { rows: [{ deferred: '2', unknown: '1', oldest_unknown_age_seconds: '42.5' }] }
+          : sql.includes('runtime_storage_policy_state')
           ? { rows: [] }
           : { rows: [{ '?column?': 1 }] })),
     };
@@ -121,7 +123,12 @@ describe('Runtime metrics cardinality and collection', () => {
     expect(output).toContain('wa_runtime_webhook_spool_events{state="active"} 2');
     expect(output).toContain('wa_runtime_webhook_spool_events{state="dead"} 1');
     expect(output).toContain('wa_runtime_webhook_spool_storage_bytes 4096');
+    expect(output).toContain('wa_runtime_webhook_spool_oldest_active_age_seconds 12');
+    expect(output).toContain('wa_runtime_webhook_spool_oldest_dead_age_seconds 62');
     expect(output).toContain('wa_runtime_webhook_spool_admission_available 1');
+    expect(output).toContain('wa_runtime_openwa_safety_deferred_message_jobs 2');
+    expect(output).toContain('wa_runtime_openwa_unknown_message_jobs 1');
+    expect(output).toContain('wa_runtime_openwa_oldest_unknown_message_job_age_seconds 42.5');
     expect(output).toContain('wa_runtime_storage_policy_state{phase="not_applicable",version="1"} 1');
     expect(output).not.toContain('metrics-token-with-at-least-32-characters');
   });

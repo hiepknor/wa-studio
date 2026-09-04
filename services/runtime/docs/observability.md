@@ -65,7 +65,7 @@ the metrics response remains available for diagnosis.
 Reference Prometheus configuration, alert rules, credential setup and rollout checks live in
 [deploy/observability](../deploy/observability/README.md). The default rules cover scrape loss,
 PostgreSQL/queue loss, stale worker/scheduler heartbeats, repeated snapshot failures, sustained HTTP
-5xx ratio and aggregate p95 latency.
+5xx ratio, aggregate p95 latency, ambiguous outbound work, dead/stalled webhooks and spool pressure.
 
 Event Inbox has an independent production metrics token and a private scrape configuration. Its
 aggregate gauges cover hard event/byte capacity, pending/leased/dead events, oldest pending age,
@@ -115,6 +115,7 @@ state, probes and operator diagnostics must supply the Runtime credential; only 
 ## Manual diagnosis
 
 The repository ships scrape and rule configuration, but the deployment still owns Prometheus,
-Alertmanager, log collection and paging destinations. Configure log-derived alerts for repeated tick
-failure/timeout, webhook `DEAD`, delivery `UNKNOWN`, queue failures and growing backlog. Never
-automatically retry an `UNKNOWN` live delivery; follow [Failure model](failure-model.md).
+Alertmanager, log collection and paging destinations. Runtime rules cover webhook `DEAD`, delivery
+`UNKNOWN`, spool pressure and stalled webhook processing. Configure additional log-derived alerts for
+repeated tick failure/timeout and queue failures. Never automatically retry an `UNKNOWN` live
+delivery; follow [Failure model](failure-model.md).

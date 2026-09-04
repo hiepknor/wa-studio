@@ -135,12 +135,14 @@ there is no second Redis copy of session sendability. Redis is configured with A
 Redis remains transport rather than a correctness boundary. Losing Redis does not erase durable
 campaign state, but outbound processing pauses until transport is restored.
 
-The scheduler removes terminal operational history, normalized events and raw webhook envelopes with
-separate configured lifetimes. A tick drains multiple indexed batches in independent transactions,
-bounded by a batch count and time budget. Active rows are never retention candidates. Campaign run
-graphs are removed before their message jobs, and normalized event children are removed with their
-parent event. Operational retention therefore also defines how long old idempotency keys remain
-replay-proof records. See [ADR 012](adr/012-event-ownership-and-bounded-storage.md).
+The scheduler removes resolved terminal operational history, normalized events and processed raw
+webhook envelopes with separate configured lifetimes. A tick drains multiple indexed batches in
+independent transactions, bounded by a batch count and time budget. Active rows and unresolved
+`UNKNOWN`/`DEAD` evidence are never routine retention candidates. Eligible Campaign Run graphs are
+removed before their message jobs, and normalized event children are removed with their parent
+event. Operational retention therefore also defines how long old idempotency keys remain
+replay-proof records. See [ADR 012](adr/012-event-ownership-and-bounded-storage.md) and
+[ADR 023](adr/023-unresolved-delivery-evidence-retention.md).
 
 ### OpenWA adapter
 

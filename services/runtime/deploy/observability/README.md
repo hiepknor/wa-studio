@@ -118,9 +118,12 @@ gap is preferable to accepting two credentials indefinitely.
   itself remains available for diagnosis.
 - `wa_runtime_build_info` exposes only version, deployment profile and queue backend.
 - `wa_runtime_openwa_safety_scopes`, safety leases, deferred Message Jobs and `UNKNOWN` Message Jobs
-  expose bounded aggregate safety state without business identifiers. An `UNKNOWN` job or open circuit
-  pages immediately; stalled recovery, throttling and deferred work warn only after their bounded grace
-  period.
+  expose bounded aggregate safety state without business identifiers. The oldest unresolved age is
+  exported separately as `wa_runtime_openwa_oldest_unknown_message_job_age_seconds`.
+- `wa_runtime_webhook_spool_events`, storage/limit gauges, admission reserve, and oldest active/dead
+  ages expose durable callback pressure without event identifiers. `UNKNOWN`, `DEAD`, or lost
+  admission reserve pages immediately; stalled processing, capacity pressure, recovery, throttling
+  and deferred work warn only after their bounded grace period.
 - `wa_runtime_process_*` and `wa_runtime_nodejs_*` contain the standard process and Node.js
   collectors from the official Prometheus JavaScript client.
 

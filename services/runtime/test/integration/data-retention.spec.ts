@@ -39,7 +39,8 @@ describe('data retention', () => {
           scheduled_at, status, dry_run, updated_at)
        VALUES
          ('runtime-api','old-terminal',$1,$2,$3,'{"type":"TEXT","text":"old"}',now(),'FAILED',false,$4),
-         ('runtime-api','old-active',$1,$2,$3,'{"type":"TEXT","text":"active"}',now(),'PROCESSING',false,$4)`,
+         ('runtime-api','old-active',$1,$2,$3,'{"type":"TEXT","text":"active"}',now(),'PROCESSING',false,$4),
+         ('runtime-api','old-unknown',$1,$2,$3,'{"type":"TEXT","text":"unknown"}',now(),'UNKNOWN',false,$4)`,
       ['a'.repeat(64), INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, old],
     );
     await pool.query(
@@ -60,12 +61,13 @@ describe('data retention', () => {
          (idempotency_key, event_type, payload, processing_state, processed_at, received_at,
           storage_bytes)
        VALUES ('old-webhook','message','{}','PROCESSED',$1,$1,0),
-              ('active-webhook','message','{}','PROCESSING',NULL,$1,2)`,
+              ('active-webhook','message','{}','PROCESSING',NULL,$1,2),
+              ('dead-webhook','message','{}','DEAD',$1,$1,3)`,
       [old],
     );
     await pool.query(
       `UPDATE runtime_webhook_spool_usage
-       SET stored_events = 1, stored_bytes = 2, updated_at = now()`,
+       SET stored_events = 2, stored_bytes = 5, updated_at = now()`,
     );
     await pool.query(
       `INSERT INTO webhook_event_receipts
@@ -89,13 +91,39 @@ describe('data retention', () => {
       `INSERT INTO campaigns (session_id, name, payload) VALUES ($1,'retention','{"type":"TEXT","text":"hello"}') RETURNING id`,
       [INTEGRATION_SESSION_ID],
     );
-    await pool.query(
+    const runs = await pool.query<{ id: string; status: string }>(
       `INSERT INTO campaign_runs
          (campaign_id, session_id, campaign_name_snapshot, idempotency_key, execution_mode,
           status, payload_snapshot, scheduled_at, updated_at)
        VALUES ($1,$2,'retention',$3,'DRY_RUN','COMPLETED','{"type":"TEXT","text":"hello"}',now(),$4),
-              ($1,$2,'retention',$5,'DRY_RUN','RUNNING','{"type":"TEXT","text":"hello"}',now(),$4)`,
-      [campaign.rows[0]!.id, INTEGRATION_SESSION_ID, randomUUID(), old, randomUUID()],
+              ($1,$2,'retention',$5,'DRY_RUN','RUNNING','{"type":"TEXT","text":"hello"}',now(),$4),
+              ($1,$2,'retention',$6,'LIVE','PARTIAL_FAILED','{"type":"TEXT","text":"hello"}',now(),$4)
+       RETURNING id, status`,
+      [campaign.rows[0]!.id, INTEGRATION_SESSION_ID, randomUUID(), old, randomUUID(), randomUUID()],
+    );
+    const unresolvedRunId = runs.rows.find(row => row.status === 'PARTIAL_FAILED')!.id;
+    await pool.query(
+      `INSERT INTO campaign_run_targets
+         (run_id, session_id, group_id, group_name, capability, capability_reason,
+          capability_revision, capability_checked_at)
+       SELECT $1, session_id, id, name, send_capability, send_capability_reason,
+         capability_revision, capability_checked_at
+       FROM gateway_groups WHERE session_id = $2 AND id = $3`,
+      [unresolvedRunId, INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID],
+    );
+    const unresolvedJob = await pool.query<{ id: string }>(
+      `INSERT INTO message_jobs
+         (idempotency_scope, idempotency_key, request_hash, session_id, recipient_id, payload,
+          scheduled_at, status, dry_run, updated_at)
+       VALUES ($1,$2,$3,$4,$5,'{"type":"TEXT","text":"unknown"}',now(),'UNKNOWN',false,$6)
+       RETURNING id`,
+      [`campaign-run:${unresolvedRunId}`, INTEGRATION_GROUP_ID, 'b'.repeat(64),
+        INTEGRATION_SESSION_ID, INTEGRATION_GROUP_ID, old],
+    );
+    await pool.query(
+      `INSERT INTO campaign_deliveries (run_id, group_id, message_job_id, status, updated_at)
+       VALUES ($1, $2, $3, 'UNKNOWN', $4)`,
+      [unresolvedRunId, INTEGRATION_GROUP_ID, unresolvedJob.rows[0]!.id, old],
     );
     await pool.query(
       `INSERT INTO activity_events
@@ -130,13 +158,17 @@ describe('data retention', () => {
         processedWebhooksCompacted: 0,
       },
     });
-    await expectCount('message_jobs', 1);
+    await expectCount('message_jobs', 3);
     await expectCount('runtime_events', 1);
     await expectCount('inbound_messages', 0);
-    await expectCount('webhook_events', 1);
+    await expectCount('webhook_events', 2);
+    expect((await pool.query(
+      `SELECT stored_events::text, stored_bytes::text FROM runtime_webhook_spool_usage`,
+    )).rows).toEqual([{ stored_events: '2', stored_bytes: '5' }]);
     await expectCount('webhook_event_receipts', 0);
     await expectCount('sync_runs', 1);
-    await expectCount('campaign_runs', 1);
+    await expectCount('campaign_runs', 2);
+    await expectCount('campaign_deliveries', 1);
     await expectCount('activity_events', 1);
   });
 

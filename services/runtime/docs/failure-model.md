@@ -153,10 +153,13 @@ create a receipt and require a fresh operator intent.
 Message idempotency is scoped. The Runtime stores a canonical request hash with each key. Repeating
 the same scope, key and request returns the existing job; reusing the key for a different request is
 a conflict. Campaign message jobs use a run-specific scope so client keys cannot collide with
-campaign delivery keys. Terminal records are removed by configured operational retention, so
-idempotency is guaranteed only while the original record remains within that retention window. Raw
-webhook envelopes and normalized events use shorter, independent lifetimes and multi-batch bounded
-draining as defined by [ADR 012](adr/012-event-ownership-and-bounded-storage.md).
+campaign delivery keys. Resolved terminal records are removed by configured operational retention,
+so idempotency is guaranteed only while the original record remains within that retention window.
+Unresolved `UNKNOWN` Message Jobs and `DEAD` webhooks are excluded from routine retention and remain
+no-go evidence. Processed raw webhook envelopes and normalized events use shorter, independent
+lifetimes and multi-batch bounded draining as defined by
+[ADR 012](adr/012-event-ownership-and-bounded-storage.md) and
+[ADR 023](adr/023-unresolved-delivery-evidence-retention.md).
 
 Runtime mutation receipts have the same operational retention window. Cleanup removes expired
 receipts before their old Session Sync or Campaign Run results and before unreferenced historical

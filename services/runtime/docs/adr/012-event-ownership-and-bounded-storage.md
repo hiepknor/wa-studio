@@ -32,7 +32,7 @@ different audit value and do not need one shared lifetime.
 4. A session snapshot from OpenWA obeys the same field-level observation fences. It may refresh
    other session metadata without regressing a newer status or restriction observation.
 5. Retention uses separate lifetimes:
-   - terminal operational/idempotency records: `RUNTIME_RETENTION_DAYS`;
+   - resolved terminal operational/idempotency records: `RUNTIME_RETENTION_DAYS`;
    - normalized runtime events and delivery projections: `RUNTIME_EVENT_RETENTION_DAYS`;
    - inbox message bodies: `RUNTIME_INBOX_RETENTION_DAYS`, defaulting to the event lifetime when
      omitted for backward compatibility;
@@ -62,6 +62,9 @@ different audit value and do not need one shared lifetime.
     two-percent analyze scale factors, each with a 10,000-row floor. Compact updates and retention
     deletes must not wait for PostgreSQL's cluster-wide 20-percent default. Global autovacuum cost,
     worker and timing settings remain unchanged until staging evidence proves they are insufficient.
+13. Unresolved `UNKNOWN` Message Jobs, Campaign Run graphs containing them, and `DEAD` webhook
+    envelopes are excluded from routine retention. Their preservation and alert contract are defined
+    by [ADR 023](023-unresolved-delivery-evidence-retention.md).
 
 ## Operational thresholds
 
