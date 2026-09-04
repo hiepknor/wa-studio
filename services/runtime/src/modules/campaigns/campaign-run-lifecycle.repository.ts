@@ -38,6 +38,11 @@ export type CampaignRunActionResult =
 
 export type CampaignResumeResult = CampaignRunActionResult | 'STALE_INPUT' | null;
 
+export interface CampaignScheduleDispatchResult {
+  held: number;
+  started: number;
+}
+
 export class CampaignRunActionIdempotencyConflictError extends Error {
   constructor() {
     super('Idempotency-Key was already used with a different campaign run action');
@@ -69,15 +74,81 @@ export class CampaignRunLifecycleRepository {
     return this.actionResult(receipt, mapCampaignRun(result.rows[0]), true);
   }
 
-  async activateDue(): Promise<number> {
+  async holdDueAtSchedulerStartup(): Promise<number> {
     return this.database.transaction(async client => {
-      const result = await client.query<{ id: string }>(
+      const held = await client.query<{
+        id: string;
+        campaign_id: string;
+        scheduled_at: Date;
+        schedule_start_deadline_at: Date;
+      }>(
+        `UPDATE campaign_runs SET status = 'PAUSED', status_reason = 'MISSED_SCHEDULE',
+           preparation_lease_token = NULL, preparation_lease_expires_at = NULL, updated_at = now()
+         WHERE execution_mode = 'LIVE'
+           AND status IN ('PREPARING', 'SCHEDULED')
+           AND schedule_start_deadline_at IS NOT NULL
+           AND scheduled_at <= now()
+         RETURNING id, campaign_id, scheduled_at, schedule_start_deadline_at`,
+      );
+      await this.pauseCampaigns(client, held.rows.map(run => run.campaign_id));
+      for (const run of held.rows) {
+        await appendCampaignRunActivity(client, {
+          runId: run.id,
+          eventType: 'campaign_run.schedule_missed',
+          severity: 'WARNING',
+          origin: 'RUNTIME',
+          metadata: {
+            reason: 'RUNTIME_RESTART',
+            scheduledAt: run.scheduled_at.toISOString(),
+            startDeadlineAt: run.schedule_start_deadline_at.toISOString(),
+          },
+        });
+      }
+      return held.rowCount ?? 0;
+    });
+  }
+
+  async activateDue(): Promise<CampaignScheduleDispatchResult> {
+    return this.database.transaction(async client => {
+      const held = await client.query<{
+        id: string;
+        campaign_id: string;
+        scheduled_at: Date;
+        schedule_start_deadline_at: Date;
+      }>(
+        `UPDATE campaign_runs SET status = 'PAUSED', status_reason = 'MISSED_SCHEDULE',
+           preparation_lease_token = NULL, preparation_lease_expires_at = NULL, updated_at = now()
+         WHERE execution_mode = 'LIVE'
+           AND schedule_start_deadline_at IS NOT NULL
+           AND (
+             (status = 'PREPARING' AND scheduled_at <= now())
+             OR (status = 'SCHEDULED' AND schedule_start_deadline_at < now())
+           )
+         RETURNING id, campaign_id, scheduled_at, schedule_start_deadline_at`,
+      );
+      await this.pauseCampaigns(client, held.rows.map(run => run.campaign_id));
+      for (const run of held.rows) {
+        await appendCampaignRunActivity(client, {
+          runId: run.id,
+          eventType: 'campaign_run.schedule_missed',
+          severity: 'WARNING',
+          origin: 'RUNTIME',
+          metadata: {
+            reason: 'START_WINDOW_EXPIRED',
+            scheduledAt: run.scheduled_at.toISOString(),
+            startDeadlineAt: run.schedule_start_deadline_at.toISOString(),
+          },
+        });
+      }
+
+      const started = await client.query<{ id: string }>(
         `UPDATE campaign_runs SET status = 'RUNNING', status_reason = NULL,
            started_at = COALESCE(started_at, now()), updated_at = now()
          WHERE status = 'SCHEDULED' AND scheduled_at <= now()
+           AND (schedule_start_deadline_at IS NULL OR schedule_start_deadline_at >= now())
          RETURNING id`,
       );
-      for (const run of result.rows) {
+      for (const run of started.rows) {
         await appendCampaignRunActivity(client, {
           runId: run.id,
           eventType: 'campaign_run.started',
@@ -85,7 +156,7 @@ export class CampaignRunLifecycleRepository {
           origin: 'RUNTIME',
         });
       }
-      return result.rowCount ?? 0;
+      return { held: held.rowCount ?? 0, started: started.rowCount ?? 0 };
     });
   }
 
@@ -196,6 +267,15 @@ export class CampaignRunLifecycleRepository {
       }
       return (cancelled.rowCount ?? 0) + (result.rowCount ?? 0);
     });
+  }
+
+  private async pauseCampaigns(client: PoolClient, campaignIds: string[]): Promise<void> {
+    if (!campaignIds.length) return;
+    await client.query(
+      `UPDATE campaigns SET status = 'PAUSED', updated_at = now()
+       WHERE id = ANY($1::uuid[]) AND status = 'ACTIVE'`,
+      [campaignIds],
+    );
   }
 
   async pause(

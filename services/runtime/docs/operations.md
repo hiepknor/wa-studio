@@ -170,6 +170,16 @@ cooldown, ambiguous outcomes, restrictions, manual block/resume, profile promoti
 The governor supersedes process-local delay as the authoritative admission decision; the delay
 settings below remain a lower-level scheduling jitter and lease constraint.
 
+One-time LIVE campaign runs have a persisted start deadline. While one scheduler session remains
+active, `CAMPAIGN_SCHEDULE_START_GRACE_SECONDS` (30 seconds by default) absorbs ordinary tick and
+database jitter. The configured value is snapshotted into each new run, so changing it does not
+silently alter existing launches. Whenever scheduler leadership is acquired, every one-time LIVE
+run whose scheduled time has already passed is moved to `PAUSED` with reason `MISSED_SCHEDULE`, even
+when it is still inside that grace window. A run that is still preparing at its scheduled time is
+held as well. These runs never catch up automatically: an operator must inspect the immutable run
+and choose **Review & send now**, which executes fresh preflight before resuming. Treat repeated
+misses as scheduler/database health incidents rather than increasing the grace window first.
+
 `OUTBOUND_MIN_DELAY_MS` and `OUTBOUND_MAX_DELAY_MS` apply inside a token-owned PostgreSQL
 per-session lease. `MESSAGE_WORKER_CONCURRENCY`, `WEBHOOK_WORKER_CONCURRENCY`,
 `GATEWAY_WORKER_CONCURRENCY` and `CAMPAIGN_WORKER_CONCURRENCY` set per-process BullMQ concurrency

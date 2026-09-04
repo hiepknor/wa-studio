@@ -111,6 +111,7 @@ const schema = z
       .pipe(z.array(z.uuid()).min(1)),
     ALLOW_LIVE_SENDS: booleanFromEnv(false),
     CAMPAIGN_LIVE_PREFLIGHT_TTL_SECONDS: z.coerce.number().int().min(30).max(900).default(120),
+    CAMPAIGN_SCHEDULE_START_GRACE_SECONDS: z.coerce.number().int().min(1).max(300).default(30),
     CAMPAIGN_MEDIA_IMAGE_MAX_BYTES: z.coerce.number().int()
       .min(65_536).max(8_388_608).default(8_388_608),
     CAMPAIGN_MEDIA_STORAGE_MAX_BYTES: z.coerce.number().int()

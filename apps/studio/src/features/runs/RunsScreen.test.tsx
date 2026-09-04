@@ -223,6 +223,46 @@ describe("RunsScreen", () => {
     expect(await within(inspector).findByText(/Paused · Runtime authoritative/)).toBeInTheDocument();
   });
 
+  it("requires explicit confirmation before releasing a missed scheduled run", async () => {
+    const user = userEvent.setup();
+    const missedRun: RuntimeCampaignRun = {
+      ...run,
+      status: "PAUSED",
+      statusReason: "MISSED_SCHEDULE",
+      startedAt: null,
+    };
+    const resumeCampaignRun = vi.fn().mockResolvedValue({
+      ...missedRun,
+      status: "RUNNING",
+      statusReason: null,
+      startedAt: "2026-08-25T10:01:00.000Z",
+    });
+    const api = renderRuns({
+      listRuns: vi.fn().mockResolvedValue({
+        data: [{ ...summary, status: "PAUSED", statusReason: "MISSED_SCHEDULE", startedAt: null }],
+        meta: { total: 1, limit: 50, offset: 0 },
+      }),
+      getCampaignRun: vi.fn().mockResolvedValue(missedRun),
+      resumeCampaignRun,
+    });
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Product release" }));
+    const inspector = await screen.findByRole("dialog", { name: "Product release" });
+
+    expect(within(inspector).getByText(/will not send until you explicitly release it/u))
+      .toBeInTheDocument();
+    await user.click(within(inspector).getByRole("button", { name: "Review & send now" }));
+    expect(resumeCampaignRun).not.toHaveBeenCalled();
+
+    const confirmation = screen.getByRole("dialog", { name: "Send missed campaign now?" });
+    expect(confirmation).toHaveTextContent(/fresh preflight/u);
+    await user.click(within(confirmation).getByRole("button", { name: "Send now" }));
+    await waitFor(() => expect(api.resumeCampaignRun).toHaveBeenCalledWith(
+      run.id,
+      expect.stringMatching(/^[0-9a-f-]{36}$/u),
+    ));
+  });
+
   it("shows one actionable delivery error when the initial read fails", async () => {
     const user = userEvent.setup();
     renderRuns({
