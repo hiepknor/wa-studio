@@ -6,6 +6,7 @@ import {
   internalLocalBuildEnvironment,
   internalLocalPreflightErrors,
 } from "./internal-local-desktop.mjs";
+import { runtimeSidecarValidationErrors } from "./macos-runtime-sidecar.mjs";
 
 const workspaceRoot = resolve(import.meta.dirname, "../..");
 const commit = "a".repeat(40);
@@ -99,6 +100,66 @@ const tauriConfig = JSON.parse(readFileSync(
 assert.deepEqual(tauriConfig.bundle.targets, ["app"]);
 assert.equal(tauriConfig.bundle.createUpdaterArtifacts, false);
 assert.equal(tauriConfig.bundle.macOS.signingIdentity, "-");
+const baseTauriConfig = JSON.parse(readFileSync(
+  resolve(workspaceRoot, "apps/studio/src-tauri/tauri.conf.json"),
+  "utf8",
+));
+assert.equal(baseTauriConfig.bundle.macOS.hardenedRuntime, true);
+assert.equal(baseTauriConfig.bundle.macOS.entitlements, "./Entitlements.plist");
+const macEntitlements = readFileSync(
+  resolve(workspaceRoot, "apps/studio/src-tauri/Entitlements.plist"),
+  "utf8",
+);
+assert.match(macEntitlements, /<key>com\.apple\.security\.cs\.allow-jit<\/key>\s*<true\/>/u);
+assert.doesNotMatch(
+  macEntitlements,
+  /allow-unsigned-executable-memory|disable-executable-page-protection|disable-library-validation/u,
+);
+
+const expectedRuntimeRelease = {
+  runtimeService: "wa-runtime",
+  runtimeVersion: "0.1.0",
+  runtimeContractVersion: "v1",
+  openwaReleaseTag: "0.23.3",
+  openwaContractSha256: "c".repeat(64),
+};
+const validRuntimeManifest = {
+  schemaVersion: 2,
+  service: "wa-runtime",
+  version: "0.1.0",
+  contractVersion: "v1",
+  openwaReleaseTag: "0.23.3",
+  openwaContractSha256: "c".repeat(64),
+  profiles: ["server", "desktop-managed"],
+  roles: ["desktop"],
+  databaseBackends: ["postgres"],
+};
+const jitEntitlement = [
+  "[Dict]",
+  "  [Key] com.apple.security.cs.allow-jit",
+  "  [Value]",
+  "    [Bool] true",
+].join("\n");
+assert.deepEqual(runtimeSidecarValidationErrors({
+  entitlements: jitEntitlement,
+  manifest: validRuntimeManifest,
+}, expectedRuntimeRelease), []);
+assert.match(runtimeSidecarValidationErrors({
+  entitlements: "[Dict]",
+  manifest: validRuntimeManifest,
+}, expectedRuntimeRelease)[0], /allow-jit/u);
+assert.match(runtimeSidecarValidationErrors({
+  entitlements: `${jitEntitlement}\n  [Key] com.apple.security.cs.disable-library-validation`,
+  manifest: validRuntimeManifest,
+}, expectedRuntimeRelease)[0], /only the/u);
+assert.match(runtimeSidecarValidationErrors({
+  entitlements: jitEntitlement,
+  manifest: { ...validRuntimeManifest, version: "0.0.0" },
+}, expectedRuntimeRelease)[0], /version/u);
+assert.match(runtimeSidecarValidationErrors({
+  entitlements: jitEntitlement,
+  manifest: { ...validRuntimeManifest, profiles: "desktop-managed" },
+}, expectedRuntimeRelease)[0], /capabilities/u);
 
 const packageJson = JSON.parse(readFileSync(resolve(workspaceRoot, "package.json"), "utf8"));
 assert.equal(

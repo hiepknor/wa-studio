@@ -21,6 +21,7 @@ import { basename, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { releaseIndependentEnvironment } from "./build-updater-release.mjs";
+import { inspectMacRuntimeSidecar } from "./macos-runtime-sidecar.mjs";
 
 const workspaceRoot = resolve(import.meta.dirname, "../..");
 const studioRoot = resolve(workspaceRoot, "apps/studio");
@@ -218,7 +219,6 @@ function inspectInternalApp(app, expectedCommit) {
     );
   }
   assertSingleArchitecture(binary, "WA Studio");
-  assertSingleArchitecture(runtimeSidecar, "WA Runtime sidecar");
   command("codesign", ["--verify", "--deep", "--strict", app]);
   const signature = spawnSync("codesign", ["-dv", "--verbose=4", app], {
     cwd: workspaceRoot,
@@ -247,6 +247,7 @@ function inspectInternalApp(app, expectedCommit) {
   if (manifest.studioVersion !== version) {
     throw new Error("Bundled release manifest does not match the internal candidate version.");
   }
+  inspectMacRuntimeSidecar(runtimeSidecar, manifest, requiredArchitecture);
 
   return {
     appBundleSha256: sha256Bundle(app),

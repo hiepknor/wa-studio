@@ -62,7 +62,9 @@ workflow above.
 3. Run `npm run verify:desktop:internal-local`. Verification binds the app to the current commit and
    version, checks the bundle identifier and macOS 13.5 floor, checks both Studio and Runtime Mach-O
    architectures, validates the ad-hoc code signature, and compares recorded bundle, binary,
-   sidecar, manifest and CodeDirectory hashes.
+   sidecar, manifest and CodeDirectory hashes. It also executes `wa-runtime manifest` under
+   Hardened Runtime and requires only the `com.apple.security.cs.allow-jit` exception, catching a
+   sidecar that is correctly signed but cannot start.
 4. Run the app only on the build Mac, with every other WA Studio instance stopped. The bundle keeps
    `dev.hiepknor.wastudio` so the managed data path remains unchanged. If the connector is not
    already installed, install the locally packaged, checksum-verified connector through the OpenWA

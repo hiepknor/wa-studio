@@ -135,7 +135,9 @@ channel. It creates only `dist/internal-local/WA Studio.app`, uses an ad-hoc sig
 updater endpoint, and deletes its temporary Cargo target directory after staging the app. It does
 not create a DMG, update manifest, tag, GitHub Release, or production-acceptance artifact. Never
 upload or distribute this build. It retains the production bundle identifier and therefore must not
-run alongside another WA Studio build that owns the same managed Runtime data.
+run alongside another WA Studio build that owns the same managed Runtime data. The verifier also
+executes the packaged Runtime manifest under Hardened Runtime and rejects missing or broader-than-
+required executable-memory entitlements.
 
 Use `npm run clean:desktop:internal-local` to remove only this rebuildable local artifact before
 building a newer commit. Developer ID signing and notarization remain mandatory for a product
