@@ -91,7 +91,12 @@ export const eventInboxConnectorBindingSchema = z.object({
   connectorId: z.uuid(),
   webhookId: z.string().trim().min(1).max(512),
   generation: z.number().int().positive().safe(),
-});
+}).strict();
+
+export const eventInboxConnectorBindingResponseSchema = eventInboxConnectorBindingSchema.extend({
+  sessionId: z.uuid(),
+  updatedAt: z.iso.datetime({ offset: true }),
+}).strict();
 
 const connectorSessionHeartbeatSchema = z.object({
   sessionId: z.uuid(),
@@ -114,32 +119,47 @@ export const eventInboxConnectorEventSchema = z.object({
   envelope: openWAWebhookEnvelopeSchema,
 });
 
+const eventInboxConnectorStatusSessionSchema = z.object({
+  sessionId: z.uuid(),
+  binding: z.object({
+    connectorId: z.uuid(),
+    webhookId: z.string().min(1).max(512),
+    generation: z.number().int().positive().safe(),
+    updatedAt: z.iso.datetime({ offset: true }),
+  }).strict().nullable(),
+  connector: z.object({
+    connectorId: z.uuid(),
+    tokenGeneration: z.number().int().positive().safe(),
+    pluginVersion: z.string().min(1).max(128),
+    protocolVersion: z.number().int().positive(),
+    journalSchemaVersion: z.number().int().positive(),
+    bindingGeneration: z.number().int().nonnegative().safe(),
+    pendingCount: z.number().int().nonnegative().safe(),
+    oldestPendingSeconds: z.number().int().nonnegative().safe().nullable(),
+    storageUtilization: z.number().min(0).max(1),
+    blockedReason: z.string().min(1).max(256).nullable(),
+    observedAt: z.iso.datetime({ offset: true }),
+  }).strict().nullable(),
+}).strict();
+
 export const eventInboxConnectorStatusResponseSchema = z.object({
   protocolVersion: z.literal(EVENT_INBOX_CONNECTOR_PROTOCOL_VERSION),
   generatedAt: z.iso.datetime({ offset: true }),
-  sessions: z.array(z.object({
-    sessionId: z.uuid(),
-    binding: z.object({
-      connectorId: z.uuid(),
-      webhookId: z.string().min(1).max(512),
-      generation: z.number().int().positive().safe(),
-      updatedAt: z.iso.datetime({ offset: true }),
-    }).nullable(),
-    connector: z.object({
-      connectorId: z.uuid(),
-      tokenGeneration: z.number().int().positive().safe(),
-      pluginVersion: z.string().min(1).max(128),
-      protocolVersion: z.number().int().positive(),
-      journalSchemaVersion: z.number().int().positive(),
-      bindingGeneration: z.number().int().nonnegative().safe(),
-      pendingCount: z.number().int().nonnegative().safe(),
-      oldestPendingSeconds: z.number().int().nonnegative().safe().nullable(),
-      storageUtilization: z.number().min(0).max(1),
-      blockedReason: z.string().min(1).max(256).nullable(),
-      observedAt: z.iso.datetime({ offset: true }),
-    }).nullable(),
-  })).max(1000),
-});
+  sessions: z.array(eventInboxConnectorStatusSessionSchema).max(1000)
+    .superRefine((sessions, context) => {
+      const seen = new Set<string>();
+      sessions.forEach((session, index) => {
+        if (seen.has(session.sessionId)) {
+          context.addIssue({
+            code: 'custom',
+            path: [index, 'sessionId'],
+            message: 'Connector status contains a duplicate session',
+          });
+        }
+        seen.add(session.sessionId);
+      });
+    }),
+}).strict();
 
 export const eventInboxMediaLeaseResponseSchema = z.object({
   attemptId: z.uuid(),
@@ -155,6 +175,9 @@ export const eventInboxMediaLeaseResponseSchema = z.object({
 
 export type EventInboxEvent = z.infer<typeof eventInboxEventSchema>;
 export type EventInboxNack = z.infer<typeof eventInboxNackSchema>['items'][number];
+export type EventInboxConnectorBindingResponse = z.infer<
+  typeof eventInboxConnectorBindingResponseSchema
+>;
 export type EventInboxConnectorHeartbeat = z.infer<typeof eventInboxConnectorHeartbeatSchema>;
 export type EventInboxConnectorStatusResponse = z.infer<typeof eventInboxConnectorStatusResponseSchema>;
 export type EventInboxMediaLeaseResponse = z.infer<typeof eventInboxMediaLeaseResponseSchema>;

@@ -27,8 +27,8 @@ struct DesktopEventInboxConfig {
 
 #[derive(Clone, Debug)]
 struct DesktopOpenWaConnectorConfig {
-    _connector_id: String,
-    _plugin_version: String,
+    connector_id: String,
+    plugin_version: String,
     instance_id: String,
     ingress_secret: String,
 }
@@ -61,8 +61,8 @@ impl DesktopRuntimeConfig {
         let connector = settings
             .connector
             .map(|connector| DesktopOpenWaConnectorConfig {
-                _connector_id: connector.connector_id,
-                _plugin_version: connector.plugin_version,
+                connector_id: connector.connector_id,
+                plugin_version: connector.plugin_version,
                 instance_id: connector.instance_id,
                 ingress_secret: connector.ingress_secret,
             });
@@ -237,8 +237,8 @@ impl DesktopRuntimeConfig {
                     );
                 }
                 Some(DesktopOpenWaConnectorConfig {
-                    _connector_id: connector_id,
-                    _plugin_version: plugin_version,
+                    connector_id,
+                    plugin_version,
                     instance_id,
                     ingress_secret,
                 })
@@ -375,6 +375,14 @@ impl DesktopRuntimeConfig {
         if let Some(connector) = self.connector.as_ref() {
             environment.extend([
                 (
+                    "OPENWA_CONNECTOR_ID".to_string(),
+                    connector.connector_id.clone(),
+                ),
+                (
+                    "OPENWA_CONNECTOR_PLUGIN_VERSION".to_string(),
+                    connector.plugin_version.clone(),
+                ),
+                (
                     "OPENWA_CONNECTOR_INSTANCE_ID".to_string(),
                     connector.instance_id.clone(),
                 ),
@@ -473,8 +481,8 @@ mod tests {
                 callback_url: "https://events.example.test/api/v1/webhooks/openwa".to_string(),
             },
             connector: Some(DesktopOpenWaConnectorConfig {
-                _connector_id: "00000000-0000-4000-8000-000000000002".to_string(),
-                _plugin_version: "0.1.0".to_string(),
+                connector_id: "00000000-0000-4000-8000-000000000002".to_string(),
+                plugin_version: "0.1.0".to_string(),
                 instance_id: "wa-studio-connector-1".to_string(),
                 ingress_secret: "connector-ingress-secret-with-at-least-32-characters".to_string(),
             }),
@@ -548,6 +556,14 @@ mod tests {
         assert!(environment.contains(&(
             "EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS".to_string(),
             "true".to_string()
+        )));
+        assert!(environment.contains(&(
+            "OPENWA_CONNECTOR_ID".to_string(),
+            "00000000-0000-4000-8000-000000000002".to_string()
+        )));
+        assert!(environment.contains(&(
+            "OPENWA_CONNECTOR_PLUGIN_VERSION".to_string(),
+            "0.1.0".to_string()
         )));
         assert!(environment.contains(&(
             "OPENWA_CONNECTOR_INSTANCE_ID".to_string(),

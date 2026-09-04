@@ -34,6 +34,8 @@ export interface OpenWAConnectorAssessment {
 }
 
 export function assessOpenWAConnectorReport(input: {
+  expectedConnectorId: string | null;
+  expectedPluginVersion: string | null;
   connectorId: string | null;
   webhookId: string | null;
   generation: number;
@@ -49,6 +51,9 @@ export function assessOpenWAConnectorReport(input: {
   if (!input.connectorId || !input.webhookId || input.generation < 1) {
     return unhealthy('NOT_CONFIGURED', 'binding_not_configured');
   }
+  if (!input.expectedConnectorId || input.connectorId !== input.expectedConnectorId) {
+    return unhealthy('BINDING_MISMATCH', 'provisioned_connector_identity_mismatch');
+  }
   if (!input.report?.binding || input.report.binding.connectorId !== input.connectorId
     || input.report.binding.webhookId !== input.webhookId
     || input.report.binding.generation !== input.generation) {
@@ -59,6 +64,10 @@ export function assessOpenWAConnectorReport(input: {
   }
   if (input.report.connector.connectorId !== input.connectorId) {
     return unhealthy('BINDING_MISMATCH', 'connector_identity_mismatch');
+  }
+  if (!input.expectedPluginVersion
+    || input.report.connector.pluginVersion !== input.expectedPluginVersion) {
+    return unhealthy('BLOCKED', 'connector_plugin_version_mismatch');
   }
   if (input.report.connector.protocolVersion !== OPENWA_CONNECTOR_PROTOCOL_VERSION) {
     return unhealthy('BLOCKED', 'connector_protocol_incompatible');
@@ -100,6 +109,11 @@ export class OpenWAConnectorHealthRepository {
   ) {}
 
   async requireHealthyBinding(sessionId: string): Promise<OpenWAConnectorBinding> {
+    const expectedConnectorId = this.config.OPENWA_CONNECTOR_ID;
+    const expectedPluginVersion = this.config.OPENWA_CONNECTOR_PLUGIN_VERSION;
+    if (!expectedConnectorId || !expectedPluginVersion) {
+      throw new Error('Provisioned OpenWA connector identity is not configured');
+    }
     const result = await this.database.query<{
       desired_webhook_id: string;
       desired_connector_id: string;
@@ -112,8 +126,20 @@ export class OpenWAConnectorHealthRepository {
          AND desired_connector_id IS NOT NULL
          AND binding_synced_at IS NOT NULL
          AND health_state = 'HEALTHY'
-         AND health_lease_expires_at > now()`,
-      [sessionId],
+         AND health_lease_expires_at > now()
+         AND desired_connector_id = $2::uuid
+         AND connector_id = $2::uuid
+         AND plugin_version = $3
+         AND protocol_version = $4
+         AND journal_schema_version = $5
+         AND reported_binding_generation = binding_generation`,
+      [
+        sessionId,
+        expectedConnectorId,
+        expectedPluginVersion,
+        OPENWA_CONNECTOR_PROTOCOL_VERSION,
+        OPENWA_CONNECTOR_JOURNAL_SCHEMA_VERSION,
+      ],
     );
     const row = result.rows[0];
     if (!row) throw new Error('OpenWA connector binding is not healthy');
@@ -130,6 +156,9 @@ export class OpenWAConnectorHealthRepository {
     connectorId: string,
     webhookId: string,
   ): Promise<OpenWAConnectorBinding> {
+    if (!this.config.OPENWA_CONNECTOR_ID || connectorId !== this.config.OPENWA_CONNECTOR_ID) {
+      throw new Error('Desired connector does not match the provisioned identity');
+    }
     return this.database.transaction(async client => {
       const result = await client.query<{
         session_id: string;
@@ -224,6 +253,8 @@ export class OpenWAConnectorHealthRepository {
         if (!row) return;
         const report = reports.get(sessionId);
         const assessment = assessOpenWAConnectorReport({
+          expectedConnectorId: this.config.OPENWA_CONNECTOR_ID ?? null,
+          expectedPluginVersion: this.config.OPENWA_CONNECTOR_PLUGIN_VERSION ?? null,
           connectorId: row.desired_connector_id,
           webhookId: row.desired_webhook_id,
           generation: Number(row.binding_generation),

@@ -38,8 +38,10 @@ import { EventInboxConnectorHealthTick } from './event-inbox-connector-health.ti
           callbackUrl: config.OPENWA_WEBHOOK_CALLBACK_URL ?? null,
           secret: config.OPENWA_WEBHOOK_SECRET,
           allowedSessionIds: config.OPENWA_ALLOWED_SESSION_IDS,
-        }, config.EVENT_INBOX_BASE_URL ? connector : undefined,
-        config.EVENT_INBOX_BASE_URL ? connectorHealth : undefined);
+          expectedConnectorId: config.OPENWA_CONNECTOR_ID ?? null,
+          expectedPluginVersion: config.OPENWA_CONNECTOR_PLUGIN_VERSION ?? null,
+        }, config.EVENT_INBOX_BASE_URL && config.OPENWA_CONNECTOR_ID ? connector : undefined,
+        config.EVENT_INBOX_BASE_URL && config.OPENWA_CONNECTOR_ID ? connectorHealth : undefined);
       },
       inject: [OpenWAClient, RUNTIME_CONFIG, EventInboxConnectorClient, OpenWAConnectorHealthRepository],
     },

@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
-  eventInboxConnectorBindingSchema,
+  eventInboxConnectorBindingResponseSchema,
   eventInboxConnectorStatusResponseSchema,
+  type EventInboxConnectorBindingResponse,
   type EventInboxConnectorStatusResponse,
 } from '../../contracts/event-inbox';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
@@ -26,7 +27,7 @@ export class EventInboxConnectorClient {
     connectorId: string;
     webhookId: string;
     generation: number;
-  }): Promise<{ webhookId: string; generation: number }> {
+  }): Promise<EventInboxConnectorBindingResponse> {
     const response = await this.request(
       'PUT',
       `/api/v1/event-inbox/connectors/bindings/${encodeURIComponent(input.sessionId)}`,
@@ -36,7 +37,7 @@ export class EventInboxConnectorClient {
         generation: input.generation,
       },
     );
-    const parsed = eventInboxConnectorBindingSchema.safeParse(response);
+    const parsed = eventInboxConnectorBindingResponseSchema.safeParse(response);
     if (!parsed.success) throw new Error('Event Inbox returned an invalid connector binding');
     return parsed.data;
   }
