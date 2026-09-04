@@ -48,6 +48,35 @@ installation, lifecycle scripts, validation, SBOM generation, staging, and publi
 them through a job-level environment. The signed-build wrapper also strips those values while preparing
 the Runtime sidecar and exposes them only to the Tauri signing/build command.
 
+## Internal-local UAT without Developer ID
+
+The internal-local lane exists only to continue same-Mac functional UAT while Apple signing and
+notarization are unavailable. It is not a release channel and must never weaken the product release
+workflow above.
+
+1. Use a clean worktree whose `HEAD` exactly matches local `origin/main`, with
+   `release/components.json` still set to `canary`.
+2. Run `npm run build:desktop:internal-local`. The wrapper strips Apple, updater, GitHub release,
+   signing and caller-supplied Rust build overrides; builds native `aarch64-apple-darwin` in a
+   temporary Cargo target; packages only an `.app`; and removes the temporary target after staging.
+3. Run `npm run verify:desktop:internal-local`. Verification binds the app to the current commit and
+   version, checks the bundle identifier and macOS 13.5 floor, checks both Studio and Runtime Mach-O
+   architectures, validates the ad-hoc code signature, and compares recorded bundle, binary,
+   sidecar, manifest and CodeDirectory hashes.
+4. Run the app only on the build Mac, with every other WA Studio instance stopped. The bundle keeps
+   `dev.hiepknor.wastudio` so the managed data path remains unchanged. If the connector is not
+   already installed, install the locally packaged, checksum-verified connector through the OpenWA
+   operator UI; the internal build does not invent a public connector URL.
+5. Use this build for functional synchronization, dry runs and a tightly supervised Test-list
+   canary only. Record its metadata as diagnostic context, not as production acceptance.
+6. Run `npm run clean:desktop:internal-local` before producing a newer candidate.
+
+The generated path is `dist/internal-local/WA Studio.app`. Do not upload it, attach it to a GitHub
+Release, enable automatic updates, bypass Gatekeeper for a downloaded copy, or use its observations
+to satisfy the signed/notarized release checklist. A tag, public desktop artifact, unattended
+production declaration and stable promotion remain blocked until Developer ID signing and Apple
+notarization are available.
+
 ## Publish
 
 1. Run `npm run release:environment:check`, `npm run check`, and `npm run test:integration` from the

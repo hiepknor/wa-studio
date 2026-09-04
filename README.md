@@ -120,6 +120,27 @@ Notarization can instead use `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`. 
 The release command fails closed if updater signing, Developer ID signing, notarization, or the HTTPS
 endpoint is incomplete; it then verifies the app signature and stapled notarization ticket.
 
+### Internal-local macOS candidate
+
+When Developer ID and notarization are unavailable, an operator may build a private candidate for
+functional UAT on the same Apple Silicon Mac:
+
+```bash
+npm run build:desktop:internal-local
+npm run verify:desktop:internal-local
+```
+
+This lane requires a clean checkout at the exact local `origin/main` commit and the `canary` release
+channel. It creates only `dist/internal-local/WA Studio.app`, uses an ad-hoc signature, embeds no
+updater endpoint, and deletes its temporary Cargo target directory after staging the app. It does
+not create a DMG, update manifest, tag, GitHub Release, or production-acceptance artifact. Never
+upload or distribute this build. It retains the production bundle identifier and therefore must not
+run alongside another WA Studio build that owns the same managed Runtime data.
+
+Use `npm run clean:desktop:internal-local` to remove only this rebuildable local artifact before
+building a newer commit. Developer ID signing and notarization remain mandatory for a product
+release.
+
 Pushing a tag that exactly matches `v<apps/studio/package.json version>` runs the release workflow.
 It builds and verifies the macOS updater, stages a normalized signed archive, DMG, static
 `latest.json`, checksums and release metadata, and publishes the immutable Event Inbox image. The
