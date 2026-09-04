@@ -194,23 +194,25 @@ send a WhatsApp message.
 
 ## Webhook development
 
-Within Docker, OpenWA posts directly to:
+OpenWA posts to the Event Inbox ingress:
 
 ```text
-http://wa-runtime-api:3100/api/v1/webhooks/openwa
+https://<event-inbox-origin>/api/v1/webhooks/openwa
 ```
 
-Both services must use the same webhook secret. If a temporary public callback is needed, expose
-only the webhook proxy route:
+OpenWA, Event Inbox and the proxy must use the same webhook secret. For local development, start
+Event Inbox on loopback. If a temporary public callback is needed, expose only the proxy route:
 
 ```bash
 npm run dev:webhook-proxy
 cloudflared tunnel --url http://127.0.0.1:3101
 ```
 
-The loopback proxy accepts only the exact webhook path, buffers at most 1 MiB before forwarding,
-strips hop-by-hop headers, caps Runtime responses and fails closed after 30 seconds. Override
-`WEBHOOK_PROXY_MAX_BODY_BYTES`, `WEBHOOK_PROXY_MAX_RESPONSE_BYTES` or
+The loopback proxy authenticates the raw body before forwarding it to Event Inbox, accepts only the
+exact webhook path, forwards only the content type and OpenWA signature, buffers at most 1 MiB,
+bounds concurrent requests, allowlists response headers and fails closed after 30 seconds. Set
+`OPENWA_WEBHOOK_SECRET`; override `EVENT_INBOX_PORT`, `WEBHOOK_PROXY_MAX_BODY_BYTES`,
+`WEBHOOK_PROXY_MAX_RESPONSE_BYTES`, `WEBHOOK_PROXY_MAX_CONCURRENT_REQUESTS` or
 `WEBHOOK_PROXY_UPSTREAM_TIMEOUT_MS` only to match an explicitly reviewed development profile.
 
 Never expose PostgreSQL, Redis, MinIO or the Runtime API through that tunnel.
