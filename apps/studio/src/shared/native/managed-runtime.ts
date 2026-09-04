@@ -120,6 +120,11 @@ export interface ManagedRuntimeStorageDiagnostics {
   filesystemAvailableBytes: number;
   filesystemAvailablePercent: number;
   pressure: StoragePressure;
+  recoveryPointBytes: number;
+  automaticRecoveryBytes: number;
+  automaticRecoveryBudgetBytes: number;
+  quarantinedClusterCount: number;
+  quarantinedClusterBytes: number;
 }
 
 export interface ManagedRuntimeDiagnostics {
@@ -136,6 +141,11 @@ export interface ManagedRuntimeDiagnostics {
   lastIntegrityCheckAtMs: number | null;
   integrityFreshness: ProtectionFreshness;
   storage: ManagedRuntimeStorageDiagnostics;
+}
+
+export interface ManagedRuntimeQuarantineCleanup {
+  removedCount: number;
+  removedBytes: number;
 }
 
 export const MANAGED_RUNTIME_STATE_CHANGED_EVENT = "managed-runtime://state-changed";
@@ -190,6 +200,10 @@ export function listManagedRuntimeBackups(): Promise<ManagedRuntimeBackup[]> {
 
 export function createManagedRuntimeBackup(): Promise<void> {
   return invoke("create_managed_runtime_backup");
+}
+
+export function deleteManagedRuntimeQuarantinedData(): Promise<ManagedRuntimeQuarantineCleanup> {
+  return invoke<ManagedRuntimeQuarantineCleanup>("delete_managed_runtime_quarantines");
 }
 
 export function exportManagedRuntimeRecoveryArchive(

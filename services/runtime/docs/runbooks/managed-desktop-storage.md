@@ -64,4 +64,28 @@ archive. WA Studio verifies the checksum before staging or restoring it. Legacy 
 manifest remain restorable through the existing authenticated `age` and `pg_restore --list`
 verification path.
 
+A matching pre-migration filename is not proof that a safety point exists. Before treating that
+step as idempotently complete, WA Studio requires a regular non-symlink archive and verifies its
+manifest, checksum, decryption, and `pg_restore` catalog. Invalid candidates are retained for
+diagnosis and a new verified safety point is created before migration continues.
+
+Persisted backup and integrity timestamps more than five minutes ahead of the current system clock
+are treated as clock anomalies. They do not postpone scheduled protection or report a false-fresh
+status. Retention ranks anomalous automatic and safety timestamps behind credible recovery points
+so a new current backup cannot be immediately evicted and recreated on every maintenance tick;
+operator-created manual recovery points retain their normal ordering.
+
 Portable passphrase archives remain self-contained and do not depend on an on-device sidecar.
+
+## Retained previous database data
+
+After a degraded recovery or an operator reset, WA Studio moves the previous managed PostgreSQL
+cluster to a timestamped sibling directory instead of deleting it. This gives the operator a final
+forensic fallback while the replacement workspace is being verified, but it is not a normal recovery
+point and is not rotated with encrypted backups.
+
+Settings → Backups & recovery reports the count and total size as **Retained previous data**. Delete
+it only after the active Runtime is ready, the replacement workspace has been verified, and any
+required evidence has been exported. The confirmation removes only timestamped, non-symlink sibling
+directories in the managed PostgreSQL namespace. It does not modify the active cluster, external
+PostgreSQL databases, or encrypted recovery points. Deletion is permanent.

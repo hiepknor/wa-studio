@@ -16,6 +16,7 @@ import {
 } from "@/shared/native/app-updates";
 import {
   createManagedRuntimeBackup,
+  deleteManagedRuntimeQuarantinedData,
   exportManagedRuntimeRecoveryArchive,
   getManagedRuntimeDiagnostics,
   getManagedRuntimeLifecycleStatus,
@@ -47,6 +48,7 @@ import "./settings.css";
 interface SettingsScreenProps {
   checkUpdate?: typeof checkForAppUpdate;
   createBackup?: typeof createManagedRuntimeBackup;
+  deleteQuarantinedData?: typeof deleteManagedRuntimeQuarantinedData;
   exportRecoveryArchive?: typeof exportManagedRuntimeRecoveryArchive;
   getDiagnostics?: typeof getManagedRuntimeDiagnostics;
   getLifecycleStatus?: typeof getManagedRuntimeLifecycleStatus;
@@ -111,6 +113,7 @@ interface PendingSettingsTab {
 export function SettingsScreen({
   checkUpdate = checkForAppUpdate,
   createBackup = createManagedRuntimeBackup,
+  deleteQuarantinedData = deleteManagedRuntimeQuarantinedData,
   exportRecoveryArchive = exportManagedRuntimeRecoveryArchive,
   getDiagnostics = getManagedRuntimeDiagnostics,
   getLifecycleStatus = getManagedRuntimeLifecycleStatus,
@@ -298,7 +301,8 @@ export function SettingsScreen({
     .filter((message): message is string => Boolean(message))
     .join(" ") || null;
   const storageNeedsAttention = diagnostics?.storage.pressure !== undefined
-    && diagnostics.storage.pressure !== "normal";
+    && (diagnostics.storage.pressure !== "normal"
+      || diagnostics.storage.quarantinedClusterCount > 0);
   const tabs = SETTINGS_TABS.map(tab => ({
     ...tab,
     warning: tab.id === "connection"
@@ -380,6 +384,7 @@ export function SettingsScreen({
               <BackupRecoverySettings
                 backups={backups}
                 createBackup={createBackup}
+                deleteQuarantinedData={deleteQuarantinedData}
                 diagnostics={diagnostics}
                 exportRecoveryArchive={exportRecoveryArchive}
                 loadError={runtimeError}

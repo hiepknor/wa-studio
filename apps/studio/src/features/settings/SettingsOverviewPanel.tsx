@@ -36,12 +36,19 @@ function storagePresentation(diagnostics: ManagedRuntimeDiagnostics | null): {
 } {
   if (!diagnostics) return { description: "Storage capacity is being inspected.", label: "Inspecting", tone: "neutral" };
   const availableGiB = diagnostics.storage.filesystemAvailableBytes / 1_073_741_824;
-  const description = `${availableGiB.toFixed(1)} GiB available (${diagnostics.storage.filesystemAvailablePercent}%).`;
+  const retainedCount = diagnostics.storage.quarantinedClusterCount;
+  const retainedGiB = diagnostics.storage.quarantinedClusterBytes / 1_073_741_824;
+  const description = retainedCount > 0
+    ? `${availableGiB.toFixed(1)} GiB available (${diagnostics.storage.filesystemAvailablePercent}%). ${retainedCount} previous database item(s) retain ${retainedGiB.toFixed(1)} GiB.`
+    : `${availableGiB.toFixed(1)} GiB available (${diagnostics.storage.filesystemAvailablePercent}%).`;
   if (diagnostics.storage.pressure === "critical") {
     return { description, label: "Critical", tone: "danger" };
   }
   if (diagnostics.storage.pressure === "warning") {
     return { description, label: "Low space", tone: "warning" };
+  }
+  if (retainedCount > 0) {
+    return { description, label: "Cleanup available", tone: "warning" };
   }
   return { description, label: "Available", tone: "success" };
 }

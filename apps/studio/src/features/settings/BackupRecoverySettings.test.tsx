@@ -8,7 +8,10 @@ import type {
   ManagedRuntimeDiagnostics,
 } from "@/shared/native/managed-runtime";
 import { ToastProvider } from "@/shared/ui/Toast";
-import { BackupRecoverySettings } from "./BackupRecoverySettings";
+import {
+  BackupRecoverySettings,
+  managedStorageAcceptanceEvidence,
+} from "./BackupRecoverySettings";
 
 const backup: ManagedRuntimeBackup = {
   id: "manual-v0.2.0-1787312262148.dump.age",
@@ -35,6 +38,11 @@ const diagnostics: ManagedRuntimeDiagnostics = {
     filesystemAvailableBytes: 64 * 1_073_741_824,
     filesystemAvailablePercent: 28,
     pressure: "normal",
+    recoveryPointBytes: backup.sizeBytes,
+    automaticRecoveryBytes: 0,
+    automaticRecoveryBudgetBytes: 2 * 1_073_741_824,
+    quarantinedClusterCount: 0,
+    quarantinedClusterBytes: 0,
   },
 };
 
@@ -48,6 +56,7 @@ function renderRecovery(overrides: Partial<ComponentProps<typeof BackupRecoveryS
   const props: ComponentProps<typeof BackupRecoverySettings> = {
     backups: [backup],
     createBackup: vi.fn().mockResolvedValue(undefined),
+    deleteQuarantinedData: vi.fn().mockResolvedValue({ removedCount: 0, removedBytes: 0 }),
     diagnostics,
     exportRecoveryArchive: vi.fn().mockResolvedValue(null),
     loadError: null,
@@ -63,6 +72,27 @@ function renderRecovery(overrides: Partial<ComponentProps<typeof BackupRecoveryS
 }
 
 describe("BackupRecoverySettings", () => {
+  it("copies exact secret-free managed storage acceptance evidence", async () => {
+    const user = userEvent.setup();
+    renderRecovery();
+
+    await user.click(screen.getByRole("button", { name: "Copy acceptance evidence" }));
+
+    const copied = JSON.parse(await navigator.clipboard.readText());
+    expect(copied).toEqual(managedStorageAcceptanceEvidence(diagnostics));
+    expect(copied).toEqual({
+      verifiedAt: new Date(diagnostics.generatedAtMs).toISOString(),
+      pressure: "normal",
+      filesystemAvailableBytes: 64 * 1_073_741_824,
+      recoveryPointCount: 1,
+      recoveryFreshness: "fresh",
+      integrityFreshness: "fresh",
+      automaticRecoveryBytes: 0,
+      automaticRecoveryBudgetBytes: 2 * 1_073_741_824,
+    });
+    expect(await screen.findByText("Managed storage evidence copied")).toBeInTheDocument();
+  });
+
   it("reports a committed backup separately from a failed view refresh", async () => {
     const user = userEvent.setup();
     const createBackup = vi.fn().mockResolvedValue(undefined);
@@ -104,6 +134,38 @@ describe("BackupRecoverySettings", () => {
       busy: false,
       dirty: false,
     }));
+  });
+
+  it("requires confirmation before deleting retained previous data", async () => {
+    const user = userEvent.setup();
+    const deleteQuarantinedData = vi.fn().mockResolvedValue({
+      removedCount: 2,
+      removedBytes: 2_048,
+    });
+    const onReload = vi.fn().mockResolvedValue(true);
+    renderRecovery({
+      deleteQuarantinedData,
+      diagnostics: {
+        ...diagnostics,
+        storage: {
+          ...diagnostics.storage,
+          quarantinedClusterCount: 2,
+          quarantinedClusterBytes: 2_048,
+        },
+      },
+      onReload,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete old data" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete retained previous data?" });
+    expect(dialog).toHaveTextContent("Existing recovery points and the active database are not changed");
+    expect(deleteQuarantinedData).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete old data" }));
+
+    expect(deleteQuarantinedData).toHaveBeenCalledOnce();
+    expect(onReload).toHaveBeenCalledOnce();
+    expect(await screen.findByText("Old data deleted")).toBeInTheDocument();
   });
 
   it("reports and clears a recovery passphrase draft when its flow is canceled", async () => {

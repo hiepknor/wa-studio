@@ -34,6 +34,11 @@ function getDiagnostics(): Promise<ManagedRuntimeDiagnostics> {
       filesystemAvailableBytes: 64 * 1_073_741_824,
       filesystemAvailablePercent: 28,
       pressure: "normal" as const,
+      recoveryPointBytes: 161_190,
+      automaticRecoveryBytes: 0,
+      automaticRecoveryBudgetBytes: 2 * 1_073_741_824,
+      quarantinedClusterCount: 0,
+      quarantinedClusterBytes: 0,
     },
   });
 }
@@ -93,6 +98,11 @@ describe("SettingsScreen", () => {
                 filesystemAvailableBytes: 18 * 1_073_741_824,
                 filesystemAvailablePercent: 7,
                 pressure: "critical",
+                recoveryPointBytes: 161_190,
+                automaticRecoveryBytes: 0,
+                automaticRecoveryBudgetBytes: 2 * 1_073_741_824,
+                quarantinedClusterCount: 0,
+                quarantinedClusterBytes: 0,
               },
             })}
             getProvisioningProfile={vi.fn().mockResolvedValue(null)}
@@ -111,6 +121,37 @@ describe("SettingsScreen", () => {
 
     expect(await screen.findByText("Critical")).toBeInTheDocument();
     expect(screen.getByText("18.0 GiB available (7%).")).toBeInTheDocument();
+  });
+
+  it("surfaces retained previous database storage in the overview", async () => {
+    render(
+      <ToastProvider>
+        <RuntimeConnectionContext.Provider value={context()}>
+          <SettingsScreen
+            getDiagnostics={vi.fn().mockResolvedValue({
+              ...await getDiagnostics(),
+              storage: {
+                ...(await getDiagnostics()).storage,
+                quarantinedClusterCount: 1,
+                quarantinedClusterBytes: 3 * 1_073_741_824,
+              },
+            })}
+            getProvisioningProfile={vi.fn().mockResolvedValue(null)}
+            getUpdateState={vi.fn().mockResolvedValue({
+              currentVersion: "0.2.0",
+              disabledReason: "Test build",
+              enabled: false,
+              pending: null,
+            })}
+            listBackups={vi.fn().mockResolvedValue([])}
+            subscribeUpdateProgress={vi.fn().mockResolvedValue(vi.fn())}
+          />
+        </RuntimeConnectionContext.Provider>
+      </ToastProvider>,
+    );
+
+    expect(await screen.findByText("Cleanup available")).toBeInTheDocument();
+    expect(screen.getByText(/1 previous database item\(s\) retain 3\.0 GiB/u)).toBeInTheDocument();
   });
 
   it("requires confirmation and restores a selected encrypted backup", async () => {

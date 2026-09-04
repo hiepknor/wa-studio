@@ -157,6 +157,18 @@ pub struct ManagedRuntimeStorageDiagnostics {
     pub filesystem_available_bytes: u64,
     pub filesystem_available_percent: u8,
     pub pressure: StoragePressure,
+    pub recovery_point_bytes: u64,
+    pub automatic_recovery_bytes: u64,
+    pub automatic_recovery_budget_bytes: u64,
+    pub quarantined_cluster_count: usize,
+    pub quarantined_cluster_bytes: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedRuntimeQuarantineCleanup {
+    pub removed_count: usize,
+    pub removed_bytes: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
