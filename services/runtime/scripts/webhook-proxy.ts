@@ -1,28 +1,22 @@
 import {
   createServer,
   request,
-  type IncomingHttpHeaders,
   type IncomingMessage,
+  type OutgoingHttpHeaders,
   type Server,
   type ServerResponse,
 } from 'node:http';
+import { verifySha256Hmac } from '../src/core/security/hmac-signature';
 
 const webhookPath = '/api/v1/webhooks/openwa';
-const hopByHopHeaders = new Set([
-  'connection',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
-]);
+const responseHeaderAllowlist = new Set(['cache-control', 'content-type', 'retry-after']);
 
 export interface WebhookProxyOptions {
-  runtimePort: number;
+  eventInboxPort: number;
+  webhookSecret: string;
   maximumRequestBytes: number;
   maximumResponseBytes: number;
+  maximumConcurrentRequests: number;
   upstreamTimeoutMs: number;
   requestTimeoutMs: number;
   headersTimeoutMs: number;
@@ -30,9 +24,18 @@ export interface WebhookProxyOptions {
 
 class ProxyPayloadTooLargeError extends Error {}
 class ProxyResponseTooLargeError extends Error {}
+class ProxyUnauthorizedError extends Error {}
 
 export function createWebhookProxy(options: WebhookProxyOptions): Server {
+  let activeRequests = 0;
   const server = createServer((incoming, outgoing) => {
+    if (activeRequests >= options.maximumConcurrentRequests) {
+      incoming.resume();
+      outgoing.setHeader('retry-after', '1');
+      writeJson(outgoing, 503, 'PROXY_CAPACITY_EXHAUSTED', 'Webhook proxy is at capacity');
+      return;
+    }
+    activeRequests += 1;
     void handleRequest(incoming, outgoing, options).catch(error => {
       if (outgoing.headersSent || outgoing.destroyed) {
         outgoing.destroy();
@@ -42,8 +45,12 @@ export function createWebhookProxy(options: WebhookProxyOptions): Server {
         writeJson(outgoing, 413, 'PAYLOAD_TOO_LARGE', 'Webhook body exceeds the proxy limit');
         return;
       }
-      writeJson(outgoing, 502, 'UPSTREAM_UNAVAILABLE', 'Runtime webhook endpoint is unavailable');
-    });
+      if (error instanceof ProxyUnauthorizedError) {
+        writeJson(outgoing, 401, 'INVALID_SIGNATURE', 'Invalid OpenWA webhook signature');
+        return;
+      }
+      writeJson(outgoing, 502, 'UPSTREAM_UNAVAILABLE', 'Event Inbox webhook endpoint is unavailable');
+    }).finally(() => { activeRequests -= 1; });
   });
   server.requestTimeout = options.requestTimeoutMs;
   server.headersTimeout = options.headersTimeoutMs;
@@ -64,27 +71,38 @@ async function handleRequest(
     return;
   }
 
+  const signature = incoming.headers['x-openwa-signature'];
+  if (typeof signature !== 'string') throw new ProxyUnauthorizedError();
   const body = await collectBody(incoming, options.maximumRequestBytes, 'request');
-  const upstream = await sendToRuntime(body, incoming.headers, options);
-  outgoing.writeHead(upstream.status, forwardedHeaders(upstream.headers));
+  if (!verifySha256Hmac(body, signature, options.webhookSecret)) {
+    throw new ProxyUnauthorizedError();
+  }
+  const suppliedContentType = incoming.headers['content-type'];
+  const contentType = typeof suppliedContentType === 'string' && suppliedContentType.length <= 256
+    ? suppliedContentType
+    : undefined;
+  const upstream = await sendToEventInbox(body, signature, contentType, options);
+  outgoing.writeHead(upstream.status, responseHeaders(upstream.headers));
   outgoing.end(upstream.body);
 }
 
-function sendToRuntime(
+function sendToEventInbox(
   body: Buffer,
-  incomingHeaders: IncomingHttpHeaders,
+  signature: string,
+  contentType: string | undefined,
   options: WebhookProxyOptions,
-): Promise<{ status: number; headers: IncomingHttpHeaders; body: Buffer }> {
+): Promise<{ status: number; headers: IncomingMessage['headers']; body: Buffer }> {
   return new Promise((resolve, reject) => {
-    const headers = forwardedHeaders(incomingHeaders);
-    headers.host = `127.0.0.1:${options.runtimePort}`;
-    headers['content-length'] = String(body.byteLength);
     const upstream = request({
       hostname: '127.0.0.1',
-      port: options.runtimePort,
+      port: options.eventInboxPort,
       path: webhookPath,
       method: 'POST',
-      headers,
+      headers: {
+        ...(contentType ? { 'content-type': contentType } : {}),
+        'content-length': String(body.byteLength),
+        'x-openwa-signature': signature,
+      },
     }, response => {
       collectBody(response, options.maximumResponseBytes, 'response')
         .then(responseBody => resolve({
@@ -135,10 +153,13 @@ async function collectBody(
   return Buffer.concat(chunks, receivedBytes);
 }
 
-function forwardedHeaders(source: IncomingHttpHeaders): IncomingHttpHeaders {
+function responseHeaders(source: IncomingMessage['headers']): OutgoingHttpHeaders {
   return Object.fromEntries(Object.entries(source).filter(([name, value]) =>
-    value !== undefined && name !== 'host' && name !== 'content-length' && !hopByHopHeaders.has(name),
-  ));
+    value !== undefined && responseHeaderAllowlist.has(name),
+  ).concat([
+    ['cache-control', 'no-store'],
+    ['x-content-type-options', 'nosniff'],
+  ]));
 }
 
 function writeJson(response: ServerResponse, status: number, code: string, message: string): void {
@@ -158,12 +179,22 @@ function integerSetting(name: string, fallback: number, minimum: number, maximum
   return value;
 }
 
+function requiredSetting(name: string, minimum: number, maximum: number): string {
+  const value = process.env[name];
+  if (!value || value.length < minimum || value.length > maximum) {
+    throw new Error(`${name} must contain ${minimum} to ${maximum} characters`);
+  }
+  return value;
+}
+
 async function main(): Promise<void> {
   const listenPort = integerSetting('WEBHOOK_PROXY_PORT', 3101, 1, 65_535);
   const options: WebhookProxyOptions = {
-    runtimePort: integerSetting('PORT', 3100, 1, 65_535),
+    eventInboxPort: integerSetting('EVENT_INBOX_PORT', 34_200, 1, 65_535),
+    webhookSecret: requiredSetting('OPENWA_WEBHOOK_SECRET', 32, 4_096),
     maximumRequestBytes: integerSetting('WEBHOOK_PROXY_MAX_BODY_BYTES', 1_048_576, 65_536, 16_777_216),
     maximumResponseBytes: integerSetting('WEBHOOK_PROXY_MAX_RESPONSE_BYTES', 1_048_576, 65_536, 16_777_216),
+    maximumConcurrentRequests: integerSetting('WEBHOOK_PROXY_MAX_CONCURRENT_REQUESTS', 8, 1, 64),
     upstreamTimeoutMs: integerSetting('WEBHOOK_PROXY_UPSTREAM_TIMEOUT_MS', 30_000, 1_000, 120_000),
     requestTimeoutMs: integerSetting('WEBHOOK_PROXY_REQUEST_TIMEOUT_MS', 30_000, 1_000, 120_000),
     headersTimeoutMs: integerSetting('WEBHOOK_PROXY_HEADERS_TIMEOUT_MS', 10_000, 1_000, 60_000),
@@ -173,7 +204,7 @@ async function main(): Promise<void> {
   }
   const server = createWebhookProxy(options);
   server.listen(listenPort, '127.0.0.1', () => {
-    process.stdout.write(`Webhook-only proxy listening on http://127.0.0.1:${listenPort}${webhookPath}\n`);
+    process.stdout.write(`Event Inbox webhook proxy listening on http://127.0.0.1:${listenPort}${webhookPath}\n`);
   });
 
   let closing = false;
