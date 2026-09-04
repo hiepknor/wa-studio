@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { canonicalUpdaterEndpoint } from "./updater-release.mjs";
+import { inspectMacRuntimeSidecar } from "./macos-runtime-sidecar.mjs";
 
 const workspaceRoot = resolve(import.meta.dirname, "../..");
 const studioRoot = resolve(workspaceRoot, "apps/studio");
@@ -155,6 +156,11 @@ function assertMacReleaseArtifact() {
   );
   const app = resolve(targetRoot, "release/bundle/macos/WA Studio.app");
   const binary = resolve(app, "Contents/MacOS/wa-studio");
+  const runtimeSidecar = resolve(app, "Contents/MacOS/wa-runtime");
+  const bundledReleaseManifest = JSON.parse(readFileSync(
+    resolve(app, "Contents/Resources/release-manifest.json"),
+    "utf8",
+  ));
   const architecture = spawnSync("lipo", ["-archs", binary], { encoding: "utf8" });
   if (architecture.error) throw architecture.error;
   if (architecture.status !== 0) process.exit(architecture.status ?? 1);
@@ -174,6 +180,7 @@ function assertMacReleaseArtifact() {
     );
   }
   run("codesign", ["--verify", "--deep", "--strict", app]);
+  inspectMacRuntimeSidecar(runtimeSidecar, bundledReleaseManifest, requiredMacArchitecture);
   const signature = spawnSync("codesign", ["-dv", "--verbose=4", app], {
     encoding: "utf8",
   });
