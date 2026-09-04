@@ -12,6 +12,10 @@ the private release record. Repository CI alone is not production acceptance.
 - [ ] The protected `release` environment contains only the Apple signing, notarization, and updater
       secrets required by the signed desktop job. Tag, workflow and artifact verification gates are
       the release authorization boundary for the single-maintainer repository.
+- [ ] `npm run release:environment:check` reports `ready` for the reviewed release channel; do not
+      create a tag while any secret name, repository variable, or `v*` deployment policy is missing.
+- [ ] Current dependency scans report no vulnerability, and every allowed transitive warning still
+      matches the target-scoped disposition in `docs/dependency-risk-register.md`.
 - [ ] A dedicated Ed25519 production-authorization private key is held only in the operator vault;
       its public PEM is stored as the protected GitHub Actions variable
       `PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM`. It is not the updater, Apple, Connector, or backup key.
@@ -87,7 +91,8 @@ from any failures recorded before or after it. Before the canary clock starts:
       webhook-admission loss, Runtime `UNKNOWN` Message Jobs, an open safety circuit, persistent
       throttling, stalled recovery, and a non-draining deferred queue.
 - [ ] After the exact canary is installed, paired, and live sends are enabled, observe the unchanged
-      candidate for 24 continuous hours with no scheduler observation gap over five minutes and no critical alert,
+      candidate for 24 continuous hours with no scheduler observation gap over five minutes and no
+      critical alert,
       new OpenWA terminal webhook failure, unexplained callback loss, duplicate outbound effect,
       `UNKNOWN` delivery, recurring OpenWA cooldown, safety metric snapshot failure, or storage
       pressure. Closing the app, changing WA Studio/Runtime/OpenWA identity, or exceeding the gap
@@ -126,8 +131,8 @@ OpenWA matches the pinned release, the connector is exclusively healthy and curr
 drained, and storage stays below the Connector journal production-pressure threshold. The same
 capture requires Runtime's bounded local ledger to prove 24 continuous hours for the exact WA
 Studio, Runtime, OpenWA, and managed-instance identity, with no gap over five minutes and no
-violating sample. It also fails closed when any outbound job is `UNKNOWN` or safety-deferred, a safety scope is
-open, half-open, manually blocked, or throttled, any Runtime webhook is `DEAD`, callback processing
+violating sample. It also fails closed when any outbound job is `UNKNOWN` or safety-deferred, a
+safety scope is open, half-open, manually blocked, or throttled, any Runtime webhook is `DEAD`, callback processing
 has stalled for more than five minutes, or the webhook spool cannot admit one maximum-sized event.
 
 ```bash
@@ -144,8 +149,9 @@ npm run release:operational:verify -- \
 Managed capture is pinned to WA Runtime's loopback origin at `http://127.0.0.1:34100`; it will not
 forward the Keychain API key to an alternate origin. The snapshot is an owner-only, secret-free
 evidence file containing release identities, health states, connector generations, current aggregate
-safety and callback-spool state, plus the candidate-bound 24-hour observation summary. The private release-evidence endpoint exposes
-only aggregate counts and ages, is excluded from OpenAPI, and requires the Runtime API credential.
+safety and callback-spool state, plus the candidate-bound 24-hour observation summary. The private
+release-evidence endpoint exposes only aggregate counts and ages, is excluded from OpenAPI, and
+requires the Runtime API credential.
 The snapshot still belongs in the encrypted immutable evidence archive, never in Git. Attach it
 atomically to the still-`PENDING` record; this
 copies the verified connector generations and health timestamps and refuses a different snapshot,

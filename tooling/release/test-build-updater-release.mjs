@@ -7,6 +7,12 @@ import {
 } from "./build-updater-release.mjs";
 
 const workspaceRoot = resolve(import.meta.dirname, "../..");
+const buildScript = readFileSync(
+  resolve(workspaceRoot, "tooling/release/build-updater-release.mjs"),
+  "utf8",
+);
+assert.match(buildScript, /spawnSync\("lipo", \["-archs", binary\]/u);
+assert.match(buildScript, /"LSMinimumSystemVersion", "raw"/u);
 const tauriConfig = JSON.parse(readFileSync(
   resolve(workspaceRoot, "apps/studio/src-tauri/tauri.conf.json"),
   "utf8",
@@ -66,7 +72,7 @@ assert.deepEqual(releasePreflightErrors({
   WA_STUDIO_UPDATER_ENDPOINT: "https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json",
 }, "linux", "stable"), []);
 
-const unsignedMac = releasePreflightErrors(updaterSecrets, "darwin");
+const unsignedMac = releasePreflightErrors(updaterSecrets, "darwin", "canary", "arm64");
 assert.equal(unsignedMac.length, 2);
 assert.match(unsignedMac[0], /non-ad-hoc APPLE_SIGNING_IDENTITY/u);
 assert.match(unsignedMac[1], /release notarization requires/u);
@@ -77,7 +83,7 @@ const adHocMac = releasePreflightErrors({
   APPLE_ID: "release@example.test",
   APPLE_PASSWORD: "apple-test-secret",
   APPLE_TEAM_ID: "TESTTEAM01",
-}, "darwin");
+}, "darwin", "canary", "arm64");
 assert.equal(adHocMac.length, 1);
 assert.match(adHocMac[0], /non-ad-hoc APPLE_SIGNING_IDENTITY/u);
 
@@ -87,7 +93,7 @@ assert.deepEqual(releasePreflightErrors({
   APPLE_ID: "release@example.test",
   APPLE_PASSWORD: "apple-test-secret",
   APPLE_TEAM_ID: "TESTTEAM01",
-}, "darwin"), []);
+}, "darwin", "canary", "arm64"), []);
 
 assert.deepEqual(releasePreflightErrors({
   ...updaterSecrets,
@@ -96,7 +102,18 @@ assert.deepEqual(releasePreflightErrors({
   APPLE_API_ISSUER: "issuer-test-id",
   APPLE_API_KEY: "key-test-id",
   APPLE_API_KEY_PATH: "/secure/ci/AuthKey_key-test-id.p8",
-}, "darwin"), []);
+}, "darwin", "canary", "arm64"), []);
+
+assert.deepEqual(releasePreflightErrors({
+  ...updaterSecrets,
+  APPLE_CERTIFICATE: "base64-test-certificate",
+  APPLE_CERTIFICATE_PASSWORD: "certificate-test-secret",
+  APPLE_API_ISSUER: "issuer-test-id",
+  APPLE_API_KEY: "key-test-id",
+  APPLE_API_KEY_PATH: "/secure/ci/AuthKey_key-test-id.p8",
+}, "darwin", "canary", "x64"), [
+  "macOS release builds require arm64; received x64.",
+]);
 
 const allErrors = [
   missing,

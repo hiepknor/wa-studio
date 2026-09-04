@@ -126,6 +126,8 @@ assert.doesNotMatch(
   "Release job-level environment must not expose GITHUB_TOKEN to dependency lifecycle scripts",
 );
 for (const requiredReleaseGate of [
+  "Verify tagged commit belongs to main",
+  "git merge-base --is-ancestor \"$GITHUB_SHA\" origin/main",
   "provenance: mode=max",
   "sbom: true",
   "anchore/sbom-action@",

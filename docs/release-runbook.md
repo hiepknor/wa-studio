@@ -12,8 +12,14 @@ passes every required check; never mutate the channel of an existing tag or publ
 ## Preconditions
 
 - Release from a pull-request commit on `main` with every required check current and successful.
-- Keep `apps/studio/package.json`, Tauri, Runtime, contract and `release/components.json` versions
-  aligned. `npm run release:manifest:check` must pass.
+- Keep every component's source version synchronized with its corresponding field in
+  `release/components.json`; the Studio, Runtime, contract, Connector and OpenWA versions are
+  independent and are not required to be numerically equal. `npm run release:manifest:check` must
+  pass.
+- Build and publish desktop artifacts only from Apple Silicon. The supported updater platform is
+  `darwin-aarch64` and the packaged app declares macOS 13.5 as its minimum system version; release
+  preflight rejects a different build architecture, and post-build validation inspects both the
+  Mach-O binary and app `Info.plist` before accepting the artifact.
 - Configure `WA_STUDIO_UPDATER_ENDPOINT` as exactly
   `https://github.com/hiepknor/wa-studio/releases/latest/download/latest.json`.
 - Configure the matching `WA_STUDIO_UPDATER_PUBLIC_KEY`, `TAURI_SIGNING_PRIVATE_KEY` and optional
@@ -29,6 +35,13 @@ passes every required check; never mutate the channel of an existing tag or publ
   single-maintainer repository, the protected tag, required checks, signed workflow and artifact
   verification replace a manual environment approval.
 
+Before creating any tag, run `npm run release:environment:check`. It reads names and policy metadata
+through the authenticated GitHub CLI, never secret values, and fails unless the `release`
+environment contains every Apple/updater input, repository variable
+`WA_STUDIO_DESKTOP_RELEASE_ENABLED` is exactly `true`, and the environment is restricted to `v*`
+tags. A stable candidate additionally requires `PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM` at repository
+scope because the early verification job does not enter the protected environment.
+
 Never print, copy into a workflow artifact, or add a fallback for any signing or notarization secret.
 Keep signing, updater, and notarization secrets scoped to the single signed-build step; dependency
 installation, lifecycle scripts, validation, SBOM generation, staging, and publishing must not inherit
@@ -37,7 +50,8 @@ the Runtime sidecar and exposes them only to the Tauri signing/build command.
 
 ## Publish
 
-1. Run `npm run check` and `npm run test:integration` from the release commit.
+1. Run `npm run release:environment:check`, `npm run check`, and `npm run test:integration` from the
+   release commit.
 2. Create and push the tag `v<apps/studio/package.json version>` without moving an existing tag.
 3. Watch the `Release` workflow. `verify`, `event-inbox-image`, and `connector-plugin` produce the
    server candidate first. `publish-server-candidate` verifies provenance and stages four
