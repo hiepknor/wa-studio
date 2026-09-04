@@ -24,6 +24,7 @@ import {
   eventInboxClaimSchema,
   eventInboxNackSchema,
   eventInboxPairingRequestSchema,
+  eventInboxRecoveryRequestSchema,
   openWAWebhookEnvelopeSchema,
 } from '../../contracts/event-inbox';
 import {
@@ -157,10 +158,28 @@ export class EventInboxController {
         device.tokenGeneration,
         device.sessionIds,
         parsed.data.limit,
+        parsed.data.throughSequence,
       );
       if (data.length > 0 || Date.now() >= deadline) return { data };
       await new Promise(resolve => setTimeout(resolve, Math.min(500, deadline - Date.now())));
     }
+  }
+
+  @Post('events/recovery')
+  @HttpCode(200)
+  async recovery(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: unknown,
+  ) {
+    const device = await this.authenticate(authorization);
+    const parsed = eventInboxRecoveryRequestSchema.safeParse(body);
+    if (!parsed.success) throw new UnprocessableEntityException('Invalid Event Inbox recovery request');
+    return this.repository.recovery(
+      device.deviceId,
+      device.tokenGeneration,
+      device.sessionIds,
+      parsed.data.watermark,
+    );
   }
 
   @Post('events/ack')

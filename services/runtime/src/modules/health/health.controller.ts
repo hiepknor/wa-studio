@@ -8,11 +8,16 @@ import {
   HealthNotReadyDto,
   HealthOperationalDto,
   HealthReadyDto,
+  RuntimeDispatchReadinessDto,
 } from '../../contracts/health/health.dto';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
 import { DatabaseService } from '../../core/database/database.service';
 import { QueueService } from '../../core/queue/queue.service';
+import {
+  RuntimeDispatchReadinessService,
+  type RuntimeDispatchReadinessSnapshot,
+} from '../../core/dispatch-readiness/runtime-dispatch-readiness.service';
 import type { QueueReadiness, RuntimeProcessHealth } from '../../core/queue/queue-transport';
 import { RUNTIME_SERVICE, RUNTIME_VERSION } from '../../core/release/runtime-release';
 import {
@@ -30,6 +35,7 @@ export class HealthController {
     private readonly queues: QueueService,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
     @Optional() private readonly openwaCompatibility?: OpenWACompatibilityService,
+    @Optional() private readonly dispatchReadiness?: RuntimeDispatchReadinessService,
   ) {}
 
   @Public()
@@ -46,10 +52,14 @@ export class HealthController {
   async ready(): Promise<HealthReadyDto> {
     let processes: RuntimeProcessHealth;
     let queue: QueueReadiness;
+    let dispatch: RuntimeDispatchReadinessDto;
     try {
       await this.database.query('SELECT 1');
       queue = await this.queues.readiness();
       processes = await this.queues.runtimeProcessHealth();
+      dispatch = this.dispatchSnapshotDto(
+        await this.dispatchReadiness?.snapshot() ?? this.unknownDispatchSnapshot(),
+      );
     } catch (error) {
       this.logger.error({ event: 'runtime.readiness.failed', error });
       throw new ServiceUnavailableException({
@@ -68,6 +78,7 @@ export class HealthController {
       liveSendsEnabled: this.config.ALLOW_LIVE_SENDS,
       openwaRelease: this.config.OPENWA_RELEASE_TAG,
       allowedSessionCount: this.config.OPENWA_ALLOWED_SESSION_IDS.length,
+      dispatch,
     };
   }
 
@@ -78,17 +89,21 @@ export class HealthController {
   async operational(@Res({ passthrough: true }) response: Response): Promise<HealthOperationalDto> {
     const openwa = this.openwaCompatibility?.snapshot() ?? this.unknownOpenWASnapshot();
     let connector = this.unknownConnectorSnapshot();
+    let dispatch = this.dispatchSnapshotDto(this.unknownDispatchSnapshot());
     const base = () => ({
       service: RUNTIME_SERVICE,
       version: RUNTIME_VERSION,
       instanceId: this.config.RUNTIME_INSTANCE_ID,
-      components: { openwa, connector },
+      components: { openwa, connector, dispatch },
     } as const);
     let dependencies: HealthOperationalDto['dependencies'];
     let processes: RuntimeProcessHealth;
     try {
       await this.database.query('SELECT 1');
       connector = await this.connectorSnapshot();
+      dispatch = this.dispatchSnapshotDto(
+        await this.dispatchReadiness?.snapshot() ?? this.unknownDispatchSnapshot(),
+      );
       const queue = await this.queues.readiness();
       dependencies = {
         postgres: true,
@@ -137,6 +152,16 @@ export class HealthController {
         dependencies,
         processes,
         reason: 'connector_unhealthy',
+      };
+    }
+    if (!dispatch.ready) {
+      response.status(503);
+      return {
+        ...base(),
+        status: 'degraded',
+        dependencies,
+        processes,
+        reason: 'dispatch_not_ready',
       };
     }
     return { ...base(), status: 'operational', dependencies, processes };
@@ -210,6 +235,32 @@ export class HealthController {
       checkedAt: null,
       lastSuccessfulAt: null,
       reason: 'not_checked',
+    };
+  }
+
+  private unknownDispatchSnapshot(): RuntimeDispatchReadinessSnapshot {
+    return {
+      required: this.dispatchReadiness?.required() ?? Boolean(this.config.EVENT_INBOX_BASE_URL),
+      ready: !(this.dispatchReadiness?.required() ?? Boolean(this.config.EVENT_INBOX_BASE_URL)),
+      state: (this.dispatchReadiness?.required() ?? Boolean(this.config.EVENT_INBOX_BASE_URL))
+        ? 'RECOVERING' : 'DISABLED',
+      reason: (this.dispatchReadiness?.required() ?? Boolean(this.config.EVENT_INBOX_BASE_URL))
+        ? 'event_inbox_recovery_not_checked' : null,
+      recoveryWatermark: null,
+      recoveryStartedAt: null,
+      readyAt: null,
+      heartbeatAt: null,
+    };
+  }
+
+  private dispatchSnapshotDto(
+    snapshot: RuntimeDispatchReadinessSnapshot,
+  ): RuntimeDispatchReadinessDto {
+    return {
+      ...snapshot,
+      recoveryStartedAt: snapshot.recoveryStartedAt?.toISOString() ?? null,
+      readyAt: snapshot.readyAt?.toISOString() ?? null,
+      heartbeatAt: snapshot.heartbeatAt?.toISOString() ?? null,
     };
   }
 }

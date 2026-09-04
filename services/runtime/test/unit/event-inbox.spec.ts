@@ -155,6 +155,7 @@ describe('Event Inbox boundary', () => {
     const receiptHandle = encodeEventInboxReceipt({ idempotencyKey: 'event-1', leaseId: crypto.randomUUID() });
     const repository = {
       claim: vi.fn().mockResolvedValue([{ idempotencyKey: 'event-1', receiptHandle }]),
+      recovery: vi.fn().mockResolvedValue({ watermark: '17', remaining: 1 }),
       acknowledge: vi.fn().mockResolvedValue(1),
       negativelyAcknowledge: vi.fn().mockResolvedValue({ retried: 0, dead: 1 }),
     };
@@ -206,6 +207,9 @@ describe('Event Inbox boundary', () => {
     const authorization = `Bearer ${pairing.deviceToken}`;
     await expect(controller.claim(authorization, { limit: 10, waitSeconds: 0 }))
       .resolves.toEqual({ data: [{ idempotencyKey: 'event-1', receiptHandle }] });
+    await expect(controller.recovery(authorization, {}))
+      .resolves.toEqual({ watermark: '17', remaining: 1 });
+    expect(repository.recovery).toHaveBeenCalledWith(deviceId, 1, [sessionId], undefined);
     await expect(controller.acknowledge(authorization, { receiptHandles: [receiptHandle] }))
       .resolves.toEqual({ acknowledged: 1 });
     await expect(controller.negativelyAcknowledge(authorization, { items: [{
@@ -241,8 +245,8 @@ describe('Event Inbox boundary', () => {
 
   it('fails readiness when it cannot admit one maximum-sized webhook', async () => {
     const readiness = {
-      migrationHead: '014_event_inbox_active_lease_index.sql',
-      migrationCount: 14,
+      migrationHead: '015_event_inbox_recovery_watermark.sql',
+      migrationCount: 15,
       storedEvents: 99,
       storedBytes: 500,
       pendingEvents: 0,

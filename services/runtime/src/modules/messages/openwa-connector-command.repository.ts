@@ -116,6 +116,26 @@ export class OpenWAConnectorCommandRepository {
     return result.rowCount === 1;
   }
 
+  async deferForDispatchReadiness(
+    command: ClaimedOpenWAConnectorCommand,
+    delayMs: number,
+  ): Promise<boolean> {
+    const result = await this.database.query(
+      `UPDATE message_attempts SET
+         ingress_next_attempt_at = LEAST(
+           command_expires_at,
+           now() + $3 * interval '1 millisecond'
+         ),
+         ingress_delivery_attempts = GREATEST(0, ingress_delivery_attempts - 1),
+         ingress_lease_id = NULL,
+         ingress_lease_expires_at = NULL
+       WHERE attempt_id = $1 AND ingress_lease_id = $2
+         AND transport_state = 'DISPATCH_STARTED'`,
+      [command.attemptId, command.leaseId, delayMs],
+    );
+    return result.rowCount === 1;
+  }
+
   settleDefinitive(
     command: ClaimedOpenWAConnectorCommand,
     error: string,

@@ -143,4 +143,50 @@ describe('HealthController readiness', () => {
     });
     expect(response.status).not.toHaveBeenCalled();
   });
+
+  it('reports operational degradation while the outbound recovery barrier is closed', async () => {
+    const database = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+    const queues = {
+      readiness: vi.fn().mockResolvedValue({ backend: 'postgres', ready: true }),
+      runtimeProcessHealth: vi.fn().mockResolvedValue({ worker: 'healthy', scheduler: 'healthy' }),
+    };
+    const response = { status: vi.fn().mockReturnThis() };
+    const controller = new HealthController(
+      database as unknown as DatabaseService,
+      queues as unknown as QueueService,
+      {
+        ALLOW_LIVE_SENDS: true,
+        OPENWA_RELEASE_TAG: '0.22.0',
+        OPENWA_ALLOWED_SESSION_IDS: ['00000000-0000-4000-8000-000000000001'],
+        RUNTIME_INSTANCE_ID: 'test-instance',
+        EVENT_INBOX_BASE_URL: 'http://127.0.0.1:34200',
+        EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS: false,
+      } as never,
+      { snapshot: () => ({
+        status: 'COMPATIBLE',
+        expectedRelease: '0.22.0',
+        observedRelease: '0.22.0',
+        checkedAt: '2026-09-04T00:00:00.000Z',
+        lastSuccessfulAt: '2026-09-04T00:00:00.000Z',
+        reason: null,
+      }) } as never,
+      { required: () => true, snapshot: vi.fn().mockResolvedValue({
+        required: true,
+        ready: false,
+        state: 'RECOVERING',
+        reason: 'event_inbox_startup_recovery',
+        recoveryWatermark: null,
+        recoveryStartedAt: new Date('2026-09-04T00:00:00Z'),
+        readyAt: null,
+        heartbeatAt: null,
+      }) } as never,
+    );
+
+    await expect(controller.operational(response as never)).resolves.toMatchObject({
+      status: 'degraded',
+      reason: 'dispatch_not_ready',
+      components: { dispatch: { ready: false, state: 'RECOVERING' } },
+    });
+    expect(response.status).toHaveBeenCalledWith(503);
+  });
 });

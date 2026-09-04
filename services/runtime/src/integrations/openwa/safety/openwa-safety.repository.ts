@@ -365,6 +365,10 @@ export class OpenWASafetyRepository {
     permit: OpenWAMessagePermit,
     connectorHealthRequired = false,
     connectorCommand?: OpenWAConnectorCommandCommit,
+    dispatchReadiness: { required: boolean; maximumHeartbeatAgeMs: number } = {
+      required: false,
+      maximumHeartbeatAgeMs: 0,
+    },
   ): Promise<CommittedOpenWAMessagePermit | null> {
     if (connectorHealthRequired && !connectorCommand) {
       throw new Error('Connector-required message commit requires a durable connector command');
@@ -429,6 +433,16 @@ export class OpenWASafetyRepository {
                NOT $8::boolean
                OR EXISTS (SELECT 1 FROM connector)
              )
+             AND (
+               NOT $16::boolean
+               OR EXISTS (
+                 SELECT 1 FROM runtime_dispatch_readiness readiness
+                 WHERE readiness.singleton = true
+                   AND readiness.state = 'READY'
+                   AND readiness.heartbeat_at
+                     > now() - ($17::double precision * interval '1 millisecond')
+               )
+             )
              AND EXISTS (
                SELECT 1 FROM gateway_sessions sessions
                WHERE sessions.id = jobs.session_id AND sessions.status = 'ready'
@@ -482,7 +496,9 @@ export class OpenWASafetyRepository {
           connectorCommand?.payloadSha256 ?? null,
           connectorCommand?.commandBody ?? null,
           connectorCommand?.expiresAt ?? null,
-          connectorCommand ? permit.policyProfile : null],
+          connectorCommand ? permit.policyProfile : null,
+          dispatchReadiness.required,
+          dispatchReadiness.maximumHeartbeatAgeMs],
       );
       const row = result.rows[0];
       return row ? {

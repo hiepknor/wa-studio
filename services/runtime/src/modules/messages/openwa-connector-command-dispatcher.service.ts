@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
+import { RuntimeDispatchReadinessService } from '../../core/dispatch-readiness/runtime-dispatch-readiness.service';
 import {
   OpenWAConnectorIngressClient,
   OpenWAConnectorIngressError,
@@ -19,6 +20,7 @@ export class OpenWAConnectorCommandDispatcherService {
     private readonly commands: OpenWAConnectorCommandRepository,
     private readonly ingress: OpenWAConnectorIngressClient,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
+    @Optional() private readonly dispatchReadiness?: RuntimeDispatchReadinessService,
   ) {}
 
   async run(): Promise<void> {
@@ -37,6 +39,7 @@ export class OpenWAConnectorCommandDispatcherService {
         count: evidenceTimedOut,
       });
     }
+    if (!(await this.isDispatchReady())) return;
     const commands = await this.commands.claimDue({
       limit: this.config.OPENWA_CONNECTOR_DISPATCH_BATCH_SIZE,
       leaseMs: this.config.OPENWA_CONNECTOR_DISPATCH_LEASE_MS,
@@ -47,6 +50,7 @@ export class OpenWAConnectorCommandDispatcherService {
 
   async dispatchAttempt(attemptId: string): Promise<boolean> {
     if (!this.config.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS) return false;
+    if (!(await this.isDispatchReady())) return false;
     const command = (await this.commands.claimDue({
       limit: 1,
       leaseMs: this.config.OPENWA_CONNECTOR_DISPATCH_LEASE_MS,
@@ -59,6 +63,13 @@ export class OpenWAConnectorCommandDispatcherService {
   }
 
   private async dispatch(command: ClaimedOpenWAConnectorCommand): Promise<void> {
+    if (!(await this.isDispatchReady())) {
+      await this.commands.deferForDispatchReadiness(
+        command,
+        this.config.EVENT_INBOX_POLL_INTERVAL_MS,
+      );
+      return;
+    }
     const actualDigest = createHash('sha256').update(command.body).digest('hex');
     if (actualDigest !== command.payloadSha256) {
       await this.commands.settleDefinitive(command, 'Connector command payload digest is corrupt');
@@ -93,6 +104,11 @@ export class OpenWAConnectorCommandDispatcherService {
       }
       await this.retryOrSettle(command, error);
     }
+  }
+
+  private async isDispatchReady(): Promise<boolean> {
+    if (this.dispatchReadiness) return (await this.dispatchReadiness.snapshot()).ready;
+    return !this.config.EVENT_INBOX_BASE_URL;
   }
 
   private async retryOrSettle(

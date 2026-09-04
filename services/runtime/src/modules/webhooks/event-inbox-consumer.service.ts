@@ -1,11 +1,13 @@
-import { HttpException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { HttpException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   eventInboxClaimResponseSchema,
+  eventInboxRecoveryResponseSchema,
   type EventInboxNack,
 } from '../../contracts/event-inbox';
 import { runtimeConfig, type RuntimeConfig } from '../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../core/config/runtime-config.module';
+import { RuntimeDispatchReadinessService } from '../../core/dispatch-readiness/runtime-dispatch-readiness.service';
 import { readBoundedResponseJson } from '../../core/http/bounded-response';
 import type { OpenWAWebhookEnvelope } from './webhook.repository';
 import { WebhookIngressService } from './webhook-ingress.service';
@@ -23,10 +25,16 @@ export class EventInboxConsumerService implements OnModuleInit, OnModuleDestroy 
   constructor(
     private readonly ingress: WebhookIngressService,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
+    @Optional() private readonly dispatchReadiness?: RuntimeDispatchReadinessService,
   ) {}
 
-  onModuleInit(): void {
-    if (this.config.EVENT_INBOX_BASE_URL) this.loopPromise = this.runLoop();
+  async onModuleInit(): Promise<void> {
+    if (!this.config.EVENT_INBOX_BASE_URL) return;
+    if (!this.dispatchReadiness) {
+      throw new Error('Event Inbox dispatch readiness service is unavailable');
+    }
+    await this.dispatchReadiness.beginRecovery();
+    this.loopPromise = this.runLoop();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -36,26 +44,54 @@ export class EventInboxConsumerService implements OnModuleInit, OnModuleDestroy 
 
   private async runLoop(): Promise<void> {
     let backoffMs = this.config.EVENT_INBOX_POLL_INTERVAL_MS;
+    let recovered = false;
     while (!this.abort.signal.aborted) {
       try {
+        if (!recovered) {
+          await this.recover();
+          recovered = true;
+        }
+        await this.dispatchReadiness?.refreshHeartbeat();
         const count = await this.runOnce();
+        await this.dispatchReadiness?.refreshHeartbeat();
         backoffMs = this.config.EVENT_INBOX_POLL_INTERVAL_MS;
         if (count === 0) await this.wait(backoffMs);
       } catch (error) {
         if (this.abort.signal.aborted) return;
         this.logger.warn({ event: 'event_inbox.claim.failed', error });
+        recovered = false;
+        await this.markDegraded(error);
         await this.wait(backoffMs);
         backoffMs = Math.min(30_000, backoffMs * 2);
       }
     }
   }
 
-  async runOnce(): Promise<number> {
+  async recover(): Promise<string> {
+    const captured = await this.recoveryRequest();
+    const watermark = captured.watermark;
+    let remaining = captured.remaining;
+    while (remaining > 0) {
+      if (this.abort.signal.aborted) throw new Error('Event Inbox recovery aborted');
+      const count = await this.runOnce({ waitSeconds: 0, throughSequence: watermark });
+      const status = await this.recoveryRequest(watermark);
+      remaining = status.remaining;
+      if (remaining > 0 && count === 0) {
+        await this.wait(this.config.EVENT_INBOX_POLL_INTERVAL_MS);
+      }
+    }
+    await this.dispatchReadiness?.markReady(watermark);
+    this.logger.log({ event: 'event_inbox.recovery.ready', watermark });
+    return watermark;
+  }
+
+  async runOnce(options: { waitSeconds?: number; throughSequence?: string } = {}): Promise<number> {
     const baseUrl = this.config.EVENT_INBOX_BASE_URL!;
     const token = this.config.EVENT_INBOX_DEVICE_TOKEN!;
     const response = await this.request(baseUrl, token, '/api/v1/event-inbox/events/claim', {
       limit: this.config.EVENT_INBOX_BATCH_SIZE,
-      waitSeconds: 20,
+      waitSeconds: options.waitSeconds ?? 20,
+      ...(options.throughSequence ? { throughSequence: options.throughSequence } : {}),
     });
     const parsed = eventInboxClaimResponseSchema.safeParse(response);
     if (!parsed.success) throw new Error('Event Inbox returned an invalid claim response');
@@ -98,6 +134,31 @@ export class EventInboxConsumerService implements OnModuleInit, OnModuleDestroy 
       await this.request(baseUrl, token, '/api/v1/event-inbox/events/nack', { items: rejected });
     }
     return parsed.data.data.length;
+  }
+
+  private async recoveryRequest(watermark?: string): Promise<{
+    watermark: string;
+    remaining: number;
+  }> {
+    const response = await this.request(
+      this.config.EVENT_INBOX_BASE_URL!,
+      this.config.EVENT_INBOX_DEVICE_TOKEN!,
+      '/api/v1/event-inbox/events/recovery',
+      watermark ? { watermark } : {},
+    );
+    const parsed = eventInboxRecoveryResponseSchema.safeParse(response);
+    if (!parsed.success) throw new Error('Event Inbox returned an invalid recovery response');
+    return parsed.data;
+  }
+
+  private async markDegraded(error: unknown): Promise<void> {
+    try {
+      await this.dispatchReadiness?.markDegraded(
+        error instanceof Error ? error.message : 'event_inbox_consumer_failed',
+      );
+    } catch (readinessError) {
+      this.logger.error({ event: 'event_inbox.readiness.degrade_failed', error: readinessError });
+    }
   }
 
   private disposition(error: unknown): 'retry' | 'dead' {

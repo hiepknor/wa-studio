@@ -111,12 +111,41 @@ export class OpenWAConnectorComponentHealthDto {
   sessions!: OpenWAConnectorSessionHealthDto[];
 }
 
+export class RuntimeDispatchReadinessDto {
+  @ApiProperty()
+  required!: boolean;
+
+  @ApiProperty()
+  ready!: boolean;
+
+  @ApiProperty({ enum: ['DISABLED', 'RECOVERING', 'READY', 'DEGRADED'] })
+  state!: 'DISABLED' | 'RECOVERING' | 'READY' | 'DEGRADED';
+
+  @ApiProperty({ type: String, nullable: true })
+  reason!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  recoveryWatermark!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' })
+  recoveryStartedAt!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' })
+  readyAt!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' })
+  heartbeatAt!: string | null;
+}
+
 export class RuntimeComponentHealthDto {
   @ApiProperty({ type: OpenWAComponentHealthDto })
   openwa!: OpenWAComponentHealthDto;
 
   @ApiProperty({ type: OpenWAConnectorComponentHealthDto })
   connector!: OpenWAConnectorComponentHealthDto;
+
+  @ApiProperty({ type: RuntimeDispatchReadinessDto })
+  dispatch!: RuntimeDispatchReadinessDto;
 }
 
 export class HealthReadyDto {
@@ -137,6 +166,9 @@ export class HealthReadyDto {
 
   @ApiProperty({ minimum: 0 })
   allowedSessionCount!: number;
+
+  @ApiProperty({ type: RuntimeDispatchReadinessDto })
+  dispatch!: RuntimeDispatchReadinessDto;
 }
 
 export class HealthNotReadyDto {
@@ -177,9 +209,10 @@ export class HealthOperationalDto {
       'upstream_unavailable',
       'upstream_incompatible',
       'connector_unhealthy',
+      'dispatch_not_ready',
     ],
   })
   reason?: 'dependency_unavailable' | 'background_process_degraded'
     | 'upstream_status_unknown' | 'upstream_unavailable' | 'upstream_incompatible'
-    | 'connector_unhealthy';
+    | 'connector_unhealthy' | 'dispatch_not_ready';
 }

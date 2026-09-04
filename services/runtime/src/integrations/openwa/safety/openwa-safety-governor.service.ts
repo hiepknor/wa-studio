@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { runtimeConfig, type RuntimeConfig } from '../../../core/config/runtime-config';
 import { RUNTIME_CONFIG } from '../../../core/config/runtime-config.module';
+import { RuntimeDispatchReadinessService } from '../../../core/dispatch-readiness/runtime-dispatch-readiness.service';
 import { OpenWASafetyRepository } from './openwa-safety.repository';
 import type {
   CommittedOpenWAMessagePermit,
@@ -27,16 +28,29 @@ export class OpenWASafetyGovernorService {
   constructor(
     private readonly repository: OpenWASafetyRepository,
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
+    @Optional() private readonly dispatchReadiness?: RuntimeDispatchReadinessService,
   ) {
     this.upstreamId = openWAUpstreamId(config.OPENWA_BASE_URL);
   }
 
-  reserveMessage(input: {
+  async reserveMessage(input: {
     sessionId: string;
     messageJobId: string;
     recipientId: string;
     operationClass: OpenWAMessageOperationClass;
   }): Promise<OpenWAPermitDecision> {
+    const readiness = this.dispatchReadiness
+      ? await this.dispatchReadiness.snapshot()
+      : this.config.EVENT_INBOX_BASE_URL
+        ? { ready: false, reason: 'event_inbox_dispatch_readiness_unavailable' }
+        : null;
+    if (readiness && !readiness.ready) {
+      return {
+        outcome: 'DEFERRED',
+        notBefore: new Date(Date.now() + this.config.EVENT_INBOX_POLL_INTERVAL_MS),
+        reason: readiness.reason ?? 'EVENT_INBOX_RECOVERY_PENDING',
+      };
+    }
     const connectorLeaseMs = this.config.OPENWA_CONNECTOR_EVIDENCE_TIMEOUT_SECONDS * 1_000;
     return this.repository.reserveMessage({
       ...input,
@@ -78,6 +92,10 @@ export class OpenWASafetyGovernorService {
       permit,
       this.config.EVENT_INBOX_CONNECTOR_REQUIRED_FOR_LIVE_SENDS,
       connectorCommand,
+      {
+        required: this.dispatchReadiness?.required() ?? Boolean(this.config.EVENT_INBOX_BASE_URL),
+        maximumHeartbeatAgeMs: this.dispatchReadiness?.maximumHeartbeatAgeMs() ?? 0,
+      },
     );
   }
 

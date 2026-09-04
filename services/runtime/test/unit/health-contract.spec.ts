@@ -23,7 +23,7 @@ describe('health OpenAPI contract', () => {
     const ready = contract.components.schemas.HealthReadyDto!;
     expect(ready.required).toEqual([
       'status', 'dependencies', 'processes', 'liveSendsEnabled',
-      'openwaRelease', 'allowedSessionCount',
+      'openwaRelease', 'allowedSessionCount', 'dispatch',
     ]);
     expect(contract.components.schemas.RuntimeProcessHealthDto?.properties).toMatchObject({
       worker: { enum: ['healthy', 'degraded'] },
@@ -58,6 +58,7 @@ describe('health OpenAPI contract', () => {
         'upstream_unavailable',
         'upstream_incompatible',
         'connector_unhealthy',
+        'dispatch_not_ready',
       ] },
     });
     expect(contract.components.schemas.OpenWAComponentHealthDto?.properties).toMatchObject({
@@ -73,5 +74,15 @@ describe('health OpenAPI contract', () => {
       'lastSuccessfulAt',
       'reason',
     ]);
+    expect(contract.components.schemas.RuntimeDispatchReadinessDto).toMatchObject({
+      required: [
+        'required', 'ready', 'state', 'reason', 'recoveryWatermark',
+        'recoveryStartedAt', 'readyAt', 'heartbeatAt',
+      ],
+      properties: {
+        state: { enum: ['DISABLED', 'RECOVERING', 'READY', 'DEGRADED'] },
+        ready: { type: 'boolean' },
+      },
+    });
   });
 });

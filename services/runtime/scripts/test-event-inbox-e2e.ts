@@ -323,11 +323,25 @@ async function main(): Promise<void> {
     await postWebhook(pairing.callbackUrl, pairing.webhookSecret, event);
     const duplicate = await postWebhook(pairing.callbackUrl, pairing.webhookSecret, event);
     assert(duplicate.duplicate === true, 'duplicate webhook was not collapsed');
+    const recovery = await inboxRequest(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      'events/recovery',
+      {},
+    );
+    assert(recovery.remaining === 1, 'recovery watermark did not capture the pending event');
 
     const firstClaim = await claim(eventInboxBaseUrl, pairing.deviceToken);
     assert(firstClaim.data.length === 1, 'durable event was not claimed');
     const leasedClaim = await claim(eventInboxBaseUrl, pairing.deviceToken);
     assert(leasedClaim.data.length === 0, 'active lease allowed duplicate concurrent delivery');
+    const leasedRecovery = await inboxRequest(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      'events/recovery',
+      { watermark: recovery.watermark },
+    );
+    assert(leasedRecovery.remaining === 1, 'active lease incorrectly opened the recovery barrier');
     const firstReceipt = firstClaim.data[0]!.receiptHandle;
     const retry = await inboxRequest(eventInboxBaseUrl, pairing.deviceToken, 'events/nack', {
       items: [{ receiptHandle: firstReceipt, disposition: 'retry', reason: 'temporary_failure' }],
@@ -346,6 +360,13 @@ async function main(): Promise<void> {
       receiptHandles: [secondReceipt],
     });
     assert(ack.acknowledged === 1, 'current receipt did not ACK the event');
+    const recovered = await inboxRequest(
+      eventInboxBaseUrl,
+      pairing.deviceToken,
+      'events/recovery',
+      { watermark: recovery.watermark },
+    );
+    assert(recovered.remaining === 0, 'ACK did not complete the recovery watermark');
     const duplicateAfterAck = await postWebhook(pairing.callbackUrl, pairing.webhookSecret, event);
     assert(duplicateAfterAck.duplicate === true, 'ACK removed the durable dedupe receipt');
     const conflictingEvent = { ...event, data: { id: 'different-message' } };
@@ -374,8 +395,8 @@ async function main(): Promise<void> {
         && health.release?.openwaReleaseTag === OPENWA_RELEASE_TAG
         && health.release?.connectorProtocolVersion === OPENWA_CONNECTOR_PROTOCOL_VERSION
         && health.release?.connectorJournalSchemaVersion === OPENWA_CONNECTOR_JOURNAL_SCHEMA_VERSION
-        && health.release?.migrationHead === '014_event_inbox_active_lease_index.sql'
-        && health.release?.migrationCount === 14,
+        && health.release?.migrationHead === '015_event_inbox_recovery_watermark.sql'
+        && health.release?.migrationCount === 15,
       'health did not expose the coordinated release identity',
     );
     assert(health.pendingEvents === 0 && health.deadEvents === 1, 'health did not expose poison isolation');
@@ -417,7 +438,7 @@ async function main(): Promise<void> {
     );
 
     process.stdout.write(
-      'Event Inbox E2E passed: bounded HTTP parsing, security headers, v1 adoption, v2 rotation/takeover/revocation, HMAC, dedup, lease fencing, retry, ACK, poison isolation, durable pairing rate limits and private metrics.\n',
+      'Event Inbox E2E passed: bounded HTTP parsing, security headers, v1 adoption, v2 rotation/takeover/revocation, HMAC, dedup, recovery watermark, lease fencing, retry, ACK, poison isolation, durable pairing rate limits and private metrics.\n',
     );
   } finally {
     if (inbox) await stop(inbox);

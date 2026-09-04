@@ -6,6 +6,9 @@ export const EVENT_INBOX_CONNECTOR_PROTOCOL_VERSION = OPENWA_CONNECTOR_PROTOCOL_
 // EVENT_INBOX_MAX_PAYLOAD_BYTES is bounded at 1 MiB. Base64 expands every three
 // bytes into four characters, including padding for the final partial block.
 const maximumEncodedEventBodyLength = Math.ceil(1_048_576 / 3) * 4;
+const eventInboxSequenceSchema = z.string()
+  .regex(/^(0|[1-9][0-9]{0,18})$/u)
+  .refine(value => BigInt(value) <= 9_223_372_036_854_775_807n);
 
 export const eventInboxEventSchema = z.object({
   idempotencyKey: z.string().min(1).max(512),
@@ -21,7 +24,17 @@ export const eventInboxClaimResponseSchema = z.object({
 export const eventInboxClaimSchema = z.object({
   limit: z.number().int().min(1).max(100).default(100),
   waitSeconds: z.number().int().min(0).max(25).default(20),
+  throughSequence: eventInboxSequenceSchema.optional(),
 });
+
+export const eventInboxRecoveryRequestSchema = z.object({
+  watermark: eventInboxSequenceSchema.optional(),
+}).strict();
+
+export const eventInboxRecoveryResponseSchema = z.object({
+  watermark: eventInboxSequenceSchema,
+  remaining: z.number().int().nonnegative(),
+}).strict();
 
 export const eventInboxAckSchema = z.object({
   receiptHandles: z.array(z.string().min(1).max(2048)).min(1).max(100),
