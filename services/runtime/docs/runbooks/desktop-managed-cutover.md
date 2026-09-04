@@ -58,6 +58,12 @@ Require all of the following before deleting legacy resources:
 
 ## 5. Irreversible cleanup
 
+Before cleanup, retain the bounded native supervisor diagnostics from WA Studio's platform log
+directory. `managed-runtime-supervisor.jsonl` and its two numbered archives are owner-only JSONL
+files capped at 1 MiB each. They contain event names and bounded structured metadata; secret-bearing
+keys and free-form error text are omitted. Failure to initialize or append this diagnostic sink is
+reported to stderr but never blocks app startup, Runtime work, or shutdown.
+
 After acceptance, remove exactly the wa-webhook-relay Compose project, directory, stopped
 containers, network and wa-webhook-relay_postgres-data volume. Let WA Studio migrate a supported
 schema-v1 local secret file into the operating-system credential store; verify the schema-v2 profile
