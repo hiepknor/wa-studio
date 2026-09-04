@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -31,10 +31,14 @@ const recordPath = resolve(root, "production-acceptance.json");
 const snapshotPath = resolve(root, "production-operational-snapshot.json");
 const recoveryEvidencePath = resolve(root, "production-recovery-evidence.json");
 const promotionPath = resolve(root, "production-promotion.json");
+const cliPromotionPath = resolve(root, "production-promotion-cli.json");
 const absentPromotionPath = resolve(root, "no-production-promotion.json");
 const cliRecordPath = resolve(root, "production-acceptance-cli.json");
 const cliPath = resolve(import.meta.dirname, "production-acceptance.mjs");
 const promotionCliPath = resolve(import.meta.dirname, "production-promotion.mjs");
+const promotionPrivateKeyPath = resolve(root, "production-promotion-private.pem");
+const promotionPublicKeyPath = resolve(root, "production-promotion-public.pem");
+const untrustedPublicKeyPath = resolve(root, "untrusted-production-promotion-public.pem");
 const acceptancePolicy = readProductionAcceptancePolicy();
 const deployment = {
   schemaVersion: 1,
@@ -82,6 +86,20 @@ function verifyRecord(options = {}) {
 }
 
 try {
+  const promotionKeyPair = generateKeyPairSync("ed25519");
+  writeFileSync(promotionPrivateKeyPath, promotionKeyPair.privateKey.export({
+    type: "pkcs8",
+    format: "pem",
+  }), { mode: 0o600 });
+  writeFileSync(promotionPublicKeyPath, promotionKeyPair.publicKey.export({
+    type: "spki",
+    format: "pem",
+  }), { mode: 0o644 });
+  const untrustedKeyPair = generateKeyPairSync("ed25519");
+  writeFileSync(untrustedPublicKeyPath, untrustedKeyPair.publicKey.export({
+    type: "spki",
+    format: "pem",
+  }), { mode: 0o644 });
   writeFileSync(deploymentPath, `${JSON.stringify(deployment, null, 2)}\n`);
   assert.match(execFileSync(process.execPath, [
     cliPath,
@@ -388,6 +406,7 @@ try {
     acceptanceRecordPath: recordPath,
     targetTag: "v0.2.3",
     outputPath: promotionPath,
+    signingPrivateKeyPath: promotionPrivateKeyPath,
     now: new Date("2026-08-29T04:00:00.000Z"),
   });
   assert.equal(receipt.acceptedRelease.tag, "v0.2.2");
@@ -395,16 +414,36 @@ try {
   assert.equal(receipt.acceptance.operationalSnapshotSha256, record.operationalSnapshot.sha256);
   assert.equal(receipt.acceptance.evidenceArchiveSha256, record.evidenceArchive.sha256);
   assert.equal(statSync(promotionPath).mode & 0o111, 0);
+  assert.match(execFileSync(process.execPath, [
+    promotionCliPath,
+    "create",
+    "--accepted-deployment", deploymentPath,
+    "--operational-snapshot", snapshotPath,
+    "--recovery-evidence", recoveryEvidencePath,
+    "--acceptance-record", recordPath,
+    "--target-tag", "v0.2.3",
+    "--output", cliPromotionPath,
+    "--signing-private-key", promotionPrivateKeyPath,
+  ], { encoding: "utf8" }), /"status":"created"/u);
+  assert.equal(verifyProductionPromotionTarget({
+    receiptPath: cliPromotionPath,
+    repository: "example/wa-studio",
+    tag: "v0.2.3",
+    releaseChannel: "stable",
+    verificationPublicKeyPath: promotionPublicKeyPath,
+  }).required, true);
   assert.equal(verifyProductionPromotionTarget({
     receiptPath: promotionPath,
     repository: "example/wa-studio",
     tag: "v0.2.3",
     releaseChannel: "stable",
+    verificationPublicKeyPath: promotionPublicKeyPath,
   }).required, true);
   assert.equal(verifyProductionPromotionTarget({
     receiptPath: absentPromotionPath,
     repository: "example/wa-studio",
     tag: "v0.2.3",
+    verificationPublicKeyPath: promotionPublicKeyPath,
     releaseChannel: "canary",
   }).required, false);
   assert.throws(
@@ -421,7 +460,27 @@ try {
     acceptedDeploymentManifestPath: deploymentPath,
     repository: "example/wa-studio",
     tag: "v0.2.3",
+    verificationPublicKeyPath: promotionPublicKeyPath,
   }).target.tag, "v0.2.3");
+  assert.throws(
+    () => verifyProductionPromotionTarget({
+      receiptPath: promotionPath,
+      repository: "example/wa-studio",
+      tag: "v0.2.3",
+      releaseChannel: "stable",
+    }),
+    /verification public key path is required/u,
+  );
+  assert.throws(
+    () => verifyProductionPromotionTarget({
+      receiptPath: promotionPath,
+      repository: "example/wa-studio",
+      tag: "v0.2.3",
+      releaseChannel: "stable",
+      verificationPublicKeyPath: untrustedPublicKeyPath,
+    }),
+    /uses an untrusted key/u,
+  );
   assert.match(execFileSync(process.execPath, [
     promotionCliPath,
     "verify-target",
@@ -429,6 +488,7 @@ try {
     "--repository", "example/wa-studio",
     "--tag", "v0.2.3",
     "--release-channel", "stable",
+    "--verification-public-key", promotionPublicKeyPath,
   ], { encoding: "utf8" }), /"receiptRequired":true/u);
   assert.match(execFileSync(process.execPath, [
     promotionCliPath,
@@ -437,6 +497,7 @@ try {
     "--accepted-deployment", deploymentPath,
     "--repository", "example/wa-studio",
     "--tag", "v0.2.3",
+    "--verification-public-key", promotionPublicKeyPath,
   ], { encoding: "utf8" }), /"acceptedTag":"v0.2.2"/u);
   assert.throws(
     () => createProductionPromotionReceipt({
@@ -446,6 +507,7 @@ try {
       acceptanceRecordPath: recordPath,
       targetTag: "v0.2.2",
       outputPath: resolve(root, "invalid-promotion.json"),
+      signingPrivateKeyPath: promotionPrivateKeyPath,
     }),
     /must be newer/u,
   );
@@ -459,8 +521,25 @@ try {
       acceptedDeploymentManifestPath: deploymentPath,
       repository: "example/wa-studio",
       tag: "v0.2.3",
+      verificationPublicKeyPath: promotionPublicKeyPath,
     }),
-    /does not match the production promotion receipt/u,
+    /signature verification failed/u,
+  );
+  writeFileSync(promotionPath, `${JSON.stringify(receipt, null, 2)}\n`);
+
+  const unsignedLegacyReceipt = structuredClone(receipt);
+  unsignedLegacyReceipt.schemaVersion = 1;
+  delete unsignedLegacyReceipt.signature;
+  writeFileSync(promotionPath, `${JSON.stringify(unsignedLegacyReceipt, null, 2)}\n`);
+  assert.throws(
+    () => verifyProductionPromotionTarget({
+      receiptPath: promotionPath,
+      repository: "example/wa-studio",
+      tag: "v0.2.3",
+      releaseChannel: "stable",
+      verificationPublicKeyPath: promotionPublicKeyPath,
+    }),
+    /missing or unexpected fields/u,
   );
   writeFileSync(promotionPath, `${JSON.stringify(receipt, null, 2)}\n`);
 

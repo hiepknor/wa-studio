@@ -35,13 +35,24 @@ jobs:
           expected="v$(node -p "require('./apps/studio/package.json').version")"
           test "$GITHUB_REF_NAME" = "$expected"
       - name: Verify production promotion requirement
+        env:
+          PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM: ${{ vars.PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM }}
         run: |
           channel="$(node -p "require('./release/components.json').releaseChannel")"
+          verification_args=()
+          if [[ "$channel" == "stable" ]]; then
+            test -n "$PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM"
+            public_key="$RUNNER_TEMP/production-acceptance-public.pem"
+            umask 077
+            printf '%s\n' "$PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM" > "$public_key"
+            verification_args=(--verification-public-key "$public_key")
+          fi
           npm run release:promotion:verify-target -- \
             --receipt release/production-promotion.json \
             --repository "$GITHUB_REPOSITORY" \
             --tag "$GITHUB_REF_NAME" \
-            --release-channel "$channel"
+            --release-channel "$channel" \
+            "${verification_args[@]}"
       - run: npm run contract:check
       - run: npm run check:connector
       - run: npm run check:runtime
@@ -360,16 +371,23 @@ jobs:
           name: wa-studio-server-release-${{ github.ref_name }}
           path: dist/server-release
       - name: Verify accepted canary promotion source
+        env:
+          PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM: ${{ vars.PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM }}
         run: |
           channel="$(node -p "require('./release/components.json').releaseChannel")"
           if [[ "$channel" == "canary" ]]; then
             exit 0
           fi
+          test -n "$PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM"
+          public_key="$RUNNER_TEMP/production-acceptance-public.pem"
+          umask 077
+          printf '%s\n' "$PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM" > "$public_key"
           npm run release:promotion:verify-target -- \
             --receipt release/production-promotion.json \
             --repository "$GITHUB_REPOSITORY" \
             --tag "$GITHUB_REF_NAME" \
-            --release-channel "$channel"
+            --release-channel "$channel" \
+            --verification-public-key "$public_key"
           accepted_tag="$(node -p "require('./release/production-promotion.json').acceptedRelease.tag")"
           accepted_commit="$(node -p "require('./release/production-promotion.json').acceptedRelease.gitCommit")"
           test "$(git rev-parse "${accepted_tag}^{commit}")" = "$accepted_commit"
@@ -385,14 +403,16 @@ jobs:
             --accepted-deployment dist/accepted-canary/wa-studio-deployment.json \
             --repository "$GITHUB_REPOSITORY" \
             --tag "$GITHUB_REF_NAME" \
-            --policy dist/accepted-source/release/production-acceptance-policy.json
+            --policy dist/accepted-source/release/production-acceptance-policy.json \
+            --verification-public-key "$public_key"
           node dist/accepted-source/tooling/release/production-promotion.mjs verify-delta \
             --receipt release/production-promotion.json \
             --repository "$GITHUB_REPOSITORY" \
             --tag "$GITHUB_REF_NAME" \
             --target-commit "$GITHUB_SHA" \
             --workspace-root "$GITHUB_WORKSPACE" \
-            --policy dist/accepted-source/release/production-acceptance-policy.json
+            --policy dist/accepted-source/release/production-acceptance-policy.json \
+            --verification-public-key "$public_key"
           gh attestation verify dist/accepted-canary/wa-studio-deployment.json \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \

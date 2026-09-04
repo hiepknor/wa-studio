@@ -198,9 +198,11 @@ updates Runtime metadata only when Runtime changed, regenerates the release mani
 then tag only that commit as `v0.2.2`.
 The stable bump is forbidden unless the private canary record has passed
 `release:acceptance:verify-go`. Generate `release/production-promotion.json` from that record with
-`release:promotion:create` for the exact stable tag, then commit the sanitized receipt with the
+`release:promotion:create` for the exact stable tag and the dedicated production-authorization
+Ed25519 private key, then commit the sanitized signed receipt with the
 version/channel-only stable bump. CI rejects a stable tag without it, downloads the accepted canary
-manifest, and verifies its digest, source commit, tag binding, prerelease state, and GitHub attestation
+manifest, verifies the receipt with `PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM`, and then verifies its
+digest, source commit, tag binding, prerelease state, and GitHub attestation
 before publishing. The stable commit must descend from the accepted canary and its complete diff is
 restricted to the receipt plus normalized Studio/Tauri version and release-channel fields; any other
 code, dependency, configuration, file mode, or manifest change requires a new canary. CI runs this

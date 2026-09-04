@@ -186,6 +186,8 @@ try {
     "Create coordinated deployment manifest",
     "Attest coordinated deployment manifest",
     "deployment-release.mjs verify",
+    "PRODUCTION_ACCEPTANCE_PUBLIC_KEY_PEM",
+    "--verification-public-key",
     "--updater-directory dist/updater-release",
     "gh attestation verify dist/release-metadata/wa-studio-deployment.json",
     "dist/server-release/wa-studio-server-deployment.json dist/connector-plugin/* --clobber",

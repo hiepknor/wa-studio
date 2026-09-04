@@ -1,15 +1,26 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 
 import { readProductionAcceptancePolicy } from "./production-acceptance.mjs";
+import { signProductionAuthorization } from "./production-authorization-signature.mjs";
 import { verifyProductionPromotionDelta } from "./production-promotion.mjs";
 
 const root = mkdtempSync(resolve(tmpdir(), "wa-production-promotion-test-"));
 const receiptPath = resolve(root, "release/production-promotion.json");
 const promotionCliPath = resolve(import.meta.dirname, "production-promotion.mjs");
+const privateKeyPath = resolve(root, "production-authorization-private.pem");
+const publicKeyPath = resolve(root, "production-authorization-public.pem");
+
+function verifyDelta(options) {
+  return verifyProductionPromotionDelta({
+    ...options,
+    verificationPublicKeyPath: publicKeyPath,
+  });
+}
 
 function git(...args) {
   return execFileSync("git", ["-C", root, ...args], {
@@ -88,6 +99,15 @@ function commit(message) {
 }
 
 try {
+  const keyPair = generateKeyPairSync("ed25519");
+  writeFileSync(privateKeyPath, keyPair.privateKey.export({
+    type: "pkcs8",
+    format: "pem",
+  }), { mode: 0o600 });
+  writeFileSync(publicKeyPath, keyPair.publicKey.export({
+    type: "spki",
+    format: "pem",
+  }), { mode: 0o644 });
   git("init", "-b", "main");
   git("config", "user.name", "WA Studio release test");
   git("config", "user.email", "release-test@example.invalid");
@@ -95,8 +115,8 @@ try {
   writeVersionFiles("1.0.0", "canary");
   const sourceCommit = commit("canary");
   const policy = readProductionAcceptancePolicy();
-  const receipt = {
-    schemaVersion: 1,
+  const authorization = {
+    schemaVersion: 2,
     product: "wa-studio",
     issuedAt: "2026-09-02T00:00:00.000Z",
     acceptedRelease: {
@@ -119,11 +139,20 @@ try {
     },
     target: { repository: "example/wa-studio", tag: "v1.0.1" },
   };
+  const receipt = {
+    ...authorization,
+    signature: signProductionAuthorization({
+      authorization,
+      purpose: "wa-studio-production-promotion",
+      privateKeyPath,
+      signedAt: authorization.issuedAt,
+    }),
+  };
 
   writeVersionFiles("1.0.1", "stable");
   write("release/production-promotion.json", json(receipt));
   const targetCommit = commit("promote stable");
-  const result = verifyProductionPromotionDelta({
+  const result = verifyDelta({
     receiptPath,
     repository: "example/wa-studio",
     tag: "v1.0.1",
@@ -139,6 +168,7 @@ try {
     "--tag", "v1.0.1",
     "--target-commit", targetCommit,
     "--workspace-root", root,
+    "--verification-public-key", publicKeyPath,
   ], { encoding: "utf8" }), /"changedFileCount":7/u);
   assert.deepEqual(result.changedFiles.sort(), [
     "apps/studio/package.json",
@@ -154,7 +184,7 @@ try {
   git("commit", "-m", "change version file mode");
   const executableCommit = git("rev-parse", "HEAD");
   assert.throws(
-    () => verifyProductionPromotionDelta({
+    () => verifyDelta({
       receiptPath,
       repository: "example/wa-studio",
       tag: "v1.0.1",
@@ -172,7 +202,7 @@ try {
   }));
   const dependencyCommit = commit("hide dependency in version file");
   assert.throws(
-    () => verifyProductionPromotionDelta({
+    () => verifyDelta({
       receiptPath,
       repository: "example/wa-studio",
       tag: "v1.0.1",
@@ -185,7 +215,7 @@ try {
   write("src/unreviewed.js", "export const unreviewed = true;\n");
   const codeCommit = commit("add unreviewed code");
   assert.throws(
-    () => verifyProductionPromotionDelta({
+    () => verifyDelta({
       receiptPath,
       repository: "example/wa-studio",
       tag: "v1.0.1",
@@ -196,7 +226,7 @@ try {
   );
 
   assert.throws(
-    () => verifyProductionPromotionDelta({
+    () => verifyDelta({
       receiptPath,
       repository: "example/wa-studio",
       tag: "v1.0.1",

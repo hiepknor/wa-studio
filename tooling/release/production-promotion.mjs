@@ -9,6 +9,10 @@ import {
   readProductionDeploymentIdentity,
   verifyProductionAcceptance,
 } from "./production-acceptance.mjs";
+import {
+  signProductionAuthorization,
+  verifyProductionAuthorization,
+} from "./production-authorization-signature.mjs";
 
 const defaultPolicyPath = resolve(
   import.meta.dirname,
@@ -21,6 +25,7 @@ const defaultReceiptPath = resolve(
 const digestPattern = /^[0-9a-f]{64}$/u;
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const versionPattern = /^v([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z.-]+))?$/u;
+const promotionSignaturePurpose = "wa-studio-production-promotion";
 const promotionFiles = new Set([
   "apps/studio/package.json",
   "apps/studio/src-tauri/Cargo.lock",
@@ -198,13 +203,13 @@ function normalizedPromotionFile(value, path, expectedVersion, expectedChannel) 
   throw new Error(`Unsupported stable promotion file: ${path}.`);
 }
 
-function verifyReceiptShape(receipt, policy) {
+function verifyReceiptContent(receipt, policy) {
   exactKeys(
     receipt,
     ["schemaVersion", "product", "issuedAt", "acceptedRelease", "acceptance", "target"],
     "Production promotion receipt",
   );
-  if (receipt.schemaVersion !== 1 || receipt.product !== "wa-studio") {
+  if (receipt.schemaVersion !== 2 || receipt.product !== "wa-studio") {
     throw new Error("Production promotion receipt schema is incompatible.");
   }
   const issuedAt = timestamp(receipt.issuedAt, "Promotion receipt issue time");
@@ -261,9 +266,33 @@ function verifyReceiptShape(receipt, policy) {
   return receipt;
 }
 
+function verifyReceiptShape(receipt, policy, verificationPublicKeyPath) {
+  exactKeys(
+    receipt,
+    ["schemaVersion", "product", "issuedAt", "acceptedRelease", "acceptance", "target", "signature"],
+    "Signed production promotion receipt",
+  );
+  const { signature, ...authorization } = receipt;
+  verifyReceiptContent(authorization, policy);
+  const verified = verifyProductionAuthorization({
+    authorization,
+    signature,
+    expectedPurpose: promotionSignaturePurpose,
+    publicKeyPath: required(
+      verificationPublicKeyPath,
+      "Production authorization verification public key path",
+    ),
+  });
+  if (verified.signedAt !== receipt.issuedAt) {
+    throw new Error("Promotion receipt signature time must equal its issue time.");
+  }
+  return receipt;
+}
+
 export function verifyProductionPromotionReceipt({
   receiptPath = defaultReceiptPath,
   policyPath = defaultPolicyPath,
+  verificationPublicKeyPath,
 }) {
   const resolvedReceiptPath = resolve(required(receiptPath, "Promotion receipt path"));
   const policy = readProductionAcceptancePolicy(policyPath);
@@ -271,7 +300,7 @@ export function verifyProductionPromotionReceipt({
     readJson(resolvedReceiptPath, "Production promotion receipt"),
     "Production promotion receipt",
   );
-  return verifyReceiptShape(receipt, policy);
+  return verifyReceiptShape(receipt, policy, verificationPublicKeyPath);
 }
 
 export function createProductionPromotionReceipt({
@@ -282,6 +311,7 @@ export function createProductionPromotionReceipt({
   targetTag,
   outputPath = defaultReceiptPath,
   policyPath = defaultPolicyPath,
+  signingPrivateKeyPath,
   now = new Date(),
 }) {
   const resolvedRecordPath = resolve(required(acceptanceRecordPath, "Acceptance record path"));
@@ -321,8 +351,8 @@ export function createProductionPromotionReceipt({
     now instanceof Date ? now.toISOString() : now,
     "Promotion receipt issue time",
   );
-  const receipt = verifyReceiptShape({
-    schemaVersion: 1,
+  const authorization = verifyReceiptContent({
+    schemaVersion: 2,
     product: "wa-studio",
     issuedAt: issuedAt.normalized,
     acceptedRelease: record.release,
@@ -340,6 +370,18 @@ export function createProductionPromotionReceipt({
       tag: target.normalized,
     },
   }, readProductionAcceptancePolicy(policyPath));
+  const receipt = {
+    ...authorization,
+    signature: signProductionAuthorization({
+      authorization,
+      purpose: promotionSignaturePurpose,
+      privateKeyPath: required(
+        signingPrivateKeyPath,
+        "Production authorization signing private key path",
+      ),
+      signedAt: issuedAt.normalized,
+    }),
+  };
   writeFileSync(
     resolve(required(outputPath, "Promotion receipt output path")),
     `${JSON.stringify(receipt, null, 2)}\n`,
@@ -354,6 +396,7 @@ export function verifyProductionPromotionTarget({
   tag,
   releaseChannel,
   policyPath = defaultPolicyPath,
+  verificationPublicKeyPath,
 }) {
   const channel = required(releaseChannel, "Release channel");
   const resolvedReceiptPath = resolve(receiptPath);
@@ -367,7 +410,11 @@ export function verifyProductionPromotionTarget({
   if (!existsSync(resolvedReceiptPath)) {
     throw new Error("Stable releases require a production promotion receipt.");
   }
-  const receipt = verifyProductionPromotionReceipt({ receiptPath: resolvedReceiptPath, policyPath });
+  const receipt = verifyProductionPromotionReceipt({
+    receiptPath: resolvedReceiptPath,
+    policyPath,
+    verificationPublicKeyPath,
+  });
   if (receipt.target.repository !== required(repository, "Target repository")
     || receipt.target.tag !== required(tag, "Target tag")) {
     throw new Error("Production promotion receipt does not authorize this repository and tag.");
@@ -381,6 +428,7 @@ export function verifyProductionPromotionSource({
   repository,
   tag,
   policyPath = defaultPolicyPath,
+  verificationPublicKeyPath,
 }) {
   const target = verifyProductionPromotionTarget({
     receiptPath,
@@ -388,6 +436,7 @@ export function verifyProductionPromotionSource({
     tag,
     releaseChannel: "stable",
     policyPath,
+    verificationPublicKeyPath,
   });
   const identity = readProductionDeploymentIdentity(acceptedDeploymentManifestPath, policyPath);
   if (Object.entries(target.receipt.acceptedRelease).some(
@@ -405,6 +454,7 @@ export function verifyProductionPromotionDelta({
   targetCommit,
   workspaceRoot = resolve(import.meta.dirname, "../.."),
   policyPath = defaultPolicyPath,
+  verificationPublicKeyPath,
 }) {
   const receipt = verifyProductionPromotionTarget({
     receiptPath,
@@ -412,6 +462,7 @@ export function verifyProductionPromotionDelta({
     tag,
     releaseChannel: "stable",
     policyPath,
+    verificationPublicKeyPath,
   }).receipt;
   const sourceCommit = receipt.acceptedRelease.gitCommit;
   const normalizedTargetCommit = required(targetCommit, "Stable target commit");
@@ -490,13 +541,20 @@ function parseArguments(argv) {
   const allowed = command === "create"
     ? new Set([
       "accepted-deployment", "operational-snapshot", "acceptance-record", "target-tag",
-      "recovery-evidence", "output", "policy",
+      "recovery-evidence", "output", "policy", "signing-private-key",
     ])
     : command === "verify-target"
-      ? new Set(["receipt", "repository", "tag", "release-channel", "policy"])
+      ? new Set([
+        "receipt", "repository", "tag", "release-channel", "policy", "verification-public-key",
+      ])
       : command === "verify-source"
-        ? new Set(["receipt", "accepted-deployment", "repository", "tag", "policy"])
-        : new Set(["receipt", "repository", "tag", "target-commit", "workspace-root", "policy"]);
+        ? new Set([
+          "receipt", "accepted-deployment", "repository", "tag", "policy", "verification-public-key",
+        ])
+        : new Set([
+          "receipt", "repository", "tag", "target-commit", "workspace-root", "policy",
+          "verification-public-key",
+        ]);
   if (!["create", "verify-target", "verify-source", "verify-delta"].includes(command)) {
     throw new Error(
       "Usage: production-promotion.mjs <create|verify-target|verify-source|verify-delta> [options]",
@@ -528,11 +586,13 @@ function main(argv) {
       targetTag: options["target-tag"],
       outputPath: options.output,
       policyPath: options.policy,
+      signingPrivateKeyPath: options["signing-private-key"],
     });
     process.stdout.write(`${JSON.stringify({
       status: "created",
       acceptedTag: receipt.acceptedRelease.tag,
       targetTag: receipt.target.tag,
+      signingKeyId: receipt.signature.keyId,
     })}\n`);
     return;
   }
@@ -543,6 +603,7 @@ function main(argv) {
       tag: options.tag,
       releaseChannel: options["release-channel"],
       policyPath: options.policy,
+      verificationPublicKeyPath: options["verification-public-key"],
     });
     process.stdout.write(`${JSON.stringify({
       status: "verified",
@@ -558,6 +619,7 @@ function main(argv) {
       repository: options.repository,
       tag: options.tag,
       policyPath: options.policy,
+      verificationPublicKeyPath: options["verification-public-key"],
     });
     process.stdout.write(`${JSON.stringify({
       status: "verified",
@@ -573,6 +635,7 @@ function main(argv) {
     targetCommit: options["target-commit"],
     workspaceRoot: options["workspace-root"],
     policyPath: options.policy,
+    verificationPublicKeyPath: options["verification-public-key"],
   });
   process.stdout.write(`${JSON.stringify({
     status: "verified",
