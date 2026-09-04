@@ -3,8 +3,10 @@ import { readConfig, type ConnectorConfig } from './config';
 import { EventInboxClient, EventInboxRequestError } from './event-inbox-client';
 import {
   ConnectorJournal,
+  ConnectorJournalCapacityError,
   type AckStatus,
   type CommandRecord,
+  type ConnectorJournalLimits,
   type JournalStats,
 } from './journal';
 import type { HookContext, IPlugin, PluginContext, WebhookRequest } from './openwa';
@@ -18,6 +20,7 @@ import {
 
 const hookPriority = 20;
 const compactIntervalMs = 60 * 60 * 1_000;
+const pressureCompactionIntervalMs = 60 * 1_000;
 
 export class WAStudioConnector implements IPlugin {
   private context: PluginContext | null = null;
@@ -29,6 +32,7 @@ export class WAStudioConnector implements IPlugin {
   private stopped = true;
   private ticking = false;
   private lastCompactedAt = 0;
+  private lastPressureCompactedAt = 0;
   private lastHeartbeatAt: number | null = null;
   private lastError: string | null = null;
   private blockedReason: string | null = null;
@@ -43,13 +47,16 @@ export class WAStudioConnector implements IPlugin {
   private readonly flushRequested = new Set<string>();
   private resumable: CommandRecord[] = [];
 
-  constructor(private readonly pluginVersion: string) {}
+  constructor(
+    private readonly pluginVersion: string,
+    private readonly journalLimits: ConnectorJournalLimits = {},
+  ) {}
 
   async onEnable(context: PluginContext): Promise<void> {
     if (this.context) throw new Error('wa-studio-connector is already enabled');
     this.context = context;
     this.config = readConfig(context.config);
-    this.journal = new ConnectorJournal(context.storage, this.pluginVersion);
+    this.journal = new ConnectorJournal(context.storage, this.pluginVersion, this.journalLimits);
     this.bindings = new BindingStore(
       context.storage,
       this.config.sessionId,
@@ -135,11 +142,7 @@ export class WAStudioConnector implements IPlugin {
     const binding = this.requireBindings().find(command.bindingGeneration);
     if (!binding) throw new Error('connector command binding generation has not been synchronized');
     const payloadSha256 = sha256Utf8(request.rawBody);
-    const received = await this.requireJournal().receive(
-      command,
-      payloadSha256,
-      binding.webhookId,
-    );
+    const received = await this.receiveCommand(command, payloadSha256, binding.webhookId);
     if (received.record.state === 'SEND_STARTED') {
       if (this.activeCommands.has(command.commandId)) return;
       await this.requireJournal().markIndeterminate(
@@ -153,21 +156,46 @@ export class WAStudioConnector implements IPlugin {
       void this.flushCommand(command.commandId);
       return;
     }
-    if (this.stats.storageUtilization >= config.storagePressureThreshold) {
-      await this.requireJournal().markRejected(
-        command.commandId,
-        'TRANSIENT_FAILURE',
-        'CONNECTOR_STORAGE_PRESSURE',
-      );
-      void this.flushCommand(command.commandId);
-      return;
-    }
     if (this.requireBindings().current()?.generation !== command.bindingGeneration) {
       await this.requireJournal().markRejected(command.commandId, 'BINDING_MISMATCH', 'BINDING_ROTATED');
       void this.flushCommand(command.commandId);
       return;
     }
     this.schedule(command);
+  }
+
+  private async receiveCommand(
+    command: ConnectorCommand,
+    payloadSha256: string,
+    webhookId: string,
+  ): Promise<{ record: CommandRecord; created: boolean }> {
+    const journal = this.requireJournal();
+    const maximumStorageUtilization = this.requireConfig().storagePressureThreshold;
+    try {
+      return await journal.receive(command, payloadSha256, webhookId, { maximumStorageUtilization });
+    } catch (error) {
+      if (!(error instanceof ConnectorJournalCapacityError)) throw error;
+      const now = Date.now();
+      let removed = 0;
+      if (now - this.lastPressureCompactedAt >= pressureCompactionIntervalMs) {
+        this.lastPressureCompactedAt = now;
+        removed = await journal.compact(new Date(now));
+      }
+      this.stats = await journal.stats();
+      if (this.stats.storageUtilization < maximumStorageUtilization) {
+        this.context?.logger.log('wa-studio-connector reclaimed journal capacity', {
+          removedRecords: removed,
+          storageUtilization: this.stats.storageUtilization,
+        });
+        return journal.receive(command, payloadSha256, webhookId, { maximumStorageUtilization });
+      }
+      this.context?.logger.warn('wa-studio-connector rejected a new command under journal pressure', {
+        storageUtilization: this.stats.storageUtilization,
+        commandId: command.commandId,
+        removedRecords: removed,
+      });
+      throw new ConnectorJournalCapacityError(this.stats.storageUtilization);
+    }
   }
 
   private schedule(command: ConnectorCommand): void {

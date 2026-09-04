@@ -44,6 +44,26 @@ export interface JournalStats {
   totalRecords: number;
 }
 
+export interface JournalReceiveOptions {
+  now?: Date;
+  maximumStorageUtilization?: number;
+}
+
+export interface ConnectorJournalLimits {
+  storageQuotaBytes?: number;
+  terminalRetentionMs?: number;
+  orphanRetentionMs?: number;
+  orphanRaceWindowMs?: number;
+  maximumOrphanAcknowledgements?: number;
+}
+
+export class ConnectorJournalCapacityError extends Error {
+  constructor(readonly storageUtilization: number) {
+    super(`connector journal storage utilization is ${(storageUtilization * 100).toFixed(1)}%`);
+    this.name = 'ConnectorJournalCapacityError';
+  }
+}
+
 interface CommandBucket {
   schemaVersion: 1;
   records: Record<string, CommandRecord>;
@@ -64,31 +84,76 @@ interface OrphanAckBucket {
   acknowledgements: Record<string, { sessionId: string; status: AckStatus; occurredAt: string }>;
 }
 
+interface ActiveSendRace {
+  sessionId: string;
+  startedAt: number;
+  deadline: number;
+}
+
 export type AckStatus = 'sent' | 'delivered' | 'read' | 'failed';
 
-const commandPrefix = 'wa-studio:v1:journal:commands:';
+const journalPrefix = 'wa-studio:v1:journal:';
+const commandPrefix = `${journalPrefix}commands:`;
 const pointerPrefix = 'wa-studio:v1:journal:index:';
 const messagePrefix = 'wa-studio:v1:journal:message:';
 const orphanPrefix = 'wa-studio:v1:journal:orphan:';
-const storageQuotaBytes = 50 * 1024 * 1024;
+const defaultStorageQuotaBytes = 50 * 1024 * 1024;
 const conservativePackageOverheadBytes = 512 * 1024;
-const terminalRetentionMs = 7 * 24 * 60 * 60 * 1_000;
+const defaultTerminalRetentionMs = 7 * 24 * 60 * 60 * 1_000;
+const defaultOrphanRetentionMs = 10 * 60 * 1_000;
+const defaultOrphanRaceWindowMs = 5 * 60 * 1_000;
+const maximumAckClockSkewMs = 30 * 1_000;
+const defaultMaximumOrphanAcknowledgements = 128;
 
 export class ConnectorJournal {
   private readonly mutex = new AsyncMutex();
+  private readonly activeSendRaces = new Map<string, ActiveSendRace>();
+  private readonly storageQuotaBytes: number;
+  private readonly terminalRetentionMs: number;
+  private readonly orphanRetentionMs: number;
+  private readonly orphanRaceWindowMs: number;
+  private readonly maximumOrphanAcknowledgements: number;
 
   constructor(
     private readonly storage: PluginStorage,
     private readonly pluginVersion: string,
-  ) {}
+    limits: ConnectorJournalLimits = {},
+  ) {
+    this.storageQuotaBytes = positiveInteger(
+      limits.storageQuotaBytes,
+      defaultStorageQuotaBytes,
+      'storageQuotaBytes',
+    );
+    this.terminalRetentionMs = positiveInteger(
+      limits.terminalRetentionMs,
+      defaultTerminalRetentionMs,
+      'terminalRetentionMs',
+    );
+    this.orphanRetentionMs = positiveInteger(
+      limits.orphanRetentionMs,
+      defaultOrphanRetentionMs,
+      'orphanRetentionMs',
+    );
+    this.orphanRaceWindowMs = positiveInteger(
+      limits.orphanRaceWindowMs,
+      defaultOrphanRaceWindowMs,
+      'orphanRaceWindowMs',
+    );
+    this.maximumOrphanAcknowledgements = positiveInteger(
+      limits.maximumOrphanAcknowledgements,
+      defaultMaximumOrphanAcknowledgements,
+      'maximumOrphanAcknowledgements',
+    );
+  }
 
   receive(
     command: ConnectorCommand,
     payloadSha256: string,
     webhookId: string,
-    now = new Date(),
+    options: JournalReceiveOptions = {},
   ): Promise<{ record: CommandRecord; created: boolean }> {
     return this.mutex.run(async () => {
+      const now = options.now ?? new Date();
       const pointer = await this.findPointer(command.commandId);
       if (pointer) {
         if (pointer.payloadSha256 !== payloadSha256) {
@@ -106,6 +171,15 @@ export class ConnectorJournal {
         }
         await this.setPointer(command.commandId, bucketKey, payloadSha256);
         return { record: clone(existing), created: false };
+      }
+      const maximumStorageUtilization = options.maximumStorageUtilization ?? 1;
+      if (!Number.isFinite(maximumStorageUtilization)
+        || maximumStorageUtilization <= 0 || maximumStorageUtilization > 1) {
+        throw new TypeError('maximumStorageUtilization must be greater than 0 and at most 1');
+      }
+      const storageUtilization = await this.storageUtilization();
+      if (storageUtilization >= maximumStorageUtilization) {
+        throw new ConnectorJournalCapacityError(storageUtilization);
       }
       const occurredAt = now.toISOString();
       const evidence = createEvidence({
@@ -186,8 +260,14 @@ export class ConnectorJournal {
   markAccepted(commandId: string, messageId: string, now = new Date()): Promise<CommandRecord> {
     return this.mutex.run(async () => {
       const { bucketKey, bucket, record } = await this.mutableRecord(commandId);
-      if (record.state === 'SEND_ACCEPTED') return clone(record);
-      if (isTerminal(record.state)) return clone(record);
+      if (record.state === 'SEND_ACCEPTED') {
+        this.activeSendRaces.delete(commandId);
+        return clone(record);
+      }
+      if (isTerminal(record.state)) {
+        this.activeSendRaces.delete(commandId);
+        return clone(record);
+      }
       if (record.state !== 'SEND_STARTED') {
         throw new Error(`cannot accept connector command from journal state ${record.state}`);
       }
@@ -199,6 +279,7 @@ export class ConnectorJournal {
         now,
       });
       record.openwaMessageId = messageId;
+      this.activeSendRaces.delete(commandId);
       await this.storage.set(bucketKey, bucket);
       await this.setMessagePointer(messageId, commandId, record.command.sessionId);
       await this.applyOrphanAck(record, bucketKey, bucket, messageId);
@@ -211,12 +292,14 @@ export class ConnectorJournal {
     messageId: string,
     status: AckStatus,
     occurredAt = new Date(),
+    observedAt = new Date(),
   ): Promise<boolean> {
     return this.mutex.run(async () => {
       const messageIndex = await this.loadMessageIndex(messageId);
       const pointer = messageIndex.pointers[messageId];
       if (!pointer) {
-        await this.storeOrphanAck(sessionId, messageId, status, occurredAt);
+        if (!this.hasActiveRaceCandidate(sessionId, occurredAt)) return false;
+        await this.storeOrphanAck(sessionId, messageId, status, occurredAt, observedAt);
         return false;
       }
       if (pointer.sessionId !== sessionId) return false;
@@ -283,6 +366,7 @@ export class ConnectorJournal {
             );
           }
           if (record.state === 'SEND_STARTED') {
+            this.activeSendRaces.delete(record.command.commandId);
             appendEvidence(record, this.pluginVersion, {
               state: 'SEND_INDETERMINATE',
               kind: 'SEND_INDETERMINATE',
@@ -305,14 +389,13 @@ export class ConnectorJournal {
 
   stats(now = new Date()): Promise<JournalStats> {
     return this.mutex.run(async () => {
-      const keys = (await this.storage.list(commandPrefix)).filter(key => key.startsWith(commandPrefix));
-      let bytes = conservativePackageOverheadBytes;
+      const journalKeys = await this.listJournalKeys();
+      const keys = journalKeys.filter(key => key.startsWith(commandPrefix));
       const pendingSince: number[] = [];
       let pendingCount = 0;
       let totalRecords = 0;
       for (const key of keys) {
         const bucket = await this.loadCommandBucket(key, false);
-        bytes += Buffer.byteLength(JSON.stringify(bucket), 'utf8');
         for (const record of Object.values(bucket.records)) {
           totalRecords += 1;
           if (record.state === 'RECEIVED' || record.state === 'SEND_STARTED'
@@ -326,7 +409,7 @@ export class ConnectorJournal {
       return {
         pendingCount,
         oldestPendingSeconds: oldest === null ? null : Math.max(0, Math.floor((now.valueOf() - oldest) / 1_000)),
-        storageUtilization: Math.min(1, bytes / storageQuotaBytes),
+        storageUtilization: await this.storageUtilization(journalKeys),
         totalRecords,
       };
     });
@@ -340,7 +423,7 @@ export class ConnectorJournal {
         const bucket = await this.loadCommandBucket(key, false);
         for (const [commandId, record] of Object.entries(bucket.records)) {
           if (!isTerminal(record.state) || record.evidence.some(entry => !entry.deliveredAt)
-            || now.valueOf() - new Date(record.updatedAt).valueOf() < terminalRetentionMs) continue;
+            || now.valueOf() - new Date(record.updatedAt).valueOf() < this.terminalRetentionMs) continue;
           delete bucket.records[commandId];
           await this.deletePointer(commandId);
           if (record.openwaMessageId) await this.deleteMessagePointer(record.openwaMessageId);
@@ -349,8 +432,91 @@ export class ConnectorJournal {
         if (Object.keys(bucket.records).length === 0) await this.storage.delete(key);
         else await this.storage.set(key, bucket);
       }
+      removed += await this.pruneOrphanAcknowledgements(now);
       return removed;
     });
+  }
+
+  private async listJournalKeys(): Promise<string[]> {
+    return (await this.storage.list(journalPrefix)).filter(key => key.startsWith(journalPrefix));
+  }
+
+  private async storageUtilization(keys?: string[]): Promise<number> {
+    let bytes = conservativePackageOverheadBytes;
+    for (const key of keys ?? await this.listJournalKeys()) {
+      const value = await this.storage.get<unknown>(key);
+      if (value === null) continue;
+      bytes += Buffer.byteLength(key, 'utf8');
+      bytes += Buffer.byteLength(JSON.stringify(value), 'utf8');
+    }
+    return Math.min(1, bytes / this.storageQuotaBytes);
+  }
+
+  private hasActiveRaceCandidate(sessionId: string, occurredAt: Date): boolean {
+    const acknowledgementTime = occurredAt.valueOf();
+    if (!Number.isFinite(acknowledgementTime)) return false;
+    return [...this.activeSendRaces.values()].some(race => race.sessionId === sessionId
+      && acknowledgementTime >= race.startedAt - maximumAckClockSkewMs
+      && acknowledgementTime <= race.deadline);
+  }
+
+  private trackActiveSend(record: CommandRecord): void {
+    const startedAt = new Date(record.updatedAt).valueOf();
+    const expiresAt = new Date(record.command.expiresAt).valueOf();
+    this.activeSendRaces.set(record.command.commandId, {
+      sessionId: record.command.sessionId,
+      startedAt,
+      deadline: Math.min(
+        startedAt + this.orphanRaceWindowMs,
+        expiresAt + maximumAckClockSkewMs,
+      ),
+    });
+  }
+
+  private async pruneOrphanAcknowledgements(
+    now: Date,
+    retainAtMost = this.maximumOrphanAcknowledgements,
+  ): Promise<number> {
+    const nowValue = now.valueOf();
+    const keys = (await this.storage.list(orphanPrefix)).filter(key => key.startsWith(orphanPrefix));
+    const buckets = new Map<string, OrphanAckBucket>();
+    const changed = new Set<string>();
+    const retained: Array<{ key: string; messageId: string; occurredAt: number }> = [];
+    let removed = 0;
+
+    for (const key of keys) {
+      const bucket = await this.loadOrphanBucketByKey(key);
+      buckets.set(key, bucket);
+      for (const [messageId, acknowledgement] of Object.entries(bucket.acknowledgements)) {
+        const occurredAt = new Date(acknowledgement.occurredAt).valueOf();
+        if (!Number.isFinite(occurredAt)
+          || occurredAt > nowValue + maximumAckClockSkewMs
+          || nowValue - occurredAt > this.orphanRetentionMs) {
+          delete bucket.acknowledgements[messageId];
+          changed.add(key);
+          removed += 1;
+          continue;
+        }
+        retained.push({ key, messageId, occurredAt });
+      }
+    }
+
+    const excess = Math.max(0, retained.length - Math.max(0, retainAtMost));
+    retained.sort((left, right) => left.occurredAt - right.occurredAt
+      || left.messageId.localeCompare(right.messageId));
+    for (const acknowledgement of retained.slice(0, excess)) {
+      const bucket = buckets.get(acknowledgement.key)!;
+      delete bucket.acknowledgements[acknowledgement.messageId];
+      changed.add(acknowledgement.key);
+      removed += 1;
+    }
+
+    for (const key of changed) {
+      const bucket = buckets.get(key)!;
+      if (Object.keys(bucket.acknowledgements).length === 0) await this.storage.delete(key);
+      else await this.storage.set(key, bucket);
+    }
+    return removed;
   }
 
   private transition(
@@ -359,7 +525,14 @@ export class ConnectorJournal {
   ): Promise<CommandRecord> {
     return this.mutex.run(async () => {
       const { bucketKey, bucket, record } = await this.mutableRecord(commandId);
-      if (record.state === transition.state || isTerminal(record.state)) return clone(record);
+      if (record.state === transition.state) {
+        if (record.state === 'SEND_STARTED') this.trackActiveSend(record);
+        return clone(record);
+      }
+      if (isTerminal(record.state)) {
+        this.activeSendRaces.delete(commandId);
+        return clone(record);
+      }
       if (transition.state === 'SEND_STARTED' && record.state !== 'RECEIVED') {
         throw new Error(`cannot start connector command from journal state ${record.state}`);
       }
@@ -367,6 +540,8 @@ export class ConnectorJournal {
         throw new Error(`cannot safely reject connector command from journal state ${record.state}`);
       }
       appendEvidence(record, this.pluginVersion, transition);
+      if (record.state === 'SEND_STARTED') this.trackActiveSend(record);
+      else this.activeSendRaces.delete(commandId);
       await this.storage.set(bucketKey, bucket);
       return clone(record);
     });
@@ -484,14 +659,30 @@ export class ConnectorJournal {
     messageId: string,
     status: AckStatus,
     occurredAt: Date,
+    observedAt: Date,
   ): Promise<void> {
+    const occurredAtValue = occurredAt.valueOf();
+    const observedAtValue = observedAt.valueOf();
+    if (!Number.isFinite(occurredAtValue) || !Number.isFinite(observedAtValue)
+      || occurredAtValue > observedAtValue + maximumAckClockSkewMs
+      || observedAtValue - occurredAtValue > this.orphanRetentionMs) return;
     const key = orphanKey(messageId);
-    const bucket = await this.loadOrphanBucket(messageId);
+    let bucket = await this.loadOrphanBucket(messageId);
     const current = bucket.acknowledgements[messageId];
-    if (!current || ackRank(status) > ackRank(current.status)) {
-      bucket.acknowledgements[messageId] = { sessionId, status, occurredAt: occurredAt.toISOString() };
-      await this.storage.set(key, bucket);
+    if (current) {
+      if (shouldReplaceAck(current.status, status)) {
+        bucket.acknowledgements[messageId] = { sessionId, status, occurredAt: occurredAt.toISOString() };
+        await this.storage.set(key, bucket);
+      }
+      return;
     }
+    await this.pruneOrphanAcknowledgements(
+      observedAt,
+      this.maximumOrphanAcknowledgements - 1,
+    );
+    bucket = await this.loadOrphanBucket(messageId);
+    bucket.acknowledgements[messageId] = { sessionId, status, occurredAt: occurredAt.toISOString() };
+    await this.storage.set(key, bucket);
   }
 
   private async applyOrphanAck(
@@ -513,7 +704,10 @@ export class ConnectorJournal {
   }
 
   private async loadOrphanBucket(messageId: string): Promise<OrphanAckBucket> {
-    const key = orphanKey(messageId);
+    return this.loadOrphanBucketByKey(orphanKey(messageId));
+  }
+
+  private async loadOrphanBucketByKey(key: string): Promise<OrphanAckBucket> {
     const value = await this.storage.get<OrphanAckBucket>(key);
     if (!value) return { schemaVersion: 1, acknowledgements: {} };
     if (value.schemaVersion !== 1 || !value.acknowledgements
@@ -618,10 +812,21 @@ function isTerminal(state: CommandJournalState): boolean {
   return ['SEND_ACCEPTED', 'SEND_REJECTED', 'SEND_INDETERMINATE'].includes(state);
 }
 
-function ackRank(status: AckStatus): number {
-  return ({ sent: 1, delivered: 2, read: 3, failed: 4 })[status];
+function shouldReplaceAck(current: AckStatus, next: AckStatus): boolean {
+  if (current === next || current === 'read') return false;
+  if (next === 'read') return true;
+  if (next === 'delivered') return current !== 'delivered';
+  return next === 'failed' && current === 'sent';
 }
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+function positiveInteger(value: number | undefined, fallback: number, name: string): number {
+  const resolved = value ?? fallback;
+  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
+    throw new TypeError(`${name} must be a positive integer`);
+  }
+  return resolved;
 }
