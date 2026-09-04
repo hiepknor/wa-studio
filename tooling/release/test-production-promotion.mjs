@@ -114,6 +114,7 @@ try {
       operationalSnapshotSha256: "e".repeat(64),
       acceptanceRecordSha256: "f".repeat(64),
       evidenceArchiveSha256: "1".repeat(64),
+      recoveryEvidenceSha256: "2".repeat(64),
       decidedAt: "2026-09-01T23:59:00.000Z",
     },
     target: { repository: "example/wa-studio", tag: "v1.0.1" },

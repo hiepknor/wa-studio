@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import {
+  attachProductionRecoveryEvidence,
   attachProductionOperationalSnapshot,
   productionAcceptanceTemplate,
   readProductionAcceptancePolicy,
@@ -28,6 +29,7 @@ const root = mkdtempSync(resolve(tmpdir(), "wa-production-acceptance-test-"));
 const deploymentPath = resolve(root, "wa-studio-deployment.json");
 const recordPath = resolve(root, "production-acceptance.json");
 const snapshotPath = resolve(root, "production-operational-snapshot.json");
+const recoveryEvidencePath = resolve(root, "production-recovery-evidence.json");
 const promotionPath = resolve(root, "production-promotion.json");
 const absentPromotionPath = resolve(root, "no-production-promotion.json");
 const cliRecordPath = resolve(root, "production-acceptance-cli.json");
@@ -53,7 +55,13 @@ const deployment = {
       journalSchemaVersion: 1,
       artifact: { sha256: "b".repeat(64) },
     },
-    eventInbox: { imageDigest: `sha256:${"c".repeat(64)}` },
+    eventInbox: {
+      imageDigest: `sha256:${"c".repeat(64)}`,
+      migrationHead: {
+        name: "015_event_inbox_recovery_watermark.sql",
+        setSha256: "f".repeat(64),
+      },
+    },
     runtime: { version: "0.1.0" },
     openwa: { releaseTag: "0.23.3" },
   },
@@ -67,6 +75,7 @@ function verifyRecord(options = {}) {
   return verifyProductionAcceptance({
     deploymentManifestPath: deploymentPath,
     operationalSnapshotPath: snapshotPath,
+    recoveryEvidencePath,
     recordPath,
     ...options,
   });
@@ -216,6 +225,65 @@ try {
     "--deployment", deploymentPath,
     "--record", cliRecordPath,
   ]).status, 0, "An attached snapshot must remain verified while the record is PENDING");
+
+  const recoveryCompletedAt = "2026-08-28T04:00:00.000Z";
+  const recoveryEvidence = {
+    schemaVersion: 1,
+    evidenceType: "wa-studio-event-inbox-restore-drill",
+    recordedAt: recoveryCompletedAt,
+    release: {
+      repository: deployment.repository,
+      tag: deployment.tag,
+      gitCommit: deployment.gitCommit,
+      deploymentManifestSha256: createHash("sha256")
+        .update(readFileSync(deploymentPath))
+        .digest("hex"),
+      eventInboxImageDigest: deployment.components.eventInbox.imageDigest,
+      eventInboxMigrationHead: deployment.components.eventInbox.migrationHead.name,
+      eventInboxMigrationSetSha256: deployment.components.eventInbox.migrationHead.setSha256,
+    },
+    backup: {
+      objectKey: "wa-event-inbox-20260828T035900Z.dump.age",
+      sha256: "d".repeat(64),
+    },
+    restore: {
+      startedAt: "2026-08-28T03:59:58.000Z",
+      completedAt: recoveryCompletedAt,
+      durationSeconds: 2,
+      isolation: "temporary-database",
+      restoredMigrationHead: deployment.components.eventInbox.migrationHead.name,
+      checksumVerified: true,
+      archiveCatalogVerified: true,
+      schemaVerified: true,
+      usageLedgerVerified: true,
+    },
+    result: "PASS",
+  };
+  writeFileSync(
+    recoveryEvidencePath,
+    `${JSON.stringify(recoveryEvidence, null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  record = attachProductionRecoveryEvidence({
+    deploymentManifestPath: deploymentPath,
+    evidencePath: recoveryEvidencePath,
+    recordPath,
+  });
+  assert.equal(record.recovery.evidenceSha256, createHash("sha256")
+    .update(readFileSync(recoveryEvidencePath))
+    .digest("hex"));
+  assert.deepEqual(attachProductionRecoveryEvidence({
+    deploymentManifestPath: deploymentPath,
+    evidencePath: recoveryEvidencePath,
+    recordPath,
+  }), record, "Attaching the same recovery evidence must be idempotent");
+  assert.match(execFileSync(process.execPath, [
+    cliPath,
+    "attach-recovery",
+    "--deployment", deploymentPath,
+    "--recovery-evidence", recoveryEvidencePath,
+    "--record", cliRecordPath,
+  ], { encoding: "utf8" }), /"status":"attached"/u);
   Object.assign(record.evidenceArchive, {
     objectKey: "production/wa-studio-v0.2.2-acceptance.tar.age",
     sha256: "e".repeat(64),
@@ -247,13 +315,6 @@ try {
     integrityFreshness: "fresh",
     automaticRecoveryBytes: 512 * 1_024 ** 2,
     automaticRecoveryBudgetBytes: 2 * 1_024 ** 3,
-  });
-  Object.assign(record.recovery, {
-    objectKey: "production/wa-studio-v0.2.2.dump.age",
-    sha256: "d".repeat(64),
-    backupVerifiedAt: "2026-08-28T03:00:00.000Z",
-    restoreDrillAt: "2026-08-28T04:00:00.000Z",
-    restoreSucceeded: true,
   });
   Object.assign(record.uat, {
     runId: "canary-run-1",
@@ -293,12 +354,37 @@ try {
     "verify-go",
     "--deployment", deploymentPath,
     "--operational-snapshot", snapshotPath,
+    "--recovery-evidence", recoveryEvidencePath,
     "--record", recordPath,
   ], { encoding: "utf8" }), /"decision":"GO"/u);
+
+  const intactRecoveryEvidence = readFileSync(recoveryEvidencePath, "utf8");
+  const failedRecoveryEvidence = JSON.parse(intactRecoveryEvidence);
+  failedRecoveryEvidence.restore.usageLedgerVerified = false;
+  writeFileSync(
+    recoveryEvidencePath,
+    `${JSON.stringify(failedRecoveryEvidence, null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  assert.throws(
+    () => verifyRecord({ requireGo: true }),
+    /usage ledger verification must be true/u,
+  );
+  writeFileSync(recoveryEvidencePath, intactRecoveryEvidence, { mode: 0o600 });
+
+  const forgedRecovery = structuredClone(record);
+  forgedRecovery.recovery.evidenceSha256 = "0".repeat(64);
+  writeRecord(forgedRecovery);
+  assert.throws(
+    () => verifyRecord({ requireGo: true }),
+    /does not match the recovery evidence/u,
+  );
+  writeRecord(record);
 
   const receipt = createProductionPromotionReceipt({
     acceptedDeploymentManifestPath: deploymentPath,
     operationalSnapshotPath: snapshotPath,
+    recoveryEvidencePath,
     acceptanceRecordPath: recordPath,
     targetTag: "v0.2.3",
     outputPath: promotionPath,
@@ -356,6 +442,7 @@ try {
     () => createProductionPromotionReceipt({
       acceptedDeploymentManifestPath: deploymentPath,
       operationalSnapshotPath: snapshotPath,
+      recoveryEvidencePath,
       acceptanceRecordPath: recordPath,
       targetTag: "v0.2.2",
       outputPath: resolve(root, "invalid-promotion.json"),

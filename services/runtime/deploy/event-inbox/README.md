@@ -188,7 +188,7 @@ in [deploy/observability](../observability/README.md).
 
 ## Encrypted off-host backups
 
-The named PostgreSQL volume is not a disaster-recovery backup. Install `age`, `rclone`, Docker
+The named PostgreSQL volume is not a disaster-recovery backup. Install `age`, `jq`, `rclone`, Docker
 Compose and the checked-in backup scripts on the VPS. Configure an off-host object store with
 versioning or object lock and a provider-side lifecycle that retains at least 35 days. Keep the age
 identity outside the object store and escrow the current `EVENT_INBOX_MASTER_SECRET` independently;
@@ -196,7 +196,8 @@ both the database and that secret are required to verify retained callbacks afte
 
 Install the files using these fixed paths:
 
-- deployment and `event-inbox.env`: `/opt/wa-event-inbox/`;
+- deployment, `event-inbox.env`, and the attested coordinated
+  `wa-studio-deployment.json`: `/opt/wa-event-inbox/`;
 - scripts: `/opt/wa-event-inbox/scripts/`;
 - mode-0600 rclone config: `/etc/wa-event-inbox/rclone.conf`;
 - mode-0400 age identity: `/etc/wa-event-inbox/backup.agekey`;
@@ -212,6 +213,8 @@ EVENT_INBOX_BACKUP_REMOTE=offsite:wa-event-inbox/production
 EVENT_INBOX_BACKUP_STAGING_REMOTE=offsite:wa-event-inbox/staging
 EVENT_INBOX_BACKUP_AGE_RECIPIENT=age1...
 EVENT_INBOX_BACKUP_AGE_IDENTITY_FILE=/etc/wa-event-inbox/backup.agekey
+EVENT_INBOX_DEPLOYMENT_MANIFEST=/opt/wa-event-inbox/wa-studio-deployment.json
+EVENT_INBOX_RESTORE_EVIDENCE_DIR=/var/lib/wa-event-inbox-backup/evidence
 RCLONE_CONFIG=/etc/wa-event-inbox/rclone.conf
 ~~~
 
@@ -234,7 +237,12 @@ verified object to the locked production prefix, and writes the checksum marker 
 Install `wa-event-inbox-restore-drill.service/.timer` only where the age identity is intentionally
 available. The monthly drill downloads the latest complete backup, verifies its checksum, decrypts
 it, restores into a uniquely named temporary database, validates migrations and the usage ledger,
-then drops only that drill database. It does not stop or modify the production database.
+then drops only that drill database. It does not stop or modify the production database. A passing
+drill also creates an owner-only JSON evidence record under
+`/var/lib/wa-event-inbox-backup/evidence/`. That record binds the restored archive and migration
+head to the exact coordinated deployment-manifest digest; a manifest/schema mismatch fails the
+drill instead of emitting success evidence. Copy the JSON record—not the decrypted dump—into the
+private release evidence set and verify it with `npm run release:recovery:verify`.
 
 ~~~bash
 systemctl enable --now wa-event-inbox-backup.timer
