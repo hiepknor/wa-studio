@@ -13,7 +13,7 @@ could therefore skip a required state, reopen terminal work, or leave a delivery
 with its message-job reference without violating the schema.
 
 Delivery evidence can also become more definitive after dispatch completes. OpenWA may first accept a
-message and later report failure, while an `UNKNOWN` outcome may later receive sent or failed evidence.
+message and later report failure, while an `UNKNOWN` outcome may later receive accepted, sent, or failed evidence.
 Treating the first aggregate Run label as immutable leaves `CampaignRun.status` inconsistent with its
 durable delivery counts.
 
@@ -26,9 +26,11 @@ durable delivery counts.
 3. Pending and capability-blocked deliveries cannot reference a message job. Every materialized or
    observed message-backed delivery must reference one. Cancelled deliveries may have either shape
    because cancellation can occur before or after materialization.
-4. Message Job `UNKNOWN` is ambiguous rather than immutable. It may resolve only to definitive sent,
-   delivered, read, or failed evidence. Sent/delivered/read progression remains monotonic, and no
-   terminal failure or cancellation can reopen sending.
+4. Message Job `UNKNOWN` is ambiguous rather than immutable. It may resolve only through authenticated,
+   attempt-bound connector evidence to accepted, sent, delivered, read, or failed. A late
+   `SEND_ACCEPTED` carries the OpenWA message ID for the exact command and resolves the transport
+   uncertainty without issuing another send. Sent/delivered/read progression remains monotonic, and
+   no terminal failure or cancellation can reopen sending.
 5. `CampaignRun.status` is the aggregate of current durable delivery evidence after dispatch has no
    pending, materialized, or processing rows. The scheduler may correct `COMPLETED` to
    `PARTIAL_FAILED` after late failure evidence, or `PARTIAL_FAILED` to `COMPLETED` after an unknown
@@ -55,5 +57,5 @@ durable delivery counts.
   full integration suite;
 - illegal direct Run, Delivery, and Message Job transitions fail with SQLSTATE `23514`;
 - accepted-to-failed evidence corrects `COMPLETED` to `PARTIAL_FAILED` exactly once;
-- unknown-to-sent evidence corrects `PARTIAL_FAILED` to `COMPLETED` exactly once;
+- unknown-to-accepted or unknown-to-sent evidence corrects `PARTIAL_FAILED` to `COMPLETED` exactly once;
 - neither correction creates a Message Job or invokes OpenWA.

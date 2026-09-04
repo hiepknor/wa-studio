@@ -1596,16 +1596,20 @@ describe('campaign draft contract HTTP API', () => {
     expect((await jsonRequest(`/campaign-runs/${resolvingRunId}`)).body.status).toBe('PARTIAL_FAILED');
 
     await pool.query(
-      `UPDATE message_jobs SET status = 'SENT', last_error = NULL, updated_at = now()
+      `UPDATE message_jobs SET status = 'ACCEPTED', last_error = NULL, updated_at = now()
        WHERE id = (SELECT message_job_id FROM campaign_deliveries WHERE run_id = $1)`,
       [resolvingRunId],
     );
     expect(await runRepository.reconcileDeliveries()).toBe(1);
+    expect((await pool.query(
+      `SELECT status, failure_reason FROM campaign_deliveries WHERE run_id = $1`,
+      [resolvingRunId],
+    )).rows[0]).toEqual({ status: 'ACCEPTED', failure_reason: null });
     expect(await runRepository.finalizeRuns(10)).toBe(1);
     expect((await jsonRequest(`/campaign-runs/${resolvingRunId}`)).body).toMatchObject({
       status: 'COMPLETED',
       statusReason: null,
-      progress: { sent: 1, unknown: 0 },
+      progress: { accepted: 1, unknown: 0 },
     });
     const resolution = await pool.query<{ metadata: Record<string, unknown> }>(
       `SELECT metadata FROM activity_events

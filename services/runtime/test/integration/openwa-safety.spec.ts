@@ -754,6 +754,121 @@ describe('OpenWA Safety Governor', () => {
     )).rows[0]?.count).toBe('3');
   });
 
+  it('resolves an evidence-timeout UNKNOWN from late attempt-bound acceptance without resending', async () => {
+    const committed = await createCommittedConnectorMessage('late-connector-acceptance');
+    const deliveryEvidence = new MessageDeliveryEvidenceService(database, safetyRepository);
+    const startedEvidence = {
+      protocolVersion: 1 as const,
+      eventId: randomUUID(),
+      commandId: committed.commandId,
+      attemptId: committed.attemptId,
+      sessionId: INTEGRATION_SESSION_ID,
+      sequence: 1,
+      kind: 'SEND_STARTED' as const,
+      openwaMessageId: null,
+      deliveryStatus: 'PENDING' as const,
+      errorClass: null,
+      errorCode: null,
+      bindingGeneration: 1,
+      pluginVersion: 'integration-test',
+      occurredAt: new Date().toISOString(),
+      payloadSha256: committed.payloadSha256,
+    };
+    await deliveryEvidence.project(startedEvidence);
+    await pool.query(
+      `UPDATE message_attempts SET outcome = 'UNKNOWN', transport_state = 'INDETERMINATE',
+         error = 'Connector evidence deadline elapsed after durable ingress acceptance'
+       WHERE attempt_id = $1`,
+      [committed.attemptId],
+    );
+    await pool.query(
+      `UPDATE message_jobs SET status = 'UNKNOWN',
+         last_error = 'Connector evidence deadline elapsed after durable ingress acceptance',
+         updated_at = now() WHERE id = $1`,
+      [committed.messageJobId],
+    );
+    await database.transaction(client => safetyRepository.recordMessageAttemptOutcomeWithClient(
+      client,
+      committed.attemptId,
+      { kind: 'AMBIGUOUS' },
+    ));
+
+    const acceptedEvidence = {
+      ...startedEvidence,
+      eventId: randomUUID(),
+      sequence: 2,
+      kind: 'SEND_ACCEPTED' as const,
+      openwaMessageId: `late-accepted-${randomUUID()}`,
+      deliveryStatus: 'ACCEPTED' as const,
+      occurredAt: new Date(Date.now() + 1_000).toISOString(),
+    };
+    await expect(deliveryEvidence.project(acceptedEvidence)).resolves.toMatchObject({
+      state: 'APPLIED', statusAdvanced: true, jobId: committed.messageJobId,
+    });
+
+    expect((await pool.query(
+      `SELECT status, openwa_message_id, last_error, attempt_count
+       FROM message_jobs WHERE id = $1`,
+      [committed.messageJobId],
+    )).rows[0]).toEqual({
+      status: 'ACCEPTED',
+      openwa_message_id: acceptedEvidence.openwaMessageId,
+      last_error: null,
+      attempt_count: 1,
+    });
+    expect((await pool.query(
+      `SELECT transport_state, outcome, openwa_message_id
+       FROM message_attempts WHERE attempt_id = $1`,
+      [committed.attemptId],
+    )).rows[0]).toEqual({
+      transport_state: 'SEND_ACCEPTED',
+      outcome: 'ACCEPTED',
+      openwa_message_id: acceptedEvidence.openwaMessageId,
+    });
+    expect((await pool.query(
+      `SELECT outcome_kind FROM openwa_safety_outcome_receipts WHERE permit_token = $1`,
+      [committed.permitToken],
+    )).rows[0]).toEqual({ outcome_kind: 'AMBIGUOUS' });
+  });
+
+  it('requeues only DEAD late-acceptance evidence rejected by the former transition graph', async () => {
+    const replayedKey = `late-acceptance-${randomUUID()}`;
+    const unrelatedKey = `unrelated-${randomUUID()}`;
+    const envelope = (kind: string) => JSON.stringify({ data: { kind } });
+    await pool.query(
+      `INSERT INTO webhook_events
+         (idempotency_key, event_type, session_id, payload, processing_state, attempt_count,
+          processing_error, dead_at)
+       VALUES
+         ($1, 'wa-studio.connector.evidence', $3, $4::jsonb, 'DEAD', 5,
+          'invalid message job status transition: UNKNOWN -> ACCEPTED', now()),
+         ($2, 'wa-studio.connector.evidence', $3, $5::jsonb, 'DEAD', 5,
+          'unrelated connector failure', now())`,
+      [replayedKey, unrelatedKey, INTEGRATION_SESSION_ID,
+        envelope('SEND_ACCEPTED'), envelope('SEND_ACCEPTED')],
+    );
+
+    const migration = await readFile(
+      resolve(process.cwd(), 'migrations/080_late_connector_acceptance_reconciliation.sql'),
+      'utf8',
+    );
+    await pool.query(migration);
+
+    expect((await pool.query(
+      `SELECT idempotency_key, processing_state, attempt_count, dead_at
+       FROM webhook_events WHERE idempotency_key IN ($1, $2)`,
+      [replayedKey, unrelatedKey],
+    )).rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        idempotency_key: replayedKey, processing_state: 'RETRY', attempt_count: 0, dead_at: null,
+      }),
+      expect.objectContaining({
+        idempotency_key: unrelatedKey, processing_state: 'DEAD', attempt_count: 5,
+        dead_at: expect.any(Date),
+      }),
+    ]));
+  });
+
   it('repairs connector ack failures ignored by an older Runtime release', async () => {
     const sent = await createSentConnectorMessage('legacy-late-ack-failure');
     const failedEventId = randomUUID();
@@ -804,7 +919,7 @@ describe('OpenWA Safety Governor', () => {
     )).rows[0]?.count).toBe('3');
   });
 
-  async function createSentConnectorMessage(key: string) {
+  async function createCommittedConnectorMessage(key: string) {
     const messageJobId = await createProcessingMessage(key, INTEGRATION_GROUP_ID);
     const decision = await safety.reserveMessage({
       sessionId: INTEGRATION_SESSION_ID,
@@ -836,12 +951,20 @@ describe('OpenWA Safety Governor', () => {
       expiresAt: new Date(Date.now() + 60_000),
     });
     if (!committed) throw new Error('Expected a committed connector attempt');
+    return {
+      messageJobId, attemptId, commandId, payloadSha256,
+      permitToken: decision.permit.permitToken,
+    };
+  }
+
+  async function createSentConnectorMessage(key: string) {
+    const committed = await createCommittedConnectorMessage(key);
     const deliveryEvidence = new MessageDeliveryEvidenceService(database, safetyRepository);
     const sentEvidence = {
       protocolVersion: 1 as const,
       eventId: randomUUID(),
-      commandId,
-      attemptId,
+      commandId: committed.commandId,
+      attemptId: committed.attemptId,
       sessionId: INTEGRATION_SESSION_ID,
       sequence: 1,
       kind: 'ACK_SENT' as const,
@@ -852,16 +975,15 @@ describe('OpenWA Safety Governor', () => {
       bindingGeneration: 1,
       pluginVersion: 'integration-test',
       occurredAt: new Date().toISOString(),
-      payloadSha256,
+      payloadSha256: committed.payloadSha256,
     };
     await pool.query(
       `UPDATE message_jobs SET last_error = 'Safety deferred: RATE_BUDGET' WHERE id = $1`,
-      [messageJobId],
+      [committed.messageJobId],
     );
     await deliveryEvidence.project(sentEvidence);
     return {
-      messageJobId, attemptId, commandId, payloadSha256, sentEvidence, deliveryEvidence,
-      permitToken: decision.permit.permitToken,
+      ...committed, sentEvidence, deliveryEvidence,
     };
   }
 

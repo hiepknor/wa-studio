@@ -33,7 +33,7 @@ after entering `PROCESSING`, the Runtime records `UNKNOWN` and never schedules a
 An operator must resolve that ambiguity or create a new intent.
 
 `ACCEPTED` is dispatch-complete but can still receive a definitive failed webhook, while `UNKNOWN`
-can later receive definitive sent or failed evidence. Delivery reconciliation therefore keeps the
+can later receive attempt-bound accepted, sent, delivered, read, or failed evidence. Delivery reconciliation therefore keeps the
 Campaign Run `COMPLETED`/`PARTIAL_FAILED` aggregate convergent with current durable delivery evidence.
 Every correction is audited and side-effect free: it does not reopen the run or issue another send.
 
