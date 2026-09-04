@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { WAStudioConnector } from '../src/connector';
-import type { ConnectorEvidence } from '../src/protocol';
+import { ConnectorJournal } from '../src/journal';
+import { sha256Utf8, type ConnectorEvidence } from '../src/protocol';
 import type { WebhookRequest } from '../src/openwa';
 import { connectorId, imageCommand, sessionId, textCommand } from './fixtures';
 import { createPluginHarness, jsonResponse, waitFor } from './helpers';
@@ -160,6 +161,48 @@ describe('WA Studio OpenWA connector', () => {
       'SEND_ACCEPTED',
     ]);
     expect(harness.sent).toHaveLength(1);
+    await plugin.onDisable();
+  });
+
+  it('compacts expired terminal evidence once before rejecting a new command under pressure', async () => {
+    const harness = createPluginHarness();
+    const limits = { storageQuotaBytes: 1024 * 1024, terminalRetentionMs: 1 };
+    const plugin = new WAStudioConnector('0.1.0', limits);
+    await plugin.onEnable(harness.context);
+
+    const oldCommand = textCommand({
+      commandId: 'b30309af-d474-40d0-91f5-f6a27f21fb63',
+      attemptId: '452b4c6e-9afe-454c-bfb8-1cb8b19fd691',
+      content: { type: 'TEXT', text: 'x'.repeat(300_000) },
+    });
+    const oldJournal = new ConnectorJournal(harness.storage, '0.1.0', limits);
+    await oldJournal.receive(
+      oldCommand,
+      sha256Utf8(JSON.stringify(oldCommand)),
+      'webhook-1',
+      { now: new Date(0) },
+    );
+    await oldJournal.markRejected(
+      oldCommand.commandId,
+      'TRANSIENT_FAILURE',
+      'TEST_TERMINAL_RECORD',
+      new Date(1),
+    );
+    const oldRecord = await oldJournal.get(oldCommand.commandId);
+    for (const entry of oldRecord?.evidence ?? []) {
+      await oldJournal.markEvidenceDelivered(oldCommand.commandId, entry.evidence.eventId, new Date(2));
+    }
+
+    const next = textCommand();
+    await harness.webhooks.get('commands')!(webhookRequest(next));
+    await waitFor(() => evidenceFrom(harness.requests).some(event =>
+      event.commandId === next.commandId && event.kind === 'SEND_ACCEPTED'));
+
+    expect(harness.sent).toHaveLength(1);
+    expect(harness.logs).toContainEqual(expect.objectContaining({
+      level: 'log',
+      message: 'wa-studio-connector reclaimed journal capacity',
+    }));
     await plugin.onDisable();
   });
 });
