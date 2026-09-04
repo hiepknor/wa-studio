@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common';
+import { RuntimeOperationalEvidenceModule } from '../../core/observability/runtime-operational-evidence.module';
 import { OpenWAModule } from '../../integrations/openwa/openwa.module';
 import { HealthController } from './health.controller';
-import { RuntimeReleaseEvidenceService } from './runtime-release-evidence.service';
 
 @Module({
-  imports: [OpenWAModule],
+  imports: [OpenWAModule, RuntimeOperationalEvidenceModule],
   controllers: [HealthController],
-  providers: [RuntimeReleaseEvidenceService],
 })
 export class HealthModule {}

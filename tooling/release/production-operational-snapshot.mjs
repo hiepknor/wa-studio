@@ -17,6 +17,8 @@ const maximumClockSkewMs = 30_000;
 const maximumHeartbeatAgeMs = 5 * 60 * 1_000;
 const maximumReleaseEvidenceAgeMs = 30_000;
 const maximumActiveWebhookAgeSeconds = 5 * 60;
+const requiredOperationalObservationSeconds = 24 * 60 * 60;
+const maximumOperationalObservationGapSeconds = 5 * 60;
 const managedRuntimeOrigin = "http://127.0.0.1:34100";
 
 function required(value, label) {
@@ -114,6 +116,7 @@ function deploymentIdentity(path) {
     throw new Error("Deployment manifest is not a coordinated WA Studio product release.");
   }
   const components = object(deployment.components, "Deployment components");
+  const studio = object(components.studio, "Deployment Studio component");
   const runtime = object(components.runtime, "Deployment Runtime component");
   const eventInbox = object(components.eventInbox, "Deployment Event Inbox component");
   const connector = object(components.connector, "Deployment connector component");
@@ -153,6 +156,7 @@ function deploymentIdentity(path) {
       sha256: policySha256,
     },
     components: {
+      studioVersion: required(studio.version, "Studio version"),
       runtimeVersion: required(runtime.version, "Runtime version"),
       openwaRelease: required(openwa.releaseTag, "OpenWA release"),
       connectorPluginVersion: required(connector.version, "Connector plugin version"),
@@ -270,14 +274,14 @@ function validateConnector({ identity, connectorVerification, capturedAt }) {
   };
 }
 
-function validateReleaseEvidence(value, capturedAt) {
+function validateReleaseEvidence(value, capturedAt, identity, connector) {
   const evidence = object(value, "Runtime release evidence");
   exactKeys(
     evidence,
-    ["schemaVersion", "status", "generatedAt", "openwaSafety", "webhookSpool"],
+    ["schemaVersion", "status", "generatedAt", "openwaSafety", "webhookSpool", "observation"],
     "Runtime release evidence",
   );
-  if (evidence.schemaVersion !== 1 || evidence.status !== "complete") {
+  if (evidence.schemaVersion !== 2 || evidence.status !== "complete") {
     throw new Error("Runtime release evidence is incomplete or incompatible.");
   }
   const generated = timestamp(evidence.generatedAt, "Runtime release evidence time");
@@ -355,6 +359,66 @@ function validateReleaseEvidence(value, capturedAt) {
   ) !== null) {
     throw new Error("Dead webhook age must be null when no dead events remain.");
   }
+
+  const observation = object(evidence.observation, "Runtime operational observation");
+  exactKeys(observation, [
+    "requiredWindowSeconds", "observedWindowSeconds", "firstObservedAt", "lastObservedAt",
+    "sampleCount", "maximumGapSeconds", "maximumAllowedGapSeconds", "violatingSamples",
+    "coverageComplete", "candidateIdentity",
+  ], "Runtime operational observation");
+  const requiredWindowSeconds = positiveInteger(
+    observation.requiredWindowSeconds,
+    "Required operational observation window",
+  );
+  if (requiredWindowSeconds !== requiredOperationalObservationSeconds) {
+    throw new Error("Runtime operational observation must cover the required 24-hour window.");
+  }
+  const observedWindowSeconds = nonnegativeInteger(
+    observation.observedWindowSeconds,
+    "Observed operational window",
+  );
+  if (observedWindowSeconds < requiredWindowSeconds) {
+    throw new Error("Runtime operational observation window is incomplete.");
+  }
+  positiveInteger(observation.sampleCount, "Operational observation sample count");
+  const maximumAllowedGapSeconds = positiveInteger(
+    observation.maximumAllowedGapSeconds,
+    "Maximum allowed operational observation gap",
+  );
+  if (maximumAllowedGapSeconds !== maximumOperationalObservationGapSeconds) {
+    throw new Error("Runtime operational observation gap policy is incompatible.");
+  }
+  const maximumGapSeconds = nonnegativeInteger(
+    observation.maximumGapSeconds,
+    "Maximum operational observation gap",
+  );
+  if (maximumGapSeconds > maximumAllowedGapSeconds) {
+    throw new Error("Runtime operational observation contains an excessive gap.");
+  }
+  zero(observation.violatingSamples, "Violating operational observation samples");
+  if (observation.coverageComplete !== true) {
+    throw new Error("Runtime operational observation coverage is incomplete.");
+  }
+  const firstObserved = timestamp(observation.firstObservedAt, "First operational observation");
+  const lastObserved = timestamp(observation.lastObservedAt, "Last operational observation");
+  const measuredWindowSeconds = Math.floor((lastObserved.parsed - firstObserved.parsed) / 1_000);
+  if (measuredWindowSeconds !== observedWindowSeconds
+    || firstObserved.parsed > generated.parsed - requiredWindowSeconds * 1_000
+    || lastObserved.parsed > generated.parsed + maximumClockSkewMs
+    || generated.parsed - lastObserved.parsed > maximumAllowedGapSeconds * 1_000) {
+    throw new Error("Runtime operational observation timestamps do not prove continuous coverage.");
+  }
+  const candidate = object(observation.candidateIdentity, "Observed Runtime candidate identity");
+  exactKeys(candidate, [
+    "runtimeVersion", "runtimeProfile", "managedInstanceId", "studioVersion", "openwaRelease",
+  ], "Observed Runtime candidate identity");
+  if (candidate.runtimeVersion !== identity.components.runtimeVersion
+    || candidate.runtimeProfile !== "desktop-managed"
+    || candidate.managedInstanceId !== connector.instanceId
+    || candidate.studioVersion !== identity.components.studioVersion
+    || candidate.openwaRelease !== identity.components.openwaRelease) {
+    throw new Error("Runtime operational observation belongs to a different release candidate.");
+  }
   return evidence;
 }
 
@@ -381,9 +445,14 @@ export function buildProductionOperationalSnapshot({
     operational,
     capturedAt: capture.parsed,
   });
-  const runtimeEvidence = validateReleaseEvidence(releaseEvidence, capture.parsed);
+  const runtimeEvidence = validateReleaseEvidence(
+    releaseEvidence,
+    capture.parsed,
+    identity,
+    connector,
+  );
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     product: "wa-studio",
     capturedAt: capture.normalized,
     release: identity.release,
@@ -404,7 +473,7 @@ function verifySnapshotShape(snapshot, identity) {
     ],
     "Production operational snapshot",
   );
-  if (snapshot.schemaVersion !== 2 || snapshot.product !== "wa-studio") {
+  if (snapshot.schemaVersion !== 3 || snapshot.product !== "wa-studio") {
     throw new Error("Production operational snapshot schema is incompatible.");
   }
   timestamp(snapshot.capturedAt, "Operational snapshot capture time");
@@ -447,7 +516,7 @@ function verifySnapshotShape(snapshot, identity) {
   zeroPending(snapshot.connector.pendingCount);
   fraction(snapshot.connector.storageUtilization, "Connector storage utilization");
   const capture = timestamp(snapshot.capturedAt, "Operational snapshot capture time");
-  validateReleaseEvidence(snapshot.runtimeEvidence, capture.parsed);
+  validateReleaseEvidence(snapshot.runtimeEvidence, capture.parsed, identity, snapshot.connector);
   const verified = timestamp(snapshot.connector.verifiedAt, "Connector verification time");
   const heartbeat = timestamp(snapshot.connector.heartbeatObservedAt, "Connector heartbeat time");
   const heartbeatAgeMs = nonnegativeInteger(snapshot.connector.heartbeatAgeMs, "Connector heartbeat age");

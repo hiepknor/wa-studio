@@ -24,16 +24,16 @@ import {
   RuntimeDispatchReadinessService,
   type RuntimeDispatchReadinessSnapshot,
 } from '../../core/dispatch-readiness/runtime-dispatch-readiness.service';
+import {
+  RuntimeOperationalEvidenceService,
+  type RuntimeReleaseEvidenceSnapshot,
+} from '../../core/observability/runtime-operational-evidence.service';
 import type { QueueReadiness, RuntimeProcessHealth } from '../../core/queue/queue-transport';
 import { RUNTIME_SERVICE, RUNTIME_VERSION } from '../../core/release/runtime-release';
 import {
   OpenWACompatibilityService,
   type OpenWACompatibilitySnapshot,
 } from '../../integrations/openwa/openwa-compatibility.service';
-import {
-  RuntimeReleaseEvidenceService,
-  type RuntimeReleaseEvidenceSnapshot,
-} from './runtime-release-evidence.service';
 
 @ApiTags('health')
 @Controller('health')
@@ -46,7 +46,7 @@ export class HealthController {
     @Inject(RUNTIME_CONFIG) private readonly config: RuntimeConfig = runtimeConfig(),
     @Optional() private readonly openwaCompatibility?: OpenWACompatibilityService,
     @Optional() private readonly dispatchReadiness?: RuntimeDispatchReadinessService,
-    @Optional() private readonly releaseEvidence?: RuntimeReleaseEvidenceService,
+    @Optional() private readonly releaseEvidence?: RuntimeOperationalEvidenceService,
   ) {}
 
   @Public()

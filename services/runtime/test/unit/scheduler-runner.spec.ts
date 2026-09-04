@@ -33,6 +33,7 @@ describe('SchedulerRunnerService', () => {
       resolvedTick as never,
       resolvedTick as never,
       leadership as never,
+      resolvedTick as never,
       {
         GATEWAY_SYNC_POLL_INTERVAL_MS: 30_000,
         RUNTIME_RETENTION_INTERVAL_MS: 60_000,
@@ -49,6 +50,7 @@ describe('SchedulerRunnerService', () => {
     try {
       const messageWork = deferred<void>();
       const resolvedTick = { run: vi.fn().mockResolvedValue(undefined) };
+      const operationalObservation = { run: vi.fn().mockResolvedValue(undefined) };
       const campaignTick = {
         beginSchedulerSession: vi.fn().mockResolvedValue(undefined),
         run: vi.fn().mockResolvedValue(undefined),
@@ -82,6 +84,7 @@ describe('SchedulerRunnerService', () => {
         resolvedTick as never,
         resolvedTick as never,
         leadership as never,
+        operationalObservation as never,
         {
           GATEWAY_SYNC_POLL_INTERVAL_MS: 30_000,
           RUNTIME_RETENTION_INTERVAL_MS: 60_000,
@@ -93,6 +96,7 @@ describe('SchedulerRunnerService', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(campaignTick.beginSchedulerSession).toHaveBeenCalledOnce();
+      expect(operationalObservation.run).toHaveBeenCalledOnce();
 
       let stopped = false;
       const stopping = runner.stop().then(() => { stopped = true; });

@@ -49,6 +49,7 @@ const deployment = {
   tag: "v0.2.2",
   gitCommit: "a".repeat(40),
   components: {
+    studio: { version: "0.2.2" },
     acceptance: {
       policyVersion: acceptancePolicy.identity.version,
       policySha256: acceptancePolicy.identity.sha256,
@@ -143,7 +144,7 @@ try {
   );
   const snapshotCapturedAt = "2026-08-29T02:55:00.000Z";
   const operationalSnapshot = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     product: "wa-studio",
     capturedAt: snapshotCapturedAt,
     release: record.release,
@@ -152,6 +153,7 @@ try {
       sha256: record.policy.sha256,
     },
     components: {
+      studioVersion: "0.2.2",
       runtimeVersion: "0.1.0",
       openwaRelease: "0.23.3",
       connectorPluginVersion: "0.1.0",
@@ -170,7 +172,7 @@ try {
       connectorStatus: "HEALTHY",
     },
     runtimeEvidence: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: "complete",
       generatedAt: snapshotCapturedAt,
       openwaSafety: {
@@ -194,6 +196,24 @@ try {
         oldestDeadAgeSeconds: null,
         utilization: 0,
         admissionAvailable: true,
+      },
+      observation: {
+        requiredWindowSeconds: 86_400,
+        observedWindowSeconds: 86_400,
+        firstObservedAt: "2026-08-28T02:55:00.000Z",
+        lastObservedAt: snapshotCapturedAt,
+        sampleCount: 1_441,
+        maximumGapSeconds: 60,
+        maximumAllowedGapSeconds: 300,
+        violatingSamples: 0,
+        coverageComplete: true,
+        candidateIdentity: {
+          runtimeVersion: "0.1.0",
+          runtimeProfile: "desktop-managed",
+          managedInstanceId: "wa-studio-00000000-0000-4000-8000-000000000002",
+          studioVersion: "0.2.2",
+          openwaRelease: "0.23.3",
+        },
       },
     },
     connector: {
@@ -618,6 +638,8 @@ try {
   const earlyOperationalSnapshot = structuredClone(operationalSnapshot);
   earlyOperationalSnapshot.capturedAt = "2026-08-28T14:05:00.000Z";
   earlyOperationalSnapshot.runtimeEvidence.generatedAt = earlyOperationalSnapshot.capturedAt;
+  earlyOperationalSnapshot.runtimeEvidence.observation.firstObservedAt = "2026-08-27T14:05:00.000Z";
+  earlyOperationalSnapshot.runtimeEvidence.observation.lastObservedAt = earlyOperationalSnapshot.capturedAt;
   earlyOperationalSnapshot.connector.verifiedAt = "2026-08-28T14:05:00.000Z";
   earlyOperationalSnapshot.connector.heartbeatObservedAt = "2026-08-28T14:04:50.000Z";
   const earlyOperationalJson = `${JSON.stringify(earlyOperationalSnapshot, null, 2)}\n`;

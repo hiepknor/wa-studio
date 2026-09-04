@@ -168,8 +168,11 @@ perform this check because they intentionally contain no update channel or publi
 4. Run the production-readiness checklist in `docs/production-readiness.md`, including one real
    outbound run scoped to the dedicated test group. Do not reuse a customer group or broaden the
    target after it has been recorded for UAT.
-5. Observe for 24 continuous hours. Restart the clock after any candidate redeploy, unexplained
-   endpoint switch, critical alert, failed backup, or unresolved UAT discrepancy.
+5. Observe for 24 continuous hours. Runtime records an aggregate sample every minute and the final
+   verifier requires the exact Studio/Runtime/OpenWA/instance identity, no violating sample, and no
+   gap over five minutes. Closing the app or changing candidate identity therefore prevents the
+   window from passing. Restart the clock after any candidate redeploy, unexplained endpoint switch,
+   critical alert, failed backup, or unresolved UAT discrepancy.
 6. Accept only with zero unexplained callback loss, zero duplicate outbound effects, zero critical
    alerts, a successful encrypted off-host backup plus restore drill, and explicit operator
    sign-off. Create the private record with `release:acceptance:create`; at the end of the unchanged
