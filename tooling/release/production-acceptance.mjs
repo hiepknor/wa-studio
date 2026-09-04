@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { verifyProductionOperationalSnapshot } from "./production-operational-snapshot.mjs";
+import { verifyProductionRecoveryEvidence } from "./production-recovery-evidence.mjs";
 
 const defaultPolicyPath = resolve(
   import.meta.dirname,
@@ -294,7 +295,7 @@ export function productionAcceptanceTemplate(
 ) {
   const identity = readProductionDeploymentIdentity(deploymentManifestPath, policyPath);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     product: "wa-studio",
     recordCreatedAt: now.toISOString(),
     release: identity.release,
@@ -350,6 +351,7 @@ export function productionAcceptanceTemplate(
       backupVerifiedAt: null,
       restoreDrillAt: null,
       restoreSucceeded: null,
+      evidenceSha256: null,
     },
     uat: {
       runId: null,
@@ -393,7 +395,7 @@ function verifyShape(record, expectedRelease, expectedPolicy) {
     "callbackIncident", "canary", "managedStorage", "connector", "recovery", "uat", "drills",
     "operations", "decision",
   ], "Production acceptance record");
-  if (record.schemaVersion !== 1 || record.product !== "wa-studio") {
+  if (record.schemaVersion !== 2 || record.product !== "wa-studio") {
     throw new Error("Production acceptance record schema is incompatible.");
   }
   timestamp(record.recordCreatedAt, "Record creation time");
@@ -434,6 +436,7 @@ function verifyShape(record, expectedRelease, expectedPolicy) {
   ], "Connector evidence");
   exactKeys(record.recovery, [
     "objectKey", "sha256", "backupVerifiedAt", "restoreDrillAt", "restoreSucceeded",
+    "evidenceSha256",
   ], "Recovery evidence");
   exactKeys(record.uat, [
     "runId", "testGroupId", "targetCount", "resolvedCount", "unknownMessageJobs", "completedAt",
@@ -453,7 +456,13 @@ function verifyShape(record, expectedRelease, expectedPolicy) {
   rejectSensitiveMaterial(record);
 }
 
-function verifyGo(record, expectedConnector, policyRequirements, operationalSnapshot) {
+function verifyGo(
+  record,
+  expectedConnector,
+  policyRequirements,
+  operationalSnapshot,
+  recoveryEvidence,
+) {
   const incident = record.callbackIncident;
   const requiredFailureSlice = policyRequirements.requiredObservedFailureSlice;
   if (incident.observedFailureSlice !== requiredFailureSlice
@@ -578,6 +587,14 @@ function verifyGo(record, expectedConnector, policyRequirements, operationalSnap
   withinWindow(record.recovery.backupVerifiedAt, "Backup verification time", canaryStart, canaryEnd);
   withinWindow(record.recovery.restoreDrillAt, "Restore drill time", canaryStart, canaryEnd);
   trueValue(record.recovery.restoreSucceeded, "Restore drill result");
+  if (!recoveryEvidence
+    || record.recovery.evidenceSha256 !== recoveryEvidence.sha256
+    || record.recovery.objectKey !== recoveryEvidence.evidence.backup.objectKey
+    || record.recovery.sha256 !== recoveryEvidence.evidence.backup.sha256
+    || record.recovery.backupVerifiedAt !== recoveryEvidence.evidence.restore.completedAt
+    || record.recovery.restoreDrillAt !== recoveryEvidence.evidence.restore.completedAt) {
+    throw new Error("Recovery acceptance fields do not match the verified restore-drill evidence.");
+  }
 
   required(record.uat.runId, "UAT run ID");
   required(record.uat.testGroupId, "UAT test group ID");
@@ -637,6 +654,7 @@ function verifyGo(record, expectedConnector, policyRequirements, operationalSnap
 export function verifyProductionAcceptance({
   deploymentManifestPath,
   operationalSnapshotPath,
+  recoveryEvidencePath,
   policyPath = defaultPolicyPath,
   recordPath,
   requireGo = false,
@@ -665,14 +683,71 @@ export function verifyProductionAcceptance({
       throw new Error("Production acceptance record does not match the operational snapshot.");
     }
   }
+  const recoveryValues = Object.values(record.recovery);
+  const hasAnyRecoveryEvidence = recoveryValues.some(value => value !== null);
+  const hasCompleteRecoveryEvidence = recoveryValues.every(value => value !== null);
+  if (hasAnyRecoveryEvidence !== hasCompleteRecoveryEvidence) {
+    throw new Error("Recovery evidence must be either complete or empty.");
+  }
+  let verifiedRecovery;
+  if (hasCompleteRecoveryEvidence || requireGo || record.decision.outcome === "GO") {
+    verifiedRecovery = verifyProductionRecoveryEvidence({
+      deploymentManifestPath,
+      evidencePath: required(recoveryEvidencePath, "Recovery evidence path"),
+    });
+    if (record.recovery.evidenceSha256 !== verifiedRecovery.sha256) {
+      throw new Error("Production acceptance record does not match the recovery evidence.");
+    }
+  }
   if (requireGo || record.decision.outcome === "GO") {
     verifyGo(
       record,
       identity.connector,
       identity.policy.requirements,
       verifiedSnapshot.snapshot,
+      verifiedRecovery,
     );
   }
+  return record;
+}
+
+export function attachProductionRecoveryEvidence({
+  deploymentManifestPath,
+  evidencePath,
+  policyPath = defaultPolicyPath,
+  recordPath,
+}) {
+  const identity = readProductionDeploymentIdentity(deploymentManifestPath, policyPath);
+  const resolvedRecordPath = resolve(required(recordPath, "Acceptance record path"));
+  assertPrivateRecord(resolvedRecordPath);
+  const record = object(
+    readJson(resolvedRecordPath, "Production acceptance record"),
+    "Production acceptance record",
+  );
+  verifyShape(record, identity.release, identity.policy.identity);
+  if (record.decision.outcome !== "PENDING") {
+    throw new Error("Recovery evidence can only be attached to a PENDING acceptance record.");
+  }
+  const verified = verifyProductionRecoveryEvidence({
+    deploymentManifestPath,
+    evidencePath: required(evidencePath, "Recovery evidence path"),
+  });
+  const proposed = {
+    objectKey: verified.evidence.backup.objectKey,
+    sha256: verified.evidence.backup.sha256,
+    backupVerifiedAt: verified.evidence.restore.completedAt,
+    restoreDrillAt: verified.evidence.restore.completedAt,
+    restoreSucceeded: true,
+    evidenceSha256: verified.sha256,
+  };
+  if (Object.values(record.recovery).some(value => value !== null)) {
+    if (Object.entries(proposed).every(([key, value]) => record.recovery[key] === value)) {
+      return record;
+    }
+    throw new Error("Acceptance record already contains different recovery evidence.");
+  }
+  record.recovery = proposed;
+  atomicPrivateWrite(resolvedRecordPath, `${JSON.stringify(record, null, 2)}\n`);
   return record;
 }
 
@@ -744,10 +819,12 @@ function parseArguments(argv) {
   const [command, ...values] = argv;
   const allowedFlags = command === "create"
     ? new Set(["deployment", "output", "policy"])
-    : new Set(["deployment", "record", "policy", "operational-snapshot"]);
-  if (!["create", "attach-operational", "verify", "verify-go"].includes(command)) {
+    : new Set([
+      "deployment", "record", "policy", "operational-snapshot", "recovery-evidence",
+    ]);
+  if (!["create", "attach-operational", "attach-recovery", "verify", "verify-go"].includes(command)) {
     throw new Error(
-      "Usage: production-acceptance.mjs <create|attach-operational|verify|verify-go> "
+      "Usage: production-acceptance.mjs <create|attach-operational|attach-recovery|verify|verify-go> "
       + "--deployment <manifest> --output|--record <path>",
     );
   }
@@ -779,6 +856,7 @@ function main(argv) {
     const record = verifyProductionAcceptance({
       deploymentManifestPath: options.deployment,
       operationalSnapshotPath: options["operational-snapshot"],
+      recoveryEvidencePath: options["recovery-evidence"],
       policyPath: options.policy,
       recordPath: options.record,
       requireGo: options.command === "verify-go",
@@ -801,6 +879,20 @@ function main(argv) {
       status: "attached",
       release: record.release.tag,
       capturedAt: record.operationalSnapshot.capturedAt,
+    })}\n`);
+    return;
+  }
+  if (options.command === "attach-recovery") {
+    const record = attachProductionRecoveryEvidence({
+      deploymentManifestPath: options.deployment,
+      evidencePath: options["recovery-evidence"],
+      policyPath: options.policy,
+      recordPath: options.record,
+    });
+    process.stdout.write(`${JSON.stringify({
+      status: "attached",
+      release: record.release.tag,
+      recoveryEvidenceSha256: record.recovery.evidenceSha256,
     })}\n`);
     return;
   }

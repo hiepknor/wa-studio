@@ -145,6 +145,26 @@ npm run release:acceptance:attach-operational -- \
   --record /private/release/production-acceptance.json
 ```
 
+Run the Event Inbox restore drill with the exact attested coordinated manifest installed on the
+VPS. Preserve the owner-only JSON path printed by the drill, transfer that file through the private
+evidence channel, and verify then attach it while the acceptance record is still `PENDING`:
+
+```bash
+npm run release:recovery:verify -- \
+  --deployment /private/release/wa-studio-deployment.json \
+  --evidence /private/release/production-recovery-evidence.json
+
+npm run release:acceptance:attach-recovery -- \
+  --deployment /private/release/wa-studio-deployment.json \
+  --recovery-evidence /private/release/production-recovery-evidence.json \
+  --record /private/release/production-acceptance.json
+```
+
+The attachment derives the backup object, archive checksum, verification time, drill time, outcome,
+and evidence digest from that closed-schema file. Do not type those fields manually. Reusing an
+artifact from another release, changing it after attachment, restoring an older migration head, or
+setting `restoreSucceeded` without the artifact all fail closed.
+
 The operational snapshot does not inspect WA Studio's native managed PostgreSQL filesystem or local
 recovery directory. Those paths and their storage policy are owned by the Tauri supervisor rather
 than Runtime's HTTP surface. At the end of the unchanged canary, open **Settings → Backups &
@@ -173,6 +193,7 @@ image, and coordinated deployment manifest still have the exact recorded identit
 npm run release:acceptance:verify -- \
   --deployment /private/release/wa-studio-deployment.json \
   --operational-snapshot /private/release/production-operational-snapshot.json \
+  --recovery-evidence /private/release/production-recovery-evidence.json \
   --record /private/release/production-acceptance.json
 ```
 
@@ -185,6 +206,7 @@ Then run the fail-closed gate:
 npm run release:acceptance:verify-go -- \
   --deployment /private/release/wa-studio-deployment.json \
   --operational-snapshot /private/release/production-operational-snapshot.json \
+  --recovery-evidence /private/release/production-recovery-evidence.json \
   --record /private/release/production-acceptance.json
 ```
 
@@ -209,6 +231,7 @@ instance, or connector identifiers into Git:
 npm run release:promotion:create -- \
   --accepted-deployment /private/release/wa-studio-deployment.json \
   --operational-snapshot /private/release/production-operational-snapshot.json \
+  --recovery-evidence /private/release/production-recovery-evidence.json \
   --acceptance-record /private/release/production-acceptance.json \
   --target-tag v<next-stable-version> \
   --output release/production-promotion.json

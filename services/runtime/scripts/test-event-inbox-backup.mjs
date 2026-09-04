@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -11,12 +11,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+
+import { verifyProductionRecoveryEvidence } from '../../../tooling/release/production-recovery-evidence.mjs';
 
 const runtimeRoot = process.cwd();
 const backupScript = resolve(runtimeRoot, 'deploy/event-inbox/event-inbox-backup.sh');
 const restoreScript = resolve(runtimeRoot, 'deploy/event-inbox/event-inbox-restore-drill.sh');
 const root = mkdtempSync(resolve(tmpdir(), 'wa-event-inbox-backup-test-'));
+const jqDirectory = dirname(execFileSync('/usr/bin/env', ['which', 'jq'], { encoding: 'utf8' }).trim());
 
 try {
   const fakeBin = resolve(root, 'bin');
@@ -25,6 +28,8 @@ try {
   const staging = resolve(root, 'staging');
   const work = resolve(root, 'work');
   const metrics = resolve(root, 'metrics');
+  const evidence = resolve(root, 'evidence');
+  const deploymentManifest = resolve(root, 'wa-studio-deployment.json');
   const createdMarker = resolve(root, 'created-database');
   const droppedMarker = resolve(root, 'dropped-database');
   mkdirSync(fakeBin, { recursive: true });
@@ -34,6 +39,24 @@ try {
   writeFileSync(resolve(deploy, 'compose.yaml'), 'services: {}\n');
   writeFileSync(resolve(deploy, 'event-inbox.env'), 'POSTGRES_DB=test\n');
   writeFileSync(resolve(root, 'identity.agekey'), 'AGE-SECRET-KEY-TEST\n');
+  writeFileSync(deploymentManifest, `${JSON.stringify({
+    schemaVersion: 1,
+    product: 'wa-studio',
+    releaseScope: 'product',
+    releaseChannel: 'canary',
+    repository: 'example/wa-studio',
+    tag: 'v1.2.3-canary.1',
+    gitCommit: 'a'.repeat(40),
+    components: {
+      eventInbox: {
+        imageDigest: `sha256:${'b'.repeat(64)}`,
+        migrationHead: {
+          name: '015_event_inbox_recovery_watermark.sql',
+          setSha256: 'c'.repeat(64),
+        },
+      },
+    },
+  }, null, 2)}\n`);
 
   fakeCommand(fakeBin, 'flock', 'process.exit(0);');
   fakeCommand(fakeBin, 'docker', `
@@ -43,7 +66,7 @@ try {
     else if (command.includes('pg_restore --list')) process.stdin.resume();
     else if (command.includes('createdb')) writeFileSync(process.env.FAKE_CREATED_MARKER, command);
     else if (command.includes('exec pg_restore')) process.stdin.resume();
-    else if (command.includes('exec psql')) process.stdout.write('ok\\n');
+    else if (command.includes('exec psql')) process.stdout.write('ok|015_event_inbox_recovery_watermark.sql\\n');
     else if (command.includes('dropdb')) writeFileSync(process.env.FAKE_DROPPED_MARKER, command);
     else throw new Error('Unexpected docker command: ' + command);
   `);
@@ -101,7 +124,7 @@ try {
 
   const environment = {
     ...process.env,
-    PATH: `${fakeBin}:/usr/bin:/bin`,
+    PATH: `${fakeBin}:${jqDirectory}:/usr/bin:/bin`,
     EVENT_INBOX_DEPLOY_DIR: deploy,
     EVENT_INBOX_BACKUP_WORK_DIR: work,
     EVENT_INBOX_BACKUP_METRICS_DIR: metrics,
@@ -109,6 +132,8 @@ try {
     EVENT_INBOX_BACKUP_STAGING_REMOTE: 'fake-staging:uploads',
     EVENT_INBOX_BACKUP_AGE_RECIPIENT: 'age1testrecipient',
     EVENT_INBOX_BACKUP_AGE_IDENTITY_FILE: resolve(root, 'identity.agekey'),
+    EVENT_INBOX_DEPLOYMENT_MANIFEST: deploymentManifest,
+    EVENT_INBOX_RESTORE_EVIDENCE_DIR: evidence,
     FAKE_REMOTE_ROOT: remote,
     FAKE_STAGING_ROOT: staging,
     FAKE_CREATED_MARKER: createdMarker,
@@ -143,6 +168,32 @@ try {
     readFileSync(resolve(metrics, 'wa-event-inbox-restore-drill.prom'), 'utf8'),
     /^wa_event_inbox_restore_drill_last_success_timestamp_seconds [0-9]+\n$/u,
   );
+  const evidenceFiles = readdirSync(evidence);
+  assert.equal(evidenceFiles.length, 1);
+  const evidencePath = resolve(evidence, evidenceFiles[0]);
+  const verifiedEvidence = verifyProductionRecoveryEvidence({
+    deploymentManifestPath: deploymentManifest,
+    evidencePath,
+  });
+  assert.equal(verifiedEvidence.evidence.result, 'PASS');
+  assert.equal(verifiedEvidence.evidence.restore.isolation, 'temporary-database');
+  assert.equal(verifiedEvidence.evidence.backup.objectKey, archiveName);
+  assert.match(verifiedEvidence.sha256, /^[0-9a-f]{64}$/u);
+
+  const mismatchedDeployment = JSON.parse(readFileSync(deploymentManifest, 'utf8'));
+  mismatchedDeployment.gitCommit = 'd'.repeat(40);
+  writeFileSync(deploymentManifest, `${JSON.stringify(mismatchedDeployment, null, 2)}\n`);
+  assert.throws(
+    () => verifyProductionRecoveryEvidence({
+      deploymentManifestPath: deploymentManifest,
+      evidencePath,
+    }),
+    /does not match the deployment manifest/u,
+  );
+  writeFileSync(deploymentManifest, `${JSON.stringify({
+    ...mismatchedDeployment,
+    gitCommit: 'a'.repeat(40),
+  }, null, 2)}\n`);
 
   const archivePath = resolve(remote, 'production', archiveName);
   writeFileSync(archivePath, `${readFileSync(archivePath, 'utf8')}-tampered`);

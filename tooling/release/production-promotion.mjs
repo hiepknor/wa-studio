@@ -214,7 +214,7 @@ function verifyReceiptShape(receipt, policy) {
   ], "Accepted release identity");
   exactKeys(receipt.acceptance, [
     "policyVersion", "policySha256", "operationalSnapshotSha256", "acceptanceRecordSha256",
-    "evidenceArchiveSha256", "decidedAt",
+    "evidenceArchiveSha256", "recoveryEvidenceSha256", "decidedAt",
   ], "Production acceptance identity");
   exactKeys(receipt.target, ["repository", "tag"], "Promotion target");
 
@@ -246,6 +246,7 @@ function verifyReceiptShape(receipt, policy) {
     [receipt.acceptance.operationalSnapshotSha256, "Operational snapshot digest"],
     [receipt.acceptance.acceptanceRecordSha256, "Acceptance record digest"],
     [receipt.acceptance.evidenceArchiveSha256, "Evidence archive digest"],
+    [receipt.acceptance.recoveryEvidenceSha256, "Recovery evidence digest"],
   ]) {
     if (!digestPattern.test(required(value, label))) throw new Error(`${label} is invalid.`);
   }
@@ -276,6 +277,7 @@ export function verifyProductionPromotionReceipt({
 export function createProductionPromotionReceipt({
   acceptedDeploymentManifestPath,
   operationalSnapshotPath,
+  recoveryEvidencePath,
   acceptanceRecordPath,
   targetTag,
   outputPath = defaultReceiptPath,
@@ -289,15 +291,22 @@ export function createProductionPromotionReceipt({
   ));
   const recordDigestBefore = sha256(resolvedRecordPath);
   const snapshotDigestBefore = sha256(resolvedSnapshotPath);
+  const resolvedRecoveryEvidencePath = resolve(required(
+    recoveryEvidencePath,
+    "Recovery evidence path",
+  ));
+  const recoveryEvidenceDigestBefore = sha256(resolvedRecoveryEvidencePath);
   const record = verifyProductionAcceptance({
     deploymentManifestPath: acceptedDeploymentManifestPath,
     operationalSnapshotPath: resolvedSnapshotPath,
+    recoveryEvidencePath,
     policyPath,
     recordPath: resolvedRecordPath,
     requireGo: true,
   });
   if (sha256(resolvedRecordPath) !== recordDigestBefore
     || sha256(resolvedSnapshotPath) !== snapshotDigestBefore
+    || sha256(resolvedRecoveryEvidencePath) !== recoveryEvidenceDigestBefore
     || record.operationalSnapshot.sha256 !== snapshotDigestBefore) {
     throw new Error("Production acceptance evidence changed while creating the promotion receipt.");
   }
@@ -323,6 +332,7 @@ export function createProductionPromotionReceipt({
       operationalSnapshotSha256: record.operationalSnapshot.sha256,
       acceptanceRecordSha256: recordDigestBefore,
       evidenceArchiveSha256: record.evidenceArchive.sha256,
+      recoveryEvidenceSha256: record.recovery.evidenceSha256,
       decidedAt: record.decision.decidedAt,
     },
     target: {
@@ -480,7 +490,7 @@ function parseArguments(argv) {
   const allowed = command === "create"
     ? new Set([
       "accepted-deployment", "operational-snapshot", "acceptance-record", "target-tag",
-      "output", "policy",
+      "recovery-evidence", "output", "policy",
     ])
     : command === "verify-target"
       ? new Set(["receipt", "repository", "tag", "release-channel", "policy"])
@@ -513,6 +523,7 @@ function main(argv) {
     const receipt = createProductionPromotionReceipt({
       acceptedDeploymentManifestPath: options["accepted-deployment"],
       operationalSnapshotPath: options["operational-snapshot"],
+      recoveryEvidencePath: options["recovery-evidence"],
       acceptanceRecordPath: options["acceptance-record"],
       targetTag: options["target-tag"],
       outputPath: options.output,
