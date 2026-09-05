@@ -153,7 +153,7 @@ async function main() {
     assert(openwa.releaseProbeCount() > 0, "Packaged Runtime did not probe the OpenWA release");
     assertWebhookRegistration(registration, eventInboxBaseUrl, profile.webhookSecret);
 
-    const event = packagedWebhookEvent();
+    const event = packagedOperationalWebhookEvent();
     await postSignedWebhook(eventInboxBaseUrl, profile.webhookSecret, event);
     await waitForEventInboxDrain(eventInboxBaseUrl);
     await waitForLocalWebhookReceipt(event);
@@ -162,6 +162,11 @@ async function main() {
     await postSignedWebhook(eventInboxBaseUrl, profile.webhookSecret, event);
     await waitForEventInboxDrain(eventInboxBaseUrl);
     await waitForLocalWebhookReceipt(event);
+
+    const inboundMessage = packagedInboundMessageEvent();
+    await postSignedWebhook(eventInboxBaseUrl, profile.webhookSecret, inboundMessage);
+    await waitForEventInboxDrain(eventInboxBaseUrl);
+    await assertNoLocalWebhookRecord(inboundMessage);
 
     await exerciseOpenWaOfflineRecovery(openwa, profile.runtimeApiKey);
 
@@ -209,7 +214,7 @@ async function main() {
   if (oneShot) {
     if (!successfulNativeQuit) throw new Error("Packaged E2E did not complete a native app shutdown.");
     process.stdout.write(
-      `Packaged managed Runtime E2E passed: OpenWA ${openWaReleaseTag} registration, offline degradation/recovery, durable Event Inbox claim/ACK, local PostgreSQL dedup, verified encrypted restart backup, safe native shutdown.\n`,
+      `Packaged managed Runtime E2E passed: OpenWA ${openWaReleaseTag} registration, offline degradation/recovery, durable Event Inbox claim/ACK, operational-event dedup, inbound-message discard, verified encrypted restart backup, safe native shutdown.\n`,
     );
   }
 }
@@ -695,7 +700,6 @@ async function waitForWebhookRegistration(openwa, eventInboxBaseUrl) {
 
 function assertWebhookRegistration(registration, eventInboxBaseUrl, webhookSecret) {
   const expectedEvents = [
-    "message.received",
     "message.sent",
     "message.ack",
     "message.failed",
@@ -715,19 +719,33 @@ function assertWebhookRegistration(registration, eventInboxBaseUrl, webhookSecre
   assert(webhookSecret === testWebhookSecret, "Packaged E2E webhook secret drifted");
 }
 
-function packagedWebhookEvent() {
+function packagedOperationalWebhookEvent() {
   const suffix = `${process.pid}-${Date.now()}`;
   return {
-    event: "message.received",
+    event: "group.update",
     timestamp: new Date().toISOString(),
     sessionId,
     idempotencyKey: `packaged-e2e-event-${suffix}`,
     deliveryId: `packaged-e2e-delivery-${suffix}`,
     data: {
+      groupId: "120363000000000000@g.us",
+    },
+  };
+}
+
+function packagedInboundMessageEvent() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  return {
+    event: "message.received",
+    timestamp: new Date().toISOString(),
+    sessionId,
+    idempotencyKey: `packaged-e2e-inbound-${suffix}`,
+    deliveryId: `packaged-e2e-inbound-delivery-${suffix}`,
+    data: {
       id: `packaged-e2e-message-${suffix}`,
       chatId: "120363000000000000@g.us",
       author: "84900000000@c.us",
-      body: "packaged Event Inbox E2E",
+      body: "packaged Event Inbox E2E inbound discard",
       type: "chat",
       fromMe: false,
       isGroup: true,
@@ -763,18 +781,7 @@ async function waitForEventInboxDrain(eventInboxBaseUrl) {
 }
 
 async function waitForLocalWebhookReceipt(event) {
-  const pidFile = resolve(managedPostgresRoot, "data-v17/postmaster.pid");
-  const lines = readFileSync(pidFile, "utf8").split(/\r?\n/u);
-  const port = Number(lines[3]);
-  assert(Number.isInteger(port) && port > 0, "Managed PostgreSQL did not publish its port");
-  const pool = new Pool({
-    host: "127.0.0.1",
-    port,
-    user: "postgres",
-    password: managedPostgresPassword,
-    database: "wa_runtime",
-    max: 1,
-  });
+  const pool = managedRuntimePool();
   try {
     const expectedPayloadSha256 = createHash("sha256")
       .update(JSON.stringify(event))
@@ -808,6 +815,41 @@ async function waitForLocalWebhookReceipt(event) {
   } finally {
     await pool.end();
   }
+}
+
+async function assertNoLocalWebhookRecord(event) {
+  const pool = managedRuntimePool();
+  try {
+    const result = await pool.query(
+      `SELECT
+         (SELECT count(*)::integer FROM webhook_events WHERE idempotency_key = $1) AS spool_count,
+         (SELECT count(*)::integer FROM webhook_event_receipts WHERE idempotency_key = $1)
+           AS receipt_count`,
+      [event.idempotencyKey],
+    );
+    const state = result.rows[0];
+    assert(
+      state?.spool_count === 0 && state?.receipt_count === 0,
+      `Disabled inbound-message capture retained a local webhook record: ${JSON.stringify(state)}`,
+    );
+  } finally {
+    await pool.end();
+  }
+}
+
+function managedRuntimePool() {
+  const pidFile = resolve(managedPostgresRoot, "data-v17/postmaster.pid");
+  const lines = readFileSync(pidFile, "utf8").split(/\r?\n/u);
+  const port = Number(lines[3]);
+  assert(Number.isInteger(port) && port > 0, "Managed PostgreSQL did not publish its port");
+  return new Pool({
+    host: "127.0.0.1",
+    port,
+    user: "postgres",
+    password: managedPostgresPassword,
+    database: "wa_runtime",
+    max: 1,
+  });
 }
 
 async function waitForJson(url, predicate, timeoutMs, init = {}) {
