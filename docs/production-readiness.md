@@ -53,7 +53,7 @@ from any failures recorded before or after it. Before the canary clock starts:
 
 ## Canary UAT and 24-hour gate
 
-- [ ] Install the notarized 0.2.3-canary.1 DMG and connect through production discovery protocol v2.
+- [ ] Install the notarized 0.2.4-canary.1 DMG and connect through production discovery protocol v2.
 - [ ] If the Mac has a legacy schema-2 profile, save the connection again and confirm it migrates to
       connector schema 3; live sends must remain effectively disabled until that migration and its
       heartbeat quorum complete.
@@ -288,5 +288,5 @@ closed. Rotate this key only through a new canary cycle, update the protected pu
 before its stable promotion, and archive the retired public key for historical verification.
 
 A no-go means: route Event Inbox back to 34200, stop outbound activity, preserve evidence, and
-fix-forward. A go means: prepare the reviewed 0.2.3 stable bump, converge the primary slot, verify the
+fix-forward. A go means: prepare the reviewed 0.2.4 stable bump, converge the primary slot, verify the
 signed updater from both supported predecessor builds, and keep the canary evidence for audit.
