@@ -134,18 +134,45 @@ describe('PostgreSQL outbound session lease', () => {
     const [secondJob] = await createProcessingJobs(messages[1]!, 1, secondSessionId);
     let active = 0;
     let maximumActive = 0;
+    let entered = 0;
+    let resolveBothEntered!: () => void;
+    let releaseOperations!: () => void;
+    const bothEntered = new Promise<void>(resolve => { resolveBothEntered = resolve; });
+    const operationsReleased = new Promise<void>(resolve => { releaseOperations = resolve; });
     const operation = async (verifyForSend: () => Promise<void>) => {
       await verifyForSend();
       active += 1;
       maximumActive = Math.max(maximumActive, active);
-      await new Promise(resolve => setTimeout(resolve, 75));
+      entered += 1;
+      if (entered === 2) resolveBothEntered();
+      await operationsReleased;
       active -= 1;
     };
 
-    await Promise.all([
+    const concurrentOperations = Promise.all([
       sessions[0]!.withLease(INTEGRATION_SESSION_ID, firstJob!, operation),
       sessions[1]!.withLease(secondSessionId, secondJob!, operation),
     ]);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let overlapError: unknown;
+    try {
+      await Promise.race([
+        bothEntered,
+        new Promise<void>((_resolve, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error('Different sessions did not enter concurrently')),
+            3_000,
+          );
+        }),
+      ]);
+    } catch (error) {
+      overlapError = error;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      releaseOperations();
+    }
+    await concurrentOperations;
+    if (overlapError) throw overlapError;
 
     expect(maximumActive).toBe(2);
   });
