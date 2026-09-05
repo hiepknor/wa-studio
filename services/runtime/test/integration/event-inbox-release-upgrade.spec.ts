@@ -73,7 +73,7 @@ describe('Event Inbox release upgrade', () => {
 
       const forward = files.filter(name => Number(name.slice(0, 3)) > LAST_ACCEPTED_MIGRATION);
       expect((await runMigrations(upgrade, migrations)).applied).toEqual(forward);
-      expect(forward.at(-1)).toBe('015_event_inbox_recovery_watermark.sql');
+      expect(forward.at(-1)).toBe('016_event_inbox_receipt_usage.sql');
       const hotPathIndexes = await upgrade.query<{ indexname: string }>(
         `SELECT indexname FROM pg_indexes
          WHERE schemaname = current_schema()
@@ -115,6 +115,12 @@ describe('Event Inbox release upgrade', () => {
         idempotencyKey: IDEMPOTENCY_KEY,
         leaseId: LEASE_ID,
       }])).resolves.toBe(1);
+      await expect(repository.readiness()).resolves.toMatchObject({
+        migrationHead: '016_event_inbox_receipt_usage.sql',
+        migrationCount: 16,
+        storedEvents: 0,
+        retainedReceipts: 1,
+      });
       await expect(repository.recovery(DEVICE_ID, 1, [SESSION_ID], recovery.watermark))
         .resolves.toEqual({ watermark: recovery.watermark, remaining: 0 });
 
@@ -167,6 +173,25 @@ describe('Event Inbox release upgrade', () => {
         'SELECT payload_hash FROM event_inbox_receipts WHERE idempotency_key = $1',
         [IDEMPOTENCY_KEY],
       )).rows[0]?.payload_hash).toEqual(createHash('sha256').update(rawBody).digest());
+      await upgrade.query(
+        `UPDATE event_inbox_receipts SET expires_at = now() - interval '1 second'
+         WHERE idempotency_key = $1`,
+        [IDEMPOTENCY_KEY],
+      );
+      await expect(repository.removeExpiredReceipts(10)).resolves.toBe(1);
+      await expect(repository.readiness()).resolves.toMatchObject({ retainedReceipts: 0 });
+
+      await upgrade.query(
+        `INSERT INTO event_inbox_receipts
+           (idempotency_key, session_id, payload_hash, expires_at)
+         VALUES ('legacy-receipt', $1::uuid, $2, now() + interval '35 days')`,
+        [SESSION_ID, createHash('sha256').update('legacy-receipt').digest()],
+      );
+      await expect(repository.readiness()).resolves.toMatchObject({ retainedReceipts: 1 });
+      await upgrade.query(
+        `DELETE FROM event_inbox_receipts WHERE idempotency_key = 'legacy-receipt'`,
+      );
+      await expect(repository.readiness()).resolves.toMatchObject({ retainedReceipts: 0 });
 
       await seedConnectorOwnership(upgrade);
       await upgrade.query(

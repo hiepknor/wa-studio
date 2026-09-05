@@ -326,6 +326,12 @@ export class EventInboxRepository implements OnModuleDestroy {
       );
       if (selected.rowCount) {
         await client.query(
+          `DELETE FROM event_inbox_receipts
+           WHERE idempotency_key = ANY($1::text[]) AND expires_at <= now()
+           RETURNING 1`,
+          [selected.rows.map(row => row.idempotency_key)],
+        );
+        await client.query(
           `INSERT INTO event_inbox_receipts
              (idempotency_key, session_id, payload_hash, expires_at)
            SELECT receipt.idempotency_key, receipt.session_id, receipt.payload_hash,
@@ -337,7 +343,8 @@ export class EventInboxRepository implements OnModuleDestroy {
              payload_hash = EXCLUDED.payload_hash,
              accepted_at = now(),
              expires_at = EXCLUDED.expires_at
-           WHERE event_inbox_receipts.expires_at <= now()`,
+           WHERE event_inbox_receipts.expires_at <= now()
+           RETURNING 1`,
           [
             selected.rows.map(row => row.idempotency_key),
             selected.rows.map(row => row.session_id),
@@ -469,17 +476,29 @@ export class EventInboxRepository implements OnModuleDestroy {
   }
 
   async removeExpiredReceipts(limit: number): Promise<number> {
-    const result = await this.pool.query(
-      `DELETE FROM event_inbox_receipts
-       WHERE idempotency_key IN (
-         SELECT idempotency_key FROM event_inbox_receipts
-         WHERE expires_at <= now()
-         ORDER BY expires_at, idempotency_key
-         LIMIT $1
-       )`,
-      [limit],
-    );
-    return result.rowCount ?? 0;
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await lockUsage(client);
+      const result = await client.query(
+        `DELETE FROM event_inbox_receipts
+         WHERE idempotency_key IN (
+           SELECT idempotency_key FROM event_inbox_receipts
+           WHERE expires_at <= now()
+           ORDER BY expires_at, idempotency_key
+           LIMIT $1
+         )
+         RETURNING 1`,
+        [limit],
+      );
+      await client.query('COMMIT');
+      return result.rowCount ?? 0;
+    } catch (error) {
+      await rollback(client);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async readiness(): Promise<EventInboxReadiness> {
@@ -503,8 +522,7 @@ export class EventInboxRepository implements OnModuleDestroy {
          GREATEST(0, usage.stored_events - state.dead_events)::text AS pending_events,
          state.leased_events::text,
          state.dead_events::text,
-         (SELECT count(*)::text FROM event_inbox_receipts
-          WHERE expires_at > now()) AS retained_receipts,
+         usage.retained_receipts::text,
          EXTRACT(EPOCH FROM now() - state.oldest_pending_at)::text
            AS oldest_pending_age_seconds,
          (SELECT count(*)::text FROM event_inbox_devices AS device

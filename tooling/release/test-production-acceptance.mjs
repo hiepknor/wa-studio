@@ -63,7 +63,7 @@ const deployment = {
     eventInbox: {
       imageDigest: `sha256:${"c".repeat(64)}`,
       migrationHead: {
-        name: "015_event_inbox_recovery_watermark.sql",
+        name: "016_event_inbox_receipt_usage.sql",
         setSha256: "f".repeat(64),
       },
     },
