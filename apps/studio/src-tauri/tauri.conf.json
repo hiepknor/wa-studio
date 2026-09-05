@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "WA Studio",
-  "version": "0.2.2",
+  "version": "0.2.3-canary.1",
   "identifier": "dev.hiepknor.wastudio",
   "build": {
     "beforeDevCommand": "npm run dev",
