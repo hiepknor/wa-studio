@@ -12,7 +12,7 @@ const rawBody = Buffer.from(JSON.stringify({
   idempotencyKey: 'event-1', deliveryId: 'delivery-1', data: { id: 'message-1' },
 }));
 
-function config() {
+function config(messageStorageMode: 'disabled' | 'full' = 'full') {
   return parseRuntimeConfig({
     NODE_ENV: 'test', RUNTIME_PROFILE: 'desktop-managed', QUEUE_BACKEND: 'postgres',
     DATABASE_URL: 'postgresql://runtime:runtime@postgres.test/runtime',
@@ -22,6 +22,7 @@ function config() {
     OPENWA_ALLOWED_SESSION_IDS: sessionId,
     EVENT_INBOX_BASE_URL: 'http://127.0.0.1:34200',
     EVENT_INBOX_DEVICE_TOKEN: 'device-token-with-at-least-32-characters',
+    RUNTIME_MESSAGE_STORAGE_MODE: messageStorageMode,
   });
 }
 
@@ -42,6 +43,7 @@ describe('EventInboxConsumerService', () => {
       .mockResolvedValueOnce(jsonResponse({ watermark: '12', remaining: 1 }))
       .mockResolvedValueOnce(jsonResponse({ data: [claimedEvent] }))
       .mockResolvedValueOnce(jsonResponse({ acknowledged: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ data: [] }))
       .mockResolvedValueOnce(jsonResponse({ watermark: '12', remaining: 0 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -58,7 +60,9 @@ describe('EventInboxConsumerService', () => {
     });
     expect(readiness.markReady).toHaveBeenCalledWith('12');
     expect(readiness.markReady.mock.invocationCallOrder[0])
-      .toBeGreaterThan(fetchMock.mock.invocationCallOrder[3]!);
+      .toBeGreaterThan(fetchMock.mock.invocationCallOrder[4]!);
+    expect(fetchMock.mock.calls.filter(call => String(call[0]).endsWith('/events/recovery')))
+      .toHaveLength(2);
   });
 
   it('rejects a claim response larger than the configured memory boundary', async () => {
@@ -94,6 +98,7 @@ describe('EventInboxConsumerService', () => {
       parseRuntimeConfig({
         ...configEnvironment(),
         EVENT_INBOX_RESPONSE_MAX_BYTES: '41943040',
+        RUNTIME_MESSAGE_STORAGE_MODE: 'full',
       }),
     ).runOnce()).resolves.toBe(1);
     expect(ingress.accept).toHaveBeenCalledWith(maximumRawBody, claimedEvent.signature, expect.anything());
@@ -111,6 +116,47 @@ describe('EventInboxConsumerService', () => {
     ).runOnce()).resolves.toBe(1);
     expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string))
       .toEqual({ receiptHandles: ['receipt-1'] });
+  });
+
+  it('ACKs inbound messages without duplicating them into compact desktop storage', async () => {
+    const ingress = { accept: vi.fn() };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [claimedEvent] }))
+      .mockResolvedValueOnce(jsonResponse({ acknowledged: 1 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new EventInboxConsumerService(
+      ingress as unknown as WebhookIngressService, config('disabled'),
+    ).runOnce()).resolves.toBe(1);
+
+    expect(ingress.accept).not.toHaveBeenCalled();
+    expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string))
+      .toEqual({ receiptHandles: ['receipt-1'] });
+  });
+
+  it('continues to durably ingest operational events in compact desktop mode', async () => {
+    const operationalBody = Buffer.from(JSON.stringify({
+      event: 'group.update', timestamp: '2026-08-22T00:00:00Z', sessionId,
+      idempotencyKey: 'group-event-1', deliveryId: 'group-delivery-1',
+      data: { groupId: '120363000000000000@g.us' },
+    }));
+    const operationalEvent = {
+      idempotencyKey: 'group-event-1', receiptHandle: 'group-receipt-1',
+      rawBody: operationalBody.toString('base64'), signature: 'sha256=original',
+    };
+    const ingress = { accept: vi.fn().mockResolvedValue({ accepted: true, duplicate: false }) };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [operationalEvent] }))
+      .mockResolvedValueOnce(jsonResponse({ acknowledged: 1 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(new EventInboxConsumerService(
+      ingress as unknown as WebhookIngressService, config('disabled'),
+    ).runOnce()).resolves.toBe(1);
+
+    expect(ingress.accept).toHaveBeenCalledWith(
+      operationalBody, operationalEvent.signature, expect.objectContaining({ event: 'group.update' }),
+    );
   });
 
   it('NACKs deterministic poison events to dead instead of starving the queue', async () => {

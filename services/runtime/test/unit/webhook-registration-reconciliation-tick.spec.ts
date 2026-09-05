@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpenWAClient } from '../../src/integrations/openwa/openwa.client';
 import {
+  RUNTIME_OPENWA_OPERATIONAL_WEBHOOK_EVENTS,
   RUNTIME_OPENWA_WEBHOOK_EVENTS,
   WebhookRegistrationReconciliationTick,
   type WebhookRegistrationReconciliationOptions,
@@ -21,6 +22,7 @@ const options = (
   allowedSessionIds: ['session-one'],
   expectedConnectorId: connectorId,
   expectedPluginVersion: pluginVersion,
+  includeInboundMessages: true,
   ...overrides,
 });
 
@@ -108,6 +110,31 @@ describe('WebhookRegistrationReconciliationTick', () => {
     }));
     expect(JSON.stringify(warning.mock.calls)).not.toContain('sensitive-session');
     expect(JSON.stringify(warning.mock.calls)).not.toContain(callbackUrl);
+  });
+
+  it('omits inbound messages when compact desktop storage is disabled', async () => {
+    const openwa = client();
+    openwa.reconcileWebhookRegistration.mockResolvedValue({
+      created: 0, updated: 1, deleted: 0, webhookId: 'webhook-one',
+    });
+
+    await new WebhookRegistrationReconciliationTick(
+      openwa as unknown as OpenWAClient,
+      options({ includeInboundMessages: false }),
+    ).run();
+
+    expect(RUNTIME_OPENWA_OPERATIONAL_WEBHOOK_EVENTS).toEqual([
+      'message.sent', 'message.ack', 'message.failed',
+      'session.status', 'session.restriction',
+      'group.join', 'group.leave', 'group.update',
+    ]);
+    expect(openwa.reconcileWebhookRegistration).toHaveBeenCalledWith({
+      sessionId: 'session-one',
+      url: callbackUrl,
+      events: [...RUNTIME_OPENWA_OPERATIONAL_WEBHOOK_EVENTS],
+      secret,
+      retryCount: 3,
+    });
   });
 
   it('does not mark a binding synchronized when the acknowledgement identity differs', async () => {

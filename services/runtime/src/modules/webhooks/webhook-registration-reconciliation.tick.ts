@@ -3,8 +3,7 @@ import { OpenWAClient } from '../../integrations/openwa/openwa.client';
 import { EventInboxConnectorClient } from './event-inbox-connector.client';
 import { OpenWAConnectorHealthRepository } from './openwa-connector-health.repository';
 
-export const RUNTIME_OPENWA_WEBHOOK_EVENTS = [
-  'message.received',
+export const RUNTIME_OPENWA_OPERATIONAL_WEBHOOK_EVENTS = [
   'message.sent',
   'message.ack',
   'message.failed',
@@ -15,6 +14,11 @@ export const RUNTIME_OPENWA_WEBHOOK_EVENTS = [
   'group.update',
 ] as const;
 
+export const RUNTIME_OPENWA_WEBHOOK_EVENTS = [
+  'message.received',
+  ...RUNTIME_OPENWA_OPERATIONAL_WEBHOOK_EVENTS,
+] as const;
+
 export interface WebhookRegistrationReconciliationOptions {
   enabled: boolean;
   callbackUrl: string | null;
@@ -22,6 +26,7 @@ export interface WebhookRegistrationReconciliationOptions {
   allowedSessionIds: string[];
   expectedConnectorId: string | null;
   expectedPluginVersion: string | null;
+  includeInboundMessages: boolean;
 }
 
 interface ReconciliationCounts {
@@ -48,6 +53,9 @@ export class WebhookRegistrationReconciliationTick {
     }
 
     const totals: ReconciliationCounts = { created: 0, updated: 0, deleted: 0 };
+    const events = this.options.includeInboundMessages
+      ? RUNTIME_OPENWA_WEBHOOK_EVENTS
+      : RUNTIME_OPENWA_OPERATIONAL_WEBHOOK_EVENTS;
     let failed = 0;
     const connectorStatus = this.connector && this.connectorHealth
       ? this.connector.status()
@@ -57,7 +65,7 @@ export class WebhookRegistrationReconciliationTick {
         const counts = await this.openwa.reconcileWebhookRegistration({
           sessionId,
           url: this.options.callbackUrl,
-          events: [...RUNTIME_OPENWA_WEBHOOK_EVENTS],
+          events: [...events],
           secret: this.options.secret,
           retryCount: 3,
         });

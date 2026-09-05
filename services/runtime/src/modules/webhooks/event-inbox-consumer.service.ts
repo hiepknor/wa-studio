@@ -74,11 +74,10 @@ export class EventInboxConsumerService implements OnModuleInit, OnModuleDestroy 
     while (remaining > 0) {
       if (this.abort.signal.aborted) throw new Error('Event Inbox recovery aborted');
       const count = await this.runOnce({ waitSeconds: 0, throughSequence: watermark });
+      if (count > 0) continue;
       const status = await this.recoveryRequest(watermark);
       remaining = status.remaining;
-      if (remaining > 0 && count === 0) {
-        await this.wait(this.config.EVENT_INBOX_POLL_INTERVAL_MS);
-      }
+      if (remaining > 0) await this.wait(this.config.EVENT_INBOX_POLL_INTERVAL_MS);
     }
     await this.dispatchReadiness?.markReady(watermark);
     this.logger.log({ event: 'event_inbox.recovery.ready', watermark });
@@ -110,7 +109,9 @@ export class EventInboxConsumerService implements OnModuleInit, OnModuleDestroy 
         if (envelope.idempotencyKey !== event.idempotencyKey) {
           throw new PoisonEventError('Event Inbox idempotency key does not match its raw envelope');
         }
-        await this.ingress.accept(rawBody, event.signature, envelope);
+        if (!this.shouldDiscardInboundMessage(envelope)) {
+          await this.ingress.accept(rawBody, event.signature, envelope);
+        }
         receiptHandles.push(event.receiptHandle);
       } catch (error) {
         const disposition = this.disposition(error);
@@ -134,6 +135,13 @@ export class EventInboxConsumerService implements OnModuleInit, OnModuleDestroy 
       await this.request(baseUrl, token, '/api/v1/event-inbox/events/nack', { items: rejected });
     }
     return parsed.data.data.length;
+  }
+
+  private shouldDiscardInboundMessage(envelope: Partial<OpenWAWebhookEnvelope>): boolean {
+    // In disabled storage mode the remote Event Inbox receipt is the durable idempotency record.
+    // Do not create a second local spool record for traffic the Runtime is configured not to retain.
+    return this.config.RUNTIME_MESSAGE_STORAGE_MODE === 'disabled'
+      && envelope.event === 'message.received';
   }
 
   private async recoveryRequest(watermark?: string): Promise<{
