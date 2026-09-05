@@ -939,14 +939,20 @@ function nativeQuitStudio(pid) {
     "import AppKit",
     "import Darwin",
     `let pid: pid_t = ${pid}`,
-    "guard let app = NSRunningApplication(processIdentifier: pid) else { exit(65) }",
-    "exit(app.terminate() ? 0 : 66)",
+    "let deadline = Date().addingTimeInterval(15)",
+    "while Date() < deadline {",
+    "  if let app = NSRunningApplication(processIdentifier: pid), app.isFinishedLaunching {",
+    "    exit(app.terminate() ? 0 : 66)",
+    "  }",
+    "  usleep(100_000)",
+    "}",
+    "exit(67)",
   ].join("\n");
   const result = spawnSync("xcrun", ["swift", "-e", script], { encoding: "utf8" });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(
-      `Could not ask packaged WA Studio process ${pid} to quit natively (status ${result.status}).`,
+      `Could not ask fully launched packaged WA Studio process ${pid} to quit natively (status ${result.status}).`,
     );
   }
 }
