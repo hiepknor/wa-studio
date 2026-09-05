@@ -347,8 +347,13 @@ export function WorkspaceShell({
             </button>
             <div aria-label="Workspace build" className="workspace-build-line">
               <StatusDot tone="success" />
-              <span>Local workspace</span>
-              <span className="workspace-build-version">v{studioPackage.version}</span>
+              <span className="workspace-build-label">Local workspace</span>
+              <span
+                className="workspace-build-version"
+                title={`WA Studio v${studioPackage.version}`}
+              >
+                v{studioPackage.version}
+              </span>
             </div>
           </div>
         </aside>

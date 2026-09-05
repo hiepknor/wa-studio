@@ -209,8 +209,10 @@ describe("WorkspaceShell", () => {
       .toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: "Active session" })).toHaveFocus();
-    expect(screen.getByLabelText("Workspace build"))
-      .toHaveTextContent(`v${studioPackage.version}`);
+    const workspaceBuild = screen.getByLabelText("Workspace build");
+    expect(workspaceBuild).toHaveTextContent(`v${studioPackage.version}`);
+    expect(workspaceBuild.querySelector(".workspace-build-version"))
+      .toHaveAttribute("title", `WA Studio v${studioPackage.version}`);
     const shell = screen.getByRole("main");
     await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
     expect(shell).toHaveAttribute("data-rail-collapsed", "true");

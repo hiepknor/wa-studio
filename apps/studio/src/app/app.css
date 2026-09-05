@@ -183,7 +183,7 @@ h1 { margin: var(--space-compact) 0 var(--space-3); font-family: var(--font-disp
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
-  padding: 0 var(--space-2);
+  padding: 0 var(--space-2) 0 var(--space-4);
   white-space: nowrap;
 }
 .workspace-brand-lockup .brand-mark { width: var(--control-compact); height: var(--control-compact); }
@@ -252,7 +252,15 @@ h1 { margin: var(--space-compact) 0 var(--space-3); font-family: var(--font-disp
   font-size: var(--text-technical-size);
   white-space: nowrap;
 }
-.workspace-build-version { overflow: hidden; font-family: var(--font-mono); text-overflow: ellipsis; }
+.workspace-build-label,
+.workspace-build-version { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.workspace-build-label { white-space: nowrap; }
+.workspace-build-version {
+  max-width: 8ch;
+  justify-self: end;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
 .workspace-rail-collapsed .workspace-build-line {
   grid-template-columns: var(--space-tight);
   justify-content: center;

@@ -802,6 +802,9 @@ describe("WA Design System contract", () => {
     expect(appCss).toContain(".workspace.workspace-rail-collapsed");
     expect(workspaceShell).toContain('className="workspace-sidebar-bottom"');
     expect(workspaceShell).toContain('className="workspace-build-line"');
+    expect(appCss).toContain("padding: 0 var(--space-2) 0 var(--space-4);");
+    expect(appCss).toContain(".workspace-build-label,");
+    expect(appCss).toContain("max-width: 8ch;");
     expect(workspaceShell).toContain("Current view");
     expect(workspaceShell).toContain("Connected locally");
     expect(workspaceShell).not.toContain("workspace-runtime-summary");
