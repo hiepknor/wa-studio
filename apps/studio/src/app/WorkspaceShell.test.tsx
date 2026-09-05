@@ -17,6 +17,7 @@ import type {
 } from "@/shared/api/runtime-client";
 import type { ManagedRuntimeProvisioningProfile } from "@/shared/native/managed-runtime";
 import { ToastProvider } from "@/shared/ui/Toast";
+import studioPackage from "../../package.json";
 
 const session: RuntimeSession = {
   id: "session-id",
@@ -208,7 +209,8 @@ describe("WorkspaceShell", () => {
       .toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: "Active session" })).toHaveFocus();
-    expect(screen.getByLabelText("Workspace build")).toHaveTextContent(/Local workspace.*v0\.2\.2/);
+    expect(screen.getByLabelText("Workspace build"))
+      .toHaveTextContent(`v${studioPackage.version}`);
     const shell = screen.getByRole("main");
     await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
     expect(shell).toHaveAttribute("data-rail-collapsed", "true");
