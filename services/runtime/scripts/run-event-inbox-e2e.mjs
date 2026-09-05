@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { Client } from 'pg';
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -22,16 +23,24 @@ function docker(args, capture = false) {
   return run('docker', args, { capture });
 }
 
-async function waitForPostgres(container) {
+async function waitForPostgres(databaseUrl) {
   const deadline = Date.now() + 60_000;
+  let consecutiveReadyChecks = 0;
   while (Date.now() < deadline) {
-    const result = spawnSync('docker', [
-      'exec', container, 'pg_isready', '-U', 'postgres', '-d', 'event_inbox_e2e',
-    ], { stdio: 'ignore' });
-    if (result.status === 0) return;
+    const client = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 2_000 });
+    try {
+      await client.connect();
+      await client.query('SELECT 1');
+      consecutiveReadyChecks += 1;
+      if (consecutiveReadyChecks >= 3) return;
+    } catch {
+      consecutiveReadyChecks = 0;
+    } finally {
+      await client.end().catch(() => undefined);
+    }
     await new Promise(resolve => setTimeout(resolve, 250));
   }
-  throw new Error('Timed out waiting for isolated Event Inbox PostgreSQL');
+  throw new Error('Timed out waiting for stable Event Inbox PostgreSQL readiness');
 }
 
 function runE2E(databaseUrl) {
@@ -42,6 +51,7 @@ function runE2E(databaseUrl) {
 
 async function main() {
   if (process.env.DATABASE_URL) {
+    await waitForPostgres(process.env.DATABASE_URL);
     runE2E(process.env.DATABASE_URL);
     return;
   }
@@ -58,11 +68,12 @@ async function main() {
       'postgres:17-alpine',
     ], true);
     started = true;
-    await waitForPostgres(container);
     const mapping = docker(['port', container, '5432/tcp'], true);
     const port = mapping.match(/:(\d+)$/u)?.[1];
     if (!port) throw new Error(`Could not parse PostgreSQL port mapping: ${mapping}`);
-    runE2E(`postgresql://postgres:test@127.0.0.1:${port}/event_inbox_e2e`);
+    const databaseUrl = `postgresql://postgres:test@127.0.0.1:${port}/event_inbox_e2e`;
+    await waitForPostgres(databaseUrl);
+    runE2E(databaseUrl);
   } finally {
     if (started) {
       const stopped = spawnSync('docker', ['stop', container], { stdio: 'ignore' });
