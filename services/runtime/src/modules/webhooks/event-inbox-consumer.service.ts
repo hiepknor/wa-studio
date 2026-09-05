@@ -138,9 +138,9 @@ export class EventInboxConsumerService implements OnModuleInit, OnModuleDestroy 
   }
 
   private shouldDiscardInboundMessage(envelope: Partial<OpenWAWebhookEnvelope>): boolean {
-    // In disabled storage mode the remote Event Inbox receipt is the durable idempotency record.
-    // Do not create a second local spool record for traffic the Runtime is configured not to retain.
-    return this.config.RUNTIME_MESSAGE_STORAGE_MODE === 'disabled'
+    // The remote Event Inbox receipt remains the durable idempotency record when inbound-message
+    // capture is disabled. Do not create a local spool record for intentionally excluded traffic.
+    return !this.config.OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED
       && envelope.event === 'message.received';
   }
 

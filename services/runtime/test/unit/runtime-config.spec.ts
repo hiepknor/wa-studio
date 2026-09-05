@@ -26,6 +26,7 @@ describe('runtime worker concurrency configuration', () => {
       RUNTIME_INBOX_RETENTION_DAYS: 30,
       RUNTIME_STORAGE_POLICY_VERSION: '1',
       RUNTIME_MESSAGE_STORAGE_MODE: 'full',
+      OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED: true,
       RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: false,
       RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: false,
       RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS: 100_000,
@@ -238,6 +239,7 @@ describe('runtime deployment profile', () => {
     expect(config).toMatchObject({
       RUNTIME_STORAGE_POLICY_VERSION: '1',
       RUNTIME_MESSAGE_STORAGE_MODE: 'disabled',
+      OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED: false,
       RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: true,
       RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: true,
       RUNTIME_INBOX_RETENTION_DAYS: 7,
@@ -250,6 +252,7 @@ describe('runtime deployment profile', () => {
     const config = parseRuntimeConfig({
       ...validEnvironment(),
       RUNTIME_MESSAGE_STORAGE_MODE: 'disabled',
+      OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED: 'true',
       RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: 'true',
       RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: 'true',
       RUNTIME_INBOX_RETENTION_DAYS: '7',
@@ -257,6 +260,7 @@ describe('runtime deployment profile', () => {
 
     expect(config).toMatchObject({
       RUNTIME_MESSAGE_STORAGE_MODE: 'disabled',
+      OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED: true,
       RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: true,
       RUNTIME_COMPACT_PROCESSED_WEBHOOK_PAYLOAD_ENABLED: true,
       RUNTIME_INBOX_RETENTION_DAYS: 7,

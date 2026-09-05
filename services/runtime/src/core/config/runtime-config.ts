@@ -71,6 +71,7 @@ const schema = z
       .min(10_000).max(3_600_000).default(60_000),
     OPENWA_WEBHOOK_SECRET: z.string().min(32),
     OPENWA_WEBHOOK_RECONCILIATION_ENABLED: booleanFromEnv(false),
+    OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED: optionalBooleanFromEnv,
     OPENWA_WEBHOOK_CALLBACK_URL: z.url().optional(),
     OPENWA_WEBHOOK_RECONCILIATION_INTERVAL_MS: z.coerce.number().int()
       .min(60_000).max(86_400_000).default(300_000),
@@ -402,6 +403,7 @@ export type RuntimeConfig = Omit<
   | 'RUNTIME_BIND_HOST'
   | 'RUNTIME_INBOX_RETENTION_DAYS'
   | 'RUNTIME_MESSAGE_STORAGE_MODE'
+  | 'OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED'
   | 'RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS'
   | 'RUNTIME_WEBHOOK_SPOOL_MAX_BYTES'
   | 'RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED'
@@ -410,6 +412,7 @@ export type RuntimeConfig = Omit<
   RUNTIME_BIND_HOST: string;
   RUNTIME_INBOX_RETENTION_DAYS: number;
   RUNTIME_MESSAGE_STORAGE_MODE: 'disabled' | 'full';
+  OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED: boolean;
   RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS: number;
   RUNTIME_WEBHOOK_SPOOL_MAX_BYTES: number;
   RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED: boolean;
@@ -422,6 +425,8 @@ let cached: RuntimeConfig | undefined;
 export function parseRuntimeConfig(environment: NodeJS.ProcessEnv): RuntimeConfig {
   const parsed = schema.parse(environment);
   const managedDesktop = parsed.RUNTIME_PROFILE === 'desktop-managed';
+  const messageStorageMode = parsed.RUNTIME_MESSAGE_STORAGE_MODE
+    ?? (managedDesktop ? 'disabled' : 'full');
   return {
     ...parsed,
     RUNTIME_BIND_HOST: parsed.RUNTIME_BIND_HOST
@@ -429,8 +434,9 @@ export function parseRuntimeConfig(environment: NodeJS.ProcessEnv): RuntimeConfi
     RUNTIME_INBOX_RETENTION_DAYS:
       parsed.RUNTIME_INBOX_RETENTION_DAYS
       ?? (managedDesktop ? 7 : parsed.RUNTIME_EVENT_RETENTION_DAYS),
-    RUNTIME_MESSAGE_STORAGE_MODE:
-      parsed.RUNTIME_MESSAGE_STORAGE_MODE ?? (managedDesktop ? 'disabled' : 'full'),
+    RUNTIME_MESSAGE_STORAGE_MODE: messageStorageMode,
+    OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED:
+      parsed.OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED ?? messageStorageMode === 'full',
     RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS:
       parsed.RUNTIME_WEBHOOK_SPOOL_MAX_EVENTS ?? (managedDesktop ? 20_000 : 100_000),
     RUNTIME_WEBHOOK_SPOOL_MAX_BYTES:

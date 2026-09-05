@@ -40,7 +40,7 @@ import { EventInboxConnectorHealthTick } from './event-inbox-connector-health.ti
           allowedSessionIds: config.OPENWA_ALLOWED_SESSION_IDS,
           expectedConnectorId: config.OPENWA_CONNECTOR_ID ?? null,
           expectedPluginVersion: config.OPENWA_CONNECTOR_PLUGIN_VERSION ?? null,
-          includeInboundMessages: config.RUNTIME_MESSAGE_STORAGE_MODE === 'full',
+          includeInboundMessages: config.OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED,
         }, config.EVENT_INBOX_BASE_URL && config.OPENWA_CONNECTOR_ID ? connector : undefined,
         config.EVENT_INBOX_BASE_URL && config.OPENWA_CONNECTOR_ID ? connectorHealth : undefined);
       },

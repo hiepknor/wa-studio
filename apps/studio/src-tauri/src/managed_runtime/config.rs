@@ -300,6 +300,10 @@ impl DesktopRuntimeConfig {
                 "disabled".to_string(),
             ),
             (
+                "OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED".to_string(),
+                "false".to_string(),
+            ),
+            (
                 "RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED".to_string(),
                 "true".to_string(),
             ),
@@ -515,6 +519,10 @@ mod tests {
         assert!(environment.contains(&(
             "RUNTIME_MESSAGE_STORAGE_MODE".to_string(),
             "disabled".to_string()
+        )));
+        assert!(environment.contains(&(
+            "OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED".to_string(),
+            "false".to_string()
         )));
         assert!(environment.contains(&(
             "RUNTIME_COMPACT_EVENT_PAYLOAD_ENABLED".to_string(),
