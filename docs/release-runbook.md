@@ -197,17 +197,20 @@ perform this check because they intentionally contain no update channel or publi
 
 ## 0.2 production rollout sequence
 
-The `v0.2.2` and `v0.2.3-canary.1` server-candidate drafts are superseded and must remain
-unpublished. Production canary validation found that `v0.2.2` omitted the authenticated recovery
-route from its committed Caddy allowlist. The `v0.2.3-canary.1` server candidate fixed and verified
-that route, but production observation then showed that retained `message.received` traffic arrived
-faster than the managed Runtime could drain it and that recovery repeatedly scanned the remaining
-watermark. Fix forward with the higher candidate below; never move or reuse either tag.
+The `v0.2.2`, `v0.2.3-canary.1`, and `v0.2.4-canary.1` server-candidate drafts are
+superseded and must remain unpublished. Production canary validation found that `v0.2.2` omitted
+the authenticated recovery route from its committed Caddy allowlist. The `v0.2.3-canary.1` server
+candidate fixed and verified that route, but production observation then showed that retained
+`message.received` traffic arrived faster than the managed Runtime could drain it and that recovery
+repeatedly scanned the remaining watermark. `v0.2.4-canary.1` bounded readiness at scale and
+compacted ignored inbound traffic, but production recovery exposed a claim plan that sorted the
+complete pending backlog before every batch. Fix forward with the higher candidate below; never
+move or reuse a superseded tag.
 
-### Canary 0.2.4-canary.1
+### Canary 0.2.4-canary.2
 
 1. Keep `releaseChannel` set to `canary` and tag the verified `main` commit as
-   `v0.2.4-canary.1`. An unsigned internal-local build may be installed manually on only the
+   `v0.2.4-canary.2`. An unsigned internal-local build may be installed manually on only the
    engineering canary Mac, but it is not production acceptance evidence. Formal canary UAT still
    requires the published notarized DMG; prereleases are intentionally invisible to the stable
    updater endpoint.
@@ -271,7 +274,7 @@ code. Keep the coordinated manifest, operational snapshot, encrypted evidence ar
 JSON together as the immutable private promotion input.
 Converge the primary Event Inbox slot to the accepted immutable image,
 switch Caddy back to the fail-safe 34200 target, then publish 0.2.4 as latest. Verify an installed
-0.2.4-canary.1 and the preceding stable build both discover 0.2.4 through the signed updater
+0.2.4-canary.2 and the preceding stable build both discover 0.2.4 through the signed updater
 manifest. Do not promote or relabel either superseded candidate.
 
 ## Failure and recovery

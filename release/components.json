@@ -3,7 +3,7 @@
   "product": "wa-studio",
   "releaseChannel": "canary",
   "runtimeService": "wa-runtime",
-  "studioVersion": "0.2.4-canary.1",
+  "studioVersion": "0.2.4-canary.2",
   "runtimeVersion": "0.1.0",
   "runtimeContractVersion": "v1",
   "connectorPluginVersion": "0.1.0",

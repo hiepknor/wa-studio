@@ -53,7 +53,7 @@ from any failures recorded before or after it. Before the canary clock starts:
 
 ## Canary UAT and 24-hour gate
 
-- [ ] Install the notarized 0.2.4-canary.1 DMG and connect through production discovery protocol v2.
+- [ ] Install the notarized 0.2.4-canary.2 DMG and connect through production discovery protocol v2.
 - [ ] If the Mac has a legacy schema-2 profile, save the connection again and confirm it migrates to
       connector schema 3; live sends must remain effectively disabled until that migration and its
       heartbeat quorum complete.
