@@ -185,6 +185,9 @@ export class EventInboxRepository implements OnModuleDestroy {
     throughSequence?: string,
   ): Promise<EventInboxEvent[]> {
     const leaseId = randomUUID();
+    // Keep the device and ownership fences uncorrelated from each event row. Joining those tables
+    // into the candidate set makes PostgreSQL sort the full backlog before applying LIMIT instead
+    // of walking the monotonic event-sequence index.
     const result = await this.pool.query<{
       idempotency_key: string;
       raw_body: Buffer;
@@ -193,21 +196,29 @@ export class EventInboxRepository implements OnModuleDestroy {
       `WITH candidates AS (
          SELECT event.idempotency_key
          FROM event_inbox_events AS event
-         JOIN event_inbox_session_owners AS owner
-           ON owner.session_id = event.session_id
-          AND owner.device_id = $4::uuid
-          AND owner.token_generation = $5
-         JOIN event_inbox_devices AS device
-           ON device.device_id = owner.device_id
-          AND device.token_generation = owner.token_generation
-          AND device.revoked_at IS NULL
-          AND device.token_expires_at > now()
          WHERE event.session_id = ANY($1::uuid[])
            AND dead_at IS NULL
            AND expires_at > now()
            AND available_at <= now()
            AND (lease_expires_at IS NULL OR lease_expires_at <= now())
            AND ($7::bigint IS NULL OR event.event_sequence <= $7::bigint)
+           AND EXISTS (
+             SELECT 1 FROM event_inbox_devices AS device
+             WHERE device.device_id = $4::uuid
+               AND device.token_generation = $5
+               AND device.revoked_at IS NULL
+               AND device.token_expires_at > now()
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM unnest($1::uuid[]) AS requested(session_id)
+             WHERE NOT EXISTS (
+               SELECT 1 FROM event_inbox_session_owners AS owner
+               WHERE owner.session_id = requested.session_id
+                 AND owner.device_id = $4::uuid
+                 AND owner.token_generation = $5
+             )
+           )
          ORDER BY event.event_sequence
          FOR UPDATE OF event SKIP LOCKED
          LIMIT $2

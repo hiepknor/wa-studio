@@ -173,6 +173,30 @@ describe('Event Inbox release upgrade', () => {
         'SELECT payload_hash FROM event_inbox_receipts WHERE idempotency_key = $1',
         [IDEMPOTENCY_KEY],
       )).rows[0]?.payload_hash).toEqual(createHash('sha256').update(rawBody).digest());
+
+      await upgrade.query(
+        'DELETE FROM event_inbox_session_owners WHERE session_id = $1::uuid',
+        [SESSION_ID],
+      );
+      await expect(repository.claim(DEVICE_ID, 1, [SESSION_ID], 1))
+        .resolves.toEqual([]);
+      await upgrade.query(
+        `INSERT INTO event_inbox_session_owners
+           (session_id, device_id, token_generation)
+         VALUES ($1::uuid, $2::uuid, 1)`,
+        [SESSION_ID, DEVICE_ID],
+      );
+      await upgrade.query(
+        'UPDATE event_inbox_devices SET revoked_at = now() WHERE device_id = $1::uuid',
+        [DEVICE_ID],
+      );
+      await expect(repository.claim(DEVICE_ID, 1, [SESSION_ID], 1))
+        .resolves.toEqual([]);
+      await upgrade.query(
+        'UPDATE event_inbox_devices SET revoked_at = NULL WHERE device_id = $1::uuid',
+        [DEVICE_ID],
+      );
+
       await upgrade.query(
         `UPDATE event_inbox_receipts SET expires_at = now() - interval '1 second'
          WHERE idempotency_key = $1`,
