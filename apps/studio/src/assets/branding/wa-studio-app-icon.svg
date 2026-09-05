@@ -1,11 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <rect x="16" y="16" width="480" height="480" rx="112" fill="#0b0c10" />
-  <rect x="16.75" y="16.75" width="478.5" height="478.5" rx="111.25" stroke="#ffffff" stroke-opacity=".12" stroke-width="1.5" />
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="#161412" />
+  <rect
+    x="16.75"
+    y="16.75"
+    width="478.5"
+    height="478.5"
+    rx="111.25"
+    stroke="#FAF9F6"
+    stroke-opacity=".14"
+    stroke-width="1.5"
+  />
   <path
-    d="M48 116 98 396l54-160 54 160 50-280M280 396l86-280 90 280M316 284h104"
-    stroke="#8f82f5"
-    stroke-width="44"
-    stroke-linecap="square"
-    stroke-linejoin="miter"
+    fill="#8F82F5"
+    fill-rule="evenodd"
+    d="M48 112h88l64 208 56-176 56 176 64-208h88L364 416h-84l-24-80-24 80h-84L48 112Zm208 100-30 96h60l-30-96Z"
+    clip-rule="evenodd"
   />
 </svg>

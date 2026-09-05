@@ -1,9 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
   <path
-    d="M24 58 49 198l27-80 27 80 25-140M140 198l43-140 45 140M158 142h52"
-    stroke="#8f82f5"
-    stroke-width="22"
-    stroke-linecap="square"
-    stroke-linejoin="miter"
+    fill="#8F82F5"
+    fill-rule="evenodd"
+    d="M24 56h44l32 104 28-88 28 88 32-104h44l-50 152h-42l-12-40-12 40H74L24 56Zm104 50-15 48h30l-15-48Z"
+    clip-rule="evenodd"
   />
 </svg>
