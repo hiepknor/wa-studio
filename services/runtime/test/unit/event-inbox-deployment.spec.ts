@@ -88,6 +88,10 @@ describe('Event Inbox deployment contract', () => {
     const caddy = readFileSync(resolve(deployRoot, 'Caddyfile.wa-events'), 'utf8');
     expect(caddy).toContain('path /api/v1/health/live');
     expect(caddy).toContain('{$WA_EVENT_INBOX_UPSTREAM:127.0.0.1:34200}');
+    expect(caddy).toContain(
+      'path /api/v1/event-inbox/events/recovery /api/v1/event-inbox/events/claim '
+      + '/api/v1/event-inbox/events/ack /api/v1/event-inbox/events/nack',
+    );
     expect(caddy).toContain('method GET POST PUT');
     expect(caddy).toContain('path /api/v1/event-inbox/connectors/*');
     expect(caddy).toContain('path /api/v1/event-inbox/media/*');

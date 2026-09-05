@@ -25,7 +25,7 @@ wa-events.onio.cc {
 
 	@delivery {
 		method POST
-		path /api/v1/event-inbox/events/claim /api/v1/event-inbox/events/ack /api/v1/event-inbox/events/nack
+		path /api/v1/event-inbox/events/recovery /api/v1/event-inbox/events/claim /api/v1/event-inbox/events/ack /api/v1/event-inbox/events/nack
 	}
 	handle @delivery {
 		request_body {
