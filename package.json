@@ -10,7 +10,7 @@
     "node": ">=24.19.0 <25"
   },
   "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "4.62.4"
+    "@rollup/rollup-linux-x64-gnu": "4.63.1"
   },
   "scripts": {
     "check": "npm run openwa:server:verify && npm run contract:check && npm run check:connector && npm run check:runtime && npm run check:studio",
