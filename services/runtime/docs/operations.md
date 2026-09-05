@@ -447,6 +447,12 @@ and reviewed event set, repairs missing state and removes only duplicate registr
 URL. Callbacks at other URLs remain outside Runtime ownership. Keep reconciliation disabled until
 the externally reachable HTTPS callback is reviewed.
 
+`OPENWA_INBOUND_MESSAGE_EVENTS_ENABLED` controls only `message.received`. It defaults to `true` when
+Runtime retains full message content and to `false` when message storage is disabled. Session,
+group, outbound acknowledgement and connector evidence events remain subscribed in both modes.
+Managed desktop explicitly disables inbound-message callbacks because its local inbox is disabled;
+authoritative contact and group synchronization remains available without retaining chat traffic.
+
 After creating, restoring, re-pairing or replacing an OpenWA session, verify that exactly one active
 callback targets the Runtime HTTPS webhook endpoint and subscribes to the reviewed message, session
 and group event set. An empty registration list means inbound activity cannot reach Runtime even
