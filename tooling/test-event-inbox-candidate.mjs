@@ -21,7 +21,7 @@ const manifest = {
     eventInbox: {
       image,
       imageDigest: `sha256:${"a".repeat(64)}`,
-      migrationHead: { name: "015_event_inbox_recovery_watermark.sql", count: 15 },
+      migrationHead: { name: "016_event_inbox_receipt_usage.sql", count: 16 },
     },
     connector: { protocolVersion: 1, journalSchemaVersion: 1 },
     openwa: { releaseTag: "0.23.3" },
@@ -31,8 +31,8 @@ const readiness = {
   status: "ready",
   service: "wa-event-inbox",
   protocolVersion: 2,
-  migrationHead: "015_event_inbox_recovery_watermark.sql",
-  migrationCount: 15,
+  migrationHead: "016_event_inbox_receipt_usage.sql",
+  migrationCount: 16,
   webhookAdmission: {
     available: true,
     eventSlotsRemaining: 499_999,
@@ -44,8 +44,8 @@ const readiness = {
     openwaReleaseTag: "0.23.3",
     connectorProtocolVersion: 1,
     connectorJournalSchemaVersion: 1,
-    migrationHead: "015_event_inbox_recovery_watermark.sql",
-    migrationCount: 15,
+    migrationHead: "016_event_inbox_receipt_usage.sql",
+    migrationCount: 16,
   },
 };
 
@@ -64,8 +64,8 @@ assert.deepEqual(verifyEventInboxCandidate({
   openwaReleaseTag: "0.23.3",
   connectorProtocolVersion: 1,
   connectorJournalSchemaVersion: 1,
-  migrationHead: "015_event_inbox_recovery_watermark.sql",
-  migrationCount: 15,
+  migrationHead: "016_event_inbox_receipt_usage.sql",
+  migrationCount: 16,
 });
 
 for (const [label, input, pattern] of [
@@ -150,8 +150,8 @@ process.stdout.write(${JSON.stringify(`${containerId}\t${image}\ttrue\t${contain
     openwaReleaseTag: "0.23.3",
     connectorProtocolVersion: 1,
     connectorJournalSchemaVersion: 1,
-    migrationHead: "015_event_inbox_recovery_watermark.sql",
-    migrationCount: 15,
+    migrationHead: "016_event_inbox_receipt_usage.sql",
+    migrationCount: 16,
     containerId,
     containerStartedAt,
   });

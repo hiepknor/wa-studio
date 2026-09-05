@@ -51,7 +51,7 @@ try {
       eventInbox: {
         imageDigest: `sha256:${'b'.repeat(64)}`,
         migrationHead: {
-          name: '015_event_inbox_recovery_watermark.sql',
+          name: '016_event_inbox_receipt_usage.sql',
           setSha256: 'c'.repeat(64),
         },
       },
@@ -66,7 +66,7 @@ try {
     else if (command.includes('pg_restore --list')) process.stdin.resume();
     else if (command.includes('createdb')) writeFileSync(process.env.FAKE_CREATED_MARKER, command);
     else if (command.includes('exec pg_restore')) process.stdin.resume();
-    else if (command.includes('exec psql')) process.stdout.write('ok|015_event_inbox_recovery_watermark.sql\\n');
+    else if (command.includes('exec psql')) process.stdout.write('ok|016_event_inbox_receipt_usage.sql\\n');
     else if (command.includes('dropdb')) writeFileSync(process.env.FAKE_DROPPED_MARKER, command);
     else throw new Error('Unexpected docker command: ' + command);
   `);
