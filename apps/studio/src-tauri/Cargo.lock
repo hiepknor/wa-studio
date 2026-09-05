@@ -6395,7 +6395,7 @@ dependencies = [
 
 [[package]]
 name = "wa-studio"
-version = "0.2.2"
+version = "0.2.3-canary.1"
 dependencies = [
  "age",
  "base64 0.22.1",
