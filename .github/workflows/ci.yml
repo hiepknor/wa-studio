@@ -31,7 +31,7 @@ jobs:
       - run: npm ci
       - run: npm audit --audit-level=high
       - run: npm audit signatures
-      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2
+      - uses: taiki-e/install-action@d438492cf8a250514fa2d34b30bc3c0dc37c65ff # v2
         with:
           tool: cargo-audit@0.22.2
       - run: cargo audit --file apps/studio/src-tauri/Cargo.lock
