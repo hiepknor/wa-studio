@@ -50,7 +50,7 @@
   "dependencies": {
     "@nestjs/common": "^11.1.6",
     "@nestjs/core": "^11.1.6",
-    "@nestjs/platform-express": "^11.1.6",
+    "@nestjs/platform-express": "^11.2.6",
     "@nestjs/swagger": "^11.2.0",
     "@prometheus-io/client": "^0.16.0",
     "bullmq": "^5.58.5",
